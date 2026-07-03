@@ -1,0 +1,48 @@
+{
+  "_comment": "ML config for the SABSIM DeePMD backend. Point ALF's",
+  "_comment2": "master_config 'ML_config_path' at this file. The",
+  "_comment3": "'deepmd_template' is a standard DeePMD input.json; the",
+  "_comment4": "plugin injects type_map, training systems, and per-",
+  "_comment5": "member seeds at runtime, so leave those out here.",
+
+  "n_models": 4,
+  "dp_command": "dp",
+  "frozen_model_name": "frozen_model.pb",
+  "data_subdir": "deepmd_data",
+
+  "deepmd_template": {
+    "model": {
+      "descriptor": {
+        "type": "se_e2_a",
+        "rcut": 6.0,
+        "rcut_smth": 0.5,
+        "sel": "auto",
+        "neuron": [25, 50, 100],
+        "axis_neuron": 16,
+        "resnet_dt": false
+      },
+      "fitting_net": {
+        "neuron": [240, 240, 240],
+        "resnet_dt": true
+      }
+    },
+    "learning_rate": {
+      "type": "exp",
+      "start_lr": 0.001,
+      "decay_steps": 5000
+    },
+    "loss": {
+      "start_pref_e": 0.02,
+      "limit_pref_e": 1,
+      "start_pref_f": 1000,
+      "limit_pref_f": 1
+    },
+    "training": {
+      "numb_steps": 400000,
+      "training_data": {"batch_size": "auto"},
+      "validation_data": {"batch_size": "auto"},
+      "disp_freq": 1000,
+      "save_freq": 10000
+    }
+  }
+}

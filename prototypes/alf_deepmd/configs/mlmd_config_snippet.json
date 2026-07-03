@@ -1,0 +1,25 @@
+{
+  "_comment": "Sampler config. The ONLY change vs. a HIPPYNN run is the",
+  "_comment2": "'ase_calculator' line -- it now points at the DeePMD",
+  "_comment3": "ensemble loader. The uncertainty thresholds (Escut/Fscut)",
+  "_comment4": "and the MD schedule stay exactly as in any ALF run.",
+
+  "ase_calculator": "sabsim_alf_deepmd.deepmd_interface.DEEPMD_ASE_load_ensemble",
+
+  "dt": 0.25,
+  "maxt": 1000.0,
+  "Escut": 20,
+  "Fscut": 0.3,
+  "Ncheck": 5,
+  "srt_temp": [200.0, 450.0],
+  "end_temp": [200.0, 450.0],
+  "amp_temp": [0.0, 50.0],
+  "per_temp": [5.0, 50.0],
+  "end_dens": null,
+  "amp_dens": null,
+  "per_dens": null,
+  "meta_dir": "sampling/",
+  "MLMD_calculator_options": {},
+  "trajectory_frequency": 0.05,
+  "trajectory_interval": 1
+}

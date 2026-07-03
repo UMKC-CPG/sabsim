@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------------
+# SABSIM .gitignore
+#
+# Two kinds of things are excluded here: ordinary build/tooling debris
+# that no repository should carry, and a small set of local-only working
+# files we deliberately keep out of the public repository (raw session
+# transcripts, a copyrighted reference PDF, and the early planning notes
+# whose content has already been folded into the dev/ document chain).
+# ---------------------------------------------------------------------
+
+# Python bytecode caches and packaging debris.
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Test-runner cache.
+.pytest_cache/
+
+# Machine-local Claude Code settings (permissions allowlist, etc.).
+# The shared skills under .claude/commands/ ARE tracked; only the
+# per-machine settings file is ignored.
+.claude/settings.local.json
+
+# Raw session transcripts and the helper that reflows them. These are
+# working logs, not project deliverables, so they stay local.
+conversation.txt
+conversation-readable.txt
+*-local-command-caveat*.txt
+reflow_transcript.py
+
+# Copyrighted reference article (Kulichenko et al. 2023, UDD). Kept
+# local to avoid redistributing it; the design chain cites it instead.
+*.pdf
+
+# Early planning notes. Their relevant content has been migrated into
+# dev/VISION.md and dev/ARCHITECTURE.md; kept local for later mining.
+onboarding-overview.md
+imago-session-summary.md

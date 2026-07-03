@@ -1,0 +1,24 @@
+{
+  "_comment": "The ONLY changes vs. a HIPPYNN ALF run are the three",
+  "_comment2": "dotted-path strings marked below. Everything else in a",
+  "_comment3": "real master_config.json (h5_path, model_path, queue",
+  "_comment4": "sizes, parsl_configuration, properties_list, ...) is",
+  "_comment5": "unchanged. properties_list is shown because the DeePMD",
+  "_comment6": "training task reads it to undo ALF's stored unit scaling.",
+
+  "ML_task": "sabsim_alf_deepmd.deepmd_interface.train_DEEPMD_ensemble_task",
+  "ML_config_path": "deepmd_ml_config.json",
+
+  "sampler_task": "alframework.samplers.mlmd_sampling.simple_mlmd_sampling_task",
+  "sampler_config_path": "mlmd_config.json",
+
+  "QM_task": "alframework.qm_interfaces.vaspase_interface.VASP_ase_calculator_task",
+
+  "model_path": "models/model-{:04d}",
+  "h5_path": "h5store/data-{:04d}.h5",
+  "gpus_per_node": 4,
+  "properties_list": {
+    "energy": ["energy", "system", 27.211386024367243],
+    "forces": ["forces", "atomic", 51.422067090480645]
+  }
+}
