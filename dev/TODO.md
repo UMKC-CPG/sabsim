@@ -50,6 +50,12 @@
       `E_en_bias_weight` on the committee calculator — a small,
       backend-independent ALF-side change (`ARCHITECTURE.md` §2.3,
       step 2).
+- [ ] Add a `LICENSE` file (deferred 2026-07-03). Leaning Apache-2.0
+      (explicit patent grant — the SAB process has a patent landscape)
+      or BSD-3-Clause (simpler, matches scientific-Python and LANL ALF).
+      Before committing one, confirm the grant terms and clear it with
+      UMKC tech-transfer / sponsored-programs; copyright holder is
+      likely "The Curators of the University of Missouri", not the PI.
 
 ---
 
