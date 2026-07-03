@@ -23,6 +23,37 @@
 
 <!-- Tasks related to layout, modules, build. -->
 
+<!-- Pre-DESIGN priority cluster. These four holes are load-bearing for
+the DESIGN level and should be resolved before DESIGN.md is filled in.
+Raised in the 2026-07-03 refine of VISION + ARCHITECTURE; the first two
+were not previously tracked anywhere. -->
+
+- [ ] Specify the quality-gate architecture (complements the VISION
+      "which measurements" item): where each reference / target value
+      comes from (experiment, higher-fidelity calc, literature), whether
+      the reference set is per-material-pair, and which module owns the
+      gate and stores its reference data. Right now
+      `passes_our_SAB_quality_tests` is a black box (`ARCHITECTURE.md`
+      §2.3, §3; `VISION.md` goal 4 and principle 5).
+- [ ] Define the inner/outer loop coupling: how our SAB-weakness
+      sampling (outer, ours) composes with ALF's own uncertainty-driven
+      sampling (inner, adopted). Does the outer loop hand ALF new seed
+      structures, new labeled data, or re-trigger a fresh campaign? This
+      seam is the literal adopt-inner / build-outer boundary and is
+      currently undefined (`ARCHITECTURE.md` §2.3 step 2, §3;
+      `VISION.md` principle 5).
+- [ ] Specify the outer-loop convergence mechanism: how a failed SAB
+      quality test maps back to which new VASP configs to add (the
+      `data_targeting(report.weaknesses)` arrow in §3 is one hand-waved
+      line), plus an iteration budget / non-convergence exit so the loop
+      is bounded (`ARCHITECTURE.md` §3; `VISION.md` principle 5).
+- [ ] Write the material-pair genericity paragraph: name what is
+      material-specific (VASP pseudopotentials, ASE slab recipes and
+      surface orientation, ZBL parameters, quality-gate reference
+      quantities) versus generic machinery, so the retargeting seam is
+      explicit before DESIGN (`ARCHITECTURE.md` §2.3; `VISION.md` goal 2
+      and principle 1).
+
 - [ ] Decide the outer orchestrator and the triggers for graduating
       from the lean controller to a heavier one
       (`ARCHITECTURE.md` §4).
