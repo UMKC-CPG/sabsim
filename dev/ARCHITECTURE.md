@@ -21,6 +21,7 @@ sabsim/
     DESIGN.md         Algorithmic design (not yet started)
     PSEUDOCODE.md     Algorithm specifications (not yet started)
     TODO.md           Task list by level
+    PRIOR_ART.md      Existing overlapping work and reusable assets
   src/                Source code (orchestrator, quality gate, glue)
   tests/              Test suite
   CLAUDE.md           AI assistant guidance
@@ -131,7 +132,10 @@ engine (ADOPT) and build the step-8 characterization batch on top
 - **Structure builder — ASE [ADOPT · glue · recipes BUILD].** Builds
   slab and facing-pair models (steps 3, 5): ASE is the adopted
   toolkit, and the SAB-specific slab and facing-pair construction
-  **recipes layered on it are ours to build** (`VISION.md` goal 5).
+  **recipes layered on it are ours to build** (`VISION.md` goal 5). A
+  working polar-slab symmetrizer for surfaces like LiNbO₃ (0001) and
+  GaN — which carry a dipole pymatgen cannot remove unaided — already
+  exists in prior art (`PRIOR_ART.md` §1.2).
   Just as importantly, ASE is the **translator** that converts a
   structure between programs' file formats — including carrying a
   step-7 snapshot into Imago for step 8. ASE is the busiest tool but
@@ -143,7 +147,10 @@ engine (ADOPT) and build the step-8 characterization batch on top
   [engine ADOPT · protocol BUILD].** Runs the amorphize (step 4) and
   press / separate (steps 6, 7) molecular dynamics. The engine is
   adopted; the *protocol* (how we activate, press, and separate) is
-  ours.
+  ours. A working Ar-bombardment *amorphize* recipe (step 4),
+  validated on SiO₂ with classical potentials, already exists in prior
+  art and is a strong starting point (`PRIOR_ART.md` §1.2); the press /
+  separate protocol there is designed but unbuilt.
 - **Training-data physics — VASP [ADOPT].** Produces the varied
   atom-configuration-and-forces training set (step 1). Chosen over
   Imago deliberately — see note below.
@@ -198,7 +205,10 @@ engine (ADOPT) and build the step-8 characterization batch on top
     absolute experimental fracture energy. A bad outcome number can
     stem from the *protocol* (activation, press, separate), which more
     training data will not fix — so it does not feed the same remedy as
-    the potential gate.
+    the potential gate. The work-of-separation-per-area unit was
+    independently arrived at in prior art (`PRIOR_ART.md` §1.2), and the
+    OLCAO analysis plan there (its `DESIGN.md` §5) is reusable input for
+    step-8 characterization.
 - **v1 gate is a reporter, not a controller [BUILD].** In v1 both
   checks above only *evaluate and report* pass/fail; automatically
   closing the outer loop on their verdicts is deferred (see §4 and
