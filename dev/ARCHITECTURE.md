@@ -110,6 +110,24 @@ engine (ADOPT) and build the step-8 characterization batch on top
   pipeline at a different material pair and drive it from their own
   code. Hand-editable settings are a convenience side door, not the
   main entrance.
+- **Run specification — material knobs and protocol knobs [BUILD].**
+  Per `VISION.md` goal 2 and principle 1, everything a user changes to
+  point the pipeline at a new study lives in one editable place, apart
+  from the fixed machinery — and it splits into two groups principle 1
+  wants kept distinct:
+  - **Material knobs:** per wafer, a crystal structure and one surface
+    face (its Miller indices), plus the material identity itself.
+  - **Protocol knobs:** the activation species (argon, or argon plus a
+    co-species such as iron); the activation energy *and* dose (energy
+    sets impact violence, dose sets how deep the surface amorphizes —
+    independent knobs); and the press/separate settings (load or
+    pressure, press depth and duration, separation speed).
+  v1 **freezes every protocol knob to a single value** so one complete
+  run is reachable within time constraints; *iterating* over them
+  (composition, dopant, activation level, pressure, temperature,
+  crystal face) is deferred to the outer-loop coupling and convergence
+  work still open in `TODO.md`. The design stays open-ended for that
+  future sweep.
 - **Structure builder — ASE [ADOPT · glue · recipes BUILD].** Builds
   slab and facing-pair models (steps 3, 5): ASE is the adopted
   toolkit, and the SAB-specific slab and facing-pair construction
@@ -160,10 +178,31 @@ engine (ADOPT) and build the step-8 characterization batch on top
   live four-structure SLURM campaign (silicon, diamond, graphite,
   silica) on the rulisp-lab partition that proved cross-node
   dispatch, worker parallelism, and cache-on-rerun end to end.
-- **Quality gate [BUILD].** The outer-loop acceptance test: does the
-  trained model reproduce the real-world SAB quantities we care about
-  (stiffness, surface energies, a reference bond strength)? This is
-  the scientific heart of the deliverable.
+- **Two separate checks — potential quality vs. bond outcome
+  [BUILD].** Once folded into a single "quality gate," these are
+  different in kind and must stay apart:
+  - **Potential-quality gate.** Is the trained MLIP any good on its
+    own terms? — elastic stiffness, surface energies, and similar
+    properties checked against VASP and experiment. A failure here is
+    a *model* problem, so the outer-loop remedy fits: add training
+    data where the potential is weak (§3).
+  - **Bond-debond outcome metric.** The scientific deliverable: the
+    **work of separation per unit area** (joules per square meter) of
+    the pressed-then-pulled interface — kept **pluggable** so several
+    measures can be compared (the same "open the method, fix the
+    interface" stance as the MLIP backend). It is anchored to
+    **surface-activated** (not thermal-fusion) bonding energies for
+    silicon-to-silicon and silicon-to-silicon-dioxide from razor-blade
+    crack-opening (Maszara) tests, used as **relative** anchors —
+    trends and ratios, since a fast nanoscale pull-apart cannot hit an
+    absolute experimental fracture energy. A bad outcome number can
+    stem from the *protocol* (activation, press, separate), which more
+    training data will not fix — so it does not feed the same remedy as
+    the potential gate.
+- **v1 gate is a reporter, not a controller [BUILD].** In v1 both
+  checks above only *evaluate and report* pass/fail; automatically
+  closing the outer loop on their verdicts is deferred (see §4 and
+  `VISION.md` principle 5).
 
 > **Why VASP, not Imago, for step 1.** Imago's OLCAO method uses a
 > fixed set of atom-centered building blocks tuned for near-
@@ -235,6 +274,14 @@ while not passes_our_SAB_quality_tests:
         break
     training_data += data_targeting(report.weaknesses)  # add the gap
 ```
+
+> **v1 runs one pass of this loop, by hand.** In v1 the body executes
+> once and *reports*; a human reads the verdict and decides whether to
+> add data and rerun. The `while` shown here is the eventual automated
+> target, not the first milestone (`VISION.md` principle 5). Note too
+> that `run_our_SAB_validation_tests` is really the two distinct
+> checks of §2.3 — potential quality and bond outcome — and only the
+> first is fixed by the `data_targeting` line.
 
 ---
 

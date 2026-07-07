@@ -49,6 +49,20 @@ programmatically.
 4. **Bond characterization.** Use Imago's all-electron analysis to
    examine snapshots of the bonded interface (pipeline step 8) and
    report the detailed bonding measurements that become the guidance.
+   The headline number is a **work of separation per unit area** — the
+   energy needed to pull the bonded layers apart, in joules per square
+   meter — chosen so it is commensurable with the experimental
+   reference below; a raw pull-off force or stress would not be. The
+   way we quantify the bond is kept deliberately open: several measures
+   may be developed and compared, not one hardwired formula. Whatever
+   measure is used is anchored to **well-characterized reference
+   pairs** — silicon-to-silicon and silicon-to-silicon-dioxide — whose
+   bonding energies are known from razor-blade crack-opening (Maszara)
+   tests *in the surface-activated regime*, not thermal fusion bonding.
+   Because a fast, nanoscale molecular-dynamics pull-apart cannot match
+   an absolute experimental fracture energy, we calibrate on **trends
+   and relative ratios** — is Si-Si stronger than Si-SiO2, in roughly
+   the right proportion? — rather than on absolute agreement.
 5. **Build only the novel part.** Deliver the genuinely new, fundable
    pieces — the SAB-specific surface models, the press-and-separate
    protocol, the quality gate, and the Imago bond characterization —
@@ -89,7 +103,11 @@ decision must be consistent with these. -->
    its potential backend by config (DeePMD / SNAP / HIPPYNN) rather
    than forking it. The *outer* loop — "does the model reproduce the
    real-world quantities *we* care about for bonding?" — is ours to
-   build and is the scientific heart of the deliverable.
+   build and is the scientific heart of the deliverable. In v1 that
+   outer loop is only a **reporter**: it evaluates the model and
+   reports pass or fail. Automatically *closing* it — feeding the gaps
+   back to ALF as new training systems — is the eventual target, not
+   the first milestone.
 6. **Start lean; graduate only under real pressure.** Begin the outer
    orchestration with a simple, teachable spine and handle provenance
    by discipline (every step records its inputs, exact tool version,

@@ -9,13 +9,18 @@
 
 <!-- Tasks related to goals and principles. -->
 
-- [ ] Pin down exactly which real-world measurements the quality gate
-      checks, and what each is compared against (stiffness, surface
-      energies, reference bond strength). Cite `VISION.md` principle 5
-      and goal 4.
+- [ ] Bond-outcome metric — now defined as a work of separation per
+      unit area (J/m2), commensurable with the Maszara blade test and
+      calibrated on relative trends / ratios, not absolute values (see
+      `VISION.md` goal 4, `ARCHITECTURE.md` §2.3). Residual: pin the
+      exact SAB-regime (not fusion-bonding) reference numbers for Si-Si
+      and Si-SiO2, and set the trend / ratio pass criteria the gate
+      uses (`VISION.md` goal 4 and principle 5).
 - [ ] Define what "characterize the bond" (step 8) actually outputs,
       and how those numbers turn into experimental advice
-      (`VISION.md` goal 4).
+      (`VISION.md` goal 4). Headline output now decided — a work of
+      separation per area; still open is the fuller set of measures and
+      how they convert into a concrete recommendation.
 
 ---
 
@@ -28,31 +33,39 @@ the DESIGN level and should be resolved before DESIGN.md is filled in.
 Raised in the 2026-07-03 refine of VISION + ARCHITECTURE; the first two
 were not previously tracked anywhere. -->
 
-- [ ] Specify the quality-gate architecture (complements the VISION
-      "which measurements" item): where each reference / target value
-      comes from (experiment, higher-fidelity calc, literature), whether
-      the reference set is per-material-pair, and which module owns the
-      gate and stores its reference data. Right now
-      `passes_our_SAB_quality_tests` is a black box (`ARCHITECTURE.md`
-      §2.3, §3; `VISION.md` goal 4 and principle 5).
-- [ ] Define the inner/outer loop coupling: how our SAB-weakness
-      sampling (outer, ours) composes with ALF's own uncertainty-driven
-      sampling (inner, adopted). Does the outer loop hand ALF new seed
-      structures, new labeled data, or re-trigger a fresh campaign? This
-      seam is the literal adopt-inner / build-outer boundary and is
-      currently undefined (`ARCHITECTURE.md` §2.3 step 2, §3;
-      `VISION.md` principle 5).
-- [ ] Specify the outer-loop convergence mechanism: how a failed SAB
-      quality test maps back to which new VASP configs to add (the
-      `data_targeting(report.weaknesses)` arrow in §3 is one hand-waved
-      line), plus an iteration budget / non-convergence exit so the loop
-      is bounded (`ARCHITECTURE.md` §3; `VISION.md` principle 5).
-- [ ] Write the material-pair genericity paragraph: name what is
-      material-specific (VASP pseudopotentials, ASE slab recipes and
-      surface orientation, ZBL parameters, quality-gate reference
-      quantities) versus generic machinery, so the retargeting seam is
-      explicit before DESIGN (`ARCHITECTURE.md` §2.3; `VISION.md` goal 2
-      and principle 1).
+- [ ] Quality-gate architecture — partly resolved (2026-07-07). Now
+      split into two checks in `ARCHITECTURE.md` §2.3: a potential-
+      quality gate (stiffness, surface energies vs VASP / experiment)
+      and a separate bond-debond outcome metric (work of separation per
+      area, Maszara-anchored, relative). In v1 both only report.
+      Residual: decide which module owns each check and stores its
+      reference data, whether the reference set is per-material-pair,
+      and the exact properties + pass thresholds for the potential gate
+      (`ARCHITECTURE.md` §2.3, §3; `VISION.md` goal 4 and principle 5).
+- [ ] Inner/outer loop coupling — DEFERRED by decision (2026-07-07).
+      ALF is centered on MLIP generation, agnostic to the application,
+      so the coupling is NOT about application knobs: the outer loop
+      steers ALF by supplying training systems that populate the
+      bond-debond application region where the potential is weak. Still
+      open — which physical parameters are worth iterating, decided with
+      collaborators under finite resources (candidates: composition,
+      dopant, activation level, pressure, temperature, Miller faces).
+      Revisit then (`ARCHITECTURE.md` §2.3 step 2, §3; `VISION.md`
+      principle 5).
+- [ ] Outer-loop convergence — DEFERRED by decision (2026-07-07), tied
+      to the loop-coupling item above. Near-term goal is narrower: get a
+      SINGLE pass of the outer loop working end to end first; only then
+      design the repeat logic (weakness-to-new-data mapping, iteration
+      budget, non-convergence exit) (`ARCHITECTURE.md` §3; `VISION.md`
+      principle 5).
+- [ ] Run-specification knobs — RESOLVED for v1 (2026-07-07): the knob
+      set is now split in `ARCHITECTURE.md` §2.3 into material knobs
+      (crystal structure + one surface face per wafer, material
+      identity) and protocol knobs (activation species, activation
+      energy AND dose, and press / separate load, depth, duration, and
+      speed). v1 freezes every protocol knob to one value; iterating
+      them is the deferred outer-loop work. Follow-on: settle the exact
+      settings-file shape at DESIGN time.
 
 - [ ] Decide the outer orchestrator and the triggers for graduating
       from the lean controller to a heavier one
