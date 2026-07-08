@@ -58,6 +58,7 @@ machinery we drive but do not write).
 2. Train a machine-learned interatomic potential (MLIP)
 3. Build wafer slab models
 4. Amorphize ("activate") the model surfaces
+   (classical+ZBL cascade, then a gentle MLIP anneal — see §2.3)
 5. Build the facing-pair (two amorphized surfaces toward each other)
    (steps 3-5 may be reordered; ordering should be a setting)
 6. Press the slabs together and let them settle  (uses the MLIP)
@@ -91,7 +92,10 @@ for one thin, config-selected **backend plugin** we maintain (the
 "plugin" tag; see §2.3), which needs no fork of ALF. Note step 8: Imago
 and Kaleidoscope are our own prior tools, so we *reuse* them as the
 engine (ADOPT) and build the step-8 characterization batch on top
-(BUILD) — that batch is our edge.
+(BUILD) — that batch is our edge. Step 4's LAMMPS row hides a potential
+split (§2.3): the violent Ar cascade runs on an adopted classical + ZBL
+potential and only the gentle post-cascade anneal uses the MLIP, so the
+MLIP is never asked to reproduce cascades.
 
 ### 2.3 Module responsibilities (single responsibility each)
 
@@ -128,7 +132,18 @@ engine (ADOPT) and build the step-8 characterization batch on top
   (composition, dopant, activation level, pressure, temperature,
   crystal face) is deferred to the outer-loop coupling and convergence
   work still open in `TODO.md`. The design stays open-ended for that
-  future sweep.
+  future sweep. v1 fixes the material knobs to the **Si/SiO2** pair
+  (covalent, a Maszara calibration anchor) and additionally runs a
+  **Si/Si same-material reference**, because the bond-outcome metric
+  calibrates on the *relative* Si-Si-to-Si-SiO2 ratio (`VISION.md`
+  goal 4) — one system yields only a point, the ratio needs both. Si/Si
+  reuses the same {Si, O} potential (Si is a subset of its species) and
+  has no lattice mismatch, so it is a cheap second run under the *same*
+  frozen protocol. Ionic / polar pairs such as
+  SiO2/LiNbO3 are supported by keeping the structure builder and the
+  potential species-generic, with hooks documented for the extra
+  polar-slab and long-range-electrostatics work those pairs need (see
+  the MLIP-training bullet and `PRIOR_ART.md` §1.2).
 - **Structure builder — ASE [ADOPT · glue · recipes BUILD].** Builds
   slab and facing-pair models (steps 3, 5): ASE is the adopted
   toolkit, and the SAB-specific slab and facing-pair construction
@@ -136,6 +151,34 @@ engine (ADOPT) and build the step-8 characterization batch on top
   working polar-slab symmetrizer for surfaces like LiNbO₃ (0001) and
   GaN — which carry a dipole pymatgen cannot remove unaided — already
   exists in prior art (`PRIOR_ART.md` §1.2).
+  **Facing-pair lattice matching (STRUCTURAL 4, 2026-07-08).**
+  Constructing the step-5 pair of two dissimilar crystals in one
+  periodic box is where lateral lattice mismatch bites — but surface
+  activation softens it, and the softening is physical, not a trick.
+  Amorphizing each surface is exactly what lets dissimilar materials
+  bond, because the interface becomes an amorphous–amorphous contact
+  with **no registry requirement**; imposing a tight coincidence lattice
+  *there* would manufacture an epitaxial order the real process does not
+  have. The constraint instead relocates to the crystalline
+  **substrates** beneath the thin activated skins: the periodic box must
+  suit each substrate lattice, but the amorphous interlayer **buffers
+  residual misfit**, so a looser tolerance — hence a smaller coincidence
+  supercell — suffices. So step 5 is: pick a coincidence supercell of
+  the two substrate lattices within a relaxed misfit tolerance, apply
+  the small residual as **recorded substrate strain** (provenance,
+  `VISION.md` goal 3), and let the activated layers absorb the rest.
+  v1 (decided 2026-07-08) bonds a **crystalline SiO2 substrate —
+  β-cristobalite, the closest-to-Si polymorph — to crystalline Si**, so
+  v1 genuinely exercises the coincidence matcher (prior art supplied
+  crystalline *slabs*, but its bilayer assembly was design-only, so the
+  pairing is new build). The matcher is written **pair-generic** (any
+  two lattices, tolerance-driven) so future pairs reuse it; the exact
+  faces (a material knob), coincidence indices, tolerance, and strain
+  split are DESIGN work. Two downstreams: the applied substrate strain
+  is a configuration dimension the MLIP must cover (STRUCTURAL 1b), and
+  because the interface is a disordered amorphous contact the bond
+  metric should be **averaged over amorphization realizations**, not
+  read from a single seed.
   Just as importantly, ASE is the **translator** that converts a
   structure between programs' file formats — including carrying a
   step-7 snapshot into Imago for step 8. ASE is the busiest tool but
@@ -150,7 +193,13 @@ engine (ADOPT) and build the step-8 characterization batch on top
   ours. A working Ar-bombardment *amorphize* recipe (step 4),
   validated on SiO₂ with classical potentials, already exists in prior
   art and is a strong starting point (`PRIOR_ART.md` §1.2); the press /
-  separate protocol there is designed but unbuilt.
+  separate protocol there is designed but unbuilt. That prior-art
+  validation is of the *recipe* — that it reliably *disorders* the
+  surface (g(r), coordination, ~29 Å depth) — **not** of the classical
+  amorphous *structure*'s accuracy, which SABSIM checks separately (see
+  the MLIP-training and potential-quality bullets). Per STRUCTURAL 1b the
+  violent Ar cascade runs on a classical + ZBL potential; the MLIP takes
+  over only for the gentle post-cascade anneal and steps 6-7.
 - **Training-data physics — VASP [ADOPT].** Produces the varied
   atom-configuration-and-forces training set (step 1). Chosen over
   Imago deliberately — see note below.
@@ -177,6 +226,69 @@ engine (ADOPT) and build the step-8 characterization batch on top
   knob in this same loop — the sampling bias lives inside ALF's
   committee calculator, so it applies to any backend; that mechanism is
   a DESIGN-level detail, noted here only so the seam is on record.
+  **Decision — one multi-species potential spanning the pair
+  (STRUCTURAL 1a, 2026-07-08).** A bonded interface puts A-atoms and
+  B-atoms in the same neighbor shell — an environment present in neither
+  bulk — and once the wafers intermix there is no way to assign a
+  per-material potential atom by atom. So the MLIP is a SINGLE potential
+  over the union of the pair's species (Si/SiO2 -> {Si, O};
+  SiO2/LiNbO3 -> {Si, O, Li, Nb}), trained on cross-interface configs as
+  well as each bulk and surface. It is therefore a **per-pair bespoke
+  artifact** — retargeting to a new pair means a new potential (the
+  retarget-cost RISK in `TODO.md`). DeePMD is natively multi-element, so
+  the backend already supports this; the joint fit is harder but is
+  exactly where ALF's active learning concentrates data. That the
+  training set MUST contain interface configs is a requirement handed to
+  the bootstrap-coverage work (STRUCTURAL 1b).
+  **v1 scope + a fidelity caveat.** v1 targets **Si/SiO2** — genuinely
+  dissimilar yet covalent and a Maszara calibration anchor — for which a
+  SHORT-RANGE MLIP (DeePMD `se_e2_a`) is defensible. Strongly ionic /
+  ferroelectric pairs (LiNbO3, GaN) are a documented future target: they
+  may need a long-range electrostatics extension (e.g. DPLR), and a
+  macroscopic slab dipole is itself a long-range object a short-range
+  potential cannot represent — the same root as the **polar-slab dipole
+  problem** (the mirror symmetrizer in `PRIOR_ART.md` §1.2 and the
+  structure-builder bullet), so symmetrizing a polar slab is also what
+  makes a short-range MLIP tenable there. The species-union machinery
+  stays pair-generic, with documented hooks so an ionic/polar pair can
+  be added later without reworking the design.
+  **Bootstrap coverage — breaking the circularity (STRUCTURAL 1b,
+  2026-07-08).** Steps 4/6/7 run MD *on* the MLIP, yet the configs they
+  visit (amorphized surface, pressed interface, breaking bonds) are what
+  the MLIP must be trained on — circular. Active learning is the escape:
+  the config *generator* need not be the production potential. (1)
+  **Seed** a first DeePMD on hand-built near-equilibrium DFT — bulk Si,
+  bulk cristobalite, their surfaces, the *strained* substrates
+  STRUCTURAL 4 introduces, moderate-T rattled snapshots (optionally
+  warm-started from a foundation MLIP). (2) **Generate** the hard configs
+  with a cheaper generator: the violent Ar cascade runs on a
+  well-validated classical silica potential (BKS or Vashishta, not an
+  arbitrary Tersoff set) with a ZBL overlay — so amorphous-surface
+  configs are manufactured with no MLIP, breaking the circularity; the
+  pressed interface and separation run on the seed MLIP. (3) **Label** a
+  selected subset with VASP, **train** DeePMD, and **refine** with ALF —
+  rerun the protocol, let committee / UDD uncertainty flag configs,
+  VASP-label those, retrain, until committee uncertainty across a full
+  protocol run falls below threshold. (4) **Convergence** is the
+  potential-quality gate plus that uncertainty threshold; it hands off to
+  the interface check of STRUCTURAL 3.
+  **Division of labor + safeguards.** The MLIP is *not* asked to
+  reproduce cascades or Ar chemistry: the classical + ZBL potential owns
+  the violent step-4 cascade, and the MLIP takes over only for the gentle
+  post-cascade anneal and steps 6-7 — so its species set stays {Si, O}
+  and the deferred question of where ZBL lives is settled (in the
+  cascade). Because glasses are kinetically trapped, a gentle anneal
+  cannot fix a badly-wrong classical topology, so the classical structure
+  is trusted only as a *starting basin*: it is corrected downstream (VASP
+  labels + MLIP re-anneal + ALF) and **validated** — g(r), ring and
+  coordination statistics against DFT and experiment — as an added check
+  in the potential-quality gate, anchored by small DFT melt-quench cells.
+  A fidelity ladder keeps the classical structure a rung, not a ceiling:
+  classical cascade -> MLIP re-anneal (v1) -> eventually MLIP melt-quench
+  (once the MLIP has molten-regime coverage the MLIP itself makes the
+  glass). For a future pair lacking a trustworthy classical potential the
+  generator swaps to a foundation MLIP or a DFT melt-quench; the
+  bootstrap *pattern* is unchanged.
 - **Bond characterization — Imago + Kaleidoscope
   [engine ADOPT · protocol BUILD · our edge].**
   Kaleidoscope fans the chosen step-8 snapshots out as a batch of
@@ -185,14 +297,45 @@ engine (ADOPT) and build the step-8 characterization batch on top
   live four-structure SLURM campaign (silicon, diamond, graphite,
   silica) on the rulisp-lab partition that proved cross-node
   dispatch, worker parallelism, and cache-on-rerun end to end.
-- **Two separate checks — potential quality vs. bond outcome
-  [BUILD].** Once folded into a single "quality gate," these are
-  different in kind and must stay apart:
+  Two responsibilities split at the cross-project seam: **skeleton
+  preparation** — turning each selected snapshot into a ready Imago
+  input (structure in OLCAO format, full basis and Γ-point sampling per
+  `PRIOR_ART.md` §1.2, run settings) — is **ours and buildable now**,
+  testable against a known-good input with no dependence on Imago's
+  unfinished fast mode or ASE adapter; only **execution** waits on those
+  cross-project deliverables (the RISK item in `TODO.md`). Keeping the
+  seam explicit lets the Imago track advance to the execution boundary
+  on our schedule, not theirs.
+- **Two separate checks and the diagnosis that routes between them —
+  potential quality vs. bond outcome [BUILD].** Once folded into a
+  single "quality gate," the two checks are different in kind and must
+  stay apart; the third sub-item below is the routing logic, not a
+  third check:
   - **Potential-quality gate.** Is the trained MLIP any good on its
     own terms? — elastic stiffness, surface energies, and similar
     properties checked against VASP and experiment. A failure here is
     a *model* problem, so the outer-loop remedy fits: add training
-    data where the potential is weak (§3).
+    data where the potential is weak (§3). It also **validates the
+    amorphous surface structure** — g(r), ring and coordination
+    statistics against DFT and experiment, anchored by small DFT
+    melt-quench cells — so a wrong classical starting glass is caught
+    here rather than propagating into the interface and the bond number
+    (STRUCTURAL 1b). **Interface-fidelity check (STRUCTURAL 3,
+    2026-07-08).** The bulk/surface properties above do NOT probe the
+    one region that matters most — the bonded interface — so a potential
+    can pass them yet be wrong exactly where the bond number is read. The
+    gate therefore also validates the interface, with two complementary
+    signals: (i) **committee / UDD uncertainty along the whole
+    press-then-pull trajectory** (endpoints AND the bond-breaking
+    pathway) — cheap, always available, catching extrapolation the
+    potential *knows* about; and (ii) an **all-electron ΔE cross-check on
+    interface subcells** — the STRUCTURAL-2 MLIP-vs-reference
+    work-of-adhesion comparison — catching the potential being
+    *confidently wrong* (committee agrees but is off). The reference is
+    VASP on a small interface subcell (available now, the always-on
+    backstop) or Imago / OLCAO at interface scale once that pipeline is
+    ready. Together they make interface-coverage failure *visible*
+    instead of letting it masquerade as a protocol failure.
   - **Bond-debond outcome metric.** The scientific deliverable: the
     **work of separation per unit area** (joules per square meter) of
     the pressed-then-pulled interface — kept **pluggable** so several
@@ -209,6 +352,54 @@ engine (ADOPT) and build the step-8 characterization batch on top
     independently arrived at in prior art (`PRIOR_ART.md` §1.2), and the
     OLCAO analysis plan there (its `DESIGN.md` §5) is reusable input for
     step-8 characterization.
+  - **Diagnosis — routing a bad bond number (STRUCTURAL 3).** The two
+    checks keep their two remedies (potential problem -> add data;
+    protocol problem -> data won't help), but the interface-fidelity
+    check above closes the hole where an interface-coverage failure was
+    silently filed as *protocol*. A bad bond number is read in order: if
+    the bulk/surface gate fails -> general model problem, add data; else
+    if the interface-fidelity check fails -> interface-coverage problem,
+    add *interface* training data (still the data remedy, now correctly
+    targeted); else -> a genuine protocol problem (activation, press,
+    separate) that more data will not fix. In v1 this is a REPORTED
+    diagnostic label, not an automated action (the gate is a reporter);
+    wiring it to `data_targeting` is the future closed loop (§3).
+- **Bond-outcome analyzer — the pluggable measure set
+  [BUILD · resolved from STRUCTURAL 2, 2026-07-08].** The bond-outcome
+  check above does not reduce to one number; it emits a small **measure
+  vector**, produced by a dedicated analyzer kept distinct from the
+  LAMMPS engine that ran the trajectory and from the Imago/Kaleidoscope
+  batch that produced the electronic data. Two families of measure, by
+  the physics they capture:
+  - **Mechanical (dissipative; path- and rate-dependent).** The MD
+    **work-integral** — force integrated over the step-7 pull, per unit
+    area. It is pure post-processing of a trajectory LAMMPS already
+    recorded, so it is **always available with no Imago at all**: the
+    headline number and the deliverable's schedule fallback, and the
+    measure commensurable with the dissipative Maszara crack-opening
+    test.
+  - **Thermodynamic (reversible; energy difference of relaxed states).**
+    The work of adhesion, (energy_separated − energy_bonded) per unit
+    area, computed at **two fidelities of the same quantity**: an
+    MLIP-fidelity value from a quasi-static LAMMPS relax-and-energy
+    sequence (cheap enough to trace a whole energy-versus-separation
+    curve) and an OLCAO all-electron value from Imago on the relaxed
+    bonded and separated endpoints (accurate, a few states; or VASP on a
+    small interface subcell as the always-on backstop before Imago is
+    ready — the same all-electron reference STRUCTURAL 3's interface
+    check uses). Because
+    they are the same difference at different fidelity, their
+    **disagreement is a direct interface-region check on the
+    potential** — the probe STRUCTURAL 3 asks for. It is reference-free:
+    both states hold the same atoms, so per-atom energy zero-points
+    cancel; read it as a trend/ratio, per the relative-calibration
+    stance.
+  Imago also yields **bond descriptors** — effective charge Q*, bond
+  order, coordination — along the snapshot series: the qualitative
+  "what kind of bond formed" companions to the energies. Generally the
+  mechanical W_sep ≥ the thermodynamic work of adhesion; the gap is the
+  dissipation and their ratio is itself an observable, so the gate
+  reports the vector and does not expect the entries to agree.
 - **v1 gate is a reporter, not a controller [BUILD].** In v1 both
   checks above only *evaluate and report* pass/fail; automatically
   closing the outer loop on their verdicts is deferred (see §4 and
@@ -290,8 +481,12 @@ while not passes_our_SAB_quality_tests:
 > add data and rerun. The `while` shown here is the eventual automated
 > target, not the first milestone (`VISION.md` principle 5). Note too
 > that `run_our_SAB_validation_tests` is really the two distinct
-> checks of §2.3 — potential quality and bond outcome — and only the
-> first is fixed by the `data_targeting` line.
+> checks of §2.3 — potential quality (bulk/surface AND interface
+> fidelity) and bond outcome. The `data_targeting` line fixes potential
+> problems — including interface-coverage failures, which the
+> interface-fidelity check (STRUCTURAL 3) routes here rather than into
+> the protocol bucket — while a genuine protocol failure needs a
+> different remedy.
 
 ---
 

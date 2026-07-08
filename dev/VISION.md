@@ -62,7 +62,13 @@ programmatically.
    Because a fast, nanoscale molecular-dynamics pull-apart cannot match
    an absolute experimental fracture energy, we calibrate on **trends
    and relative ratios** — is Si-Si stronger than Si-SiO2, in roughly
-   the right proportion? — rather than on absolute agreement.
+   the right proportion? — rather than on absolute agreement. Of these
+   measures, the mechanical work of separation is integrated straight
+   from the molecular-dynamics pull and needs no all-electron code, so
+   it is always available; the Imago electronic-structure measures (a
+   reversible energy difference and bonding descriptors) add accuracy
+   and detail on top when that pipeline is ready. This keeps the funded
+   deliverable robust even if the Imago work lands late.
 5. **Build only the novel part.** Deliver the genuinely new, fundable
    pieces — the SAB-specific surface models, the press-and-separate
    protocol, the quality gate, and the Imago bond characterization —
