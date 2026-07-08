@@ -62,15 +62,142 @@ DESIGN (STRUCTURAL 4 follow-ons); PRIOR_ART §1.2 (polar symmetrizer) and
 
 ## 3. Surface activation (amorphization)
 
-<!-- Scope: the step-4 protocol — a classical + ZBL Ar-bombardment
-cascade (frozen substrate, `p p f` sputter boundary, thermostat damping
-and inter-impact timing), a gentle MLIP re-anneal, and
-amorphous-structure validation (g(r) / partial-g(r) / coordination vs
-DFT and experiment, with thresholds). The MLIP never runs the cascade.
-Sources: ARCHITECTURE §2.3 (surface-dynamics engine; potential-quality
-gate) and §4.1; TODO DESIGN (STRUCTURAL 1b follow-ons); PRIOR_ART §1.2
-(recipe + verification kernels) and §1.5 (the frozen-layer / `p p f`
-lesson). -->
+This section designs step 4 — activating each wafer surface by
+amorphizing a thin skin so dangling bonds form for the interface to link
+across. Prior art gives a *running* cascade recipe and hard-won thermostat
+lessons (`PRIOR_ART.md` §1.2, §1.5), but its implementation is narrow:
+argon-only, SiO₂-hardcoded metrics, a whole-slab thermostat, a fresh
+LAMMPS process and full-slab disk round-trip per impact, and a
+report-only "verification." This section keeps its physics and its
+lessons while widening the frame to be pair- and mechanism-generic.
+
+### 3.1 Activation is a pluggable mechanism
+
+Surface activation is modeled as an abstraction: a mechanism that takes a
+crystalline slab and an activation spec and returns an activated surface
+(a thin amorphous, dangling-bond skin) plus a validation verdict. v1
+implements one mechanism — **energetic-particle bombardment** — but the
+seam lets other methods (plasma, reactive activation) slot in later
+without touching step 4's consumers. We frame it as energetic-particle
+activation rather than "Ar-ion bombardment" deliberately: an ion beam and
+a fast-atom beam — the two things real SAB uses — are identical in
+classical MD, and both are just one setting of the projectile spec below.
+
+### 3.2 The bombardment spec (generic knobs)
+
+- **Projectile — species-generic.** Argon is the v1 default; a co-species
+  (iron first) may be co-deposited at a configurable fraction. The
+  projectile mass and, crucially, the **ZBL Z-pair channels are derived
+  from the species set** (substrate ∪ projectile), never hand-enumerated
+  as in prior art — so a new material or co-species needs no code change.
+- **Energy, angle, pattern.** Impact energy, angle of incidence (polar
+  and azimuth), and the spatial impact pattern are knobs. v1 freezes each
+  to a single value (the v1 protocol-knob freeze), but the design admits
+  **distributions** — an energy spread, an angular spread, randomized
+  azimuth — since a real beam is neither monoenergetic nor unidirectional.
+- **Dose as fluence.** Dose is a **fluence** (ions·Å⁻²); the impact count
+  follows from fluence × surface area. This makes activation comparable
+  across cell sizes, which an impact *count* (prior art's knob) is not.
+- **A recorded master seed** governs impact positions, velocities, and
+  the LAMMPS seeds — both for reproducibility (`VISION.md` goal 3) and so
+  the bond metric can be **averaged over amorphization realizations** by
+  varying it (STRUCTURAL 4). Prior art's rewrite uses unseeded
+  randomness, so its runs are not reproducible; we fix that.
+
+### 3.3 The cascade engine — heat-sink and boundary design
+
+This is the correctness core, and the part prior art gets wrong. The
+classical + ZBL potential runs the cascade (STRUCTURAL 1b; §4.6): a
+`hybrid/overlay` splice with ZBL for the short-range collision and the
+config-selected classical generator (BKS or Vashishta for silica,
+Munetoh-Tersoff a fallback; Buckingham for ionic) for the bonding.
+
+The **heat-sink and boundary design** must be:
+
+- a **frozen (or Langevin) bottom substrate layer** that anchors the slab
+  and absorbs recoil, so the slab does not drift as a whole;
+- a **`p p f` (or shrink-wrap) z-boundary** so sputtered atoms *leave*
+  rather than wrap into a periodic image — a true free surface;
+- a **Langevin border thermostat** on the lower/side region that drains
+  cascade heat at a physical rate, while the interior evolves under
+  **NVE** so the collision cascade stays ballistic, not artificially
+  quenched;
+- the substrate held at the target temperature between impacts.
+
+Why this matters, concretely: prior art's whole-slab NVT over-couples to
+the cascade and quenches the damage before it accumulates — its own
+documented failure, worked around by detuning the thermostat to a fragile
+sweet spot — and the newest tree dropped even the frozen layer and
+`p p f`, so it fails to amorphize at all. The frozen-base +
+border-thermostat + NVE-interior design is standard radiation-damage
+practice and is robust across a *range* of energy and dose, so we design
+the root cause rather than inherit a tuned single point.
+
+**Per-impact cycle:** insert the projectile above the surface with the
+spec'd velocity → NVE cascade (a few ps) → short border-thermostatted
+relaxation → repeat to the target fluence. **Execution uses a persistent
+LAMMPS driver** (an in-LAMMPS impact loop, or the LAMMPS Python library),
+*not* a fresh process plus a full-slab disk round-trip per impact as prior
+art does — at the doses SAB needs (thousands of impacts) that overhead is
+prohibitive.
+
+### 3.4 The MLIP re-anneal (a SABSIM addition)
+
+Prior art is classical throughout; SABSIM adds a stage it does not have.
+After the classical cascade creates the disorder, the activated surface is
+**re-equilibrated under the MLIP** (gentle, near-equilibrium) so the final
+structure is MLIP/DFT-quality rather than classical-quality — the first
+rung of the fidelity ladder (§4.5). This is where the classical→accurate
+correction happens; validation (§3.5) runs *after* the re-anneal. Its
+temperature, duration, and ensemble are design parameters; a kinetically
+trapped glass will not fully rearrange, so the classical start must be a
+reasonable basin (the STRUCTURAL 1b safeguards).
+
+### 3.5 The validation gate (pass/fail, not a report)
+
+Prior art's `check_amorphous` only *reports*: it prints a g(r) RMSD
+against an optional experimental curve with **no threshold**, its
+partial-g(r) pairs are hardcoded to Si/O, and its depth metric scans
+top-down and stops at the first crystalline-looking layer, so it can
+report 0 Å depth beneath a defective surface. SABSIM makes activation
+validation a **gate** with pluggable metrics and reference data:
+
+- **g(r) and partial g_AB(r)** with pairs *derived from the species
+  present*, using the density-reference normalization prior art got right
+  (the near-surface amorphous region is ~20% less dense than the crystal
+  below, so the reference density must be the local slab's, not the full
+  cell's — a genuinely good kernel to keep, `PRIOR_ART.md` §1.5).
+- **Coordination-number distribution and per-species defect fraction**
+  (generic, not Si-only).
+- **Ring statistics** — absent from prior art — the network-topology check
+  that separates a true amorphous network from a merely defective crystal.
+- **A robust amorphization-depth profile** (disorder vs depth), replacing
+  the fragile top-down scan.
+
+Each is compared against DFT and experimental references with thresholds,
+yielding a pass/fail verdict. This is the "did the surface activate, and
+is its structure sane?" check that feeds the potential-quality gate
+(§7; STRUCTURAL 1b).
+
+### 3.6 What we keep, what we replace, and v1
+
+**Keep** (re-framed, not copied): the ZBL `hybrid/overlay` splice
+(channels generalized, §3.2); the density-reference g(r) normalization
+(§3.5); the thermostat/timing values as a *starting range*, understood as
+a symptom of the missing heat sink (§3.3); Munetoh-Tersoff as one
+config-selected generator option.
+
+**Replace:** argon-only species; SiO₂-hardcoded metrics; the whole-slab
+thermostat / dropped frozen layer / `p p p` regression; the per-impact
+process relaunch and disk round-trip; the report-only "verification";
+impact-count dose; unseeded randomness; and working-directory-as-config
+(`PRIOR_ART.md` §1.2 item 7).
+
+**Frozen for v1:** mechanism = bombardment; projectile = argon (iron the
+first accommodated co-species); a single frozen fluence, energy, and
+normal incidence; the generator is a config-selected classical + ZBL
+potential (silica per §4 and STRUCTURAL 1b); the MLIP re-anneal and the
+validation gate are both mandatory, not optional.
 
 ## 4. MLIP backend and bootstrap
 

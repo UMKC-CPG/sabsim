@@ -124,11 +124,16 @@ MLIP is never asked to reproduce cascades.
   wants kept distinct:
   - **Material knobs:** per wafer, a crystal structure and one surface
     face (its Miller indices), plus the material identity itself.
-  - **Protocol knobs:** the activation species (argon, or argon plus a
-    co-species such as iron); the activation energy *and* dose (energy
-    sets impact violence, dose sets how deep the surface amorphizes —
-    independent knobs); and the press/separate settings (load or
-    pressure, press depth and duration, separation speed).
+  - **Protocol knobs:** the activation species — **argon by default,
+    with a co-species such as iron as the first accommodated secondary**,
+    kept generic so the projectile set is a knob (its ZBL channels are
+    derived from the species, not hand-enumerated); the activation
+    energy and angle of incidence; the **dose as a fluence** (ions·Å⁻²,
+    so it is cell-size-independent — the impact count follows from it and
+    the surface area); and the press/separate settings (load or pressure,
+    press depth and duration, separation speed). v1 freezes each to a
+    single value; the design admits distributions (energy/angle spread)
+    later.
   v1 **freezes every protocol knob to a single value** so one complete
   run is reachable within time constraints; *iterating* over them
   (composition, dopant, activation level, pressure, temperature,
@@ -204,7 +209,11 @@ MLIP is never asked to reproduce cascades.
   amorphous *structure*'s accuracy, which SABSIM checks separately (see
   the MLIP-training and potential-quality bullets). Per STRUCTURAL 1b the
   violent Ar cascade runs on a classical + ZBL potential; the MLIP takes
-  over only for the gentle post-cascade anneal and steps 6-7.
+  over only for the gentle post-cascade anneal and steps 6-7. Surface
+  activation is designed as a pluggable **mechanism** — energetic-particle
+  bombardment (an ion or fast-atom beam, identical in classical MD) is
+  v1's implementation, and the seam leaves room for other methods (e.g.
+  plasma) without reworking step 4 (see DESIGN §3).
 - **Training-data physics — VASP [ADOPT].** Produces the varied
   atom-configuration-and-forces training set (step 1). Chosen over
   Imago deliberately — see note below.
