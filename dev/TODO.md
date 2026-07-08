@@ -209,9 +209,13 @@ so they are not discovered late (two touch non-negotiable goals). -->
       project dependencies). Currently unowned and undated; track as a
       schedule risk on SABSIM's own deliverable.
 
-- [ ] Decide the outer orchestrator and the triggers for graduating
-      from the lean controller to a heavier one
-      (`ARCHITECTURE.md` §4).
+- [ ] Outer orchestrator — partly resolved (2026-07-08). The execution
+      model is now set in `ARCHITECTURE.md` §4.1: three tiers (thin
+      sequencer / opaque ALF + Kaleidoscope Parsl / direct jobs), NO
+      Parsl-in-Parsl, Parsl as the common dispatch substrate with plain
+      `sbatch` for v1. Still OPEN: the heavier workflow / provenance
+      manager that may sit on top (Snakemake / jobflow / AiiDA) and the
+      triggers for graduating to it (`ARCHITECTURE.md` §4, §4.1).
 - [ ] Decide which step-6/7 snapshots get sent to Imago, how many,
       and how they are chosen (`ARCHITECTURE.md` §2.3, step 8).
 - [ ] Make the step 3/4/5 ordering a flexible setting, not hardcoded
@@ -224,8 +228,11 @@ so they are not discovered late (two touch non-negotiable goals). -->
       pressing is a DESIGN-level option (`ARCHITECTURE.md` §2.3 MLIP +
       surface-dynamics bullets).
 - [ ] Carry "what to run" vs "where to run it" separation into the
-      module boundaries (`VISION.md` principle 1, `ARCHITECTURE.md`
-      §2.3).
+      module boundaries — now located (2026-07-08): the "where" lives in
+      the deployment / resource-class layer of `ARCHITECTURE.md` §4.1
+      (per-job CPU/GPU class, nodes, walltime, env), externalized from
+      code. Residual: settle the exact deployment-config shape at DESIGN
+      time (`VISION.md` principle 1, `ARCHITECTURE.md` §2.3, §4.1).
 - [ ] Decide which module owns provenance-by-discipline record-keeping
       (each step recording its inputs, exact tool version, and
       settings) (`ARCHITECTURE.md` §2.3 / §4, `VISION.md` goal 3 and

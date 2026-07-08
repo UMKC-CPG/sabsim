@@ -108,7 +108,9 @@ MLIP is never asked to reproduce cascades.
   kept separate from the "where to run" (which cluster, node counts,
   walltime — the deployment), and both kept separate from the fixed
   machinery. Deployment stays a freely-turnable knob so the *same*
-  experiment can be run several ways and compared.
+  experiment can be run several ways and compared. The execution
+  realization of this — the three tiers, the resource-class deployment
+  layer, and the HPC walls — is §4.1.
 - **Programmatic / turn-key entry [BUILD].** Per `VISION.md` goal 2,
   the controller is exposed as a library-style programmatic interface,
   not just a hand-run script, so another researcher can point the
@@ -517,23 +519,104 @@ dependencies, by work group, are:
   ours, with no ALF fork.
 - **Imago** + **Kaleidoscope** (which uses **Parsl** for SLURM
   dispatch) — bond characterization (step 8).
-- **Outer orchestrator — OPEN.** Three candidates, light to heavy:
-  - *Snakemake (light):* files-produce-files; simple, teachable,
-    portable. Weak at loops and keeps no queryable history.
-  - *jobflow (middle):* Python-based; handles loops and a moderate
-    history. A sensible step-up.
-  - *AiiDA (heavy):* best-in-class provenance, but heavy, steep, and
-    hard to leave. Justified eventually because the deliverable is
-    *traceable advice*.
-  - *Recommendation:* start lean (Snakemake, or a little of the Parsl
-    code we already understand), provenance by discipline, graduate
-    under real pressure (`VISION.md` principle 6).
+- **Outer orchestrator — the thin Tier-A sequencer.** The execution
+  model is now settled at three tiers (§4.1); this covers only the
+  outermost. Its **dispatch substrate is Parsl** — what ALF and
+  Kaleidoscope already use — so our own Tier-C submission aligns on one
+  stack (separate instances, never nested; §4.1). **v1 starts
+  dead-simple with plain `sbatch` scripts**; Parsl-driven submission
+  arrives with automation. Still OPEN is only the *heavier workflow /
+  provenance manager* that may sit on top once we query across hundreds
+  of runs or close the loop — candidates unchanged, light to heavy:
+  **Snakemake** (files-produce-files, weak at loops), **jobflow**
+  (Python loops + moderate history), **AiiDA** (best-in-class provenance,
+  heavy, hard to leave). Recommendation stands: provenance by discipline,
+  graduate under real pressure (`VISION.md` principle 6).
 
 **Cross-project dependencies (Imago side).** SABSIM relies on a few
 Imago deliverables maturing in parallel: a fast, lightweight step-8
 analysis mode; the ASE adapter (so snapshots can cross into Imago);
 and a good initial-guess potential database that makes large, cheap
 analyses possible.
+
+### 4.1 Execution and resource model on HPC
+
+How the heterogeneous pipeline actually runs on a cluster. Kept at
+architecture altitude — config formats and Parsl executor details are
+DESIGN work; the walls at the end are forward-notes so DESIGN avoids
+them.
+
+**Three tiers, kept separate.**
+- **Tier A — a thin outer sequencer (ours).** Runs the eight steps in
+  order and owns the quality-gate loop. In v1 it is hand-run or a simple
+  script: launch a step, wait, check the output contract, launch the
+  next.
+- **Tier B — two adopted Parsl sub-orchestrators, treated as black
+  boxes.** ALF (step 2) drives its own Parsl to fan out VASP labeling and
+  DeePMD training; Kaleidoscope (step 8) drives its own Parsl to fan out
+  Imago runs. Tier A invokes each as one opaque step and waits — it never
+  looks inside.
+- **Tier C — plain jobs Tier A submits directly:** the VASP training runs
+  (when not inside ALF) and the LAMMPS amorphize / press / separate runs.
+
+**Rule — no Parsl inside Parsl.** ALF and Kaleidoscope each stand up
+their own Parsl kernel; wrapping them in an outer Parsl workflow would
+nest Parsl in Parsl, which is fragile. So the outer tier stays a
+lightweight sequencer and each Parsl tool owns its own SLURM submission
+independently — "thin orchestration" (`VISION.md` principle 6) made
+concrete.
+
+**Dispatch substrate.** Parsl is the project's common dispatch technology
+— ALF uses it, Kaleidoscope uses it, and our own Tier-C submission will
+too, as *separate* Parsl instances. v1 begins dead-simple with plain
+`sbatch` scripts; Parsl-driven submission arrives with automation.
+
+**Linking = file contracts on a shared filesystem.** Steps are decoupled
+through on-disk file formats, so passing data between them is just
+reading and writing on the cluster's shared parallel filesystem — no
+explicit staging. Large trajectories go on scratch, not home.
+
+**Deployment / resource layer — the "where to run" knob.** Per
+`VISION.md` principle 1, every site-specific and resource choice lives in
+an editable deployment config, never in code: resource *class* (CPU vs
+GPU partition), node / core / GPU counts, walltime, memory, and
+module / environment setup. This is the concrete form of the
+Settings / deployment-separation module (§2.3), and is emphatically
+**not** the prior-art anti-pattern of baking partition names and site
+details into emitted scripts (`PRIOR_ART.md` §1.2 item 7). Routing is
+**per job, not per step**, because the pipeline is CPU/GPU-heterogeneous
+and one step can straddle both — step 4 runs a classical + ZBL cascade on
+CPU and then a gentle MLIP anneal on GPU:
+
+| Work                                   | Resource class |
+|----------------------------------------|----------------|
+| VASP labeling (step 1 / inside ALF)    | CPU (MPI)      |
+| DeePMD training (inside ALF)           | GPU            |
+| Classical + ZBL Ar cascade (step 4)    | CPU            |
+| MLIP re-anneal + press / separate      | GPU (`deepmd`) |
+| Imago / OLCAO (step 8)                 | CPU            |
+
+**Execution walls, flagged for DESIGN.**
+1. **Parsl-in-Parsl** — avoided by the tier separation above.
+2. **CPU/GPU routing** — every job carries a resource class the
+   deployment layer maps; never assume a single partition.
+3. **Site-specifics in code** — externalize all of it.
+4. **The persistent control process** — a long-lived controller cannot
+   sit on a login node (it is killed). Fine for v1 (hand-run); automation
+   later must run it inside a job or use a submit-and-monitor manager.
+5. **ALF's Parsl config for the target machine** — a bounded setup task
+   (a CPU-QM executor + a GPU-train executor), not a fork. The bootstrap
+   loop (STRUCTURAL 1b) is the most execution-intensive part: ALF's Parsl
+   interleaved with our LAMMPS protocol runs.
+6. **Large trajectory I/O** — scratch vs home.
+
+**Current target machine (one instance; the model stays generic).**
+Today's cluster is a **SLURM** system with a shared **PixStor** parallel
+filesystem and a lab-owned partition (`rulisp-lab`) spanning CPU and GPU
+nodes — the partition the Kaleidoscope step-8 batch was validated on.
+Nothing above depends on those specifics: any SLURM-plus-shared-filesystem
+HPC with CPU and GPU partitions instantiates the same three-tier model by
+swapping the deployment config.
 
 ---
 
