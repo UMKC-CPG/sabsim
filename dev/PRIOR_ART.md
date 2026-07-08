@@ -35,36 +35,38 @@ the electronic-analysis end where SABSIM wraps that same OLCAO lineage
 inside Imago/Kaleidoscope. There is **no ALF, no active-learning outer
 loop** — it is one straight pass, not the nested-loop design of SABSIM.
 
-### 1.1 Maturity — the docs run well ahead of the code
+> **Update (2026-07-08) — this is now a multi-generation body of work.**
+> A more recent copy adds two further generations beyond the version
+> first studied: an evolved **classical** pipeline (`slab_bond_debond/`)
+> that has actually *built and run* the bond/debond stages, and an
+> **MLIP-targeted** restructure (`slab_bond_debond_MLIP/`). §1.1–1.4 are
+> kept current; **§1.5 carries the full update**, including where the
+> newer work independently confirms SABSIM's structural decisions.
 
-The single most important thing to know before reusing anything: the
-project's **design documents describe far more than its code implements.**
+### 1.1 Maturity — most of the pipeline now runs (updated 2026-07-08)
 
-- Its `dev/DESIGN.md` and `PSEUDOCODE.md` lay out a clean, modular
-  pipeline (`build_slab.py`, `ar_bombardment.py`, `assemble_bilayer.py`,
-  a three-phase `run_bonding_md.py`, `carve_subcell.py`, `run_olcao.py`).
-  This is genuinely well-written design.
-- The **actual working code** is one self-contained script,
-  `bin/primeinput.py` (≈1500 lines, emits LAMMPS input as Python
-  strings), plus `bin/build_slab.py` and `bin/analyze.py`. It implements
-  **only the relaxation and amorphization stages** — every other stage is
-  explicitly refused at runtime.
+At first study the design documents ran well ahead of the code — only
+slab-build, relax, and amorphize were implemented, every other stage
+refused at runtime. **That is no longer true:** in the evolved classical
+tree (`slab_bond_debond/`) the bilayer and bond/debond stages have been
+built and executed. Current state, in the most-complete
+(classical-potential) tree:
 
-What has actually run end to end:
+| Stage                  | SiO₂                      | LiNbO₃            |
+|------------------------|---------------------------|-------------------|
+| Slab build             | works                     | works             |
+| Relaxation             | works                     | works (new)       |
+| Amorphize (Ar bombard) | works, verified g(r)      | works (new)       |
+| Bilayer assembly       | works + ran (new)         | works + ran (new) |
+| Bond/debond MD         | works + ran, uncalibrated | works + ran (new) |
+| OLCAO analysis         | design only (stubs)       | design only       |
 
-| Stage                     | SiO₂                       | LiNbO₃          |
-|---------------------------|----------------------------|-----------------|
-| Slab build                | works                      | slab only       |
-| Relaxation                | works                      | no output       |
-| Amorphize (Ar bombard)    | works, **verified** by g(r)| not run         |
-| Bilayer assembly          | design only                | design only     |
-| Bond/debond MD            | design only                | design only     |
-| OLCAO analysis            | design only (empty stubs)  | design only     |
-
-In short: **SiO₂ runs all the way through surface activation and is
-validated; LiNbO₃ only gets a slab; and the bond/debond and electronic-
-analysis stages — the parts closest to SABSIM's novel bond-outcome
-metric — exist here only as design text.**
+The bond/debond numbers are explicitly **uncalibrated** — the
+cross-interface bonds use a placeholder Morse well (§1.5). The newest,
+MLIP-*targeted* tree (`slab_bond_debond_MLIP/`) is further along in
+*design* but behind in *code*: its amorphization has not yet succeeded
+and its bond/debond stages are still design-only. OLCAO (step 8) remains
+unbuilt in every tree. The generational breakdown is in §1.5.
 
 ### 1.2 Reusable assets, ranked
 
@@ -137,19 +139,100 @@ metric — exist here only as design text.**
 
 The LiNbO₃ Buckingham parameters hardcoded in `primeinput.py` (Li–O and
 Nb–O terms) **disagree with the parameter table in its own
-`DESIGN.md` §2.3.** This is a real code/doc mismatch, though moot in
-practice because LiNbO₃ amorphization never successfully ran. Flagged
-here only so that anyone lifting a force-field number checks it against
-a primary source, not this project.
+`DESIGN.md` §2.3.** This is a real code/doc mismatch. It is **no longer
+moot** — LiNbO₃ now relaxes and amorphizes (§1.1), and the newer trees
+move to a **Donnerberg Model-II core-only Buckingham** set with formal
+charges (Li +1 / Nb +5 / O −2). Anyone lifting a LiNbO₃ force-field
+number should check it against a primary source, not this project.
 
-### 1.4 Open question for a future decision
+### 1.4 Open question — now answered
 
-The stages this project *designed but never built* — bilayer assembly
+The stages this project had *designed but not built* — bilayer assembly
 and the three-phase bond/debond MD — are exactly where **SABSIM's novel
-outer-loop bond-outcome metric will live.** A live option (not yet
-decided) is whether Sunita finishes those stages inside SABSIM's
-structure, since she has already reasoned them through on paper. This is
-recorded as a possibility, not a plan.
+bond-outcome metric lives.** As of 2026-07-08 that question is
+**answered: Sunita built and ran them** (classical tree; see §1.1 and
+§1.5). The collaboration question shifts accordingly — not *whether* the
+pipeline exists, but that it is complete yet **blind at the interface**
+(a placeholder pair potential), which is exactly the gap SABSIM's trained
+MLIP fills. Her pipeline + our potential = a working SAB simulator.
+
+### 1.5 Update — three generations and the MLIP-targeted rewrite
+
+A more recent copy contains **three generations**:
+
+- `bond_debond/` — the original studied in §1.1–1.4 above.
+- **`slab_bond_debond/`** — an evolved **classical** pipeline; the most
+  *complete*. LiNbO₃ caught up (relax + amorphize), and bilayer assembly
+  plus bond and debond MD are **built and have run**, yielding a first
+  work of adhesion ≈ **3.746 J/m²** (plus a stress–strain curve).
+- **`slab_bond_debond_MLIP/`** — a ground-up **MLIP-targeted** restructure
+  (a proper `src/` package, a Stage-1.5 relaxation, a classical→DeePMD
+  `pair_style` swap seam); the most forward-looking *design* but the
+  least complete *code* (two competing implementations, amorphization not
+  yet succeeding, Stages 3–5 design-only).
+
+**The key relationship.** The MLIP tree is DeePMD-*targeted*, not
+DeePMD-*trained*: there is **no VASP labeling, no training, no
+committee / uncertainty, no active learning, no ALF** anywhere — DeePMD
+is a stubbed config slot. So the two projects are **complementary**:
+Sunita builds the *pipeline that consumes* the potential; SABSIM builds
+*the potential* and the active-learning machinery she lacks.
+
+**Independent confirmation of SABSIM's structural decisions.** Her newer
+design reaches three of our five pre-DESIGN resolutions on its own:
+
+- **STRUCTURAL 1a (one multi-species potential):** verbatim — *"a single
+  DeePMD model … covering Si, O, Li, and Nb handles both substrates and
+  the heterogeneous interface in a single, unified potential."*
+- **STRUCTURAL 4 (coincidence supercell, strained before amorphization):**
+  a worked example — 16×SiO₂ ≈ 15×LiNbO₃ → ≈77.9 Å cell, cutting the
+  4.78% raw mismatch to ~1.8% residual strain, split ±0.88%/slab and
+  applied *before* amorphization "because amorphous material has no
+  lattice to strain cleanly." (`ARCHITECTURE.md` §2.3 structure-builder
+  bullet points here.)
+- **STRUCTURAL 2 (measure vector):** her bond/debond design defines both
+  a thermodynamic adhesion energy (PE-difference / area, J/m²) and a
+  mechanical σ-vs-separation curve, and the classical tree ran the
+  mechanical pull end to end (`ARCHITECTURE.md` §2.3 bond-outcome
+  analyzer points here).
+
+**One divergence — the cascade engine (STRUCTURAL 1b).** Her MLIP design
+intends **DeePMD + ZBL to run the Ar cascade** ("ZBL required even with
+DeePMD"), i.e. the production MLIP does the violent amorphization. SABSIM
+**considered this and reaffirms the opposite (2026-07-08): the cascade
+stays classical + ZBL and the MLIP runs only the gentle stages**, so the
+MLIP is never trained on cascade-level distortion or Ar. (In her *code*
+the cascade is classical + ZBL anyway; the divergence is only in her
+stated end-goal.)
+
+**No interface-fidelity gate (STRUCTURAL 3).** Her `check_amorphous.py`
+is a **reporting** tool, not a gate: it prints a g(r) RMSD against an
+*optional experimental* neutron curve but applies **no threshold and no
+DFT reference**; the only quantitative criterion is coordination-based.
+SABSIM's validation gate is deliberately stricter — lift her g(r) /
+partial-g(r) / coordination kernels, then add the thresholds and DFT
+anchor she omits.
+
+**The load-bearing caution.** The headline 3.746 J/m² is
+**uncalibrated**: the cross-interface bonds use a placeholder generic
+Morse well, and the result files say so outright (her own bond-strength
+outputs even disagree, 15.3 vs 1.1 GPa). This is the sharpest statement
+of why SABSIM exists — the pipeline is complete but *blind exactly at the
+interface*, where a trained MLIP is required.
+
+**New reusable assets (beyond §1.2).**
+- The end-to-end **bond/debond MD protocol** (press → NVT hold → minimize
+  → pull → force-vs-separation → work of adhesion) — a concrete template
+  for SABSIM steps 5–7, absent at first study.
+- The **worked coincidence supercell** above (16:15, ≈77.9 Å).
+- A likely-instructive **negative result:** the MLIP tree's amorphization
+  fails to accumulate damage, and its cascade dropped the frozen
+  substrate and the `p p f` sputter boundary (it uses `p p p`, no frozen
+  layer, no border thermostat) that the *working* older tree had — those
+  recipe details are load-bearing.
+- Bulk-lattice **validation runs** of the classical potentials
+  (Munetoh-2007 Tersoff for SiO₂ — a legitimate Si-O set — and Buckingham
+  for LiNbO₃).
 
 ---
 

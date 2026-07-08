@@ -169,10 +169,13 @@ MLIP is never asked to reproduce cascades.
   `VISION.md` goal 3), and let the activated layers absorb the rest.
   v1 (decided 2026-07-08) bonds a **crystalline SiO2 substrate —
   β-cristobalite, the closest-to-Si polymorph — to crystalline Si**, so
-  v1 genuinely exercises the coincidence matcher (prior art supplied
-  crystalline *slabs*, but its bilayer assembly was design-only, so the
-  pairing is new build). The matcher is written **pair-generic** (any
-  two lattices, tolerance-driven) so future pairs reuse it; the exact
+  v1 genuinely exercises the coincidence matcher — our Si/cristobalite
+  pairing is new build, but prior art now offers a worked example to
+  adapt (`PRIOR_ART.md` §1.5): a 16×SiO2 ≈ 15×LiNbO3 coincidence cell
+  (≈77.9 Å) cutting a 4.78% raw mismatch to ~1.8% residual strain
+  applied *before* amorphization, the same rationale we give. The
+  matcher is written **pair-generic** (any two lattices, tolerance-
+  driven) so future pairs reuse it; the exact
   faces (a material knob), coincidence indices, tolerance, and strain
   split are DESIGN work. Two downstreams: the applied substrate strain
   is a configuration dimension the MLIP must cover (STRUCTURAL 1b), and
@@ -399,7 +402,13 @@ MLIP is never asked to reproduce cascades.
   "what kind of bond formed" companions to the energies. Generally the
   mechanical W_sep ≥ the thermodynamic work of adhesion; the gap is the
   dissipation and their ratio is itself an observable, so the gate
-  reports the vector and does not expect the entries to agree.
+  reports the vector and does not expect the entries to agree. Prior art
+  both confirms and de-risks this (`PRIOR_ART.md` §1.5): its bond/debond
+  design defines the same two measures, and its classical pipeline has
+  already run the mechanical pull end to end — a concrete protocol
+  template for steps 5-7, though its interface number is uncalibrated
+  because a placeholder pair potential stands exactly where SABSIM's
+  trained MLIP will.
 - **v1 gate is a reporter, not a controller [BUILD].** In v1 both
   checks above only *evaluate and report* pass/fail; automatically
   closing the outer loop on their verdicts is deferred (see §4 and
