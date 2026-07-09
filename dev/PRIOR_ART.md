@@ -30,10 +30,12 @@ bombardment → assemble bilayer → bond/debond MD → OLCAO analysis
 
 The important difference from SABSIM: it uses **classical interatomic
 potentials** (Tersoff for SiO₂, Buckingham + Coulomb for LiNbO₃) where
-SABSIM will use the DeePMD MLIP, and it drives **OLCAO directly** for
-the electronic-analysis end where SABSIM wraps that same OLCAO lineage
-inside Imago/Kaleidoscope. There is **no ALF, no active-learning outer
-loop** — it is one straight pass, not the nested-loop design of SABSIM.
+SABSIM will use the DeePMD MLIP, and its electronic-analysis end is
+*planned* against the **legacy OLCAO code** — never built — where SABSIM
+drives **Imago** through Kaleidoscope. Those are not the same code and
+share no input format, rc convention, or invocation (§1.8). There is
+**no ALF, no active-learning outer loop** — it is one straight pass, not
+the nested-loop design of SABSIM.
 
 > **Update (2026-07-08) — this is now a multi-generation body of work.**
 > A more recent copy adds two further generations beyond the version
@@ -100,17 +102,32 @@ unbuilt in every tree. The generational breakdown is in §1.5.
    losses do not inflate the amorphized peaks), coordination-number
    defect counting, and a surface-inward amorphous-depth estimator.
    These are exactly the "did the surface actually activate?" checks
-   SABSIM's potential-quality gate will want. The numerical core is well
-   factored; only its O(N²) scaling and directory-convention glue would
-   need replacing.
+   SABSIM's potential-quality gate will want. **Take the g(r)
+   normalization, not the file.** The density-reference trick is one of
+   the three sound kernels in the codebase (§1.8), but "validated"
+   overstates the rest: the amorphous-depth estimator scans top-down and
+   reports 0 Å (`DESIGN.md` §3.5), the whole module is SiO₂-hardcoded and
+   report-only with no threshold, and §1.8 catalogues five unrelated,
+   underived cutoffs elsewhere in the same file. Beyond the O(N²) scaling
+   and the directory-convention glue, the *criteria* need writing — which
+   is why `DESIGN.md` §3.5 makes activation a pass/fail gate rather than
+   a report.
 
 **Usable as design input (not code):**
 
-4. **Its `DESIGN.md` §4.4 independently defines the bond metric as an
-   adhesion energy in J/m²** (converted from eV/Å²) — the *same work-of-
-   separation-per-area* headline number SABSIM settled on (see
-   `ARCHITECTURE.md` §2.3, `VISION.md` goal 4). Independent arrival at
-   the commensurable unit is a useful confirmation.
+4. **Its `DESIGN.md` §4.4 reaches the same commensurable *unit* SABSIM
+   settled on** — an interface energy per area in J/m², converted from
+   eV/Å² (see `ARCHITECTURE.md` §2.3, `VISION.md` goal 4). Independent
+   arrival at that unit is a useful confirmation.
+   **The quantity is not the same, and this entry once said it was.**
+   A thermodynamic *work of adhesion* and a mechanical *work of
+   separation* are different numbers; the first is rate-independent, the
+   second is dissipative, and their difference is the energy dissipated
+   in the pull. SABSIM reports both and treats the gap as an observable
+   (`DESIGN.md` §6.1), so conflating them is precisely the error §6 is
+   built to avoid. Her specification names the work of adhesion and then
+   measures something that is neither — §1.8 records four faults in the
+   formula. Take the unit and the intent; do not take the definition.
 
 5. **Its `DESIGN.md` §5 is a worked-out OLCAO analysis plan** — a full-
    basis (fb) choice, Γ-point-only sampling justified by interface
@@ -158,7 +175,20 @@ bond-outcome metric lives.** As of 2026-07-08 that question is
 §1.5). The collaboration question shifts accordingly — not *whether* the
 pipeline exists, but that it is complete yet **blind at the interface**
 (a placeholder pair potential), which is exactly the gap SABSIM's trained
-MLIP fills. Her pipeline + our potential = a working SAB simulator.
+MLIP fills.
+
+> **Qualified (2026-07-09).** This section once ended "her pipeline +
+> our potential = a working SAB simulator." The three code evaluations
+> that followed (§1.6, §1.7, §1.8) do not support that. The potential is
+> the *deepest* gap, not the only one: the structure builder has no
+> coincidence solver and ships two slabs strained to cells 0.9% apart;
+> the bilayer bonds by slamming one slab into the other at 150 m/s
+> rather than pressing it; and the measurement layer emits prose with no
+> uncertainty, no provenance, and no check that can fail. Dropping a
+> trained MLIP into that pipeline would replace an uncalibrated number
+> with a differently uncalibrated one. What transfers is the *physics*
+> and the hard-won recipe knowledge — which is a great deal, and is what
+> §1.2 ranks. What does not transfer is the architecture.
 
 ### 1.5 Update — three generations and the MLIP-targeted rewrite
 
@@ -199,7 +229,12 @@ design reaches three of our five pre-DESIGN resolutions on its own:
   a thermodynamic adhesion energy (PE-difference / area, J/m²) and a
   mechanical σ-vs-separation curve, and the classical tree ran the
   mechanical pull end to end (`ARCHITECTURE.md` §2.3 bond-outcome
-  analyzer points here).
+  analyzer points here). The confirmation is that *two* measures are
+  needed, which is the substance of STRUCTURAL 2 — **not** the
+  definitions: the thermodynamic one was never built and is wrong as
+  specified (§1.8), and her design does not treat the gap between the
+  two as an observable, which is the point of the vector
+  (`DESIGN.md` §6.1).
 
 **One divergence — the cascade engine (STRUCTURAL 1b).** Her MLIP design
 intends **DeePMD + ZBL to run the Ar cascade** ("ZBL required even with
