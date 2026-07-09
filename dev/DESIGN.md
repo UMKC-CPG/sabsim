@@ -52,13 +52,298 @@ shape). -->
 
 ## 2. Structure builder
 
-<!-- Scope: SAB-specific slab construction (step 3) and facing-pair
-assembly (step 5) on ASE — the pair-generic coincidence-supercell
-lattice matcher, residual-strain application before amorphization, and a
-polar-slab symmetrizer hook for future ionic/polar pairs.
-Sources: ARCHITECTURE §2.3 (structure builder; STRUCTURAL 4); TODO
-DESIGN (STRUCTURAL 4 follow-ons); PRIOR_ART §1.2 (polar symmetrizer) and
-§1.5 (worked 16:15 coincidence cell). -->
+This section designs steps 3 and 5 — cutting each crystalline slab and
+assembling the two of them face to face in one periodic box. Prior art
+supplies a working polar-slab symmetrizer and a worked 16:15 coincidence
+cell (`PRIOR_ART.md` §1.2, §1.5), but its builder is **single-slab**:
+the shared lateral cell that ties the pair together is a number the
+operator types into two separate config files, and in one generation the
+two files disagree, so the "matched" slabs are strained to cells 0.9 %
+apart. Everything below follows from putting the *pair* back at the
+center.
+
+### 2.1 The facing pair is the primary object
+
+A slab has a lattice; a **pair** has a *shared* lateral cell. That
+shared cell is an invariant of the pair, so no slab can be built before
+it is solved for. The structure builder therefore takes two materials
+and two surface faces, and emits, in one atomic step:
+
+- the **shared lateral cell** both slabs will adopt;
+- for each slab, the **integer tiling** that carries its own surface
+  lattice into that cell (an output of the solver, never a user knob);
+- for each slab, the **residual strain** it must absorb, recorded in
+  the run's provenance record (`VISION.md` goal 3) and passed forward as
+  a training-configuration dimension the MLIP must cover (STRUCTURAL 1b);
+- the two slabs themselves, already strained, already tiled.
+
+Prior art's failure is the direct consequence of the opposite choice.
+Each material's job file hardcodes the *other* material's lattice
+constant as a literal and recomputes the common cell independently — one
+using `15 * a_linbo3`, the other `(15*a + 16*a_sio2)/2`. Nothing ever
+compares the two answers. With a pair object the shared cell is computed
+once and cannot disagree with itself.
+
+### 2.2 The lattices come from the potential, checked against DFT
+
+The matcher needs each material's surface lattice vectors. Taking them
+from a published crystallographic file is the obvious move and it is
+wrong. The slabs are subsequently evolved by a *potential*, and a
+potential has its own equilibrium lattice, which differs from the
+experimental one by some small error. Build the box on the experimental
+lattice and the potential immediately finds itself compressed or
+stretched: prior art hit exactly this, reporting −30 to −40 GPa of
+internal pressure at step zero and losing hundreds of atoms, and
+absorbed it with a relaxation stage rather than fixing the cell. Worse
+for us, the residual strain we *record* would then be wrong by the
+potential's own lattice error, and that number is a deliverable.
+
+So SABSIM derives each lattice constant from a **bulk relaxation under
+the current production potential** — the same committee that will run
+steps 4, 6 and 7. Two consequences follow:
+
+- The lattice is re-derived **once per potential generation**. Each ALF
+  round that changes the committee can change the equilibrium lattice,
+  hence the shared cell. The structure builder is therefore *downstream
+  of* the MLIP (`ARCHITECTURE.md` §2.1 already orders step 2 before
+  step 3), not a one-time preprocessing step.
+- The potential's relaxed lattice is compared against a **VASP
+  reference**, and the disagreement is reported as a quantity of the
+  potential-quality gate (§7) alongside stiffness and surface energy. A
+  potential whose lattice constant is off is a potential that will build
+  the wrong box; that belongs in the gate, not in a silent relaxation.
+
+### 2.3 Matching two surface lattices
+
+This is the piece prior art does not have, so it is worth setting out in
+full rather than naming a citation and moving on.
+
+**The setup.** A crystal surface is periodic in two directions, so it is
+described by two vectors lying in the surface plane. Call them `a_1` and
+`a_2` for the first slab and `b_1` and `b_2` for the second. Any larger
+repeating cell we can cut from the first surface is built by taking
+whole-number combinations of its two vectors:
+
+```
+supercell_1 = m_11 * a_1 + m_12 * a_2
+supercell_2 = m_21 * a_1 + m_22 * a_2
+```
+
+The four whole numbers form a 2×2 matrix, `tiling_A`. Its determinant is
+exactly how many original surface cells the new cell contains, so it
+sets the atom count; we require it to be positive, since a negative
+determinant would mirror the surface rather than tile it. The second
+slab gets its own whole-number matrix, `tiling_B`.
+
+**The twist.** Before tiling, the second slab may be **rotated in the
+surface plane** by an angle `twist_angle`. This is a real physical
+degree of freedom — nothing requires two bonded wafers to share a
+crystallographic orientation — and it is the single largest lever on how
+big the matched cell has to be, because rotating one lattice changes
+*which* whole-number combinations happen to line up with the other's.
+Prior art holds the twist at zero without saying so.
+
+**The misfit.** For a candidate `(tiling_A, tiling_B, twist_angle)` the
+two supercells are almost never identical, so we ask what deformation
+carries the second onto the first. Writing each supercell as a 2×2
+matrix whose rows are its two vectors,
+
+```
+deformation = supercell_A * inverse(supercell_B_rotated)
+misfit_strain = deformation - identity
+```
+
+`misfit_strain` is a 2×2 **tensor**, not two numbers. Its diagonal
+entries stretch the cell along each direction; its off-diagonal entries
+**shear** it, which is what happens whenever the two surfaces have
+different cell angles. Prior art applies only a diagonal, two-number
+rescale and so cannot match two lattices whose angles differ at all.
+
+**The search.** Enumerate whole-number matrices up to an area limit and
+twist angles over a grid, keep every candidate whose largest strain
+component is within the misfit tolerance and whose atom count is within
+budget, and among the survivors take the smallest cell. Two properties
+are worth stating because they are exactly what prior art lacks:
+
+- Nothing in this ever assumes the two surface vectors have equal
+  length, or meet at 90° or 120°, or that the same whole number is used
+  in both directions. It is correct for any pair of surfaces.
+- Allowing off-diagonal whole numbers and a twist routinely finds a far
+  smaller cell at the same tolerance than the diagonal, twist-free
+  search does. Prior art's restriction is what forces its 7.9 nm,
+  ~72,500-atom bilayer — and cell size lands directly on the execution
+  walls of `ARCHITECTURE.md` §4.1, so this is a cost decision, not a
+  stylistic one.
+
+This construction is due to **Zur and McGill (1984)** and is implemented
+in `pymatgen`'s interface-matching tools. We **adopt** the algorithm
+rather than rewrite it (`VISION.md` principle 2, goal 5); what we build
+around it is the pair object of §2.1, the potential-derived lattices of
+§2.2, the strain split of §2.4, and the provenance record. Prior art's
+continued-fraction reasoning (approximating the ratio of two lattice
+lengths by a fraction of small whole numbers) is not wrong — it is the
+one-dimensional shadow of this search, and remains a good way to seed
+candidate whole numbers.
+
+**A note on v1.** Si/Si has no mismatch, so the solver must return the
+identity tiling, zero twist, and exactly zero strain. That makes the
+same-material reference run (`ARCHITECTURE.md` §2.3) double as the
+matcher's null test.
+
+### 2.4 Splitting the residual strain
+
+Both slabs must end up in one cell, but *where that cell sits between
+their two natural sizes* is a physical question with a physical answer,
+and "split it evenly" is only one special case of it.
+
+Hold a slab of thickness `slab_thickness` at an in-plane strain `strain`
+away from its natural size. Per unit of interface area it stores elastic
+energy of roughly
+
+```
+energy_per_area = 0.5 * biaxial_modulus * slab_thickness * strain^2
+```
+
+Each slab pulls the shared cell toward its own natural size with a
+stiffness proportional to `biaxial_modulus * slab_thickness`. Minimizing
+the total stored energy over the shared cell size puts it at the
+**stiffness-weighted average** of the two natural sizes, with the weight
+for each slab being `biaxial_modulus * slab_thickness` (divided by the
+square of its natural size, a correction that is negligible when the two
+sizes are close). Three readings of that one formula:
+
+- **Equal weights give the even split.** That is prior art's ±0.88 %, and
+  it is correct only when the two slabs have equal stiffness *and* equal
+  thickness. Its own design table has them at 36.62 Å and 54.57 Å.
+- **One weight going to infinity gives "one slab takes all the strain."**
+  That is what a later prior-art generation silently switched to.
+- **In between is the physical answer**, and it is what we use: the
+  stiffer, thicker slab moves less. The biaxial modulus comes from the
+  same elastic constants the potential-quality gate already computes.
+
+Two further points the two-number rescale of prior art misses:
+
+- The split is applied to the **strain tensor** of §2.3, shear included,
+  not to a pair of lengths.
+- Straining a slab in-plane must let it respond **out of plane**. Prior
+  art passes a zero z-component to `apply_strain`, freezing the layer
+  spacing and suppressing the Poisson contraction entirely. SABSIM
+  strains the lateral cell, then relaxes the out-of-plane coordinates
+  under the potential at fixed lateral cell.
+
+Strain is applied **before activation**, because amorphous material has
+no lattice to strain cleanly — the one point on which prior art's
+reasoning is exactly right, and which we adopt unchanged.
+
+### 2.5 Cutting the slab
+
+Slab generation itself is adopted machinery: cleave the relaxed bulk
+along the requested Miller face, tile it to the shared cell, add vacuum.
+Three decisions sit on top of it.
+
+**Thickness is a criterion, not a constant.** A slab must retain enough
+undamaged crystal beneath the activated skin to behave like a substrate:
+
+```
+slab_thickness >= activated_depth + minimum_bulk_thickness
+```
+
+`activated_depth` is not guessed — it is measured by the depth profile
+of §3.5. This makes step 3 and step 4 mutually dependent, so v1 fixes
+thickness by a short convergence study (prior art's one genuinely good
+idea here) and records the margin actually achieved.
+
+**Termination is chosen by surface energy.** Prior art takes
+`sym_slabs[0]` with the comment "first candidate is sufficient" — the
+first entry of a list, in list order. Where a face admits several
+terminations, SABSIM enumerates them and selects by computed surface
+energy, which the potential-quality gate already needs anyway.
+
+**The polar-slab symmetrizer is a hook, and a gate.** v1's faces are
+non-polar, so the four-strategy symmetrization ladder of `PRIOR_ART.md`
+§1.2 enters as a documented hook for future ionic and polar pairs
+(LiNbO₃, GaN). Two changes when it is switched on. First, when all
+strategies fail, prior art prints a warning that the slab "will carry a
+macroscopic dipole along z" and **returns it anyway**; an uncancelled
+macroscopic dipole is not something a short-range potential can even
+represent (see the long-range-electrostatics residual in `TODO.md`), so
+this is a hard failure. Second, two of its four strategies symmetrize by
+*removing atoms*, which changes stoichiometry and, in an ionic crystal,
+net charge — so any strategy that removes atoms must report what it
+removed, and the charge-neutrality check must run there rather than
+downstream on the assembled bilayer.
+
+### 2.6 Assembling the facing pair
+
+By construction (§2.1) both slabs already share a lateral cell, so
+assembly **asserts** commensurability rather than assuming it. Prior
+art's assembler adopts one slab's box outright (`box = sio2["box"]`) and
+never looks at the other's.
+
+**Where is the surface?** Not at the highest atom. An activated surface
+is rough, and a single asperity or a still-attached adatom would set the
+gap for the whole interface. SABSIM builds the atomic number-density
+profile along the surface normal and places the surface plane where that
+density falls to half its interior value — the same robustness fix §3.5
+applies to the amorphization depth, for the same reason.
+
+**Ejecta.** Sputtered atoms left in the vacuum are removed by
+**bonded-cluster connectivity**: an atom that is not part of the slab's
+largest connected cluster is not part of the slab. Prior art cuts at the
+first 4 Å gap in the z-profile scanning upward, a threshold that is one
+unlucky adatom away from truncating the slab.
+
+**The gap and the clash.** The initial separation is a knob, measured
+between the two dividing surfaces. After placement the minimum
+cross-slab atomic distance is checked; if it violates the floor, the gap
+is backed off and the adjustment is recorded, rather than aborting the
+run as prior art does.
+
+**There is no registry search.** Prior art exposes a `lateral_shift`
+knob "to explore different bonding registries." Registry is a
+crystalline-epitaxy concept, and STRUCTURAL 4 is precisely the
+observation that an amorphous–amorphous contact has none — that is *why*
+dissimilar bonding works. The lateral offset survives only as one more
+realization variable, alongside the amorphization seed, for the
+ensemble the bond metric is averaged over.
+
+**The builder emits labeled groups.** The frozen base, the thermostatted
+border, the NVE interior (§3.3), the activated skin, and the press/pull
+grips (§5) are all geometric facts the builder knows and every
+downstream stage needs. Prior art re-derives each region ad hoc inside
+every LAMMPS input, from hardcoded per-material layer thicknesses.
+SABSIM makes the labeled group set part of the structure contract that
+crosses the step-3/4/5/6/7 seam, so the cascade and the pull agree on
+what "the substrate" means without either of them measuring it again.
+
+### 2.7 What we keep, what we replace, and v1
+
+**Keep:** the four-strategy polar symmetrization ladder (as a hook, now
+gated); the slab-thickness convergence study; strain applied before
+activation; continued fractions as a seed for candidate whole numbers.
+
+**Replace:** the single-slab builder with an operator-typed shared cell
+(→ the pair object); the scalar lattice-length match (→ whole-number
+matrices plus twist, with a strain *tensor*); literature lattice
+constants (→ relaxed under the potential, referenced to DFT); the even
+strain split (→ stiffness-and-thickness weighted); the frozen
+out-of-plane response (→ relax z at fixed lateral cell); repeat counts
+computed by `ceil(target_size / lattice_constant)` and then overridden by
+hand (→ repeats are solver outputs); termination by list order (→ by
+surface energy); warn-and-continue on an uncancelled dipole (→ hard
+fail); the extremal-atom gap and the 4 Å ejecta threshold (→ the
+density-profile surface plane and bonded-cluster connectivity); the
+registry knob (→ no registry; ensemble over seeds); ad hoc region
+selection in every input file (→ the labeled-group contract); and
+adopting one slab's box for the pair (→ assert commensurability).
+
+**Frozen for v1:** crystalline β-cristobalite SiO₂ against crystalline
+Si, plus the Si/Si same-material reference that null-tests the matcher;
+lattices from the current committee, checked against VASP; the misfit
+tolerance and cell-area budget set to admit the amorphous interlayer's
+buffering (STRUCTURAL 4). Still DESIGN follow-ons: the exact Miller
+faces (a material knob), the tolerance and budget values themselves, and
+cristobalite versus quartz.
 
 ## 3. Surface activation (amorphization)
 

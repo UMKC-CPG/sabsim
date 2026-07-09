@@ -189,7 +189,8 @@ design reaches three of our five pre-DESIGN resolutions on its own:
   4.78% raw mismatch to ~1.8% residual strain, split ±0.88%/slab and
   applied *before* amorphization "because amorphous material has no
   lattice to strain cleanly." (`ARCHITECTURE.md` §2.3 structure-builder
-  bullet points here.)
+  bullet points here.) **Read the cell as an example, not a method** —
+  see the §1.6 caution below.
 - **STRUCTURAL 2 (measure vector):** her bond/debond design defines both
   a thermodynamic adhesion energy (PE-difference / area, J/m²) and a
   mechanical σ-vs-separation curve, and the classical tree ran the
@@ -233,6 +234,65 @@ interface*, where a trained MLIP is required.
 - Bulk-lattice **validation runs** of the classical potentials
   (Munetoh-2007 Tersoff for SiO₂ — a legitimate Si-O set — and Buckingham
   for LiNbO₃).
+
+### 1.6 Evaluation of the structure-building code (2026-07-09)
+
+Done before writing `DESIGN.md` §2, per the standing rule that prior-art
+code is evaluated for narrowness before any of it is reused. The
+symmetrizer is the real asset; the lattice matching is not code at all.
+
+- **There is no coincidence-cell solver.** No `ZSLGenerator` /
+  `SubstrateAnalyzer` / lattice-matching import exists anywhere. The
+  16:15 cell is hand-derived in prose, and injected as literals: each
+  material's job file **hardcodes the other material's lattice
+  constant**. The builder is single-slab, so the shared cell is a number
+  typed twice.
+- **The two "matched" slabs are not commensurate.** In the MLIP tree the
+  SiO₂ jobs use `cell_size = 15 * a_linbo3` (77.2245 Å) while the LiNbO₃
+  jobs use `(15*a + 16*a_sio2)/2` (≈77.92 Å) — a ~0.9% disagreement,
+  while the docstrings claim a shared cell. A later generation silently
+  switched convention again (LiNbO₃ takes zero strain). This is the
+  concrete evidence for making the *pair* the builder's object.
+- **The "matcher" is a scalar length comparison.** It strains `a` and
+  `b` toward one scalar via a diagonal `apply_strain([εa, εb, 0.0])` —
+  no cell angle, no shear, no relative twist, no off-diagonal tiling,
+  and the zero z-component freezes the Poisson response. It happens to
+  work only because both surfaces are hexagonal with a = b.
+- **Repeat counts are computed then overridden.** `ceil(target_size /
+  a)` yields 17 instead of 16 for SiO₂ and a spurious −6.7% strain, so
+  the operator must pass `--supercell 16x16` by hand. Target size and
+  commensurability are the same knob; they should not be.
+- **Lattice constants are literature values.** The potential's own
+  equilibrium lattice differs, which is the *root cause* of the −30 to
+  −40 GPa step-zero pressure that its Stage 1.5 relaxation exists to
+  absorb. SABSIM matches on potential-relaxed lattices instead.
+- **The bilayer assembler is `assemble_bond_slabs`** (`slab_bond_debond/
+  bin/primeinput.py:2076`), not the `assemble_bilayer.py` that
+  `bilayerrc.py` names — that rc file is dead config, and its `gap` of
+  7.0 Å contradicts the assembler's default of 1.0 Å. The assembler
+  adopts one slab's box (`box = sio2["box"]`) without checking the
+  other's, applies no lateral shift, hardcodes a five-type remap with
+  per-type masses and charges, strips ejecta at a 4 Å z-gap heuristic,
+  and bonds by **velocity impact** rather than a static press.
+- **Warn-and-continue where a gate belongs.** When all four
+  symmetrization strategies fail, the code prints that the slab "will
+  carry a macroscopic dipole along z" and returns it. Two of those four
+  strategies symmetrize by removing atoms, breaking stoichiometry and
+  net charge, while the charge-neutrality check sits downstream on the
+  assembled bilayer. Terminations are selected as `sym_slabs[0]`, i.e.
+  by list order.
+- **Generations are not monotonic.** Two slab builders ship side by side
+  (only the longer one can symmetrize LiNbO₃ (0001)); the top-level tree
+  reverted LiNbO₃ to Buckingham while a nested tree carries the newer
+  bond-valence Morse fix. Never assume the newest directory is the best
+  physics.
+
+**Genuinely worth keeping:** the four-strategy symmetrization ladder
+(especially the direct mirror construction, which is species-generic and
+succeeds where pymatgen fails on the R3c stacking); the slab-thickness
+convergence study; and "strain before amorphization, because amorphous
+material has no lattice to strain cleanly," which is simply correct.
+`DESIGN.md` §2.7 records the full keep / replace ledger.
 
 ---
 

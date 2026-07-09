@@ -288,11 +288,29 @@ foundations, interaction rules. -->
       ΔE-mismatch thresholds for the interface-fidelity check, the VASP
       interface-subcell size, and the report's diagnostic-label schema
       (`ARCHITECTURE.md` §2.3 potential-quality + diagnosis sub-bullets).
-- [ ] STRUCTURAL 4 DESIGN follow-ons: exact Si and SiO2 faces (a
-      material knob), the coincidence indices + misfit tolerance, the
-      strain split by compliance, cristobalite-vs-quartz, and averaging
-      the bond metric over amorphization seeds (`ARCHITECTURE.md` §2.3
-      structure-builder bullet).
+- [ ] STRUCTURAL 4 DESIGN follow-ons — mostly answered by `DESIGN.md`
+      §2 (2026-07-09). Settled there: the matcher is a whole-number
+      tiling-matrix + in-plane-twist search (Zur-McGill, adopted from
+      `pymatgen`) over a strain *tensor*, not a scalar length match; the
+      strain split is weighted by each slab's biaxial stiffness times
+      its thickness (an even split is the equal-weight special case);
+      lattice constants come from a bulk relaxation under the current
+      committee, referenced to VASP; the facing pair (not the slab) is
+      the object the builder constructs. Still OPEN: the exact Si and
+      SiO2 Miller faces (a material knob), the numerical misfit
+      tolerance + cell-area/atom-count budget, cristobalite-vs-quartz,
+      and how many amorphization seeds the bond metric is averaged over
+      (`ARCHITECTURE.md` §2.3 structure-builder bullet; `DESIGN.md` §2).
+- [ ] Structure-contract schema: the labeled atom groups the builder
+      emits (frozen base, thermostat border, NVE interior, activated
+      skin, press/pull grips, per-slab id) and consumed across the
+      step-3/4/5/6/7 seam — introduced in `DESIGN.md` §2.6, needs its
+      concrete field list. Prior art re-derives these regions ad hoc in
+      every LAMMPS input from hardcoded layer thicknesses.
+- [ ] Slab-thickness convergence: `DESIGN.md` §2.5 sets the criterion
+      `slab_thickness >= activated_depth + minimum_bulk_thickness`,
+      where `activated_depth` is measured by the §3.5 depth profile.
+      Pin `minimum_bulk_thickness` and run the convergence study.
 - [ ] Settings-file shape for the material + protocol knobs (from the
       run-knobs resolution), including the v1 Si/SiO2 + Si/Si reference
       run set (`ARCHITECTURE.md` §2.3 run-specification + material-knobs

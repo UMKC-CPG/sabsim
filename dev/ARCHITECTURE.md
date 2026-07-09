@@ -182,9 +182,26 @@ MLIP is never asked to reproduce cascades.
   (≈77.9 Å) cutting a 4.78% raw mismatch to ~1.8% residual strain
   applied *before* amorphization, the same rationale we give. The
   matcher is written **pair-generic** (any two lattices, tolerance-
-  driven) so future pairs reuse it; the exact
+  driven) so future pairs reuse it: it searches whole-number tiling
+  matrices over *both* surface vectors plus a relative in-plane twist
+  (the Zur-McGill construction, adopted from `pymatgen`), so it never
+  assumes equal cell lengths, a particular cell angle, or a twist of
+  zero. Prior art's 16:15 cell is a hand-derived constant, not a solved
+  one, and its two slabs are in fact strained to cells 0.9% apart — so
+  it is a worked *example* to check ourselves against, not a method to
+  inherit (`DESIGN.md` §2). Two structural consequences: the **facing
+  pair, not the slab, is the object the builder constructs** — the
+  shared lateral cell is an invariant of the pair, so per-slab
+  construction cannot precede solving for it — and the lattice constants
+  the matcher works from come from a **bulk relaxation under the current
+  potential** (referenced to VASP), not from literature values, so the
+  recorded residual strain is true for the potential that will actually
+  run the dynamics. That makes the structure builder a **consumer of
+  step 2's potential**, and the shared cell is re-derived whenever an
+  ALF round changes the committee. The exact
   faces (a material knob), coincidence indices, tolerance, and strain
-  split are DESIGN work. Two downstreams: the applied substrate strain
+  split (weighted by each slab's stiffness *and* thickness, not split
+  evenly) are DESIGN work. Two downstreams: the applied substrate strain
   is a configuration dimension the MLIP must cover (STRUCTURAL 1b), and
   because the interface is a disordered amorphous contact the bond
   metric should be **averaged over amorphization realizations**, not
@@ -326,10 +343,15 @@ MLIP is never asked to reproduce cascades.
   stay apart; the third sub-item below is the routing logic, not a
   third check:
   - **Potential-quality gate.** Is the trained MLIP any good on its
-    own terms? — elastic stiffness, surface energies, and similar
+    own terms? — **equilibrium lattice constants**, elastic stiffness,
+    surface energies, and similar
     properties checked against VASP and experiment. A failure here is
     a *model* problem, so the outer-loop remedy fits: add training
-    data where the potential is weak (§3). It also **validates the
+    data where the potential is weak (§3). The lattice constants are
+    load-bearing beyond the gate: the structure builder matches on them
+    and records the residual strain from them (see the structure-builder
+    bullet), so a potential with a wrong lattice builds a wrong box.
+    It also **validates the
     amorphous surface structure** — g(r), ring and coordination
     statistics against DFT and experiment, anchored by small DFT
     melt-quench cells — so a wrong classical starting glass is caught
