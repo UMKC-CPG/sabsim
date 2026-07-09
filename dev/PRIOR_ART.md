@@ -115,8 +115,12 @@ unbuilt in every tree. The generational breakdown is in §1.5.
 5. **Its `DESIGN.md` §5 is a worked-out OLCAO analysis plan** — a full-
    basis (fb) choice, Γ-point-only sampling justified by interface
    disorder, and wall-clock cost estimates for 500–2000-atom interface
-   sub-cells. This is directly reusable planning for SABSIM's step-8
-   Imago characterization.
+   sub-cells. The *physics choices* are reusable planning for SABSIM's
+   step-8 characterization. The *mechanics* are not: the plan is written
+   against the **legacy OLCAO code, not against Imago**, which SABSIM
+   drives through Kaleidoscope and which shares no input format, rc
+   convention, or invocation with that lineage (see §1.8). Take the
+   basis/sampling/cost reasoning; take no templates or scripts.
 
 6. **The two-tier potential strategy** (classical potential as
    development scaffolding, DeePMD as the production potential, selected
@@ -386,6 +390,144 @@ temperature, pull); measuring the reaction force on the pulled grip and
 time-averaging it; the non-periodic z-boundary; and the unit conversions
 (1 eV/Å² = 16.0218 J/m², 1 eV/Å³ = 160.2176 GPa). `DESIGN.md` §5.9
 records the full keep / replace ledger.
+
+### 1.8 Evaluation of the analyzer code (2026-07-09)
+
+Done before writing `DESIGN.md` §6. This covers the measurement layer
+(`bin/analyze.py`, 3261 lines) apart from the debond reducers already
+dissected in §1.7. **The net result: §6 inherits almost nothing.** There
+is no usable definition of the thermodynamic work of adhesion, no
+machine-readable output, and no gate — only two sound kernels and a list
+of cautions.
+
+**"Bond order" is coordination number.** `run_bond_order_analysis`
+counts cation-oxygen neighbours inside a hardcoded 2.6 Å sphere and
+names the result a bond order. Bond order is an *electronic* quantity —
+exactly one of the descriptors Imago/OLCAO computes, and one STRUCTURAL
+2 lists *separately* from coordination. Collapsing them into one name
+would silently invite comparing unlike things. SABSIM keeps the
+geometric and electronic descriptors nominally distinct, because the
+point of the two-fidelity design is that they may disagree.
+
+**Five interface cutoffs, none shared, none derived.** Within one file:
+1.0 Å (crush detection), 2.5 Å (contact counting; change analysis),
+2.6 Å (bond length; bond order), 3.2 Å (a second contact count), 3.0 Å
+(ejecta cleaning), plus a per-material `cn_cutoff` of 2.5 Å. Si-O sits
+near 1.61 Å, Nb-O near 1.9-2.1 Å, Li-O near 2.1 Å, and one 2.6 Å sphere
+serves all three. Nothing derives a cutoff from the first minimum of the
+relevant partial g(r) — although `find_gr_first_peak` exists in the same
+file and is used only for the amorphization report.
+
+**The bond-length distribution is a distribution of minima.** Each
+cation contributes exactly one length, its shortest (`if r.size and
+r.min() < 2.6: bond_lengths.append(r.min())`), so a four-coordinate
+silicon records one bond, not four. The reported mean and spread are
+therefore biased short and artificially narrow — while the docstring
+claims a broadened spread "signals interface strain/disorder," which is
+precisely what the estimator suppresses. Cations with no oxygen in range
+are dropped silently and never counted.
+
+**Contacts are pairs, not bonds; the interface is one atom.** Both
+`run_bond_analysis` and `run_change_analysis` set the interface plane to
+the single highest SiO₂ atom (`zint = pos[sio2][:,2].max()`), take 7 Å
+windows either side, and count *every* cross-slab pair under 2.5 Å
+regardless of species — oxygen-oxygen and cation-cation included. Slab
+membership is by atom *type*, i.e. by slab of origin, so an oxygen that
+migrated across is still counted on its birth side: STRUCTURAL 1a again,
+now in the measurement rather than the potential.
+
+**`run_change_analysis` cannot measure what it claims.** It compares the
+bonded and debonded structures with `disp = pd[:n] - pb[:n]` — positional
+index alignment, not atom ID — with `n = min(len(pb), len(pd))` silently
+truncating when atom counts differ, which is exactly what a lost atom
+through the non-periodic boundary produces. It applies no minimum-image
+convention to that difference (in a function that calls
+`min_image_displacements` five lines later), so any atom crossing a
+lateral boundary registers a displacement of about a box length. And it
+measures each state's 7 Å window from *that state's own* extreme z, so
+after separation the windows are simply far apart and the surviving
+contact count is ~0 by construction. "How many bonds broke" is
+guaranteed by the geometry of the estimator.
+
+**The verdict and the defect flag both evaporate.** `run_bond_analysis`
+already computes the bonded/not-bonded verdict SABSIM makes first-class —
+but a single pair under 2.5 Å means "bonded," and the result is printed
+to stdout, written to no file, returned to no caller. The crush detector
+is the same: `crushed` is a local integer, printed, discarded. **All nine
+`WARNING`s in `analyze.py` are bare `print` calls**, one of which reads
+`print("WARNING (overridden):" + message)`. Nothing in the file can fail.
+
+**There is no schema.** Every result is a human-readable `.txt` with
+`#`-prefixed prose headers (`debond_analysis.txt`, `strength.txt`,
+`bond_length.txt`, `bond_order.txt`, `change.txt`, `stress_strain.txt`).
+No JSON, no YAML, nothing machine-readable anywhere in `bin/`. No
+uncertainty on any number; no record of which potential, seed, or
+trajectory produced it — which is how §1.7's truncated run and
+wrong-file fetch went undetected. **A gate cannot consume prose.** The
+measure-vector schema of `DESIGN.md` §6 is therefore not bookkeeping; it
+is what makes the §7 gate possible at all.
+
+**The energy-difference adhesion is specified, unbuilt, and wrong as
+specified.** `dev/PSEUDOCODE.md` defines `adhesion_energy = (E_bonded -
+E_separated) / interface_area`, with `E_separated` the potential energy
+at step 0 of the press and `E_bonded` the mean over the last 20% of the
+hold. Four faults, all in the spec: the **sign is backwards** (bonding
+lowers energy, so the work of adhesion is `E_separated - E_bonded`); the
+states are **not commensurable** (one instantaneous value, carrying the
+thermal-initialization spike, minus one time average); it is measured
+**across the press**, so it contains all the press's irreversible work
+(heating, plastic deformation, the crushed contacts its own analyzer
+detects), with nothing subtracted and the separated reference never
+re-relaxed as two free surfaces; and it is a **potential-energy
+difference, not a free energy**, at 300 K. `surface_energy` remains
+unimplemented, exiting with "needs a bulk-energy reference." SABSIM's §6
+writes this measurement from scratch, on the relaxed endpoints §5 emits.
+
+**Two designed-but-unbuilt ideas worth taking.**
+- `find_contact_step` specifies a **dual contact criterion**: primary,
+  `gap = zmin_upper - zmax_lower <= 2.5 Å`; confirmatory, a 1 ps running
+  average of `pzz` turning positive. The extremal-atom gap is the
+  weakness §2.6 already fixed with a density-profile dividing surface,
+  but the **pressure-sign confirmation is sound** and belongs in §5.2's
+  contact detection: a gap can close on one asperity, whereas a positive
+  normal stress means the surfaces are genuinely loading each other.
+- `select_snapshots` specifies three detectors — potential-energy local
+  *minima* during the hold (bond-formation events), potential-energy
+  local *maxima* during the pull (a bond at maximum stretch), and
+  **σ_zz drop spikes** (the mechanical signature of bond-breaking stress
+  release) — with near-duplicate frames merged. That is a thoughtful
+  answer to an open question in our own `TODO.md` (which step-6/7
+  snapshots go to Imago, and how they are chosen). It belongs in §8.
+
+**Step 8 has no code at all, and it targets the wrong code base.** Every
+`OLCAO` occurrence in her source is the `$OLCAO_RC` environment
+variable, a config-directory convention borrowed from the OLCAO script
+template (`XYZ.py` / `recordCLP`) — not electronic-structure work. There
+is no input generation and no skeleton prep. §1.1's "design only
+(stubs)" is confirmed at the level of grep.
+
+More importantly, **her step-8 plan is written against the legacy OLCAO
+code, not against Imago.** SABSIM's step 8 drives *Imago* (the modern
+all-electron successor) through *Kaleidoscope*, and the two do not share
+an input format, an invocation, or a run-settings vocabulary. So the
+plan's *physics* transfers — a full-basis choice, Γ-point-only sampling
+justified by interface disorder, and the wall-clock cost estimates for
+500-2000-atom interface subcells — while its *mechanics* do not: no
+input template, no rc convention, no `$OLCAO_RC`, and no script from
+that lineage should be carried across. Note that the same legacy
+template is the origin of the working-directory-as-configuration
+antipattern §1.2 item 7 tells us to leave behind, so importing its
+conventions would import that too. `DESIGN.md` §8's skeleton preparation
+is a new build against the Imago/Kaleidoscope seam.
+
+**Genuinely worth keeping.** `_box_xy_area` is **correct**, and its
+docstring shows the reasoning rather than a guess: for a triclinic slab
+box with vectors `a = (lx, 0, 0)` and `b = (xy, ly, 0)`, the in-plane
+area is `lx * ly` independent of the tilt. And `min_image_displacements`
+is a proper minimum-image implementation that handles the `xy` tilt — it
+is simply not used in the one place it matters most. Together with the
+density-reference g(r) normalization of §1.2, these are the three sound
+kernels in the codebase.
 
 ---
 

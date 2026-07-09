@@ -751,9 +751,18 @@ target). SABSIM thermostats **only the interior** — never the grips —
 and, where any thermostatted region carries directed motion, removes the
 center-of-mass bias from the temperature before applying it.
 
-**Contact begins from a defined gap.** The starting separation is the
-one §2.6 established between the two density-profile dividing surfaces,
-not between extremal atoms.
+**Contact begins from a defined gap, and is confirmed by a stress.** The
+starting separation is the one §2.6 established between the two
+density-profile dividing surfaces, not between extremal atoms. Contact
+itself is declared on a **dual criterion**, adapted from prior art's
+`find_contact_step` (`PRIOR_ART.md` §1.8) — one of the few pieces of its
+design worth taking: the primary test is that the gap has closed to a
+threshold, and the confirmatory test is that a running average of the
+normal stress has turned positive. The confirmation earns its keep,
+because a gap can close on a single asperity, whereas a positive normal
+stress means the two surfaces are genuinely loading each other. (Prior
+art measures its gap between extremal atoms, which is exactly the
+asperity failure the stress criterion guards against; we fix both.)
 
 The press then holds at temperature for a specified duration — the hold
 is where bonding actually happens — and the structure is relaxed to
@@ -988,10 +997,20 @@ TODO DESIGN (STRUCTURAL 3 follow-ons). -->
 
 ## 8. Step-8 characterization (Imago + Kaleidoscope)
 
-<!-- Scope: OLCAO skeleton preparation (structure -> OLCAO input,
-full-basis, Γ-point, run settings) built independent of Imago execution,
-the Kaleidoscope batch dispatch, and snapshot selection (which and how
-many step-6/7 frames).
+<!-- Scope: skeleton preparation (structure -> Imago input, full-basis,
+Γ-point, run settings) built independent of Imago execution, the
+Kaleidoscope batch dispatch, and snapshot selection (which and how many
+step-6/7 frames).
+Caution (PRIOR_ART §1.8): prior art's step-8 plan is written against the
+LEGACY OLCAO code, not against Imago — the two share no input format,
+rc convention, or invocation. Take its physics (full basis, Γ-point-only
+given interface disorder, the 500-2000-atom cost estimates); take none
+of its templates, scripts, or the $OLCAO_RC working-directory-as-config
+convention it carries. Skeleton prep is a new build on the Imago seam.
+Prior art's `select_snapshots` detectors ARE worth adopting in shape:
+PE local minima during the hold (bond formation), PE local maxima during
+the pull (bond at maximum stretch), and sigma_zz drop spikes
+(bond-breaking stress release), with near-duplicate frames merged.
 Sources: ARCHITECTURE §2.3 (bond characterization) and §4.1; TODO
-(snapshot selection; OLCAO skeleton template); PRIOR_ART §1.2 item 5
-(OLCAO plan). -->
+(snapshot selection; skeleton template); PRIOR_ART §1.2 item 5 and
+§1.8. -->

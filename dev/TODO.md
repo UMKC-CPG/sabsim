@@ -322,6 +322,42 @@ foundations, interaction rules. -->
       for v1 with a displacement-controlled cross-check on the Si/Si
       reference. Specify the seam's contract (both modes emit load AND
       depth reached) and the reversibility comparison between them.
+- [ ] §6 follow-ons opened by the analyzer evaluation (`PRIOR_ART.md`
+      §1.8, 2026-07-09). Prior art supplies NO usable measurement layer,
+      so all of this is new build: (a) the measure-vector schema must be
+      **machine-readable** (JSON/YAML), since prior art emits only prose
+      `.txt` and a gate cannot consume prose — this is what makes §7
+      possible at all; (b) every measure carries an uncertainty and a
+      provenance record (potential generation, seed set, pull rate,
+      trajectory id); (c) bond cutoffs must be **derived** from the first
+      minimum of the relevant partial g(r), per species pair, not
+      hardcoded (prior art uses five unrelated constants: 1.0, 2.5, 2.6,
+      3.0, 3.2 Å); (d) geometric coordination and *electronic* bond order
+      stay nominally distinct measures (prior art names coordination
+      "bond order"); (e) cross-interface bonds are counted by chemistry
+      and geometry, never by slab-of-origin atom type.
+- [ ] Thermodynamic work of adhesion (§6): write the definition from
+      scratch. Prior art's `compute_adhesion_energy` spec is unbuilt and
+      wrong — sign reversed, an instantaneous energy differenced against
+      a time average, measured across the press so it contains the
+      press's irreversible work, and a potential-energy rather than a
+      free-energy difference (`PRIOR_ART.md` §1.8). SABSIM's endpoints
+      are the relaxed bonded state and the relaxed, fully separated
+      slabs, both emitted by §5. Open: whether v1 reports the
+      potential-energy difference or attempts a free-energy estimate.
+- [ ] §8 snapshot selection — adopt the SHAPE of prior art's unbuilt
+      `select_snapshots`: PE local minima during the hold (bond
+      formation), PE local maxima during the pull (bond at maximum
+      stretch), sigma_zz drop spikes (bond-breaking stress release),
+      near-duplicate frames merged. This answers the long-open "which
+      step-6/7 snapshots go to Imago" item above (`PRIOR_ART.md` §1.8).
+- [ ] §8 skeleton prep is a NEW build against the **Imago** seam. Prior
+      art's step-8 plan targets the **legacy OLCAO** code and shares no
+      input format, rc convention, or invocation with Imago; its
+      `$OLCAO_RC` working-directory-as-config convention is the origin of
+      the antipattern `PRIOR_ART.md` §1.2 item 7 warns against. Take the
+      physics (full basis, Γ-point-only, cost estimates); take no
+      templates or scripts (`PRIOR_ART.md` §1.2 item 5, §1.8).
 - [ ] Settings-file shape for the material + protocol knobs (from the
       run-knobs resolution), including the v1 Si/SiO2 + Si/Si reference
       run set (`ARCHITECTURE.md` §2.3 run-specification + material-knobs
