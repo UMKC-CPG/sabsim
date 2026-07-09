@@ -216,10 +216,14 @@ anchor she omits.
 
 **The load-bearing caution.** The headline 3.746 J/m² is
 **uncalibrated**: the cross-interface bonds use a placeholder generic
-Morse well, and the result files say so outright (her own bond-strength
-outputs even disagree, 15.3 vs 1.1 GPa). This is the sharpest statement
-of why SABSIM exists — the pipeline is complete but *blind exactly at the
-interface*, where a trained MLIP is required.
+Morse well, and the result files say so outright. The situation is in
+fact worse than "uncalibrated" — see the §1.7 evaluation: the number
+comes from a trajectory its own directory marks incomplete, and the
+15.3-vs-1.1 GPa discrepancy is not an internal inconsistency of one
+analysis but two *different simulations* selected by a newest-file-wins
+fetch, both of whose peaks are startup artifacts. This is the sharpest
+statement of why SABSIM exists — the pipeline is complete but *blind
+exactly at the interface*, where a trained MLIP is required.
 
 **New reusable assets (beyond §1.2).**
 - The end-to-end **bond/debond MD protocol** (press → NVT hold → minimize
@@ -293,6 +297,95 @@ succeeds where pymatgen fails on the R3c stacking); the slab-thickness
 convergence study; and "strain before amorphization, because amorphous
 material has no lattice to strain cleanly," which is simply correct.
 `DESIGN.md` §2.7 records the full keep / replace ledger.
+
+### 1.7 Evaluation of the bond/debond code (2026-07-09)
+
+Done before writing `DESIGN.md` §5. This is the most complete stage in
+prior art — it ran, and it produced numbers — and therefore the one that
+most needed evaluating. Only the evolved classical tree
+(`slab_bond_debond/`) implements it; the MLIP tree has no bond/debond
+code at all. The headline figures do not mean what the surrounding
+documents say they mean.
+
+**The interface was tuned until it stuck.** With no interfacial
+chemistry the surfaces would not adhere: an LJ well of 0.02 eV "let the
+surfaces drift apart," so it became a Morse well of D0 = 1.0 eV (about
+38 kT at 300 K) applied **identically to all six cross-interface element
+pairs** — O–Li, O–Nb, O–O, Si–Li, Si–Nb, Si–O — with r0 = 1.7 Å, which
+is unphysically short for, say, Si–Nb. Even then a static press "leaves
+the main LiNbO₃ slab detached," so the whole upper slab was given a
+−1.5 Å/ps (150 m/s) downward velocity and driven into the lower one. The
+reported bond strength is a readout of that well depth and that impact
+speed: mechanical interlock, not surface-activated adhesion.
+
+**Same element, two identities.** `_BOND_CHARGES` gives oxygen from the
+SiO₂ slab a charge of 0.0 and oxygen from the LiNbO₃ slab −1.178,
+assigned by *which slab the atom started in*. After a 150 m/s impact
+that intermixes the surfaces, that assignment is meaningless. There is
+no cross-interface Coulomb at all. This is STRUCTURAL 1a — a
+per-material potential cannot even be *assigned* at an intermixed
+interface — demonstrated as a running program.
+
+**Three defects in the bonding input.** Its docstring describes a
+`fix move` displacement-controlled press; the code contains no `fix
+move`. The thermostat is a plain `nvt` on a group containing the
+drifting slab, so 150 m/s of directed motion is counted as heat and the
+setpoint is never reached (the log runs ≈227 K against 300 K). And
+"Stage B: stop driving" is `velocity linbo3 set 0.0 0.0 0.0 sum yes` —
+with `sum yes` that *adds* zero, a no-op; the slab is never stopped.
+
+**The measurement.** Separation is the top grip's centre-of-mass
+displacement across a 51.6 Å bilayer, so the work integral contains the
+elastic stretch of both slabs and is nonetheless labelled a work of
+adhesion. There is no equilibration before pulling (the potential energy
+jumps 481 eV in the first 0.5 ps; the first real force sample already
+reads −47 eV/Å) and no baseline subtraction. The averaging fix emits a
+zero before its first window closes, and that spurious zero anchors both
+the first trapezoid of the work integral and the three-point line fit
+behind its "Young's modulus = 181.09 GPa." The stated reason for
+averaging — that otherwise "the ± thermal noise cancels and the work of
+adhesion comes out ~0" — is backwards; noise cancellation is what an
+integral should do. Right remedy, wrong reasoning, exactly as with the
+thermostat lesson in §1.2.
+
+**Both headline strengths are artifacts.** `strength.txt`'s 1.124 GPa is
+`max(−f_z)` over a sign-flipping thermal signal (neighbouring samples
+read −36, +38, +3, +21, −30 eV/Å) in the first 1.5 ps. `debond_analysis
+.txt`'s 15.308 GPa is the crest of an unequilibrated loading transient.
+Neither is a pull-off strength.
+
+**The numbers are unreconstructable.** The two disagree by a factor of
+thirteen not because of physics but because the strength analyzer
+fetches "the newest `debond.dat` under the job root" and so silently
+analyzed the *eight-layer* run, while the adhesion analyzer beside it
+read the *four-layer* run; both stamp the same interface area, which is
+identical between them and hides the swap. The headline **3.746 J/m² was
+computed from a trajectory that stopped at step 122,500 of 150,000**, in
+a directory containing `NOTE_INCOMPLETE.txt` ("data here is partial").
+The analysis script prints, as a hardcoded string, that the interface
+used a 0.5 eV Morse well while the code applied 1.0 eV. Its own bond
+analyzer detects and *prints* that the impact left "crushed cross
+contacts <1.0 Ang (over-aggressive impact; a debond strength from this
+run will read high)" — and reports the strength anyway. Inputs also bake
+in an absolute path to another user's home directory.
+
+**Where its design was right.** These are failures of implementation,
+not of thinking. Its own `DESIGN.md` §4 specifies gap closure at
+0.01–0.1 Å/ps with **contact detection**, a **constant-normal-pressure
+barostat** for a nanosecond-scale bonding hold, and adhesion energy as
+**(E_bonded − E_separated) / area** — a thermodynamic energy difference.
+None of it was built; the code slams, holds 50 ps at constant volume,
+and integrates a force curve. SABSIM's §5 press is close to the protocol
+prior art *designed and never ran*, and its energy-difference adhesion is
+the thermodynamic entry of our measure vector. The lesson is about the
+chain, not the student: a design nothing binds to its code will drift,
+and the drift surfaces as a number quoted to four significant figures.
+
+**Genuinely worth keeping:** the three-phase arc (approach, hold at
+temperature, pull); measuring the reaction force on the pulled grip and
+time-averaging it; the non-periodic z-boundary; and the unit conversions
+(1 eV/Å² = 16.0218 J/m², 1 eV/Å³ = 160.2176 GPa). `DESIGN.md` §5.9
+records the full keep / replace ledger.
 
 ---
 

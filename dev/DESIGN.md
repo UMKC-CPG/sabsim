@@ -665,12 +665,304 @@ cascades or Ar.
 
 ## 5. Bond/debond MD protocol
 
-<!-- Scope: the step-6/7 press-then-separate protocol on LAMMPS + the
-MLIP — gap closure, pressure bonding, controlled separation — and the
-force-vs-displacement reduction feeding §6. Runs on GPU (`pair_style
-deepmd`).
-Sources: ARCHITECTURE §2.3 (surface-dynamics engine; STRUCTURAL 2) and
-§4.1; PRIOR_ART §1.5 (a built-and-run press/pull protocol template). -->
+This section designs steps 6 and 7 — pressing the two activated surfaces
+together, letting them bond, and pulling them apart while recording the
+force that resists. It runs on LAMMPS under the MLIP (`pair_style
+deepmd`, GPU; `ARCHITECTURE.md` §4.1).
+
+Prior art built this stage and ran it, which makes it the most dangerous
+prior art we have: it produced a number. `PRIOR_ART.md` §1.7 records the
+evaluation. The short version is that its interface had no chemistry —
+one hand-tuned Morse well applied to every cross-interface element pair
+— so nothing would stick, so the protocol was escalated until something
+did. What its 3.746 J/m² measures is a well depth and an impact speed.
+Every design choice below descends from refusing that trade.
+
+### 5.1 The interface must bond on its own
+
+The failure is a loop. With no interfacial chemistry the surfaces drift
+apart; deepening the placeholder well to 1.0 eV (about thirty-eight
+times kT) is not enough, because a static press still "leaves the main
+slab detached"; so the upper slab is given a 150 m/s downward velocity
+and driven into the lower one. The interface that results is a
+mechanical interlock, and its measured strength is a readout of the two
+numbers that were tuned to produce it.
+
+SABSIM cannot enter that loop, because it has nothing to tune. The MLIP
+is one potential over the union of the pair's species (STRUCTURAL 1a),
+trained on cross-interface configurations; there is no cross-term to
+invent, and **no analogue of `_BOND_XMORSE` exists anywhere in the
+design**. Whether two activated surfaces adhere under a given load is
+therefore a prediction of the potential, and the protocol's job is to
+ask the question, not to guarantee the answer.
+
+So step 6 emits, alongside the bonded structure:
+
+- **a bonded / not-bonded verdict** at the specified load. A no-bond is
+  a *result*, reported with its diagnostic label (§7), never a reason to
+  escalate the drive;
+- **a graded contact-quality measure**, so partial adhesion is
+  distinguishable from none: the number of cross-interface bonds per
+  unit area, and the fraction of the interface plane in contact, taken
+  from the same density-profile and coordination machinery §2.6 and §3.5
+  already define.
+
+The graded measure matters because a binary verdict gives §7's diagnosis
+nothing to work with. A potential that bonds a tenth of the interface is
+failing differently from one that bonds none.
+
+### 5.2 The press is a pluggable control mode
+
+Two ways to bring the surfaces together, one seam, both emitting the
+same contract (bonded structure, contact quality, and *both* the load
+and the depth actually reached):
+
+- **Load-controlled.** Ramp the normal stress on the top grip to a
+  target bonding pressure and hold. This is the experimental knob
+  (`ARCHITECTURE.md` §2.3 lists "load or pressure"), and it is the mode
+  in which "did it bond?" is a clean question, since the load is the
+  input and the approach is the response.
+- **Displacement-controlled.** Drive the top grip down at a fixed slow
+  rate to a target press depth and hold. Numerically better behaved,
+  since the grip cannot accelerate; here the load is the observable.
+
+Running both is a **cross-check with real content**: press by
+displacement to depth `d`, read the load `L`; then press by load to `L`
+and see whether the depth returns to `d`. A gap between them is
+irreversibility in the press itself, and it is measurable for free.
+
+**Frozen for v1: load-controlled**, because it keeps bonding an
+observable and matches the experimental knob; the displacement-controlled
+mode is implemented at the same seam and run once, on the Si/Si
+reference, as the cross-check.
+
+Three constraints bind whichever mode runs.
+
+**No velocity impact.** The approach speed must be far below the
+material's sound speed, and the kinetic energy the surfaces acquire must
+be far below the bond energy scale, or the press is a collision and the
+interface it forms is interlock rather than adhesion.
+
+**The thermostat must not see the drive.** Prior art thermostats a group
+containing the drifting slab with a plain `nvt`, so 150 m/s of directed
+motion is counted as heat; the thermostat then fights the drive and
+never reaches its setpoint (its own log runs about 227 K against a 300 K
+target). SABSIM thermostats **only the interior** — never the grips —
+and, where any thermostatted region carries directed motion, removes the
+center-of-mass bias from the temperature before applying it.
+
+**Contact begins from a defined gap.** The starting separation is the
+one §2.6 established between the two density-profile dividing surfaces,
+not between extremal atoms.
+
+The press then holds at temperature for a specified duration — the hold
+is where bonding actually happens — and the structure is relaxed to
+define the reference state of §5.3.
+
+### 5.3 The equilibrated zero-load reference state
+
+The pull's force-versus-displacement curve has to start somewhere, and
+that somewhere must be a state at rest under no applied load. Prior art
+minimizes, re-creates thermal velocities, and begins pulling at once;
+its potential energy jumps by 481 eV in the first half picosecond, and
+its first genuine force sample already reads −47 eV/Å at five hundredths
+of an ångström of displacement. It integrates from a stressed state and
+subtracts no baseline.
+
+SABSIM makes the reference state a gated artifact: minimize, then
+equilibrate under the thermostat, then **assert** that the net force on
+each grip has fallen within the thermal noise floor and that the
+potential energy has stopped drifting. If it has not, the press did not
+settle, and that is reported rather than integrated over.
+
+### 5.4 The pull
+
+The bottom grip is held, the top grip is displaced at a constant rate,
+and the reaction force is recorded. Grip thicknesses come from §2's
+labeled-group contract, not from a hardcoded per-material layer
+thickness.
+
+**Both reaction forces are recorded, and their sum is a free correctness
+check.** Newton's third law requires the forces on the two grips to
+cancel; a drift in the sum means momentum is leaking into the
+thermostat or the boundary. In LAMMPS the total force on a held group is
+available from the holding fix's own output, which records the sum
+*before* zeroing it — so the check costs nothing. Prior art holds its
+bottom grip with `fix setforce`, never queries that output, and so
+throws the check away.
+
+**Force is time-averaged, and the average's warm-up is discarded.** The
+instantaneous force at temperature is noisy, and sparse instantaneous
+sampling aliases that noise into the work integral. (Prior art's stated
+reason for averaging — that otherwise "the ± thermal noise cancels and
+the work of adhesion comes out ~0" — is backwards: cancellation of
+zero-mean noise is exactly what an integral should do. The remedy is
+right, the reasoning is not.) The averaging window is chosen in units of
+**grip displacement**, small compared with a bond length, rather than in
+timesteps. Critically, an averaging fix emits zero before its first
+window closes; that leading zero is discarded, not recorded. In prior
+art it survives as the first point of `debond.dat`, anchoring both the
+first trapezoid of the work integral and the three-point line fit that
+its "Young's modulus of 181.09 GPa" comes from.
+
+**The peak force is extracted, not selected.** Taking `max()` over a
+noisy sample is not a measurement. Prior art's two reported strengths
+are both artifacts of doing exactly that: one is the most negative
+thermal fluctuation in the first 1.5 ps of a pull whose neighbouring
+samples read −36, +38, +3, +21, −30 eV/Å, and the other is the crest of
+an unequilibrated loading transient. SABSIM takes the peak from the
+averaged curve, after the reference state of §5.3 has certified that no
+transient is present, and requires it to stand above the noise floor by
+a stated margin; a peak that does not is reported as unresolved.
+
+**The pull-rate ladder is mandatory, and it is physics.** Molecular
+dynamics pulls roughly eight orders of magnitude faster than any
+experiment, so rate dependence is not a nuisance to be frozen away. It
+is also exactly what distinguishes the two entries of the STRUCTURAL 2
+measure vector: the **mechanical** work of separation is rate-dependent
+because dissipation is, while the **thermodynamic** work of adhesion is
+not. Running several rates therefore buys a real internal test — as the
+rate falls, the mechanical integral must approach the quasi-static
+thermodynamic value from above, never cross below it. v1 runs at least
+three rates spanning a decade and reports each measure's rate trend.
+
+**Every number carries an ensemble.** The interface is a disordered
+amorphous contact, so the measures are averaged over amorphization
+realizations (STRUCTURAL 4) and over thermal-velocity seeds, and
+reported as a mean with a spread. Prior art runs one fixed seed, once,
+and quotes 3.746 J/m² with no uncertainty at all.
+
+### 5.5 What the pull hands to the analyzer
+
+**Separation is not grip displacement.** The grip moves through the
+elastic stretch of both slabs before the interface opens at all, so a
+work integral taken over grip displacement contains stored elastic
+energy that never belonged to the interface. Prior art defines
+separation as the top grip's center-of-mass displacement across a 51.6 Å
+bilayer and calls the resulting integral a work of adhesion. Step 7
+therefore emits **two curves**:
+
+- force versus **grip displacement** — what a testing machine measures,
+  and the quantity the mechanical work integral is taken over;
+- force versus **interface opening** — the distance between the two
+  slabs' density-profile dividing surfaces (§2.6), which is where the
+  interface actually is.
+
+**Complete separation** is declared when the interface opening exceeds
+the potential's cutoff (6.0 Å for `se_e2_a`, §4.6) *and* the averaged
+force has returned to zero within the noise floor. The mechanical work
+integral runs from the §5.3 reference state to that point and stops;
+prior art integrates the entire record, noise tail included.
+
+**The dissipation identity is a sign check.** Step 7 also records the
+potential energy of the bonded relaxed state and of the fully separated,
+relaxed slabs. Their difference is the thermodynamic work of adhesion at
+MLIP fidelity, which §6 computes properly; the mechanical integral minus
+that difference is the energy dissipated. STRUCTURAL 2 predicts the
+mechanical work is the larger. If it comes out smaller, the reference
+state or the integral is wrong, and the run is rejected rather than
+reported.
+
+### 5.6 The box, the boundary, and the run that has to finish
+
+The lateral cell is the shared coincidence cell of §2 and is **held
+fixed** — no lateral barostat, or the recorded substrate strain relaxes
+away mid-run and the provenance number becomes a fiction. The
+z-boundary is non-periodic, with vacuum sized for the full pull distance
+plus margin.
+
+Two things are then gates rather than warnings. **Atom count is
+conserved**: a non-periodic boundary silently deletes any atom that
+leaves the box, so a lost atom invalidates the run. And **the trajectory
+must be complete**: walltime is budgeted from pull distance divided by
+pull rate, not set to a flat four hours. Prior art's headline number was
+computed from a trajectory that stopped at 122,500 of 150,000 steps, in
+a directory containing a file named `NOTE_INCOMPLETE.txt`.
+
+### 5.7 Provenance is part of the measurement
+
+Every number this stage emits names the potential generation that
+produced it, the seed set, the pull rate, the press mode and the load or
+depth reached, and the trajectory file it was reduced from
+(`VISION.md` goal 3). The analyzer **refuses a truncated trajectory**.
+
+**The analyzer is handed its input; it does not go looking for one.**
+Prior art's strength analysis fetches "the newest `debond.dat` under the
+job root," so it silently analyzed the *eight-layer* run while the
+adhesion analysis beside it analyzed the *four-layer* run — and both
+stamped the same interface area, which is identical between the two and
+therefore hides the swap. That is the whole of the "15.3 versus 1.1 GPa"
+disagreement: not physics, but a newest-file-wins rule. A SABSIM
+analyzer takes an explicit trajectory identifier and refuses to guess.
+
+**A detected defect must gate, not decorate.** Prior art's own bond
+analyzer already prints a warning that the impact left "crushed cross
+contacts <1.0 Ang (over-aggressive impact; a debond strength from this
+run will read high)." The strength is then computed and reported anyway.
+Every check SABSIM's protocol performs either stops the run or is not
+worth performing.
+
+Together with the truncated trajectory and the hardcoded string
+declaring a 0.5 eV Morse well where the code applied 1.0 eV, the numbers
+are not so much wrong as **unreconstructable**, which is worse: nothing
+in the tree lets a reader determine which structure, which potential, or
+which trajectory produced the headline figure.
+
+### 5.8 A note on where prior art's design was right
+
+The failures above are failures of *implementation*, and it is worth
+saying so plainly, because prior art's own `DESIGN.md` specifies much of
+what this section arrives at independently. It calls for gap closure at
+0.01–0.1 Å/ps with **contact detection**, a **constant-normal-pressure
+barostat** for the bonding hold, a hold measured in nanoseconds, and an
+adhesion energy defined as **(E_bonded − E_separated) / area** — a
+thermodynamic energy difference, not a force integral.
+
+None of that was built. The code performs a 1.5 Å/ps velocity impact, a
+50 ps constant-volume hold, no contact detection, no barostat, and
+reduces a force integral instead. So the divergence is not that its
+author designed the wrong protocol; it is that the design and the code
+parted company and nothing detected it. The pressure-controlled press
+this section freezes for v1 is, in essence, the protocol prior art
+specified and never ran — and its energy-difference adhesion is the
+thermodynamic entry of the §6 measure vector.
+
+That is also the sharpest argument for our own document chain: a design
+that no test binds to its code will drift, and the drift will not
+announce itself. It surfaces as a number quoted to four significant
+figures.
+
+### 5.9 What we keep, what we replace, and v1
+
+**Keep:** the three-phase arc (approach, hold at temperature, pull); the
+reaction-force-on-the-grip measurement; time-averaging that force; the
+non-periodic z-boundary; and the eV/Å² → J/m² conversion
+(1 eV/Å² = 16.0218 J/m², 1 eV/Å³ = 160.2176 GPa).
+
+**Replace:** the placeholder cross-interface Morse well (→ the trained
+MLIP; no cross-term exists); per-slab element charges that give the same
+element two identities (→ one species map, STRUCTURAL 1a); velocity
+impact (→ a load- or displacement-controlled press); a thermostat that
+counts directed motion as heat (→ interior-only, bias-removed); pulling
+from an unequilibrated, pre-stressed state (→ the gated zero-load
+reference); the averaging fix's leading zero (→ discarded); separation
+as grip displacement (→ also as interface opening); the mechanical
+integral labelled "work of adhesion" (→ the measure vector of §6, with
+the dissipation identity as a sign check); a single seed and no error bar
+(→ an ensemble with a spread); a single unvalidated pull rate (→ the rate
+ladder); a discarded bottom-grip reaction force (→ the Newton check); a
+flat walltime and a truncated trajectory (→ budgeted walltime and a
+completeness gate); and a report string that names a potential the run
+did not use (→ provenance emitted from the run, not typed).
+
+**Frozen for v1:** load-controlled press to a single target pressure,
+with one displacement-controlled cross-check on the Si/Si reference; a
+single press temperature, depth allowance, and hold duration; at least
+three pull rates spanning a decade; bonded/not-bonded plus contact
+quality always reported. Still DESIGN follow-ons: the target bonding
+pressure and hold duration, the noise-floor thresholds for the reference
+state and for "force returned to zero," the contact-quality definition's
+bond-counting cutoff, and the ensemble size in seeds.
 
 ## 6. Bond-outcome analyzer and measures
 

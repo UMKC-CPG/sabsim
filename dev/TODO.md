@@ -311,6 +311,17 @@ foundations, interaction rules. -->
       `slab_thickness >= activated_depth + minimum_bulk_thickness`,
       where `activated_depth` is measured by the §3.5 depth profile.
       Pin `minimum_bulk_thickness` and run the convergence study.
+- [ ] STRUCTURAL 2 / §5 follow-ons opened by `DESIGN.md` §5
+      (2026-07-09): the target bonding pressure and hold duration; the
+      noise-floor thresholds for the zero-load reference state, for
+      "force returned to zero," and for calling a force peak resolved;
+      the contact-quality definition's bond-counting cutoff; and the
+      ensemble size (amorphization seeds x velocity seeds). Also pin the
+      pull-rate ladder's three rates (`DESIGN.md` §5.4, §5.9).
+- [ ] Press-mode seam: `DESIGN.md` §5.2 freezes load-controlled press
+      for v1 with a displacement-controlled cross-check on the Si/Si
+      reference. Specify the seam's contract (both modes emit load AND
+      depth reached) and the reversibility comparison between them.
 - [ ] Settings-file shape for the material + protocol knobs (from the
       run-knobs resolution), including the v1 Si/SiO2 + Si/Si reference
       run set (`ARCHITECTURE.md` §2.3 run-specification + material-knobs
