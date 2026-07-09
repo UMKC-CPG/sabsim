@@ -217,7 +217,14 @@ so they are not discovered late (two touch non-negotiable goals). -->
       manager that may sit on top (Snakemake / jobflow / AiiDA) and the
       triggers for graduating to it (`ARCHITECTURE.md` §4, §4.1).
 - [ ] Decide which step-6/7 snapshots get sent to Imago, how many,
-      and how they are chosen (`ARCHITECTURE.md` §2.3, step 8).
+      and how they are chosen (`ARCHITECTURE.md` §2.3, step 8). A
+      candidate answer is queued in `DESIGN.md` §8's scope note, taken
+      from prior art's designed-but-unbuilt `select_snapshots`
+      (`PRIOR_ART.md` §1.8): potential-energy local minima during the
+      hold (bond formation), potential-energy local maxima during the
+      pull (a bond at maximum stretch), and sigma_zz drop spikes
+      (bond-breaking stress release), with near-duplicate frames merged.
+      Closes when §8 is written.
 - [ ] Make the step 3/4/5 ordering a flexible setting, not hardcoded
       (`ARCHITECTURE.md` §2.1).
 - [x] Decide where the ZBL close-range physics is added in the LAMMPS
