@@ -438,7 +438,7 @@ of cautions.
 **"Bond order" is coordination number.** `run_bond_order_analysis`
 counts cation-oxygen neighbours inside a hardcoded 2.6 Å sphere and
 names the result a bond order. Bond order is an *electronic* quantity —
-exactly one of the descriptors Imago/OLCAO computes, and one STRUCTURAL
+exactly one of the descriptors Imago computes, and one STRUCTURAL
 2 lists *separately* from coordination. Collapsing them into one name
 would silently invite comparing unlike things. SABSIM keeps the
 geometric and electronic descriptors nominally distinct, because the

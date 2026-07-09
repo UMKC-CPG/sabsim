@@ -14,10 +14,20 @@
       calibrated on relative trends / ratios, not absolute values (see
       `VISION.md` goal 4, `ARCHITECTURE.md` §2.3). v1 runs BOTH the
       Si/SiO2 pair and a Si/Si same-material reference so the relative
-      ratio can actually be formed (decided 2026-07-08). Residual: pin
+      ratio can actually be formed (decided 2026-07-08). The *form* of
+      the pass criterion is settled by `DESIGN.md` §7.4 (2026-07-09):
+      the ratio against the experimental ratio within the combined
+      uncertainty (systematic errors common to both systems cancel to
+      first order, which is why the ratio is the trustworthy quantity),
+      plus a loose absolute order-of-magnitude bracket that tests only
+      the plumbing — a ratio stays correct when both numbers are off by
+      the same factor, which is what a unit bug produces. Residual: pin
       the exact SAB-regime (not fusion-bonding) reference numbers for
-      Si-Si and Si-SiO2, and set the trend / ratio pass criteria the
-      gate uses (`VISION.md` goal 4 and principle 5).
+      Si-Si and Si-SiO2; set the significance level and the bracket
+      width; and treat the two works of separation as **correlated**
+      when propagating the ratio's uncertainty, since assuming
+      independence would throw away the very cancellation that makes the
+      ratio worth testing (`VISION.md` goal 4 and principle 5).
 - [ ] Define what "characterize the bond" (step 8) actually outputs,
       and how those numbers turn into experimental advice
       (`VISION.md` goal 4). Headline output now decided — a work of
@@ -40,9 +50,16 @@ were not previously tracked anywhere. -->
       quality gate (stiffness, surface energies vs VASP / experiment)
       and a separate bond-debond outcome metric (work of separation per
       area, Maszara-anchored, relative). In v1 both only report.
-      Residual: decide which module owns each check and stores its
-      reference data, whether the reference set is per-material-pair,
-      and the exact properties + pass thresholds for the potential gate
+      Largely resolved at DESIGN level by `DESIGN.md` §7 (2026-07-09):
+      the properties are enumerated (§7.2), the pass thresholds became
+      significance statements rather than constants (§7.5), and the
+      potential gate turns out to run in **two parts at two times** —
+      its bulk/surface half must precede the structure builder, which
+      §2.2 makes a consumer of the potential's relaxed lattice
+      constants, while its interface half cannot run until a
+      press-then-pull trajectory exists. Residual: decide which module
+      owns each check and **stores its reference data**, and whether the
+      reference set is per-material-pair
       (`ARCHITECTURE.md` §2.3, §3; `VISION.md` goal 4 and principle 5).
 - [ ] Inner/outer loop coupling — DEFERRED by decision (2026-07-07).
       ALF is centered on MLIP generation, agnostic to the application,
@@ -157,7 +174,7 @@ so they are not discovered late (two touch non-negotiable goals). -->
       catches extrapolation; (ii) an all-electron ΔE cross-check on
       interface subcells (the STRUCTURAL-2 MLIP-vs-reference
       work-of-adhesion) — catches confidently-wrong; reference = VASP on
-      a small subcell now (always-on backstop), Imago / OLCAO at scale
+      a small subcell now (always-on backstop), Imago at scale
       when ready. Diagnosis order for a bad bond number: bulk gate fail
       -> add data; else interface-fidelity fail -> add INTERFACE data;
       else -> genuine protocol problem. Two remedies preserved; the
@@ -254,7 +271,12 @@ so they are not discovered late (two touch non-negotiable goals). -->
 - [ ] Wire UDD as a first-class knob: expose ALF's `use_bias` /
       `E_en_bias_weight` on the committee calculator — a small,
       backend-independent ALF-side change (`ARCHITECTURE.md` §2.3,
-      step 2).
+      step 2). **Promoted from convenience to load-bearing** by
+      `DESIGN.md` §7.3 (2026-07-09): the bounded exploration launched at
+      an uncertainty abort *is* a UDD run. The abort trigger and the UDD
+      bias respond to the same committee spread with opposite intent —
+      a production run avoids it to make a measurement, a data-
+      generation run seeks it to find the potential's holes.
 - [ ] Add a `LICENSE` file (deferred 2026-07-03). Leaning Apache-2.0
       (explicit patent grant — the SAB process has a patent landscape)
       or BSD-3-Clause (simpler, matches scientific-Python and LANL ALF).
@@ -296,20 +318,69 @@ foundations, interaction rules. -->
       `work_of_adhesion_relaxed` (an amorphous surface is kinetically
       trapped, so the schedule is a recorded knob); the constrained
       ladder's opening spacing; the free-energy estimator for the
-      `free_energy_correction` entry; the VASP interface-subcell size;
-      and the numeric tolerances on every check in `DESIGN.md` §6.5
-      (dissipation >= 0, healing >= 0, rate monotonicity, ladder
-      closure).
+      `free_energy_correction` entry; the tolerance at which the
+      interface subcell is declared converged (its *size* is no longer a
+      constant to choose — §6.4 makes it the outcome of a convergence
+      test run with the potential itself); and the numeric tolerances on
+      every check in `DESIGN.md` §6.5 (dissipation >= 0, healing >= 0,
+      rate monotonicity, ladder closure, subcell truncation).
 - [ ] STRUCTURAL 1b DESIGN follow-ons: BKS vs Vashishta as the silica
       generator, the amorphous-structure validation metrics + thresholds
       (g(r) / ring / coordination vs DFT + experiment), the seed-set
       composition, the bootstrap ALF convergence threshold, the MLIP
       re-anneal protocol, and the optional MLIP melt-quench upgrade
       (`ARCHITECTURE.md` §2.3 MLIP + potential-gate bullets).
-- [ ] STRUCTURAL 3 DESIGN follow-ons: the committee-uncertainty and
-      ΔE-mismatch thresholds for the interface-fidelity check, the VASP
-      interface-subcell size, and the report's diagnostic-label schema
-      (`ARCHITECTURE.md` §2.3 potential-quality + diagnosis sub-bullets).
+- [x] STRUCTURAL 3 DESIGN follow-ons — RESOLVED by `DESIGN.md` §7
+      (2026-07-09), except the bare numbers. The diagnostic-label schema
+      is §7.8 (verdict / cause / basis / fired / unresolved / power /
+      remedy / provenance). The interface-subcell *size* is no longer a
+      quantity to choose: §6.4 makes it the outcome of a convergence
+      test run with the potential itself (`subcell_truncation_error`),
+      so the cheap method certifies the expensive method's input. The
+      thresholds became *significance statements* rather than constants,
+      because §6.6 forbids bare numbers and every gate comparison
+      therefore carries an uncertainty (§7.5). Two additions changed
+      `ARCHITECTURE.md` §2.3 in the same commit: `void` at the head of
+      the chain (a measurement that is not a measurement is never
+      diagnosed) and a `basis` field recording whether `protocol` was
+      reached by direct evidence or by elimination (§7.7).
+- [x] §6.4 defect FIXED (2026-07-09), recorded for the lesson it
+      carries: the interface-fidelity check originally read `M4 - M2`
+      with M4 on a subcell and M2 on the full cell, conflating the
+      fidelity difference with a box-size difference. It is now M4 minus
+      M2 on the *same* subcell, gated by M2(full) - M2(subcell). The
+      transferable rule: **any comparison of two methods must fix the
+      system, and any comparison of two systems must fix the method.**
+      Worth checking for the same shape wherever else the chain compares
+      quantities computed different ways.
+- [ ] §7 numeric follow-ons: the quantile that calibrates the
+      committee-uncertainty threshold; the significance level for the
+      fidelity cross-check; the width of the absolute sanity bracket;
+      the committee evaluation stride, the persistence window, and the
+      abort budget (§7.3); the step budget and plausibility ceiling
+      bounding the UDD exploration launched at an abort; and the
+      composition of the harvested batch (stratified baseline vs
+      excursion).
+- [ ] §7.7's open question, deliberately surfaced rather than hidden:
+      the inventory of protocol checks (rate-ladder convergence, press
+      contact quality, the dissipation identity, ladder closure) was
+      assembled for other purposes and has **not** been argued to span
+      the ways a protocol can be wrong. The `basis: by_elimination`
+      count is the instrument that measures how sparse it is.
+- [ ] Confirm whether ALF exposes the **per-atom** committee spread or
+      only the global `energy_stdev`. DeePMD's energy is a sum of atomic
+      contributions so the quantity exists; §7.3 uses it to localize the
+      potential's ignorance, and §6.4 uses that to center the interface
+      subcell. A code-level question for PSEUDOCODE
+      (`prototypes/alf_deepmd/`, [[alf-pluggable-mlip-backend]]).
+- [ ] Wording audit, deferred from the Imago rename (2026-07-09):
+      `ARCHITECTURE.md` §2.3 calls our step-8 skeleton prep "structure in
+      OLCAO format", and `ARCHITECTURE.md` + `TODO.md` speak of an
+      "OLCAO all-electron value from Imago". Since `PRIOR_ART.md` §1.8
+      established that Imago and legacy OLCAO share no input format,
+      these are either stale or refer to OLCAO-the-*method* (which is
+      legitimate — Imago implements it, as §2.1 and §4 use the term).
+      Needs a decision from someone who knows Imago's input format.
 - [ ] STRUCTURAL 4 DESIGN follow-ons — mostly answered by `DESIGN.md`
       §2 (2026-07-09). Settled there: the matcher is a whole-number
       tiling-matrix + in-plane-twist search (Zur-McGill, adopted from

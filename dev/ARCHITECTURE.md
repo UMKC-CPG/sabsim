@@ -369,7 +369,7 @@ MLIP is never asked to reproduce cascades.
     work-of-adhesion comparison — catching the potential being
     *confidently wrong* (committee agrees but is off). The reference is
     VASP on a small interface subcell (available now, the always-on
-    backstop) or Imago / OLCAO at interface scale once that pipeline is
+    backstop) or Imago at interface scale once that pipeline is
     ready. Together they make interface-coverage failure *visible*
     instead of letting it masquerade as a protocol failure.
   - **Bond-debond outcome metric.** The scientific deliverable: the
@@ -392,14 +392,35 @@ MLIP is never asked to reproduce cascades.
     checks keep their two remedies (potential problem -> add data;
     protocol problem -> data won't help), but the interface-fidelity
     check above closes the hole where an interface-coverage failure was
-    silently filed as *protocol*. A bad bond number is read in order: if
-    the bulk/surface gate fails -> general model problem, add data; else
-    if the interface-fidelity check fails -> interface-coverage problem,
-    add *interface* training data (still the data remedy, now correctly
-    targeted); else -> a genuine protocol problem (activation, press,
-    separate) that more data will not fix. In v1 this is a REPORTED
-    diagnostic label, not an automated action (the gate is a reporter);
-    wiring it to `data_targeting` is the future closed loop (§3).
+    silently filed as *protocol*. A bad bond number is read along an
+    ordered chain, because each test is interpretable only given the
+    ones before it. **Five outcomes** (`DESIGN.md` §7.6 refines the
+    original three): if a check the chain depends on could not be
+    evaluated -> `undiagnosed`, since a test that did not run may not be
+    counted as passed; else if the measurement is invalid — truncated
+    trajectory, atoms lost, an internal consistency check failed, an
+    uncertainty abort -> `void`, and a void measurement is **never
+    diagnosed**, because diagnosing a number nobody believes is worse
+    than reporting nothing; else if the bulk/surface gate fails ->
+    `bulk_model`, add data; else if the interface-fidelity check fails
+    -> `interface_coverage`, add *interface* training data (still the
+    data remedy, now correctly targeted); else -> `protocol`
+    (activation, press, separate), which more data will not fix.
+    The `void` outcome is not a new idea but an inherited one: `DESIGN.md`
+    §5 already refuses truncated trajectories and §6.5 already requires
+    internal checks to pass.
+    Because `protocol` is the last branch, it is reached **by
+    elimination**, and elimination is sound only if the alternatives are
+    exhaustive — we have enumerated exactly two ways for a potential to
+    be at fault. The gate therefore reports the cause **and, separately,
+    the basis on which it was reached** (`direct_evidence` when a named
+    protocol check fired, `by_elimination` when none did). Nothing is
+    discarded, a reader can weigh inference differently from
+    observation, and a study whose protocol verdicts are mostly reached
+    by elimination is telling us our protocol checks are too sparse.
+    In v1 all of this is a REPORTED diagnostic label, not an automated
+    action (the gate is a reporter); wiring it to `data_targeting` is
+    the future closed loop (§3).
 - **Bond-outcome analyzer — the pluggable measure set
   [BUILD · resolved from STRUCTURAL 2, 2026-07-08].** The bond-outcome
   check above does not reduce to one number; it emits a small **measure
@@ -625,7 +646,7 @@ CPU and then a gentle MLIP anneal on GPU:
 | DeePMD training (inside ALF)           | GPU            |
 | Classical + ZBL Ar cascade (step 4)    | CPU            |
 | MLIP re-anneal + press / separate      | GPU (`deepmd`) |
-| Imago / OLCAO (step 8)                 | CPU            |
+| Imago (step 8)                         | CPU            |
 
 **Execution walls, flagged for DESIGN.**
 1. **Parsl-in-Parsl** — avoided by the tier separation above.

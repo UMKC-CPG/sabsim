@@ -636,10 +636,20 @@ bootstrap pass is:
 3. **Label, convert, retrain.** VASP labels a selected subset (ALF's
    `QM_task = VASP_ase_calculator_task`); the converter folds it into the
    HDF5 store; `train_DEEPMD_ensemble_task` retrains the committee.
+   Interface configurations are labelled as **interface subcells** (§6.4)
+   rather than whole production cells — the potential is short-ranged, so
+   the training signal is local, and all-electron cost grows steeply with
+   atom count. Note the asymmetry: a *training* configuration need only
+   be physically valid and relevant, which leaves the subcell choice
+   free, whereas the `interface_fidelity` cross-check compares two
+   methods and so demands that both see the identical system.
 4. **Refine by sampling.** Re-run the protocol under the committee; the
    sampler (uncertainty-triggered and/or UDD-biased, §4.4) flags the
    configurations where σ is high; VASP labels those; retrain. Repeat
    until committee σ across a full protocol run falls below threshold.
+   A run that the live monitor of §7.3 aborts is not a wasted run: it
+   feeds this step, and the bounded UDD exploration launched from its
+   triggering configuration is the most targeted sampler we have.
 
 **Convergence** is that uncertainty threshold together with the
 potential-quality gate (§7); this is the hand-off to STRUCTURAL 3. The
@@ -1112,13 +1122,71 @@ curve measures directly how far the chosen pull rate sits from
 quasi-static, which is the assumption the whole rate ladder rests on.
 
 **M4 — Work of adhesion at all-electron fidelity.** The same energy
-difference as M2, evaluated on interface subcells with an all-electron
-method rather than the potential: VASP on a small subcell now, as the
-always-available backstop, and Imago/OLCAO at scale once the
-cross-project deliverables land (`ARCHITECTURE.md` §4). The quantity of
-interest is not M4 itself but **M4 minus M2**, which is STRUCTURAL 3's
-interface-fidelity check — the signal that catches a potential which is
-confidently wrong exactly where the bond number is read.
+difference as M2, evaluated with an all-electron method rather than the
+potential: VASP on an interface subcell now, as the always-available
+backstop, and Imago at scale once the cross-project deliverables
+land (`ARCHITECTURE.md` §4).
+
+The comparison has to be set up carefully, because the obvious version
+of it does not work. M4 is affordable only on a subcell, while M2 is
+defined on the full system. Subtracting one from the other would mix the
+difference we want — how far the potential sits from all-electron
+physics — with one we do not: how far a small box sits from a large one.
+Two methods, two systems, one number, and nothing left to say which
+difference produced it. So the analyzer forms **two** differences:
+
+- **`interface_fidelity`** — M4 minus M2 recomputed on the **same
+  subcell**. Two methods, one system. This is STRUCTURAL 3's signal, the
+  one that catches a potential which is confidently wrong exactly where
+  the bond number is read.
+- **`subcell_truncation_error`** — M2 on the full cell minus M2 on the
+  subcell. One method, two systems. This is what the truncation cost us,
+  and it is **cheap**: both terms come from the potential, so no
+  all-electron calculation is involved at all.
+
+The second measure exists to gate the first. If shrinking the cell moved
+the answer by as much as the fidelity difference we are trying to read,
+then the fidelity question was never askable on that subcell, and
+`interface_fidelity` is reported `unresolved` rather than believed.
+
+**What an interface subcell is.** The potential is short-ranged — the
+`se_e2_a` descriptor with a 6 Å cutoff (§4.6) — so an atom's energy and
+force depend only on what lies within that radius of it. The physics we
+are training and testing is local, and that locality is what makes a
+smaller cell legitimate at all. But it cannot be exploited by cutting
+atoms out: a cut surface carries dangling bonds, and the forces near it
+are wrong in precisely the region we were trying to look at. Saturating
+those bonds — with hydrogen, say — would introduce a species the global
+type map of §4.3 does not contain, and a termination scheme we would
+then have to validate on a covalent-ionic interface.
+
+So the subcell is **not a carved cluster.** It is a legitimate physical
+system in its own right, built by four rules:
+
+- the **full lateral periodicity** of §2's shared cell is kept, untouched;
+- the cell is truncated **only along the interface normal**;
+- every atom whose label will be used keeps its **entire 6 Å
+  environment**;
+- truncation stops at the slab's **own real free surfaces**, so no
+  surface is manufactured and no bond is severed.
+
+It is a thinner version of the same interface, and its energies and
+forces are correct without qualification. Atoms near the outer surfaces
+sit in different environments than they would in the production cell,
+but those environments are physical too — so their labels are data, not
+contamination. Where along the interface the subcell is centered is
+decided by the per-atom committee spread (§7.3), which is the quantity
+that localizes the potential's ignorance.
+
+**Its size is a convergence test, not a constant.** Evaluate the target
+quantity with the *potential* on the full cell and on the subcell, and
+enlarge the subcell until the difference falls below tolerance. That
+difference is `subcell_truncation_error`; it needs no all-electron
+calculation; and it means **the cheap method certifies the expensive
+method's input.** This is why the truncation error is a reported measure
+rather than an internal detail, and why `TODO.md`'s long-standing "VASP
+interface-subcell size" item is answered by a procedure instead of by a
+number.
 
 **M5 — Bond descriptors, geometric and electronic, kept apart.** Two
 families, and they must never share a name:
@@ -1163,6 +1231,12 @@ M1(rate) >= work_of_adhesion_as_fractured >= work_of_adhesion_relaxed
   integrator independently of the physics — the single check that would
   have caught prior art's leading-zero artifact and its truncated
   trajectory at once.
+- **The subcell was large enough to ask the question.**
+  `subcell_truncation_error` must be small compared with the
+  `interface_fidelity` difference it gates (§6.4). Where it is not, the
+  fidelity measure is reported `unresolved` and never `pass`, because at
+  that point a box-size artifact and a potential error are
+  indistinguishable.
 
 These are cheap, they use only quantities already computed, and none of
 them exists in prior art, whose analyzer contains no check that can fail.
@@ -1243,23 +1317,446 @@ atom count, M3's constrained ladder with the relaxed-snapshot
 comparison, M5's geometric family, the contact-quality measure, and
 every check of §6.5. M2's zero-temperature energy difference is the
 headline, with the free-energy correction reported as a separate entry
-on a possibly smaller ensemble. M4 uses the VASP subcell backstop; the
-Imago variant and M5's electronic family are registered but may report
-`unresolved`. Still DESIGN follow-ons: the annealing schedule behind
+on a possibly smaller ensemble. M4 uses the VASP subcell backstop, and
+reports `interface_fidelity` and `subcell_truncation_error` together —
+never the first without the second. The Imago variant and M5's
+electronic family are registered but may report `unresolved`. Still
+DESIGN follow-ons: the annealing schedule behind
 `work_of_adhesion_relaxed`, the constrained-ladder opening spacing, the
-free-energy estimator, the VASP subcell size, and the numeric tolerances
-on every check in §6.5.
+free-energy estimator, the tolerance at which the interface subcell is
+declared converged (its *size* is now the outcome of a convergence test,
+not a constant to be chosen), and the numeric tolerances on every check
+in §6.5.
 
 ## 7. Quality gates and diagnosis
 
-<!-- Scope: the two checks and their routing — the potential-quality
-gate (bulk stiffness / surface energies plus the interface-fidelity
-check: committee uncertainty along the pull and an MLIP-vs-all-electron
-ΔE cross-check) and the bond-outcome gate — with the three-way diagnosis
-(bulk-model / interface-coverage / protocol) and its reported
-diagnostic-label schema. v1 reports; it does not close the loop.
-Sources: ARCHITECTURE §2.3 (two separate checks + diagnosis) and §3;
-TODO DESIGN (STRUCTURAL 3 follow-ons). -->
+This section designs the two checks that decide whether a run is worth
+believing, and the reasoning that turns a bad number into an instruction
+about what to do next. It realizes STRUCTURAL 3.
+
+It is the first section whose inputs are entirely our own. §6 hands it a
+measure vector; §5 hands it a trajectory and the records taken along it;
+§4 hands it a committee of potentials that can say when it is guessing.
+From prior art it inherits nothing at all, for the reason `PRIOR_ART.md`
+§1.8 records plainly: **nothing in that analyzer can fail.** Its nine
+warnings are bare `print` statements, its bonded verdict is computed and
+discarded, and its amorphization check reports a number against no
+threshold. A gate is exactly the thing that codebase does not have.
+
+### 7.1 Two checks that differ in remedy, not in strictness
+
+The two checks are often collapsed into one "quality gate." They must
+stay apart, and the reason is not tidiness — it is that **they lead to
+different actions**:
+
+- The **potential-quality gate** asks whether the trained potential is a
+  good model of these materials. A failure is a *model* problem, and the
+  remedy is to generate more training data and retrain.
+- The **bond-outcome gate** asks whether the work of separation is
+  physically sensible. A failure may be a *protocol* problem — the
+  activation, the press, the pull — which no quantity of training data
+  will ever fix.
+
+From this a second, sharper point follows, and it governs the whole
+section. **A bad bond number carries no meaning on its own.** Until the
+potential gate has been read, the bond number is a measurement made with
+an uncalibrated instrument, and asking what it says about the protocol
+is asking the wrong question. The order of the checks is therefore not a
+convention; it is forced by what makes each one interpretable.
+
+### 7.2 The potential-quality gate runs in two parts, at two times
+
+The gate is one idea, but it cannot be one event in the pipeline, and
+this falls out of decisions already made elsewhere.
+
+Its **bulk and surface half** — equilibrium lattice constants, elastic
+stiffness, surface energies, and the amorphous-structure validation of
+§3.5 (partial g(r), ring statistics, coordination) against VASP and
+experiment — must run **before the structure builder**. §2.2 makes the
+builder a consumer of the potential's own relaxed lattice constants: it
+matches the two surface lattices on them and records the residual strain
+from them. A potential with a wrong lattice therefore builds a wrong
+box, and everything downstream measures the wrong system. This half
+gates the build, at the step 2/3 boundary.
+
+Its **interface half** cannot run there at all, because the interface
+does not yet exist. The interface-fidelity check of §7.3 needs a
+press-then-pull trajectory, so it runs after step 7.
+
+The consequence is worth stating, because it is uncomfortable. **An
+interface-coverage failure is discovered only after the entire pipeline
+has been paid for.** That is what §7.3's live monitor exists to soften.
+
+### 7.3 The interface-fidelity check, and watching it live
+
+The bulk and surface properties above do not probe the one region the
+whole project is about. A potential can reproduce every one of them and
+still be wrong exactly where the bond number is read. STRUCTURAL 3 gives
+the interface two complementary signals, and they catch different
+failures:
+
+- **Committee uncertainty along the press-then-pull trajectory.** The
+  spread among the committee members of §4.4 is large where the
+  potential is extrapolating. This is cheap, always available, and it
+  catches the potential being *uncertain* — wrong in a way it knows
+  about.
+- **An all-electron energy-difference cross-check on an interface
+  subcell** — the `interface_fidelity` measure of §6.4, which is M4
+  minus M2 evaluated on **the same subcell**, against VASP now and Imago
+  at scale later. This catches the potential being **confidently
+  wrong**: the committee agrees with itself and is off. It is read only
+  when `subcell_truncation_error` says the subcell was large enough to
+  have asked the question; otherwise it is `unresolved`, not `pass`.
+
+Neither signal subsumes the other. *Committee agreement is not
+correctness*, which is precisely why the second signal is not optional.
+
+**Watching it live, and why an abort is not a loss.** The uncertainty
+signal is available at every timestep, so it need not wait for the
+post-hoc check. Reasoning about whether to act on it turns on one
+observation. If the uncertainty genuinely leaves the training
+distribution partway through a pull, then the post-hoc check will void
+that measurement anyway — the run was already lost, and finishing it
+buys nothing. An abort cannot destroy work that would have survived.
+**The only way a live abort wastes a run is if the threshold fires when
+the potential was in fact fine.** The entire design of the monitor is
+therefore false-positive control, and it has six parts:
+
+- **Evaluate the committee on a stride**, roughly every hundred steps.
+  Running four members every step multiplies inference cost about
+  fourfold; running them every hundredth step costs a few percent, and
+  uncertainty does not change meaningfully between adjacent
+  femtoseconds. The monitor is cheap *because* it is strided, and the
+  stride is a recorded setting, not an implementation detail.
+- **Run the pull-rate ladder in ascending cost, and gate between its
+  rungs.** §5.4 already requires at least three rates spanning a decade,
+  so the fastest rung is both the cheapest and *required output
+  regardless*. Run it first: it traverses the same press → bond → pull →
+  separate pathway and maps the uncertainty along it for a fraction of
+  the production cost. This scout is free. Its limit must be stated
+  honestly, though: a slow pull is not a fast pull in slow motion. It
+  permits rearrangements that visit configurations the fast rung never
+  reaches, so **a clean scout is a filter, not a proof**, and the
+  in-run monitor remains necessary on the slow rungs.
+- **Two thresholds, not one.** A *warn* band records and harvests while
+  the run continues; an *abort* band stops it. The gap between them is
+  where the most valuable training data lives — configurations the
+  potential finds unfamiliar but can still integrate.
+- **Require persistence.** A single high-uncertainty frame is a rare
+  close approach, not extrapolation. The excursion must persist over a
+  window before the abort band fires — the same discipline §5.4 applies
+  when it extracts a force peak above a noise floor rather than taking
+  a bare maximum.
+- **Resolve the uncertainty per atom, not only per cell.** DeePMD's
+  energy is a sum of atomic contributions, so the committee spread can
+  be resolved atom by atom. A single number for the whole cell says only
+  *that* the potential is guessing; the per-atom field says **where**.
+  That sharpens the diagnosis of §7.6 — spread concentrated at the
+  interface is `interface_coverage`, spread out at the grips is a
+  different problem entirely — and it places the interface subcell of
+  §6.4, which is carved around exactly those atoms. (Whether ALF exposes
+  the per-atom decomposition or only the global spread is a code-level
+  question for PSEUDOCODE; the quantity exists in DeePMD.)
+- **Restart from the post-cascade checkpoint, and bound the aborts.**
+  STRUCTURAL 1b puts the violent Ar cascade on a classical potential
+  with ZBL, not on the MLIP, so **the amorphized surfaces are
+  potential-independent and survive retraining untouched**. A retrained
+  potential invalidates only the gentle re-anneal, the press and the
+  pull. Finally, aborts are counted: repeated aborts at the same
+  physical stage within one potential generation are not a nuisance to
+  be retried, they are an `interface_coverage` diagnosis, and the gate
+  escalates to a human rather than looping.
+
+The uncertainty threshold itself is not a number typed into a settings
+file. It is **calibrated against the distribution of committee spread
+over held-out training configurations**, so that configurations the
+potential has genuinely seen pass by construction, and the threshold
+moves when the training set does. Note what this makes the threshold
+mean: *this configuration is less familiar to the potential than all but
+a small fraction of the things it was trained on.* Where along the
+trajectory that first happens is an **output**, not a setting. Choosing
+instead to abort at some fraction of the pull would be asserting
+something about the physics that we do not know.
+
+The quantile is a real choice, and a cost asymmetry settles it. Aborting
+too early wastes one production run. Aborting too late wastes that same
+run **and** hands us a harvest drawn from a stretch of trajectory
+integrated under forces we had already stopped trusting. Err early; let
+the persistence window keep "early" from becoming twitchy.
+
+**The abort is a data-generation event.** Once the production
+measurement is void, the configuration it died on is the single most
+informative structure the run produced, and the machinery to exploit it
+already exists. §4.4 adopts ALF's **uncertainty-driven dynamics**: a
+bias potential proportional to the committee spread, whose force drives
+the system *toward* configurations the potential finds unfamiliar. The
+abort trigger and the UDD bias are two responses to the same signal with
+opposite intent — a production run wants to avoid high uncertainty
+because it is trying to make a measurement, while a data-generation run
+wants to seek it because it is trying to find the potential's holes. So
+at the trigger, SABSIM voids the measurement and launches a short,
+bounded UDD exploration from the triggering configuration. **The
+production run's death becomes a data-generation run's birth.**
+
+This works because of a fact worth stating plainly, since it is easy to
+get backwards: **a training configuration does not have to lie on a
+physically correct trajectory.** The label comes from VASP, which does
+not care how the configuration was generated. A configuration need only
+be physically plausible and lie in a region where we need the potential
+to be accurate. Configurations produced by a potential that is guessing
+satisfy both — right up until they do not, which is what bounds the
+exploration. The uncertainty axis therefore carries four bands, not two:
+
+| Band | Meaning | Action |
+|------|---------------------------|-----------------------------|
+| below warn | familiar | run normally |
+| warn → abort | unfamiliar, integrable | keep running, harvest |
+| at abort | extrapolating | void; begin UDD exploration |
+| ceiling | nonphysical | stop everything |
+
+The **ceiling** is not a statistical threshold but a physical one — a
+minimum interatomic distance, an energy bound, no spurious fragmentation
+— because a biased run driven by a potential that no longer knows the
+physics will eventually reach configurations that are *correctly
+labelled and worthless*, and labelling them spends budget teaching the
+model about a region it will never visit.
+
+Finally, what is harvested is not the triggering frame. Selecting one
+configuration per abort is what makes active learning converge slowly,
+and training **only** on hard configurations is a distribution shift
+that can degrade the potential where it used to be fine. The batch
+handed to ALF's sampler is therefore drawn from four places at once: a
+**stratified baseline** across the whole trajectory, the **warn band**,
+the **excursion neighbourhood** on the run-up to the trigger, and the
+**UDD exploration** beyond it.
+
+### 7.4 The bond-outcome gate: a ratio, and a bracket
+
+`VISION.md` goal 4 anchors the bond number to razor-blade crack-opening
+(Maszara) measurements for silicon-to-silicon and silicon-to-silicon-
+dioxide, taken in the **surface-activated** regime rather than thermal
+fusion bonding, and used as **relative** anchors. v1 runs the Si/SiO₂
+pair *and* a Si/Si same-material reference precisely so that a ratio can
+be formed; one system alone is only a point.
+
+**The ratio is the scientific criterion.** The simulated ratio of the
+two works of separation is compared against the experimental ratio,
+within the combined uncertainty of both. The reason to trust a ratio is
+physical, not resignation: the systematic errors that keep a
+nanosecond-scale pull from reproducing an absolute fracture energy —
+the pull rate, the cell size, the thermostat, the finite activation
+dose, the whole mismatch of timescales — are **largely common to the two
+systems, and cancel to first order in their ratio**. What survives is
+the difference between the two interfaces, which is the physics we are
+actually claiming.
+
+That cancellation is real only if the uncertainty is propagated as
+such. Both numbers come from the same potential under the same protocol,
+so their errors are **correlated**, and treating them as independent
+would overstate the ratio's uncertainty and weaken a test that ought to
+be strong. The covariance is carried, not assumed away.
+
+**The bracket is a sanity check, and it is not science.** A ratio stays
+perfectly correct when both of its numbers are wrong by the same factor
+of a thousand — which is exactly what a unit-conversion error produces.
+So each absolute work of separation is additionally required to fall
+inside a loose order-of-magnitude bracket around its experimental value.
+This criterion tests nothing about the physics and everything about the
+plumbing, and it is the only thing standing between us and a confidently
+reported number in the wrong units. Prior art published two mutually
+inconsistent headline strengths side by side (`PRIOR_ART.md` §1.7) with
+nothing in the codebase positioned to compare them.
+
+### 7.5 Every threshold is a significance statement
+
+§6.6 forbids bare numbers: every record carries a value, an uncertainty,
+and a realization count. That rule now pays for itself. Because the gate
+compares *measures* rather than numbers, nearly every comparison it
+makes is a **statement about significance rather than a magic constant**.
+
+The all-electron cross-check is the clearest case. It does not ask
+whether `M4 − M2` is smaller than some tolerance in eV. It asks whether
+that difference is consistent with zero given the combined uncertainty of
+both measures. When the ensembles are small the test is weak — and the
+gate **reports the power it had**, so that a pass on two realizations is
+not silently mistaken for a pass on twenty.
+
+Two rules follow, and both exist to close the door on warn-and-continue:
+
+- **A measure whose status is `unresolved` can never pass a check.**
+  §6.7 lets Imago descriptors come back unresolved so the Imago-free
+  path stays first-class. A check that depends on them must then return
+  unresolved as well — never `pass`. Absence of evidence is recorded as
+  absence, and it propagates.
+- **Where a bare constant is genuinely unavoidable** — the sanity
+  bracket's width, the quantile that sets the uncertainty threshold, the
+  persistence window — it is named, recorded in the report with its
+  justification, and treated as a knob rather than a fact.
+
+### 7.6 The precedence chain, and the diagnosis
+
+Every check runs, and every outcome is recorded. But the *cause* the
+gate reports is read off an ordered chain, because each test is only
+interpretable given the ones before it — the interface check means
+nothing if the bulk is wrong, and the protocol cannot be judged through
+a potential we do not trust:
+
+```
+if a required check could not be evaluated  -> undiagnosed
+elif the measurement is invalid             -> void
+elif the bulk / surface gate fails          -> bulk_model
+elif the interface-fidelity check fails     -> interface_coverage
+else                                        -> protocol
+```
+
+- **`void`** — the measurement is not wrong, it is *not a measurement*.
+  §6.5's internal checks failed, or the trajectory was truncated, or
+  atoms were lost, or the live monitor aborted the run. A void
+  measurement is **never diagnosed**, because diagnosing a number you do
+  not believe is worse than reporting nothing. Remedy: rerun.
+- **`bulk_model`** — the potential is wrong in general. Remedy: add
+  training data.
+- **`interface_coverage`** — the potential is fine in the bulk and has
+  never seen the interface. Remedy: add *interface* training data. This
+  is still the data remedy, now correctly targeted, and closing this
+  hole is what STRUCTURAL 3 was for.
+- **`protocol`** — the activation, the press, or the pull. Remedy:
+  revise the protocol; more data will not help.
+- **`undiagnosed`** — a test the chain depends on returned `unresolved`,
+  so the chain cannot be walked at all. This is **not** the bucket for
+  "nothing fired"; see §7.7. If the potential's interface check could
+  not be evaluated, we may not conclude that the potential passed it.
+
+Two design points hide in that chain. The first is that `void` sits at
+the front, ahead of every question about cause, and it did not exist in
+`ARCHITECTURE.md`'s original three-way routing — it falls out of §5's
+refusal to accept truncated trajectories and §6.5's checks. The second
+is that the chain reports the *first* actionable cause while **all**
+checks still run and are recorded, so a run with two problems does not
+hide the second one; it simply names the one that must be fixed first.
+
+### 7.7 The conclusion and its basis are reported separately
+
+`protocol` is the last branch, so it is reached whenever nothing before
+it fires. That makes it a **conclusion by elimination**, and reasoning by
+elimination is sound only when the alternatives have been exhausted. We
+have enumerated exactly two ways for a potential to be at fault. Should
+there be a third — a deficiency visible in neither the bulk properties
+nor the two interface signals — it would fall through both tests and
+land, silently and confidently, in a bucket that sends a researcher off
+to adjust a press load that was never the problem.
+
+That is the prior-art pattern of §1.8 (detect the defect, report the
+number anyway) relocated from a `print` statement into the gate itself,
+and the fix is neither to forbid the conclusion nor to trust it blindly.
+**The gate reports the cause and, in a separate field, how it reached
+it:**
+
+```
+cause : protocol            cause : protocol
+basis : by_elimination      basis : direct_evidence
+fired : []                  fired : [pull_rate_ladder_no_convergence]
+```
+
+Nothing is discarded. A conclusion by elimination is frequently correct
+— an activation dose that is simply too low is a real protocol failure
+that no protocol check need fire to make true — and a reader who sees
+`by_elimination` knows at once to weigh it as inference rather than
+observation.
+
+The field also makes our own ignorance **countable**. If most protocol
+verdicts across a study are reached by elimination and few by evidence,
+that is a measurable statement that the protocol checks are too sparse,
+and it becomes a task rather than a silent weakness. The protocol checks
+available today all come from §5 and §6 — the pull-rate ladder failing
+to converge, the press never reaching the contact quality of §5.1, the
+dissipation identity or the ladder-closure check of §6.5 breaking — and
+that set was assembled for other purposes. **It has not been argued to
+span the ways a protocol can be wrong**, and the `basis` field is how we
+find out.
+
+### 7.8 The diagnostic-label schema
+
+The gate emits one machine-readable record, alongside §6's measure
+vector and obeying the same rules — read by name and status, never by
+position; no bare numbers.
+
+- **`verdict`** — `pass`, `fail`, or `void`.
+- **`cause`** — null on a pass, else one of `void`, `bulk_model`,
+  `interface_coverage`, `protocol`, `undiagnosed`.
+- **`basis`** — `direct_evidence`, `by_elimination`, or
+  `not_applicable`.
+- **`fired`** — every check that failed, each with its measure name,
+  value, uncertainty, threshold, and the comparison performed.
+- **`unresolved`** — every check that could not be evaluated, and why.
+- **`power`** — for each significance test, the combined uncertainty
+  that made it pass or fail, so a weak test cannot pose as a strong one.
+- **`remedy`** — `rerun`, `add_data`, `add_interface_data`,
+  `revise_protocol`, or `investigate`.
+- **Provenance** — the potential generation and committee size, the
+  trajectory identifiers, the thresholds in force and where each came
+  from (a calibrated quantile, or a named constant).
+
+The gate takes its inputs by **explicit identifier**. It never discovers
+them, and in particular it never selects the newest matching file in a
+directory — the mechanism by which prior art silently compared two
+different simulations to each other (`PRIOR_ART.md` §1.7).
+
+### 7.9 A gate that has never failed is not known to be a gate
+
+Every check here is a claim that certain inputs will be rejected, and an
+untested rejection path is an assumption. The gate is therefore
+exercised, as part of its test suite, on inputs that are **known to be
+bad**, and each must produce its specific expected cause: a deliberately
+undertrained potential (`bulk_model`); a trajectory truncated partway
+(`void`); a structure with atoms lost through the boundary (`void`); a
+measure vector with an energy in the wrong units (the sanity bracket);
+a potential trained only on bulk configurations (`interface_coverage`);
+and a run whose interface reference is missing entirely
+(`undiagnosed`, never `pass`).
+
+This is the one requirement that most directly answers §1.8. Prior art's
+analyzer contains checks; what it does not contain is any check that can
+fail. Implementing a gate and testing that it *rejects* are different
+pieces of work, and only the second one produces a gate.
+
+### 7.10 What we keep, what we replace, and v1
+
+**Keep:** nothing. There is no prior-art gate to keep — `check_amorphous`
+is a reporting tool that prints a g(r) RMSD against an optional
+experimental curve with **no threshold and no DFT reference**, and the
+analyzer's nine warnings are bare prints.
+
+**Replace:** report-without-threshold (→ every check compares against a
+reference and can fail); warnings as `print` (→ typed records the gate
+reads); the newest-file-wins input fetch (→ explicit trajectory
+identifiers); a bad number attributed to the protocol by default (→ a
+cause *and* the basis on which it was reached); bare tolerances (→
+significance tests against propagated uncertainty, with the power
+reported); and a passing verdict on missing evidence (→ `unresolved`
+never passes).
+
+**Frozen for v1:** the gate is a **reporter**. It emits the verdict, the
+cause, the basis, and the remedy; a human reads them and decides whether
+to add data and rerun. Wiring the remedy to `data_targeting` is the
+future closed loop (`ARCHITECTURE.md` §3, `VISION.md` principle 5). The
+bulk/surface half runs before the build; the interface half after step 7;
+the live monitor runs with the full guard stack of §7.3, and its abort
+is a run-validity decision, not a loop-closing action. The bond-outcome
+gate tests the Si/SiO₂-to-Si/Si ratio against the experimental ratio,
+with the absolute bracket alongside it. M4 uses the VASP interface
+subcell.
+
+**Still DESIGN follow-ons:** the numeric thresholds (the quantile that
+sets the uncertainty threshold, the significance level for the fidelity
+cross-check, the width of the sanity bracket); the committee stride, the
+persistence window, and the abort budget of §7.3; the exploration step
+budget and the plausibility ceiling that bounds the UDD run; the
+composition of the harvested batch (how much stratified baseline against
+how much excursion); whether ALF exposes the per-atom committee spread
+or only the global one; the covariance treatment in the ratio's
+uncertainty; and — the one §7.7 exists to surface — whether the
+inventory of protocol checks is anywhere near complete.
 
 ## 8. Step-8 characterization (Imago + Kaleidoscope)
 
