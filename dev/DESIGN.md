@@ -40,15 +40,338 @@ sources; bodies are written section by section. -->
 
 ## 1. Run specification and settings layer
 
-<!-- Scope: the editable config a user changes to point the pipeline at
-a study — material knobs (crystal, one Miller face, identity) and
-protocol knobs (activation species / energy / dose; press and separate
-load, depth, duration, speed) — kept apart from the deployment/resource
-layer and the fixed machinery, and exposed programmatically. v1 fixes
-Si/SiO2 (plus a Si/Si reference) with every protocol knob frozen.
-Sources: ARCHITECTURE §2.3 (run specification; settings/deployment
-separation; programmatic entry) and §4.1; TODO DESIGN (settings-file
-shape). -->
+This section designs the specification a user writes to point the
+pipeline at a study, and the rules that keep it honest. It was written
+last on purpose. §2 through §7 each deposited knobs, tolerances and
+seeds as they went, and only with all of them on the table does the
+shape of the settings layer become visible — it is not one list but
+five, and the divisions between them carry meaning.
+
+Prior art states the problem by contradiction. Its `primeinput.py` reads
+a run's parameters out of the directory path it happens to be sitting in
+(`jobs/<stage>/<material>/<layer>/<energy>/`) and bakes a partition
+name, a personal email address, and module versions into the scripts it
+emits (`PRIOR_ART.md` §1.2 item 7). SABSIM inverts this completely:
+**the configuration is an object, and the directory is an output.**
+
+### 1.1 The object is a study, and a run still stands alone
+
+The naive top-level object is a run: one material pair, one protocol,
+one number out. But §7.4's headline criterion is a **ratio** — the work
+of separation of the Si/SiO₂ pair divided by that of the Si/Si reference
+— and a ratio is a property of a *pair* of runs, belonging to neither
+one. Give the settings layer only runs and the primary measure has
+nowhere to live. This is §2.1's discovery in a different costume: the
+object worth modelling sits one level above where you would first put
+it.
+
+So a **study** names its runs and declares the **relations** among them
+— which run is the subject and which the reference. Beneath it a **run**
+is one material pair under one protocol, and beneath that a
+**realization** is one seed.
+
+But a run must remain **self-contained and independently reproducible**,
+executable on its own and identical whether or not a study ever mentions
+it. A study is a composition over runs, not an owner of them, and it may
+be assembled after the fact from runs that already exist.
+
+That freedom has a price, and paying it is the interesting part. §7.4
+trusts the ratio because **the systematic errors common to both runs
+cancel to first order** — the pull rate, the cell size, the thermostat,
+the mismatch of timescales. Cancellation requires that those systematics
+actually be shared. Two runs made with different potentials, or
+different press loads, cancel nothing, and their ratio is worthless.
+
+**A relation declares what it varies and what it holds fixed.** It is
+tempting to write the precondition as a fixed rule — *the runs must
+share a potential and a protocol* — but that rule forbids one of the
+studies we most want to run. Comparing two **protocols** on the same
+material pair (an activation-dose sweep, a press-load sweep) is a study
+in exactly the same sense, and there the protocol is the thing that must
+differ. The precondition cannot be a property of the settings layer. It
+is a property of **each relation**.
+
+So a relation names two sets of fields:
+
+- its **contrast** — the fields it deliberately varies. This is the
+  independent variable, the reason the comparison is being made at all.
+- its **controls** — the fields it intends to hold fixed, checked
+  rather than assumed.
+
+v1's ratio contrasts the **material pair** (Si/SiO₂ against Si/Si) while
+controlling the potential and the protocol. A dose sweep would contrast
+the **activation fluence** while controlling the material pair and
+everything else. Same machinery, opposite fields.
+
+**Report, never restrict.** Nothing in this section may prevent a run,
+a study, or a comparison from being performed. When a relation's
+controls disagree, or when it carries more than one contrast and is
+therefore *confounded* — a change in the result attributable to neither
+variable — the relation is still computed, still reported, and still
+carries its full difference set. What changes is only whether the
+**gate** is willing to issue a verdict on it.
+
+Refusing to evaluate and refusing to certify are different acts, and
+SABSIM performs only the second. §7.4's automated criterion is a narrow
+instrument, competent to judge one particular ratio under one particular
+set of controls; `unresolved` is a statement about **that instrument's
+competence**, never about whether a number may exist or be looked at.
+The scientist who runs many material pairs many different ways is the
+person this project is built to serve, and they routinely learn from
+comparisons no automated criterion is qualified to bless. Handing them
+the number, the contrast, and the difference set is the whole job. A
+machine that declines to compute what a scientist asked for, on the
+grounds that it would not know how to grade the answer, has mistaken its
+role.
+
+**Every relation emits a difference set.** Controls agreeing is not the
+same as the runs being alike, and the gap between those two statements
+is where a misleading comparison lives. Every field that differs is
+therefore reported alongside the value, sorted by *why* it differs:
+
+- **Contrasted** — it differs by design. This is the signal.
+- **Entailed** — it differs *because* of the contrast, and cannot be
+  removed without removing the contrast. Si/Si has no lattice mismatch
+  and Si/SiO₂ does; that residual-strain systematic is precisely the
+  term §7.4 would like to see cancel, and it cannot, because you cannot
+  contrast two material pairs without contrasting their mismatch. An
+  entailed difference is not a mistake. It is the **irreducible price of
+  the contrast**, and the relation is marked as only *partially
+  cancelling* on its account.
+- **Incidental** — it differs for no declared reason. These are the
+  dangerous ones, and naming them that way is the point: an incidental
+  difference is an uncontrolled variable that nobody decided to vary.
+
+Note which category deserves suspicion. An earlier draft of this section
+called the last group "believed harmless," which is backwards — a
+difference nobody intended is the least examined thing in the
+comparison, not the most. **SABSIM cannot know in general which
+differences break a cancellation**; that judgment rests on physics the
+settings layer does not encode. What it can do is refuse to hide them.
+A reader given the full difference set can decide whether a ratio, or
+any other comparison, means what it appears to mean. A reader handed a
+bare number cannot. The obligation belongs to *comparison* itself, so
+every relation we add later inherits it.
+
+### 1.2 Five groups, divided by what refinement does to them
+
+`ARCHITECTURE.md` §2.3 named two groups, material and protocol, with
+deployment held apart. Writing §2 through §7 produced two more, and the
+line between them is worth drawing sharply because a great deal depends
+on it.
+
+- **Material** — per wafer: the crystal structure, one surface face
+  given by its Miller indices, and the material identity. What we are
+  studying.
+- **Protocol** — the activation species, energy, angle of incidence and
+  fluence; the press mode, load, depth and duration; the hold
+  temperature; the pull rates of §5.4's ladder. How the experiment is
+  performed.
+- **Numerical** — tolerances, cutoffs, convergence criteria, the
+  committee stride and persistence window of §7.3, the significance
+  levels of §7.5, slab thickness, cell size. How carefully we compute.
+- **Ensemble** — the master seed and the realization count.
+- **Deployment** — resource class, node counts, walltime, modules. This
+  lives in a *separate document* (`ARCHITECTURE.md` §4.1) and the run
+  specification cannot express it at all.
+
+The protocol/numerical line has a crisp test. **A numerical setting is
+one whose influence on the answer must vanish as it is refined. A
+protocol knob's influence on the answer *is* the physics.** Refine a
+tolerance and watch the number move, and you have a convergence problem.
+Change the press load and watch the number move, and you have a result.
+A settings layer that cannot tell these apart cannot tell numerics from
+physics, and neither can any report or database built on top of it.
+
+**Ensemble** is separate because a seed is not a knob you tune, it is a
+coordinate you sample. Averaging over seeds is where §6.6's uncertainty
+comes from, so a seed is the one setting whose *variation* is the
+measurement rather than a threat to it. One **master seed** is recorded;
+every per-realization seed is derived from it deterministically, so a
+single number reproduces an entire ensemble (§3.6).
+
+The honest boundary case is the **pull rate**. It is physically real —
+§6.4's mechanical work is rate-dependent because dissipation is real —
+yet §5.4 also uses it as a convergence variable, extrapolating the
+ladder toward the quasi-static limit. It is a protocol knob that we
+additionally refine, and it sits on the line rather than on one side of
+it. The categories are a tool for thinking, not a law of nature, and
+§1 says so rather than pretending the boundary is clean everywhere.
+
+### 1.3 What is not a setting
+
+Equally important is the list of quantities a user must **not** be able
+to specify, because each is derived, and each has a section that owns
+its derivation. Prior art let several of these be typed in by hand, and
+paid for it.
+
+- **Lattice constants.** They come from a bulk relaxation under the
+  current potential, referenced to VASP (§2.2). Prior art hardcoded
+  literature CIF values, and `PRIOR_ART.md` §1.6 traces its Stage-1.5
+  step-zero pressure of −30 to −40 GPa directly to that choice. The
+  settings name a material and its structure type; never its lattice
+  constant.
+- **The shared lateral cell, the tiling matrices, and the residual
+  strain.** Outputs of the coincidence solver (§2.3), never user knobs.
+- **Bond cutoffs.** Derived per species pair from the first minimum of
+  that pair's partial g(r) (§6.3).
+- **The interface-subcell size.** The outcome of a convergence test run
+  with the potential itself (§6.4).
+- **The activated depth.** Measured by the validation gate (§3.5), and
+  then *consumed* by §2.5's slab-thickness criterion.
+- **The potential.** Not a knob but an artifact, referenced by
+  generation identifier.
+
+A useful way to read this list: **a setting is a choice; a derived
+quantity is a consequence.** Letting a consequence be typed in is how a
+pipeline comes to disagree with itself.
+
+### 1.4 No hidden defaults, and no version numbers either
+
+Two rules govern the specification's contents, and they pull in the same
+direction.
+
+**Every effective value appears in the input.** The loader **rejects an
+incomplete specification** rather than quietly filling it from a default
+buried in the machinery. If a number influenced the answer, a reader can
+point at where it was written. This is `VISION.md` principle 1 taken
+literally, and it is the difference between a knob that was frozen and a
+knob that was forgotten. To keep that livable, defaults exist only as a
+**generator** — a command that emits a fully-populated specification for
+the user to edit — never as a silent fallback at load time. Convenience
+lives in writing the file, not in reading it.
+
+**Protocols are identified by their contents, not by a version label.**
+A version number imposes a single line of descent on something that
+branches: protocols are explored, abandoned, and revisited, and `v2` is
+not obviously later than a sibling. So a protocol's identity is a
+**fingerprint computed from its own values** — a short digest that two
+specifications share exactly when their protocol values agree. It is
+recorded in every report, and it is derived, never typed.
+
+The fingerprint serves **provenance**: it answers "which protocol
+produced this number?" without anyone having had to name one. It does
+**not**, by itself, serve §1.1's precondition, and it is worth being
+clear about why. A relation that contrasts protocols *requires* the
+fingerprints to differ. So comparability is checked **field by field
+against the relation's declared controls**, not by matching one digest
+against another. Comparing whole-protocol fingerprints would answer a
+question no relation asked.
+
+The field-level comparison is needed regardless, since it is what
+produces the difference set. The digest is the cheap identity; the
+field comparison is the actual check.
+
+Together these give the v1 freeze its meaning. **"Frozen" means written
+down in one place, not absent.** Prior art froze its protocol by
+hardcoding it, which is why no result it produced can name the protocol
+that produced it.
+
+### 1.5 Units are carried, and validation happens twice
+
+Every dimensional setting **names its unit**, exactly as §6.6 requires
+of every measure. Fluence is in ions·Å⁻² — cell-size-independent, so the
+impact count follows from the fluence and the surface area rather than
+being specified (§3.2). No reader should have to trust a conversion
+factor typed into a report string.
+
+Validation splits in two, and the split is not arbitrary — it is the
+same shape as §7.2's two-phase potential gate, and for the same reason.
+
+- **Static validation, at load.** Types, units, ranges, completeness,
+  and the consistency requirements that need nothing from a running
+  pipeline. The sharpest of these: **the union of the pair's species
+  must equal the potential's global type map** (§4.3), which is
+  STRUCTURAL 1a enforced at the earliest possible moment rather than
+  discovered at an intermixed interface.
+- **Deferred validation, at the point of use.** Some requirements
+  reference quantities that do not exist until the pipeline has run.
+  §2.5's criterion — `slab_thickness >= activated_depth +
+  minimum_bulk_thickness` — cannot be checked before §3.5 has *measured*
+  the activated depth. That check is registered at load and evaluated
+  the moment its input exists.
+
+Both are **gates**, not warnings. A specification that fails static
+validation does not run.
+
+But note carefully what these gates judge, because §1.1 forbids the
+other thing. They reject a specification that **cannot be executed** — a
+species the potential has never heard of, a fluence in the wrong units,
+a slab too thin to contain its own activated layer. They never reject a
+specification whose *comparisons* would be hard to interpret. Whether
+two runs are worth comparing is a scientific judgment, made by a person,
+downstream, with the difference set in hand. Whether a run can be
+performed at all is a mechanical question, answered here.
+
+### 1.6 The specification is the provenance record
+
+`VISION.md` goal 3 asks that every reported number name the simulations,
+inputs, code versions and settings that justify it. §5.7, §6.6 and §7.8
+each carry a provenance block. §1 is where that obligation is actually
+discharged, because the settings object *is* the thing to be recorded.
+
+The requirement, stated as a test: **the effective specification must be
+reconstructible from any output the pipeline produces.** Every report
+echoes back the fully resolved specification together with its protocol
+fingerprint, the potential generation, the master seed, and the version
+of every code involved.
+
+This is the direct answer to how prior art came to publish a work of
+adhesion computed from a trajectory that its own directory marked
+incomplete, alongside a strength read from an entirely different
+simulation (`PRIOR_ART.md` §1.7). Neither number could name what
+produced it. A number that cannot name its own provenance is not a
+result.
+
+### 1.7 Programmatic first, the file second
+
+Per `VISION.md` goal 2, the controller is a library-style programmatic
+interface, so another researcher can point the pipeline at a new
+material pair from their own code. The canonical specification is
+therefore a **typed, validated in-memory object**; the human-editable
+file is a *serialization* of it, and the two must round-trip exactly.
+
+The direction matters. If the file were canonical and the object a
+parse of it, then the file's syntax would be the schema, and validation
+would be advisory. With the object canonical, the schema is the type,
+the file is data, and a specification that cannot be constructed cannot
+be run. Hand-editable settings are a convenience side door, not the main
+entrance.
+
+### 1.8 What we keep, what we replace, and v1
+
+**Keep:** nothing. Prior art has no settings layer — it has a directory
+convention.
+
+**Replace:** working-directory-as-configuration (→ the configuration is
+an object, the directory an output); site details baked into emitted
+scripts (→ a separate deployment document, §4.1, which the run spec
+cannot express); hand-typed lattice constants (→ derived from the
+potential, §2.2); hidden defaults (→ the loader rejects an incomplete
+specification); an unnamed, unrecorded protocol (→ inline values with a
+content fingerprint); and numbers that cannot say where they came from
+(→ the specification is reconstructible from any output).
+
+**Frozen for v1:** the study is the **Si/SiO₂ facing pair plus the Si/Si
+same-material reference**, sharing one potential and one protocol, with
+the ratio between them as §7.4's criterion. Every protocol knob takes a
+single value — written down, not hardcoded — and the design already
+admits distributions (an energy or angle spread) without changing shape.
+Iterating over composition, dopant, activation level, pressure,
+temperature or crystal face is the outer-loop sweep deferred in
+`TODO.md`; §1's contribution to it is that a sweep becomes a set of
+specifications rather than an edit to the machinery.
+
+**Still DESIGN follow-ons:** the serialization format and the schema
+mechanism; the exact fingerprint definition (which fields are included,
+and how a value declared irrelevant to comparability is excluded); the
+initial classification of difference-set fields into
+weakens-the-comparison and believed-harmless, which is a physics
+judgment and will need revisiting as relations are added; how relations
+beyond `ratio` are expressed; and the values themselves. That last one
+is not a small matter — **every numeric follow-on left open by §2
+through §7 lands in this file**, and §1's real service is to have given
+them a single, inspectable home.
 
 ## 2. Structure builder
 
@@ -1555,6 +1878,28 @@ such. Both numbers come from the same potential under the same protocol,
 so their errors are **correlated**, and treating them as independent
 would overstate the ratio's uncertainty and weaken a test that ought to
 be strong. The covariance is carried, not assumed away.
+
+Nor is the cancellation assumed to be complete. The ratio is a
+**relation** in the sense of §1.1: it contrasts the material pair while
+controlling the potential and the protocol. The gate checks those
+controls, and reports the relation's **difference set** beside the
+result.
+
+When the controls do not hold, the gate withholds its **verdict**, not
+the number. The ratio is computed and reported either way, because a
+criterion calibrated for one comparison has no standing to suppress
+another (§1.1). `unresolved` here means *this gate is not competent to
+grade this comparison*, and it is the scientist, not the gate, who
+decides what the comparison was worth.
+
+One entry in that set is unavoidable. Si/Si has no lattice mismatch and
+Si/SiO₂ does, so the residual-strain systematic that this criterion
+would most like to see cancel does not — and no care in setting up the
+runs can fix it, because **you cannot contrast two material pairs
+without contrasting their mismatch.** It is an *entailed* difference,
+the irreducible price of the contrast rather than a flaw in it. The
+ratio is reported as only partially cancelling on its account. The gate
+does not decide what that is worth; it refuses to let a reader miss it.
 
 **The bracket is a sanity check, and it is not science.** A ratio stays
 perfectly correct when both of its numbers are wrong by the same factor

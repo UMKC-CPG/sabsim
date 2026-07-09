@@ -455,10 +455,45 @@ foundations, interaction rules. -->
       the antipattern `PRIOR_ART.md` §1.2 item 7 warns against. Take the
       physics (full basis, Γ-point-only, cost estimates); take no
       templates or scripts (`PRIOR_ART.md` §1.2 item 5, §1.8).
-- [ ] Settings-file shape for the material + protocol knobs (from the
-      run-knobs resolution), including the v1 Si/SiO2 + Si/Si reference
-      run set (`ARCHITECTURE.md` §2.3 run-specification + material-knobs
-      bullets).
+- [x] Settings-file shape — RESOLVED by `DESIGN.md` §1 (2026-07-09).
+      The configured object is a **study** (runs + relations), because
+      §7.4's criterion is a ratio and a ratio belongs to a *pair* of
+      runs; a run still stands alone and studies may be assembled after
+      the fact. Knobs split into **five** groups by a sharp test — a
+      numerical setting's effect must vanish under refinement, a
+      protocol knob's effect *is* the physics — with ensemble (seeds)
+      separate because a seed is sampled, not tuned, and deployment in
+      its own document (§4.1). No hidden defaults: the loader rejects an
+      incomplete spec; defaults exist only as a generator that emits a
+      fully-populated file. Protocols are identified by a **content
+      fingerprint**, not a version number (versioning is too linear;
+      protocols branch). Lattice constants, the shared cell, bond
+      cutoffs, subcell size and activated depth are **derived, never
+      settings**. `ARCHITECTURE.md` §2.3's run-spec bullet amended in
+      the same commit.
+- [ ] §1 follow-ons: the serialization format and schema mechanism; the
+      exact fingerprint definition (which fields it covers, and how a
+      field declared irrelevant to comparability is excluded); how
+      relations beyond `ratio` are expressed; and the initial sorting of
+      difference-set fields into *entailed* vs *incidental*, which is a
+      physics judgment, not a schema one, and will need revisiting as
+      relations are added (`DESIGN.md` §1.1, §1.4, §1.8).
+- [ ] §1 gave every open numeric follow-on a single home. The values
+      themselves — §2's tolerances, §3's gate thresholds, §5's rate
+      ladder, §6.5's check tolerances, §7's quantile / stride /
+      persistence window / abort budget / bracket width — must all
+      appear in the specification file, since nothing may fall back to a
+      hidden code default. Pinning them is still open; **housing** them
+      no longer is.
+- [ ] Principle recorded by `DESIGN.md` §1.1, worth defending in review:
+      **report, never restrict.** Refusing to evaluate and refusing to
+      certify are different acts, and SABSIM performs only the second. A
+      relation whose controls disagree, or which is confounded, is still
+      computed and reported with its difference set; only the *gate's
+      verdict* is withheld. `unresolved` is a statement about the gate's
+      competence, never about whether a number may exist. Watch for this
+      eroding as gates are implemented — the temptation to refuse the
+      computation will be strong and must be resisted.
 
 ---
 

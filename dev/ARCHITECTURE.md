@@ -117,13 +117,43 @@ MLIP is never asked to reproduce cascades.
   pipeline at a different material pair and drive it from their own
   code. Hand-editable settings are a convenience side door, not the
   main entrance.
-- **Run specification — material knobs and protocol knobs [BUILD].**
+- **Run specification — the study, and five groups of knobs [BUILD].**
   Per `VISION.md` goal 2 and principle 1, everything a user changes to
   point the pipeline at a new study lives in one editable place, apart
-  from the fixed machinery — and it splits into two groups principle 1
-  wants kept distinct:
+  from the fixed machinery. `DESIGN.md` §1 refines this in two ways.
+  First, the configured object is a **study** — a set of runs plus the
+  **relations** among them — because the bond-outcome criterion is a
+  *ratio* between two runs and so belongs to neither one alone. A run
+  remains self-contained and independently reproducible, and a study may
+  be assembled after the fact from runs that already exist. Each
+  relation declares its own **contrast** (the fields it deliberately
+  varies) and its **controls** (the fields it holds fixed) — the
+  precondition cannot be a fixed rule, because a study comparing two
+  *protocols* on one material pair needs the protocol to differ. Every
+  relation emits a **difference set** sorting each differing field as
+  contrasted, *entailed* (it differs because of the contrast and cannot
+  be removed without it — Si/Si has no lattice mismatch and Si/SiO2
+  does), or *incidental* (nobody decided to vary it — the dangerous
+  kind). **Report, never restrict:** a relation whose controls disagree,
+  or which is confounded by more than one contrast, is still computed
+  and still reported; only the gate's *verdict* is withheld. Refusing to
+  evaluate and refusing to certify are different acts, and SABSIM
+  performs only the second — the scientist comparing many pairs run many
+  ways is who this is for, and they routinely learn from comparisons no
+  automated criterion can grade.
+  Second, the knobs split into **five** groups, not two, divided by a
+  sharp test: *a numerical setting's influence on the answer must vanish
+  as it is refined; a protocol knob's influence on the answer* is *the
+  physics.* The five are material, protocol, numerical (tolerances,
+  cutoffs, strides, windows, budgets), ensemble (the master seed and the
+  realization count — a coordinate one samples, not a knob one tunes),
+  and deployment, which lives in a separate document (§4.1) that the run
+  specification cannot express.
   - **Material knobs:** per wafer, a crystal structure and one surface
-    face (its Miller indices), plus the material identity itself.
+    face (its Miller indices), plus the material identity itself —
+    **never a lattice constant**, which §2.2 derives from the potential
+    (hand-typed literature values are the root cause of prior art's
+    −30 to −40 GPa step-zero pressure, `PRIOR_ART.md` §1.6).
   - **Protocol knobs:** the activation species — **argon by default,
     with a co-species such as iron as the first accommodated secondary**,
     kept generic so the projectile set is a knob (its ZBL channels are
