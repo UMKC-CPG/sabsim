@@ -268,16 +268,31 @@ foundations, interaction rules. -->
       UDD bias math. `ARCHITECTURE.md` §2.3 forward-references both as
       "DESIGN-level detail" but no DESIGN section covers them yet
       (`ARCHITECTURE.md` §2.3, step 2).
-- [ ] STRUCTURAL 2 DESIGN follow-ons (from the 2026-07-08 resolution):
-      (a) the quasi-static energy-difference protocol — a controlled
-      rigid-separation relax sequence vs relaxing along the dynamic
-      snapshots (the former is the cleaner reversible curve; the latter
-      is nearly free once endpoint relaxation exists); (b) the measure-
-      vector schema the analyzer emits and the gate consumes; (c) the
-      force-over-displacement reduction for the MD W_sep (which group's
-      force, the area definition, drift / thermal handling); (d) the
-      OLCAO skeleton template and its validation against a known-good
-      Imago input (`ARCHITECTURE.md` §2.3 analyzer + Imago bullets).
+- [x] STRUCTURAL 2 DESIGN follow-ons — RESOLVED by `DESIGN.md` §5-§6
+      (2026-07-09), except (d). (a) **Both:** a constrained-minimization
+      ladder at prescribed interface openings is the primary reversible
+      curve, and relaxing the dynamic-pull snapshots is a cheap second
+      curve whose gap from the ladder measures how far the pull rate sits
+      from quasi-static (§6.4 M3). (b) The measure-vector schema is §6.6;
+      it is machine-readable, every record carries uncertainty, units,
+      fidelity, method and status, and the gate reads by name and status,
+      never by position. (c) Settled in §5.4-§5.5: both grip reaction
+      forces (Newton check), time-averaged with the warm-up discarded,
+      peak extracted above a noise floor, integrated over grip
+      displacement from the gated zero-load reference to complete
+      separation, with the interface-opening curve emitted alongside;
+      area is the §2 shared cell's `lx*ly` (tilt-independent).
+      **(d) remains open** and moves to §8: the skeleton template and its
+      validation against a known-good input — noting it must target
+      **Imago, not legacy OLCAO** (`PRIOR_ART.md` §1.8).
+- [ ] §6 numeric follow-ons: the annealing schedule behind
+      `work_of_adhesion_relaxed` (an amorphous surface is kinetically
+      trapped, so the schedule is a recorded knob); the constrained
+      ladder's opening spacing; the free-energy estimator for the
+      `free_energy_correction` entry; the VASP interface-subcell size;
+      and the numeric tolerances on every check in `DESIGN.md` §6.5
+      (dissipation >= 0, healing >= 0, rate monotonicity, ladder
+      closure).
 - [ ] STRUCTURAL 1b DESIGN follow-ons: BKS vs Vashishta as the silica
       generator, the amorphous-structure validation metrics + thresholds
       (g(r) / ring / coordination vs DFT + experiment), the seed-set
@@ -322,29 +337,33 @@ foundations, interaction rules. -->
       for v1 with a displacement-controlled cross-check on the Si/Si
       reference. Specify the seam's contract (both modes emit load AND
       depth reached) and the reversibility comparison between them.
-- [ ] §6 follow-ons opened by the analyzer evaluation (`PRIOR_ART.md`
-      §1.8, 2026-07-09). Prior art supplies NO usable measurement layer,
-      so all of this is new build: (a) the measure-vector schema must be
-      **machine-readable** (JSON/YAML), since prior art emits only prose
-      `.txt` and a gate cannot consume prose — this is what makes §7
-      possible at all; (b) every measure carries an uncertainty and a
-      provenance record (potential generation, seed set, pull rate,
-      trajectory id); (c) bond cutoffs must be **derived** from the first
-      minimum of the relevant partial g(r), per species pair, not
-      hardcoded (prior art uses five unrelated constants: 1.0, 2.5, 2.6,
-      3.0, 3.2 Å); (d) geometric coordination and *electronic* bond order
-      stay nominally distinct measures (prior art names coordination
-      "bond order"); (e) cross-interface bonds are counted by chemistry
-      and geometry, never by slab-of-origin atom type.
-- [ ] Thermodynamic work of adhesion (§6): write the definition from
-      scratch. Prior art's `compute_adhesion_energy` spec is unbuilt and
-      wrong — sign reversed, an instantaneous energy differenced against
-      a time average, measured across the press so it contains the
-      press's irreversible work, and a potential-energy rather than a
-      free-energy difference (`PRIOR_ART.md` §1.8). SABSIM's endpoints
-      are the relaxed bonded state and the relaxed, fully separated
-      slabs, both emitted by §5. Open: whether v1 reports the
-      potential-energy difference or attempts a free-energy estimate.
+- [x] §6 follow-ons opened by the analyzer evaluation (`PRIOR_ART.md`
+      §1.8) — RESOLVED by `DESIGN.md` §6 (2026-07-09). The schema is
+      machine-readable with per-record uncertainty, units, fidelity,
+      method and status (§6.6); bond cutoffs are derived per species
+      pair from the first minimum of that pair's partial g(r), and a
+      measure whose cutoff is unresolved is marked `unresolved` rather
+      than defaulted (§6.3); geometric coordination and electronic bond
+      order are separate named families (§6.4 M5); and cross-interface
+      bonds are identified by a per-atom **provenance label** kept
+      distinct from **species** — one field per job, where prior art had
+      one field doing both (§6.2).
+- [x] Thermodynamic work of adhesion (§6) — RESOLVED (2026-07-09).
+      Written from scratch; prior art's spec is not adopted. **Two named
+      references**, because they answer different questions: pieces are
+      identified by bonded-cluster connectivity, then
+      `work_of_adhesion_as_fractured` relaxes each only into its nearest
+      minimum (matched to the mechanical pull, so their difference is
+      dissipation and nothing else) and `work_of_adhesion_relaxed`
+      anneals each so its surface reorganizes (the reference that
+      connects to `W = γ_A + γ_B − γ_AB`, whose surface energies are
+      defined for equilibrium surfaces). Their difference is reported as
+      `surface_healing_energy`, and `transferred_atom_count` beside it.
+      Each is reported **twice**: a zero-temperature potential-energy
+      difference (headline, comparable to the all-electron 0 K
+      cross-check) and a `free_energy_correction` at the press
+      temperature, whose ensemble may be smaller because it needs a
+      phonon calculation per endpoint (`DESIGN.md` §6.4 M2).
 - [ ] §8 snapshot selection — adopt the SHAPE of prior art's unbuilt
       `select_snapshots`: PE local minima during the hold (bond
       formation), PE local maxima during the pull (bond at maximum

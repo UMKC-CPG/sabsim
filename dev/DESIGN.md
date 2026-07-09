@@ -975,14 +975,280 @@ bond-counting cutoff, and the ensemble size in seeds.
 
 ## 6. Bond-outcome analyzer and measures
 
-<!-- Scope: the pluggable measure vector — mechanical MD work-integral
-(headline, Imago-free), thermodynamic work-of-adhesion at MLIP and
-all-electron fidelity (including the quasi-static separation-energy
-protocol), and Imago bond descriptors — plus the measure-vector schema
-the gate consumes.
-Sources: ARCHITECTURE §2.3 (bond-outcome analyzer; STRUCTURAL 2); TODO
-DESIGN (STRUCTURAL 2 follow-ons); PRIOR_ART §1.5 (dual measure
-definition; uncalibrated-interface caution). -->
+This section designs the module that turns what step 7 emits into the
+numbers the gate reads. It realizes STRUCTURAL 2: the outcome of a bond
+is not a number but a **measure vector**, whose entries are expected to
+disagree, and whose disagreements are themselves observables.
+
+Unlike §2, §3 and §5, this section inherits essentially nothing.
+`PRIOR_ART.md` §1.8 records why: prior art's measurement layer has no
+usable definition of the work of adhesion (the one its PSEUDOCODE
+specifies has its sign reversed and is measured across the press), emits
+only human-readable prose, carries no uncertainty and no provenance, and
+contains no check that can fail. That absence is clarifying. There is no
+tempting-but-broken definition to argue with, so §6 is written from
+first principles on the endpoints §5 already produces.
+
+### 6.1 Why a vector, and why its entries must not agree
+
+A single "adhesion energy" would have to be either the energy actually
+spent pulling the interface apart, or the energy stored in the bond
+itself. These are not the same quantity, and forcing them into one
+number destroys the information in their difference. So the analyzer
+reports several measures side by side, each with its own definition,
+fidelity, and uncertainty, and treats the **gaps between them as data**:
+the gap between mechanical and thermodynamic work is dissipation, and
+the gap between the potential's answer and an all-electron answer is the
+interface-fidelity signal STRUCTURAL 3 needs.
+
+### 6.2 Species is not provenance
+
+Before any measure can be defined, one confusion has to be removed.
+Prior art stores "oxygen that began in the silica slab" and "oxygen that
+began in the lithium-niobate slab" as two different **atom types**, and
+then uses that type both to assign the potential and to decide which
+side of the interface an atom is on. Both uses are wrong, and they are
+wrong in opposite directions.
+
+SABSIM separates the two ideas explicitly. Every atom carries:
+
+- a **species**, from the single global element map of §4.3 — this is
+  chemistry, it is what the potential sees, and there is exactly one
+  oxygen (STRUCTURAL 1a);
+- a **provenance label**, from §2's labeled-group contract — this
+  records which slab the atom was built in, it is bookkeeping, and the
+  potential never sees it.
+
+A bond is **cross-interface** when its two atoms carry different
+provenance labels. An atom that migrated across during pressing keeps
+its original provenance label, which is what makes **atom transfer**
+measurable at all: the transferred atoms are exactly those whose
+provenance disagrees with the fragment they end up in. Prior art cannot
+express this, because it has one field doing both jobs.
+
+### 6.3 Bond cutoffs are derived, not chosen
+
+Whether two atoms are bonded is decided by a distance cutoff, and prior
+art carries five unrelated ones — 1.0, 2.5, 2.6, 3.0 and 3.2 Å — in a
+single file, applied to element pairs whose real bond lengths differ by
+half an ångström.
+
+SABSIM derives the cutoff for each unordered species pair from the
+**first minimum of that pair's partial radial distribution function**,
+computed on the structure being analyzed. That minimum is the natural
+boundary between the first coordination shell and the second; it is what
+"bonded" means. The machinery already exists — §3.5 computes partial
+g(r) with the density-reference normalization, and prior art even has a
+first-peak finder it never applies here. Each derived cutoff is written
+into the output record. Where the minimum is not resolved (too few
+pairs, a liquid-like g(r)), the measure that depends on it is marked
+**unresolved** rather than silently falling back to a constant.
+
+### 6.4 The measures
+
+**M1 — Mechanical work of separation.** The integral of the resisting
+force over grip displacement, from §5.3's equilibrated zero-load
+reference state to complete separation, divided by the interface area of
+§2's shared cell. This is the headline, it needs no all-electron code,
+and it is always available (`VISION.md` goal 4). It is **dissipative and
+rate-dependent** by construction, so it is reported once per rate on the
+§5.4 ladder.
+
+**M2 — Thermodynamic work of adhesion at MLIP fidelity.** The energy
+cost of ending with two separate pieces instead of one bonded system:
+
+```
+work_of_adhesion = (energy_of_piece_one + energy_of_piece_two
+                    - energy_of_bonded_system) / interface_area
+```
+
+The bonded energy is unambiguous. The pieces are not, because a real
+amorphous interface does not come apart along the seam it was built on.
+The two pieces are identified by **bonded-cluster connectivity** — the
+same kernel §2.6 uses to strip ejecta — and each is held at the shared
+lateral cell. SABSIM then reports **two** named measures, because they
+answer two different questions:
+
+- `work_of_adhesion_as_fractured` — each piece relaxed only into its
+  nearest energy minimum, surfaces left damaged, exactly as the pull
+  left them. This is the reference **matched to M1**: the two numbers
+  describe the same physical endpoint, so their difference is the
+  dissipation and nothing else.
+- `work_of_adhesion_relaxed` — each piece additionally annealed so its
+  surface atoms rearrange and dangling bonds find partners. This is the
+  reference that connects to experiment and to the surface-energy
+  relation `W = γ_A + γ_B − γ_AB`, in which the surface energies are
+  defined for equilibrium surfaces.
+
+The relaxed pieces have lower energy, so `work_of_adhesion_relaxed` is
+the smaller number, and the difference is reported as its own measure,
+`surface_healing_energy`. Two honesties are recorded with it: an
+amorphous surface is kinetically trapped, so "relaxed" means only "as
+relaxed as this annealing schedule achieved," making that schedule a
+recorded knob; and the two pieces need not have the composition of the
+two original slabs, so `transferred_atom_count` is recorded beside them.
+
+Each of M2's entries is reported **twice**: as a
+`potential_energy_difference` at zero temperature — cheap, reproducible,
+and directly comparable with the all-electron cross-check of M4, which
+is also a zero-temperature quantity — and as a `free_energy_correction`
+estimating the vibrational and entropic contribution at the press
+temperature. The first is the headline; the second is what makes it a
+free energy, and it is priced honestly: it needs a phonon calculation
+per endpoint, so its ensemble may be smaller than M1's.
+
+**M3 — The quasi-static separation curve.** M1's rate ladder needs
+something to extrapolate *toward*. That target is a reversible curve,
+obtained by imposing a sequence of prescribed interface openings and
+minimizing at each — a rate-free ladder of constrained relaxations, not
+a trajectory. Its integral is the primary quasi-static number.
+
+Separately, and nearly for free, the frames of the §5 dynamic pull are
+each minimized and their energies recorded. This second curve carries
+the pull's history, so it is **not** reversible and its openings are
+unevenly spaced; it is not a substitute. Its value is the comparison:
+the gap between the relaxed-snapshot curve and the constrained-ladder
+curve measures directly how far the chosen pull rate sits from
+quasi-static, which is the assumption the whole rate ladder rests on.
+
+**M4 — Work of adhesion at all-electron fidelity.** The same energy
+difference as M2, evaluated on interface subcells with an all-electron
+method rather than the potential: VASP on a small subcell now, as the
+always-available backstop, and Imago/OLCAO at scale once the
+cross-project deliverables land (`ARCHITECTURE.md` §4). The quantity of
+interest is not M4 itself but **M4 minus M2**, which is STRUCTURAL 3's
+interface-fidelity check — the signal that catches a potential which is
+confidently wrong exactly where the bond number is read.
+
+**M5 — Bond descriptors, geometric and electronic, kept apart.** Two
+families, and they must never share a name:
+
+- **Geometric** — coordination number, cross-interface bond count per
+  unit area, and contact-area fraction. These come from positions and
+  the derived cutoffs of §6.3, cost nothing, and are computed along the
+  whole trajectory. `contact_area_fraction` and the bond count are the
+  graded contact-quality measure §5.1 requires.
+- **Electronic** — effective charge (Q\*) and bond order, from Imago on
+  the snapshots §8 selects, with endpoints relaxed first. These are
+  properties of the electron density, not of the neighbour list.
+
+Prior art names a geometric neighbour count "bond order." A reader
+comparing that against an electronic bond order would be comparing
+unlike things with no warning. The distinction is preserved in the
+names, and the schema records which family each measure belongs to.
+
+### 6.5 The inequality chain, and the checks it buys
+
+The measures are ordered by physics, and each ordering is a test the
+analyzer runs before it reports anything:
+
+```
+M1(rate) >= work_of_adhesion_as_fractured >= work_of_adhesion_relaxed
+```
+
+- **Dissipation is non-negative.** `M1 − work_of_adhesion_as_fractured`
+  is the energy dissipated in the pull. If it comes out negative, the
+  reference state or the integral is wrong, and the run is rejected
+  rather than reported (§5.5).
+- **Healing energy is non-negative.** `work_of_adhesion_as_fractured −
+  work_of_adhesion_relaxed` is the energy released as the damaged
+  surfaces reorganize. A negative value means the anneal did not relax.
+- **The rate ladder converges from above.** As the pull rate falls, M1
+  must decrease monotonically toward the as-fractured value. Both the
+  monotonicity and the limit are checked; a ladder that rises with
+  falling rate indicates the pull is not yet in the dissipative regime.
+- **The quasi-static ladder closes.** Because M3's ladder is a sequence
+  of minimizations, the work computed by integrating its force must
+  equal the difference of its endpoint energies. This tests the
+  integrator independently of the physics — the single check that would
+  have caught prior art's leading-zero artifact and its truncated
+  trajectory at once.
+
+These are cheap, they use only quantities already computed, and none of
+them exists in prior art, whose analyzer contains no check that can fail.
+
+### 6.6 The measure-vector schema
+
+**A gate cannot consume prose.** Every result prior art emits is a
+`.txt` file with `#`-prefixed English headers; nothing downstream can
+read them, which is precisely how a truncated trajectory and a
+wrong-file fetch survived into a quoted result. The schema below is
+therefore not bookkeeping — it is what makes §7 possible at all.
+
+The analyzer emits one machine-readable document per run, containing:
+
+- **Provenance** (`VISION.md` goal 3): the potential generation and
+  committee size, the seed set, the press mode with the load and depth
+  reached, the pull rate, the structure and trajectory identifiers, and
+  the version of every code involved.
+- **Geometry:** the shared lateral cell from §2, the interface area and
+  the rule used to compute it, and the derived bond cutoffs of §6.3.
+- **Measures:** a list of records, each carrying `name`, `value`,
+  `uncertainty`, `realization_count`, `units`, `fidelity` (geometric,
+  electronic, MLIP, or all-electron), `method`, the inputs it was
+  computed from, and a `status` of `ok`, `unresolved`, or `rejected`.
+- **Verdicts:** the bonded / not-bonded outcome of §5.1 and the graded
+  contact quality behind it.
+- **Checks:** the outcome of every test in §6.5, plus §5's Newton
+  residual, atom-count conservation, and trajectory completeness.
+
+Three rules govern it. **No bare numbers**: a value without an
+uncertainty and a realization count is not a measure. **The gate reads
+by name and status**, never by position, so adding a measure cannot
+silently shift the meaning of another. And **units are explicit and
+carried**, with both the native `eV/Å²` and the SI `J/m²` recorded along
+with the conversion used (1 eV/Å² = 16.0218 J/m²; 1 eV/Å³ = 160.2176
+GPa), so no reader has to trust a factor typed into a report string.
+
+### 6.7 The analyzer is a registry of measures
+
+Each measure declares what it needs — the bonded structure, the
+separated fragments, a force curve, a snapshot series — and emits
+records. The analyzer resolves those needs against what the run
+produced, computes what it can, and marks the rest `unresolved`. This is
+what makes the measure vector **pluggable** (`ARCHITECTURE.md` §2.3):
+adding an Imago descriptor, or a second all-electron reference, is
+registering a measure, not editing the gate.
+
+It also makes the Imago-free path a first-class configuration rather
+than a degraded one. If Imago is not ready, M5's electronic family and
+M4's Imago variant come back `unresolved`, M1 and M2 and the VASP
+backstop still report, and the gate still runs — which is exactly the
+schedule insurance `VISION.md` goal 4 asks for.
+
+### 6.8 What we keep, what we replace, and v1
+
+**Keep:** almost nothing from prior art's analyzer — only the correct
+triclinic in-plane area (for box vectors `a = (lx, 0, 0)` and
+`b = (xy, ly, 0)` the area is `lx * ly` independent of tilt), its proper
+minimum-image displacement routine, and the unit conversions.
+
+**Replace:** the sign-reversed, press-spanning energy difference (→ M2
+on relaxed endpoints, two references); coordination named "bond order"
+(→ geometric and electronic families kept nominally apart); five
+hardcoded cutoffs (→ one derived per species pair from the partial
+g(r) first minimum); the bond-length distribution built from each
+cation's *nearest* neighbour only (→ all bonds within the derived
+cutoff); species-agnostic pair counting in a 7 Å window around the
+highest atom (→ cross-interface bonds by provenance label and chemistry);
+structure comparison by positional index with no minimum image (→ by
+atom identity, minimum-image throughout); a bonded verdict and a crush
+flag that are printed and discarded (→ first-class records the gate
+reads); prose reports (→ the machine-readable schema); and numbers
+without uncertainty or provenance (→ neither is optional).
+
+**Frozen for v1:** the Imago-free set is mandatory — M1 on the rate
+ladder, M2's two references with the healing energy and the transferred
+atom count, M3's constrained ladder with the relaxed-snapshot
+comparison, M5's geometric family, the contact-quality measure, and
+every check of §6.5. M2's zero-temperature energy difference is the
+headline, with the free-energy correction reported as a separate entry
+on a possibly smaller ensemble. M4 uses the VASP subcell backstop; the
+Imago variant and M5's electronic family are registered but may report
+`unresolved`. Still DESIGN follow-ons: the annealing schedule behind
+`work_of_adhesion_relaxed`, the constrained-ladder opening spacing, the
+free-energy estimator, the VASP subcell size, and the numeric tolerances
+on every check in §6.5.
 
 ## 7. Quality gates and diagnosis
 
