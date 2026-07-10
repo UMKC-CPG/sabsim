@@ -233,15 +233,12 @@ so they are not discovered late (two touch non-negotiable goals). -->
       `sbatch` for v1. Still OPEN: the heavier workflow / provenance
       manager that may sit on top (Snakemake / jobflow / AiiDA) and the
       triggers for graduating to it (`ARCHITECTURE.md` §4, §4.1).
-- [ ] Decide which step-6/7 snapshots get sent to Imago, how many,
-      and how they are chosen (`ARCHITECTURE.md` §2.3, step 8). A
-      candidate answer is queued in `DESIGN.md` §8's scope note, taken
-      from prior art's designed-but-unbuilt `select_snapshots`
-      (`PRIOR_ART.md` §1.8): potential-energy local minima during the
-      hold (bond formation), potential-energy local maxima during the
-      pull (a bond at maximum stretch), and sigma_zz drop spikes
-      (bond-breaking stress release), with near-duplicate frames merged.
-      Closes when §8 is written.
+- [x] Decide which step-6/7 snapshots get sent to Imago, how many,
+      and how they are chosen — RESOLVED by `DESIGN.md` §8.3
+      (2026-07-10). The three detectors, run on the §8.2 subcell atom
+      set, gated by prominence, merged by event; "how many" is a logged,
+      refinable frame budget; endpoints always included. (See the §8
+      snapshot-selection item below for the full resolution.)
 - [ ] Make the step 3/4/5 ordering a flexible setting, not hardcoded
       (`ARCHITECTURE.md` §2.1).
 - [x] Decide where the ZBL close-range physics is added in the LAMMPS
@@ -361,6 +358,19 @@ foundations, interaction rules. -->
       bounding the UDD exploration launched at an abort; and the
       composition of the harvested batch (stratified baseline vs
       excursion).
+- [ ] §8 numeric and interface follow-ons (opened by `DESIGN.md` §8.9):
+      the smoothing window and prominence threshold behind each of the
+      three detectors; the frame budget and the refinement that shows it
+      adequate; the merge tolerance (the sub-noise energy gap below which
+      two frames with an identical cross-interface bond set are one); the
+      one-time denser-mesh check that demotes Γ-only to a tested
+      numerical setting; the exact file-layout and command-sequence
+      differences between Imago and legacy OLCAO; the atom-count envelope
+      check of §8.2 and what §2's coincidence tolerance must be to keep
+      the subcell affordable for v1's pair (the coincidence tolerance
+      prices step 8); and Imago's failure taxonomy — which failures are
+      retryable and which are structural, since §8.6's coverage-by-class
+      rule needs to tell them apart.
 - [ ] §7.7's open question, deliberately surfaced rather than hidden:
       the inventory of protocol checks (rate-ladder convergence, press
       contact quality, the dissipation identity, ladder closure) was
@@ -373,14 +383,16 @@ foundations, interaction rules. -->
       potential's ignorance, and §6.4 uses that to center the interface
       subcell. A code-level question for PSEUDOCODE
       (`prototypes/alf_deepmd/`, [[alf-pluggable-mlip-backend]]).
-- [ ] Wording audit, deferred from the Imago rename (2026-07-09):
-      `ARCHITECTURE.md` §2.3 calls our step-8 skeleton prep "structure in
-      OLCAO format", and `ARCHITECTURE.md` + `TODO.md` speak of an
-      "OLCAO all-electron value from Imago". Since `PRIOR_ART.md` §1.8
-      established that Imago and legacy OLCAO share no input format,
-      these are either stale or refer to OLCAO-the-*method* (which is
-      legitimate — Imago implements it, as §2.1 and §4 use the term).
-      Needs a decision from someone who knows Imago's input format.
+- [x] Wording audit, deferred from the Imago rename — RESOLVED
+      (2026-07-10). Ruling from the programmer: Imago inherits the OLCAO
+      input *format* (only file-layout and command-sequence tweaks), so
+      "structure in OLCAO format" is legitimate, not stale, and OLCAO
+      names both the method Imago implements and the input convention it
+      kept. The earlier `PRIOR_ART.md` claim that the two "share no input
+      format" was an overstatement and has been narrowed in three places
+      (§ intro, §1.2 item 5, §1.8): the *format* transfers; the rc
+      convention, invocation, and `$OLCAO_RC` machinery do not.
+      Captured in `DESIGN.md` §8.4 and §8.9.
 - [ ] STRUCTURAL 4 DESIGN follow-ons — mostly answered by `DESIGN.md`
       §2 (2026-07-09). Settled there: the matcher is a whole-number
       tiling-matrix + in-plane-twist search (Zur-McGill, adopted from
@@ -442,19 +454,25 @@ foundations, interaction rules. -->
       cross-check) and a `free_energy_correction` at the press
       temperature, whose ensemble may be smaller because it needs a
       phonon calculation per endpoint (`DESIGN.md` §6.4 M2).
-- [ ] §8 snapshot selection — adopt the SHAPE of prior art's unbuilt
-      `select_snapshots`: PE local minima during the hold (bond
-      formation), PE local maxima during the pull (bond at maximum
-      stretch), sigma_zz drop spikes (bond-breaking stress release),
-      near-duplicate frames merged. This answers the long-open "which
-      step-6/7 snapshots go to Imago" item above (`PRIOR_ART.md` §1.8).
-- [ ] §8 skeleton prep is a NEW build against the **Imago** seam. Prior
-      art's step-8 plan targets the **legacy OLCAO** code and shares no
-      input format, rc convention, or invocation with Imago; its
-      `$OLCAO_RC` working-directory-as-config convention is the origin of
-      the antipattern `PRIOR_ART.md` §1.2 item 7 warns against. Take the
-      physics (full basis, Γ-point-only, cost estimates); take no
-      templates or scripts (`PRIOR_ART.md` §1.2 item 5, §1.8).
+- [x] §8 snapshot selection — RESOLVED by `DESIGN.md` §8.3 (2026-07-10).
+      Adopted the SHAPE of prior art's unbuilt `select_snapshots` (PE
+      hold-minima, PE pull-maxima, σ_zz drop spikes, near-duplicates
+      merged), with three fixes it lacked: the detectors run on the §8.2
+      subcell atom set (where the event is, not the noisy whole cell);
+      candidates must clear a prominence threshold above §5.4's noise
+      floor; and near-duplicates merge by *event* (identical
+      cross-interface bond set + sub-noise energy gap), not by geometric
+      RMSD. Endpoints are always included; the frame budget is a
+      numerical setting whose drops are logged.
+- [x] §8 skeleton prep — RESOLVED by `DESIGN.md` §8.4 (2026-07-10). A
+      NEW build against the **Imago** seam, a pure function of a
+      structure and a settings object (no clock, no working directory,
+      no environment), testable by exact comparison against a known-good
+      input with no Imago present. Correction from the earlier framing:
+      Imago *does* inherit the OLCAO input format (file-layout and
+      command-sequence tweaks only); what it does not inherit is the
+      `$OLCAO_RC` working-directory-as-config convention (the §1.2 item 7
+      antipattern) or any script from that lineage.
 - [x] Settings-file shape — RESOLVED by `DESIGN.md` §1 (2026-07-09).
       The configured object is a **study** (runs + relations), because
       §7.4's criterion is a ratio and a ratio belongs to a *pair* of

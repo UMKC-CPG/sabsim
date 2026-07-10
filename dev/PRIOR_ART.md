@@ -32,8 +32,10 @@ The important difference from SABSIM: it uses **classical interatomic
 potentials** (Tersoff for SiO₂, Buckingham + Coulomb for LiNbO₃) where
 SABSIM will use the DeePMD MLIP, and its electronic-analysis end is
 *planned* against the **legacy OLCAO code** — never built — where SABSIM
-drives **Imago** through Kaleidoscope. Those are not the same code and
-share no input format, rc convention, or invocation (§1.8). There is
+drives **Imago** through Kaleidoscope. Those are not the same code:
+Imago inherits the OLCAO input format (with only file-layout and
+command-sequence tweaks), but shares no rc convention or invocation with
+that lineage (§1.8). There is
 **no ALF, no active-learning outer loop** — it is one straight pass, not
 the nested-loop design of SABSIM.
 
@@ -135,9 +137,10 @@ unbuilt in every tree. The generational breakdown is in §1.5.
    sub-cells. The *physics choices* are reusable planning for SABSIM's
    step-8 characterization. The *mechanics* are not: the plan is written
    against the **legacy OLCAO code, not against Imago**, which SABSIM
-   drives through Kaleidoscope and which shares no input format, rc
-   convention, or invocation with that lineage (see §1.8). Take the
-   basis/sampling/cost reasoning; take no templates or scripts.
+   drives through Kaleidoscope. Imago inherits the OLCAO input *format*,
+   but shares no rc convention, invocation, or script lineage with the
+   legacy plan (see §1.8). Take the basis/sampling/cost reasoning; take
+   no templates or scripts.
 
 6. **The two-tier potential strategy** (classical potential as
    development scaffolding, DeePMD as the production potential, selected
@@ -543,13 +546,16 @@ is no input generation and no skeleton prep. §1.1's "design only
 
 More importantly, **her step-8 plan is written against the legacy OLCAO
 code, not against Imago.** SABSIM's step 8 drives *Imago* (the modern
-all-electron successor) through *Kaleidoscope*, and the two do not share
-an input format, an invocation, or a run-settings vocabulary. So the
-plan's *physics* transfers — a full-basis choice, Γ-point-only sampling
+all-electron successor) through *Kaleidoscope*. Imago inherits the OLCAO
+input *format* — the two differ only in file layout and command sequence
+(confirmed 2026-07-10) — but they do not share an invocation, an rc
+convention, or the surrounding run-driver machinery. So the plan's
+*physics* transfers — a full-basis choice, Γ-point-only sampling
 justified by interface disorder, and the wall-clock cost estimates for
-500-2000-atom interface subcells — while its *mechanics* do not: no
-input template, no rc convention, no `$OLCAO_RC`, and no script from
-that lineage should be carried across. Note that the same legacy
+500-2000-atom interface subcells — and the input *format* transfers,
+while the *mechanics* around it do not: no rc convention, no `$OLCAO_RC`,
+and no script from that lineage should be carried across. Note that the
+same legacy
 template is the origin of the working-directory-as-configuration
 antipattern §1.2 item 7 tells us to leave behind, so importing its
 conventions would import that too. `DESIGN.md` §8's skeleton preparation
