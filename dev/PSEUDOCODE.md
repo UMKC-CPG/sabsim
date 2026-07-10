@@ -77,36 +77,55 @@ function run_single(run_specification):
     #
     # while not run_result.gate.passes:          # <- future closed loop
     #     training_data += data_targeting(run_result.gate.weaknesses)
+    #
+    # EVERY stage below is routed through run_to_contract (defined after
+    # this function): run the stage, then HALT unless its output
+    # satisfies the contract the next stage depends on. That is what
+    # makes "the pipeline always runs" safe (ARCHITECTURE §5.1) — it runs
+    # until a stage produces a contract-invalid artifact, then stops
+    # loudly instead of corrupting everything downstream.
 
     # The potential is a CONTRACT, not a fixed implementation. The
     # walking skeleton satisfies it with a classical pair_style
     # stand-in; the bootstrap wave (steps 1-2) later satisfies it with
     # the trained MLIP through the SAME seam (ARCHITECTURE §5.1).
-    potential = resolve_potential(run_specification)   # W0: classical
+    potential = run_to_contract(
+        () -> resolve_potential(run_specification),   # W0: classical
+        POTENTIAL_CONTRACT)
 
     # Steps 3/4/5 order is a SETTING (ARCHITECTURE §2.1), so the
     # sequencer reads it rather than hardcoding build->amorphize->
     # assemble. The builder and activator are order-agnostic behind the
     # structure contract (ARCHITECTURE §5.3).
-    structure = run_structure_stage(run_specification, potential)
+    structure = run_to_contract(
+        () -> run_structure_stage(run_specification, potential),
+        STRUCTURE_CONTRACT)
 
     # Steps 6-7: press then pull, on the MLIP (here, the stand-in).
-    trajectory = run_bond_debond_md(structure, potential,
-                                    run_specification)
+    trajectory = run_to_contract(
+        () -> run_bond_debond_md(structure, potential, run_specification),
+        TRAJECTORY_CONTRACT)
 
     # The analyzer turns the trajectory into a measure vector (DESIGN
     # §6). In W0 only the Imago-free mechanical measure is real; the
     # rest report `unresolved`.
-    measures = run_analyzer(structure, trajectory, run_specification)
+    measures = run_to_contract(
+        () -> run_analyzer(structure, trajectory, run_specification),
+        MEASURE_VECTOR_CONTRACT)
 
     # Step 8 characterization feeds additional measures. In W0 this is
     # MOCKED and returns schema-valid `unresolved` records.
-    measures = merge_measures(
-        measures,
-        run_characterization(structure, trajectory, run_specification))
+    characterization = run_to_contract(
+        () -> run_characterization(structure, trajectory,
+                                   run_specification),
+        MEASURE_VECTOR_CONTRACT)
+    measures = merge_measures(measures, characterization)
 
     # The gate READS the measure vector and REPORTS; it never edits a
-    # measure and, in v1, never acts (DESIGN §7).
+    # measure and, in v1, never acts (DESIGN §7). It is the terminal
+    # reader, not a hand-off to a further stage, so it is not itself
+    # wrapped; the run's OWN output (RunResult) is the last contract,
+    # checked at the run->study seam (§1's run_study and emit_run).
     gate_report = evaluate_run_gates(measures, run_specification,
                                      potential)
 
@@ -135,26 +154,59 @@ record RunResult:
                                       # to be believed (ARCHITECTURE §5.3)
 ```
 
-**Each step is a contract-checked hand-off.** The sequencer launches a
-step, waits, and validates the step's output against its contract before
-launching the next (`ARCHITECTURE.md` §4.1); a step whose output fails
-its contract stops the pipeline rather than propagating a bad artifact.
-Linking is by file contracts on the shared filesystem, so "hand-off"
-means "write a contract-valid artifact, then read it."
+**Every stage is routed through one guard: `run_to_contract`.** The
+sequencer never calls a stage and hopes. It runs the stage through a
+guard that validates the stage's output against the contract the *next*
+stage depends on, and **halts** the pipeline if that contract is not met
+(`ARCHITECTURE.md` §4.1). Linking is by file contracts on the shared
+filesystem, so a "hand-off" is "write a contract-valid artifact, then
+read it," and `run_to_contract` is what stands over that write.
 
 ```
-function run_step(step_callable, inputs, output_contract):
-    artifact = step_callable(inputs)          # Tier-B/C work happens here
-    validation = check_contract(artifact, output_contract)
+function run_to_contract(work, contract):
+    # A GUARD placed at the seam between two stages — NOT a stage itself.
+    # It runs the given work, then refuses to let the pipeline advance
+    # unless the result satisfies `contract`, the shape the NEXT stage
+    # depends on. This is where ARCHITECTURE §4.1's "launch, check the
+    # output contract, then launch the next" is enforced, and where the
+    # "gate, don't warn" rule lives: a contract-invalid artifact HALTS
+    # the run and is never passed downstream (the prior-art
+    # NOTE_INCOMPLETE-quoted-as-a-result failure, DESIGN §5.7).
+    #
+    # WHY THIS NAME. It is not `run_step`, because it does NOT do a
+    # step's work — `work` does. Naming it `run_step` would advertise the
+    # one thing it delegates and hide the thing it exists for. Its job is
+    # to hold that work's output TO its CONTRACT — and "the contract is
+    # the unit of stability" is the load-bearing idea of ARCHITECTURE
+    # §5.1, so the name is built on the vocabulary we already committed
+    # to. It deliberately avoids "gate" (the §7 quality gate) and
+    # "checkpoint" (the §5.5 git baseline), both already taken. Every
+    # stage is routed THROUGH it, so the discipline reads uniformly:
+    # run_to_contract(work_A, ...); run_to_contract(work_B, ...).
+    #
+    # `work` is a ZERO-ARGUMENT callable — the stage with its inputs
+    # already supplied, written `() -> stage(args)` at the call sites, so
+    # a stage of any arity fits one guard signature.
+    artifact = work()
+    validation = check_contract(artifact, contract)
     if not validation.ok:
-        halt_pipeline(reason = validation.failure)   # gate, don't warn
+        halt_pipeline(reason = validation.failure)   # halt, never warn
     return artifact
 ```
+
+The contracts named at the call sites are exactly the seam schemas of
+this document: `STRUCTURE_CONTRACT` and `TRAJECTORY_CONTRACT` are §3,
+`MEASURE_VECTOR_CONTRACT` is §4. `POTENTIAL_CONTRACT` is the one
+exception — not a record of ours but the external potential's loadable
+`pair_style` interface (its *quality* is judged separately by the §5
+gate; the guard here only checks it is a usable potential).
 
 `[DEPTH-FIRST]` the bodies of `run_structure_stage`,
 `run_bond_debond_md`, `run_analyzer`, and `run_characterization` are the
 per-module algorithms; pass 1 fixes only their signatures and the
-contracts they exchange (§3, §4 below).
+contracts they exchange (§3, §4). `check_contract` and `halt_pipeline`
+are likewise contract-level here: the actual schema-validation logic is
+a depth-first concern.
 
 ## 2. The run/study specification and its validator
 
