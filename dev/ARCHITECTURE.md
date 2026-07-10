@@ -353,20 +353,38 @@ MLIP is never asked to reproduce cascades.
 - **Bond characterization — Imago + Kaleidoscope
   [engine ADOPT · protocol BUILD · our edge].**
   Kaleidoscope fans the chosen step-8 snapshots out as a batch of
-  Imago analyses across the cluster and harvests the bonding numbers.
-  This is exactly the batch we validated in the prior session — a
-  live four-structure SLURM campaign (silicon, diamond, graphite,
-  silica) on the rulisp-lab partition that proved cross-node
-  dispatch, worker parallelism, and cache-on-rerun end to end.
-  Two responsibilities split at the cross-project seam: **skeleton
-  preparation** — turning each selected snapshot into a ready Imago
-  input (structure in OLCAO format, full basis and Γ-point sampling per
-  `PRIOR_ART.md` §1.2, run settings) — is **ours and buildable now**,
-  testable against a known-good input with no dependence on Imago's
-  unfinished fast mode or ASE adapter; only **execution** waits on those
-  cross-project deliverables (the RISK item in `TODO.md`). Keeping the
-  seam explicit lets the Imago track advance to the execution boundary
-  on our schedule, not theirs.
+  Imago analyses across the cluster, then caches and tracks which
+  succeeded — dispatch and bookkeeping only, per `VISION.md` principle 3.
+  Turning the raw returns into bonding numbers is **not** Kaleidoscope's
+  job; it is SABSIM's harvester (below). This is exactly the batch we
+  validated in the prior session — a live four-structure SLURM campaign
+  (silicon, diamond, graphite, silica) on the rulisp-lab partition that
+  proved cross-node dispatch, worker parallelism, and cache-on-rerun end
+  to end.
+  `DESIGN.md` §8 refines SABSIM's side of the cross-project seam into
+  **four artifacts**, all buildable and testable before Imago can run:
+  - **snapshot selector** (§8.3) — three detectors (hold PE minima,
+    pull PE maxima, σ_zz drop spikes) run on the interface-subcell atom
+    set, gated by prominence and merged by event, plus the always-
+    included relaxed endpoints; a pure function of the trajectory;
+  - **skeleton preparer** (§8.4) — turns each selected snapshot into a
+    ready Imago input (structure in OLCAO format, full basis and Γ-point
+    sampling per `PRIOR_ART.md` §1.2, run settings). Imago inherits the
+    OLCAO input *format* (file-layout and command-sequence tweaks only),
+    but not its `$OLCAO_RC` working-directory-as-config convention; the
+    preparer is a pure function of structure + settings, testable
+    against a known-good input with no Imago present;
+  - **manifest** (§8.5) — the whole interface to Kaleidoscope: one list
+    of self-describing units keyed by content fingerprint (§1.4);
+  - **harvester** (§8.6) — collects the returns, parses Imago's native
+    channel, and emits §6.6 measure records, reporting **coverage by
+    detector class** because all-electron runs fail on the hard,
+    signal-carrying frames rather than at random.
+
+  Only **execution** waits on the cross-project deliverables (the RISK
+  item in `TODO.md`); the four artifacts above do not. Keeping the seam
+  explicit lets the Imago track advance to the execution boundary on our
+  schedule, not theirs.
 - **Two separate checks and the diagnosis that routes between them —
   potential quality vs. bond outcome [BUILD].** Once folded into a
   single "quality gate," the two checks are different in kind and must

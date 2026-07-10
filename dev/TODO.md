@@ -308,9 +308,12 @@ foundations, interaction rules. -->
       displacement from the gated zero-load reference to complete
       separation, with the interface-opening curve emitted alongside;
       area is the §2 shared cell's `lx*ly` (tilt-independent).
-      **(d) remains open** and moves to §8: the skeleton template and its
-      validation against a known-good input — noting it must target
-      **Imago, not legacy OLCAO** (`PRIOR_ART.md` §1.8).
+      **(d) RESOLVED by `DESIGN.md` §8.4** (2026-07-10): skeleton
+      preparation is a pure function of structure + settings, testable by
+      exact comparison against a known-good input with no Imago present.
+      Imago inherits the OLCAO input *format* (file-layout and
+      command-sequence tweaks only), not the `$OLCAO_RC` convention. See
+      the §8 skeleton-prep item below.
 - [ ] §6 numeric follow-ons: the annealing schedule behind
       `work_of_adhesion_relaxed` (an amorphous surface is kinetically
       trapped, so the schedule is a recorded knob); the constrained
