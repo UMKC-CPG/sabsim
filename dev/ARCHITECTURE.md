@@ -720,12 +720,150 @@ swapping the deployment config.
 
 ---
 
-## 5. Development Checkpoints
+## 5. Development Trajectory and Checkpoints
 
-<!-- Git tag / branching strategy for design baselines. -->
+<!-- How the design becomes working code without backtracking, plus the
+git tag / branching strategy for baselines. -->
 
-To be established for this repository. The prior Imago/Kaleidoscope
-effort used numbered checkpoints (for example C68, C69) tagged in git
-with matching TODO entries and doc revisions; a similar scheme is the
-likely starting point once the vision and architecture stabilize.
-This first-pass mapping is the natural first baseline to tag.
+SABSIM glues six external codes to several novel components of our own, so
+the danger is coding — or pseudocoding — ourselves into a box that forces
+wide backtracking. The design already did most of the work that prevents
+this: nearly every seam, plugin point, and first-class fallback it chose
+exists to let modules be built, swapped, and tested independently. This
+section makes that latent property an explicit development policy.
+
+**The spine, in one sentence:** freeze the contracts between steps first,
+put the cheapest possible stand-in behind each one, get a wrong-but-well-
+formed number to fall out of the whole eight-step pipeline as early as
+possible, then deepen each module behind its already-stable contract — in
+an order set by risk, not by step number.
+
+### 5.1 The policy — six practices
+
+- **The contract is the unit of stability, not the module.**
+  Backtracking happens when a change inside one module forces changes in
+  its neighbours; the cure is that neighbours depend only on a module's
+  *contract*, never its internals. The design already named these
+  contracts: the labeled-group structure contract crossing the 3→4→5→6→7
+  seam (`DESIGN.md` §2.6), the measure-vector schema the gate reads by
+  name and status (`DESIGN.md` §6.6), the manifest and its content-
+  fingerprint identity into Kaleidoscope (`DESIGN.md` §8.5, §1.4), the
+  file-contracts-on-shared-filesystem linking model (§4.1), and the run
+  specification itself (`DESIGN.md` §1). A seam schema, once written,
+  changes only by deliberate amendment with a recorded note — the same
+  discipline the design chain itself uses.
+- **A walking skeleton before any depth.** Build the thinnest end-to-end
+  thread first: a run spec for the **Si/Si** reference → structure builder
+  → a **classical potential standing in for the MLIP** behind `pair_style`
+  → LAMMPS press/pull → analyzer emitting only the mechanical work-
+  integral (needs no Imago) → gate reports a verdict. It touches every
+  seam under real data flow with no VASP, no ALF, no Imago. Its number is
+  deliberately **not trusted** — a plumbing test, its verdict withheld
+  (`report, never restrict`, `DESIGN.md` §1) — because the point is that
+  the bytes flow and the schemas hold. Seams get stress-tested when they
+  are cheapest to move.
+- **Every module has a cheap stand-in behind its contract.** Generalize
+  the fidelity ladder (classical → MLIP re-anneal → melt-quench, §2.3) to
+  *every* module: a classical potential for the MLIP, the VASP subcell (or
+  a schema-valid mock) for Imago, a token cascade for activation, hand-
+  built seed data for ALF. A stand-in that satisfies the contract **is**
+  the module's contract test, not throwaway work, and it keeps the whole
+  pipeline runnable at all times — "the pipeline always runs" is the
+  strongest anti-backtracking invariant available.
+- **Build order by risk and blast radius, not by step number.** Steps 1
+  (VASP) and 8-execution (Imago) are the lowest *design* risk and the
+  highest *external-dependency* risk — adopt-and-wait, not ours to
+  schedule — so they come late; our uncertainty and our edge live in the
+  middle of the pipeline, and that is where construction concentrates.
+- **A per-module definition of done.** A module is *done to contract*
+  when it has a frozen schema, a golden input/output fixture, a contract
+  test that passes independently of the neighbouring tools, and
+  provenance emission. Two such fixtures already exist — the
+  `prototypes/alf_deepmd` converter round-trip and the validated four-
+  structure Kaleidoscope campaign. A module never advances past a red
+  contract test.
+- **Prior art's failure modes are coding policy from line one.** Prior
+  art failed by drift, not design: a `NOTE_INCOMPLETE` trajectory quoted
+  as a result, a newest-file-wins fetch reading the wrong run, a hardcoded
+  well-depth string disagreeing with the code, warnings that decorated
+  instead of gating. The design answered each — gates stop rather than
+  warn (`DESIGN.md` §5.7); identifiers are explicit, never newest-file-
+  wins (§5.7, §8.5); no hidden defaults, the loader rejects an incomplete
+  spec (§1.4); outputs are machine-readable, never prose (§6.6). These are
+  enforced from the first commit, not rediscovered.
+
+### 5.2 Eight steps are five buildable units plus a frame
+
+The pipeline's eight steps do not map one-to-one onto modules: three
+DESIGN sections cover two steps each, and three cover none — they are the
+frame that wraps every step.
+
+| Steps | Buildable unit        | Tool                | DESIGN §   |
+|-------|-----------------------|---------------------|------------|
+| 3, 5  | Structure builder     | ASE                 | §2         |
+| 4     | Activation            | LAMMPS + ZBL        | §3         |
+| 1, 2  | Bootstrap (training)  | VASP · ALF/DeePMD   | §4         |
+| 6, 7  | Bond/debond MD        | LAMMPS + MLIP       | §5         |
+| 8     | Characterization      | Imago/Kaleidoscope  | §8         |
+| —     | Frame                 | run-spec·schema·gate| §1, §6, §7 |
+
+So construction sequences five units and a frame, not eight steps in
+numeric order.
+
+### 5.3 The deepening waves
+
+Every step is present from the start; fidelity rises in waves.
+
+- **Wave 0 — the Si/Si walking skeleton.** Steps 1+2 *skipped* (classical
+  stand-in); step 3 real but minimal; step 4 stubbed; step 5 real but
+  **trivial**, because Si/Si has no lattice mismatch and the coincidence
+  matcher is effectively identity — which is exactly why Si/Si is the
+  right skeleton pair; steps 6+7 real on the classical potential; step 8
+  mocked against a schema-valid fixture; the frame real throughout.
+  Output: one untrusted number with full provenance.
+- **Wave 1 — deepen what is ours and needs no MLIP.** Step 4 becomes real
+  amorphization with its pass/fail gate; the analyzer grows from one
+  measure to the full Imago-free vector; the gate's diagnosis chain goes
+  live.
+- **Wave 2 — the bootstrap, for real (steps 1+2 together).** VASP
+  labeling + ALF + the DeePMD committee + UDD; the trained MLIP replaces
+  the classical stand-in **behind the same `pair_style` seam**, and the
+  potential-quality gate's bulk/surface half switches on.
+- **Wave 3 — the Si/Si → Si/SiO2 transition.** A *milestone, not a step*,
+  and the single most important "prove it here" gate: the coincidence
+  matcher (step 5), the real dissimilar amorphous–amorphous interface, and
+  STRUCTURAL 1a/1b/3/4 all become load-bearing at once, having been
+  dormant behind the Si/Si choice until now.
+- **Wave 4 — characterization execution (step 8).** The four SABSIM-side
+  artifacts, fixture-tested back in Waves 1–2, connect to real Imago when
+  it lands; until then the VASP subcell backstop carries the all-electron
+  measure, and the Imago variants come online last — the schedule
+  insurance the design already guaranteed (`DESIGN.md` §8.8).
+
+One design freedom to protect from Wave 0: steps 3/4/5 are reorderable by
+setting (§2.1), so the structure builder and the activator must stay
+**order-agnostic behind the structure contract** — neither may assume it
+ran before or after the other. Hard-wiring build→amorphize→assemble in
+the skeleton would quietly forfeit that freedom.
+
+### 5.4 Consequence for PSEUDOCODE
+
+The immediate next level obeys the same spine: **breadth-first shallow,
+then depth-first per module.** The first pseudocode pass covers control
+flow and the seam schemas — the Tier-A sequencer, run-spec load/validate,
+the structure contract, the measure schema, the gate's precedence chain —
+which is the walking skeleton expressed as pseudocode. The deep per-module
+algorithms (the coincidence matcher, the UDD bias, the detector
+prominence math) are filled in as each module is implemented, behind a
+contract that is already frozen and skeleton-tested. Writing them all to
+full depth up front would front-load the stable-behind-a-contract work
+before a single seam had been validated — a form of coding into a box in
+its own right.
+
+### 5.5 Checkpoints and baselines
+
+The prior Imago/Kaleidoscope effort used numbered checkpoints (for
+example C68, C69) tagged in git with matching TODO entries and doc
+revisions; a similar scheme is the natural fit, with each **wave**
+(§5.3) and the **Si/SiO2 transition** as baseline tags. This first-pass
+design mapping is the natural first baseline to tag.

@@ -522,6 +522,25 @@ foundations, interaction rules. -->
 
 <!-- Tasks related to algorithm specifications. -->
 
+- [ ] First PSEUDOCODE pass follows `ARCHITECTURE.md` §5.4 — **breadth-
+      first shallow, then depth-first per module.** Pass 1 covers only
+      control flow and the seam schemas (Tier-A sequencer, run-spec
+      load/validate, the labeled-group structure contract, the measure
+      schema, the gate precedence chain) — the walking skeleton expressed
+      as pseudocode. Deep per-module algorithms (coincidence matcher, UDD
+      bias, detector prominence math) are deferred to when each module is
+      implemented behind its already-frozen contract. Writing them all to
+      full depth up front is itself a way to code into a box (§5.1). Open
+      scope question for the session that starts this: confirm the Si/Si
+      walking-thread membership from §5.3 Wave 0 before pseudocoding it.
+- [ ] `/refine` note: `ARCHITECTURE.md` §5 governs PSEUDOCODE's SHAPE
+      (build order, skeleton-first), not just its content — a future
+      refine should check the pseudocode's *sequencing* against §5.3's
+      waves, not only whether each algorithm matches its DESIGN section.
+      (The pre-existing per-atom-committee-spread question stays filed in
+      the DESIGN section above, tagged "a code-level question for
+      PSEUDOCODE"; not duplicated here.)
+
 ---
 
 ## CODE
