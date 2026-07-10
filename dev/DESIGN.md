@@ -1493,6 +1493,17 @@ system in its own right, built by four rules:
 - truncation stops at the slab's **own real free surfaces**, so no
   surface is manufactured and no bond is severed.
 
+The material that actually gets removed comes only from the **undamaged
+crystalline buffer** inside each slab — never from the activated skin,
+never from the interface, never from the outer free surface. That buffer
+is a stack of identical repeating crystal layers, so removing a *whole
+number* of them and closing the gap leaves the two faces that now meet
+lined up exactly as they were in the uninterrupted crystal: no gap, no
+strain, no atom short a neighbour, and a join indistinguishable from
+bulk. This **quantizes the thinning** — only whole-layer steps keep the
+join seamless — which is the concrete mechanism behind the promise that
+no surface is manufactured and no bond is severed.
+
 It is a thinner version of the same interface, and its energies and
 forces are correct without qualification. Atoms near the outer surfaces
 sit in different environments than they would in the production cell,
@@ -1503,8 +1514,12 @@ that localizes the potential's ignorance.
 
 **Its size is a convergence test, not a constant.** Evaluate the target
 quantity with the *potential* on the full cell and on the subcell, and
-enlarge the subcell until the difference falls below tolerance. That
-difference is `subcell_truncation_error`; it needs no all-electron
+enlarge the subcell until the difference falls below tolerance. Because
+the thinning is quantized, "enlarge" means **add back one whole crystal
+layer** to the buffer: the test walks a discrete ladder of whole-layer
+thicknesses, not a continuous size, and stops at the first rung whose
+difference clears tolerance. That difference is
+`subcell_truncation_error`; it needs no all-electron
 calculation; and it means **the cheap method certifies the expensive
 method's input.** This is why the truncation error is a reported measure
 rather than an internal detail, and why `TODO.md`'s long-standing "VASP
@@ -2105,20 +2120,407 @@ inventory of protocol checks is anywhere near complete.
 
 ## 8. Step-8 characterization (Imago + Kaleidoscope)
 
-<!-- Scope: skeleton preparation (structure -> Imago input, full-basis,
-Γ-point, run settings) built independent of Imago execution, the
-Kaleidoscope batch dispatch, and snapshot selection (which and how many
-step-6/7 frames).
-Caution (PRIOR_ART §1.8): prior art's step-8 plan is written against the
-LEGACY OLCAO code, not against Imago — the two share no input format,
-rc convention, or invocation. Take its physics (full basis, Γ-point-only
-given interface disorder, the 500-2000-atom cost estimates); take none
-of its templates, scripts, or the $OLCAO_RC working-directory-as-config
-convention it carries. Skeleton prep is a new build on the Imago seam.
-Prior art's `select_snapshots` detectors ARE worth adopting in shape:
-PE local minima during the hold (bond formation), PE local maxima during
-the pull (bond at maximum stretch), and sigma_zz drop spikes
-(bond-breaking stress release), with near-duplicate frames merged.
-Sources: ARCHITECTURE §2.3 (bond characterization) and §4.1; TODO
-(snapshot selection; skeleton template); PRIOR_ART §1.2 item 5 and
-§1.8. -->
+Every other section of this document designs something SABSIM builds and
+then runs. This one designs a **seam**. The all-electron code (**Imago**)
+and the thin batch manager that dispatches it (**Kaleidoscope**) are
+sibling projects, not modules of this repository (`ARCHITECTURE.md` §1).
+What §8 owns is everything on SABSIM's side of that boundary, and it is
+four artifacts: a **selector** that decides which frames of the
+press-and-pull trajectory are worth the expense, a **skeleton preparer**
+that turns a structure into an input Imago will accept, a **manifest**
+that is the entire conversation with Kaleidoscope, and a **harvester**
+that collects what comes back and turns it into the measure records §6.6
+defines.
+
+"All-electron" is why step 8 exists at all. The potential of §4 never
+sees an electron; it maps positions to energies and forces, and it was
+trained to do so. It cannot say whether the bond that formed across the
+interface is ionic or covalent, how much charge moved, or how strong an
+individual bond is in the sense a chemist means. Imago models every
+electron — no pseudopotential shortcut for the tightly bound core states
+— and answers exactly those questions, on the calm, nearly-relaxed
+geometries where its atom-centered basis is at its best. That last
+clause is also why VASP and not Imago labels the violent step-1
+configurations (`ARCHITECTURE.md` §2.3). The division of labour is
+deliberate: VASP for the distorted, Imago for the bonded.
+
+### 8.1 One seam, two consumers, wanting different things
+
+Step 8 does not serve one measure. It serves two, and their demands are
+almost opposites. Reading §8 as a single "run Imago on some snapshots"
+job is the way to get it wrong.
+
+**M4 wants two states, and they must be commensurable.** The
+all-electron work of adhesion (§6.4) is an energy *difference*: the
+energy of the separated state minus the energy of the bonded state, per
+unit of interface area. It needs exactly two structures, both relaxed
+into their local energy minima, both effectively at zero temperature. It
+does not want a series, and it does not want thermal noise. What it
+demands above all is that the two states hold **the same atoms in the
+same cell**, because that is what makes the per-atom energy zero-points
+cancel and the difference reference-free.
+
+**M5's electronic family wants a series, and it must be consistent.**
+Effective charge and bond order along the trajectory (§6.4) are read from
+frames **as they were** — finite temperature, unrelaxed, taken at the
+moments where something chemically interesting happened. Relaxing them
+would erase the event. This family is a *trend*, so what it demands is
+that every frame be measured on the same footing as every other, not that
+any frame be commensurable with some external reference.
+
+Different temperatures, different counts, different notions of
+correctness. One structure convention and one dispatch path serve both,
+but the two must never be collapsed into one job type — and, as §8.6
+shows, they fail differently too.
+
+### 8.2 The structure is §6.4's interface subcell, extracted once
+
+**Decision: every Imago calculation in step 8 runs on the interface
+subcell of §6.4.** Not on the production cell, which is far too large,
+and not on some second, step-8-specific construction.
+
+This is worth more than it first appears. §6.4 defines the subcell for a
+different purpose — as the only affordable arena for the all-electron
+cross-check — and it defines it *carefully*: the full lateral periodicity
+of §2's shared cell is kept untouched, the cell is truncated only along
+the interface normal, every atom whose result will be used keeps its
+entire 6 Å environment, and the truncation manufactures no surface and
+severs no bond. Reusing that object here means the convergence test §6.4
+already runs — enlarging the subcell with the *potential* until
+`subcell_truncation_error` falls below tolerance — certifies M5's frames
+as well as M4's endpoints. There is no second study to run. The cheap
+method certifies the expensive method's input, once, for everything.
+
+**How the truncation actually avoids cutting a bond.** The production
+cell presents two real free surfaces to vacuum, one at the outside of
+each slab (§5.6). Thinning removes material only from the **undamaged
+crystalline buffer** inside each slab — never from the activated skin,
+never from the interface, never from the outer free surface. Because
+that buffer is a stack of identical repeating crystal layers, removing a
+*whole number* of them and closing the gap leaves the two faces that now
+meet lined up exactly as they were in the uninterrupted crystal: no gap,
+no strain, no atom short a neighbour, and a join indistinguishable from
+bulk (§6.4). This **quantizes the thinning** — only whole-layer steps
+keep the join seamless. §2.5 guarantees the buffer to remove exists,
+because it sizes each slab as `activated_depth + minimum_bulk_thickness`.
+What the subcell presents to vacuum afterwards is therefore the
+production cell's *own* free surface, brought closer to the interface.
+Nothing was cleaved.
+
+**The atom set is frozen once, by identity.** It is chosen at the
+zero-load reference state of §5.3 and carried through the trajectory by
+atom identity, minimum-image throughout (§6.8). It is emphatically not a
+spatial slice re-applied to each frame: atoms move, and a spatial slice
+would let them wander in and out, so a descriptor series would jump for
+reasons of bookkeeping rather than chemistry. An atom that transfers
+across the interface during the pull stays in the set and is counted by
+§6.4's `transferred_atom_count`, where it belongs.
+
+**The two retained thicknesses need not be equal.** §6.4 says the subcell
+is centered by the per-atom committee spread — the quantity that
+localizes where the potential is least sure of itself (§7.3). With the
+full lateral cell kept, there is nothing to center *laterally*; the
+freedom that actually exists is how the retained thickness is **split
+between the two slabs**. The spread decides it: the slab whose atoms the
+committee disagrees about most keeps more substrate. The convergence test
+of §6.4 accordingly runs over a thickness *pair*, and each entry of that
+pair is a whole-layer count, so the search is a ladder in two discrete
+directions — add a layer to one slab, or to the other — not a single
+continuous number.
+
+**An honest limit, stated rather than hidden.** The lateral cell is not
+ours to shrink — it is §2's shared coincidence cell, fixed by the
+crystallography of the pair. If, at the minimum retained thickness, the
+subcell still exceeds the affordable envelope (prior art's 500–2000-atom
+estimate, `PRIOR_ART.md` §1.2 item 5), then there is no way to make step 8
+affordable for that pair without breaking one of §6.4's four rules. The
+design's answer is to say so, not to break one quietly: the Imago variant
+of M4 and the electronic family of M5 return `unresolved` with a recorded
+reason, exactly as they do when Imago is late (§6.7). A consequence
+worth noticing: **§2's coincidence tolerance prices step 8.** A looser
+tolerance buys a smaller shared cell, and the shared cell is the one
+dimension of the subcell that step 8 cannot negotiate.
+
+### 8.3 Three detectors, measured where the event is
+
+Which frames? Prior art answers this, and it is one of only two
+designed-but-unbuilt ideas its evaluation rates as worth taking
+(`PRIOR_ART.md` §1.8). Its `select_snapshots` specifies three detectors,
+each picking out a physically meaningful moment:
+
+- **potential-energy local minima during the hold** — bonds forming, and
+  releasing energy as they do;
+- **potential-energy local maxima during the pull** — a bond stretched as
+  far as it will go before it lets go;
+- **sharp drops in the normal stress σ_zz** — the mechanical signature of
+  a bond actually breaking and shedding the load it carried;
+
+with near-duplicate frames merged. Nothing was ever built, so what
+transfers is the *shape* of the idea. Three things must be added before
+it becomes an algorithm, and each of them fixes a way the naive version
+fails.
+
+**Measure the signal where the event is.** The production cell holds many
+thousands of atoms in thermal motion. Its total potential energy
+fluctuates by far more, frame to frame, than a single bond formation
+releases. A local-minimum detector run on that series is a noise detector
+with a physics name. So all three detectors run on the **frozen subcell
+atom set of §8.2**: LAMMPS records per-atom potential energy and per-atom
+virial, and the detectors read their sums over that set alone, with the
+stress obtained from the subcell's own volume.
+
+**A local extremum of a noisy series is not an event.** The series is
+smoothed over a window of a few characteristic vibrational periods, and a
+candidate must clear a **prominence** requirement — a depth or height
+relative to its surroundings, measured against the same noise floor §5.4
+established for the force curve. A detector without a prominence
+requirement finds every thermal wiggle in the trajectory and calls each
+one a bond.
+
+**Merge by event, not by geometry.** Two frames are near-duplicates when
+their **cross-interface bond sets are identical** — bonds by the derived
+cutoffs of §6.3, identified by provenance label rather than species
+(§6.2) — and their subcell energies differ by less than the noise floor.
+A geometric root-mean-square-distance criterion, the obvious choice,
+gets this backwards in both directions: it merges two frames that sit on
+opposite sides of a bond-breaking event because the atoms barely moved,
+and it keeps two frames that differ by nothing but a phonon.
+
+**The endpoints are not detected; they are always included.** M4 requires
+the relaxed bonded and relaxed separated states, and no detector finds
+them, because they are not moments in the trajectory. They are computed
+states from §5, and they enter the batch unconditionally.
+
+**The budget is a convergence test, and its drops are logged.** Candidates
+are ranked by prominence and truncated to a frame budget. What was
+dropped is *reported* — a silently truncated list reads, downstream, as
+complete coverage. And the budget is a numerical setting by §1.2's test:
+raise it, and the descriptor trend must stop changing. Its adequacy is
+demonstrated the same way the subcell's size is, by refining it once and
+showing the answer stayed put, not by asserting that thirty frames feels
+like enough.
+
+Finally, selection is a **pure, deterministic function** of the
+trajectory and the settings. It can be re-run, audited, and argued with
+long after the molecular dynamics is gone, and its output is part of the
+provenance record §1.6 requires.
+
+### 8.4 The format transfers; the mechanics do not
+
+Imago inherits the legacy OLCAO code's **input format**, essentially
+unchanged — the differences are a few adjustments to file layout and to
+the command sequence that drives a run. So `ARCHITECTURE.md` §2.3's
+phrase "structure in OLCAO format" is accurate, not stale, and OLCAO
+names both the method Imago implements and the input convention it
+kept. This corrects an overstatement `PRIOR_ART.md` carried, which said
+the two shared no input format at all.
+
+What emphatically does **not** transfer is everything built around that
+format. Prior art contributes no input generation and no skeleton prep to
+inherit; every `OLCAO` string in its source is the `$OLCAO_RC`
+environment variable, a convention in which a program reads its
+configuration out of whichever directory it happens to be sitting in
+(`PRIOR_ART.md` §1.8). That is the working-directory-as-configuration
+antipattern §1 was written to invert, and importing a template that
+carries it would import it. **A skeleton is a self-contained directory
+whose entire content is a function of explicit arguments.** Nothing is
+read from the environment. Nothing is read from the current directory.
+
+Two physics choices are inherited outright, and one of them is inherited
+with a correction.
+
+**Full basis.** Imago builds electronic states from functions centered on
+atoms, in sets of increasing size. The bond at an activated interface is
+precisely a region where charge redistributes into the space *between*
+atoms, so the smaller sets — tuned for near-equilibrium bulk — are the
+wrong economy exactly where we are looking. Step 8 uses the full set.
+
+**Γ-point-only sampling, re-justified.** Electronic states in a periodic
+solid are labelled by wavevectors filling a reciprocal cell whose size is
+inversely proportional to the real-space cell. A large real cell gives a
+small reciprocal cell, and a single point — Γ, its origin — samples it
+adequately. Prior art justifies Γ-only by the *disorder* of the
+interface, on the reasoning that a disordered material has no dispersion
+left to sample. That argument is true and it is secondary: most of the
+subcell by atom count is **crystalline substrate**, which is not
+disordered at all. The primary and checkable justification is cell size.
+So Γ-only is v1's setting and, by §1.2's test, a numerical one: refine
+the sampling and the answer must stop moving. One snapshot is run once
+against a denser mesh and the comparison recorded — cheap insurance
+against a justification we inherited instead of testing.
+
+**Skeleton preparation is a pure function** of a structure and a settings
+object: no clock, no working directory, no environment. That is what
+makes it testable by exact comparison against a **known-good input**,
+with no Imago present anywhere — which closes the last outstanding
+STRUCTURAL 2 follow-on. The reference structure comes from the validated
+four-structure Kaleidoscope campaign (`ARCHITECTURE.md` §2.3).
+
+**ASE is the membrane, not the vocabulary.** ASE carries species,
+positions, and the cell across the boundary. The basis choice, the
+sampling, and the command sequence are Imago's own vocabulary and do not
+pass through ASE's — which knows about energy, forces, and motion, and
+would quietly flatten everything step 8 exists to obtain
+(`VISION.md` principle 4).
+
+### 8.5 The manifest is the whole conversation
+
+SABSIM hands Kaleidoscope **one manifest**, listing N analysis units, and
+waits. That is the entire interface. The outer sequencer treats the batch
+as a single opaque step and never looks inside, because Kaleidoscope
+stands up its own dispatch machinery and wrapping it in ours would nest
+one inside the other (`ARCHITECTURE.md` §4.1).
+
+Each unit is self-describing: where its skeleton lives, a stable
+identifier, which consumer it serves (an M4 endpoint, or an M5 frame and
+which detector found it), and provenance backpointers — the run, the
+trajectory, the frame index, the subcell, the potential generation, the
+seed set.
+
+**The identifier is a content fingerprint of the skeleton**, reusing §1.4's
+rule rather than inventing a second one. Identical content yields an
+identical identifier, so Kaleidoscope's cache is correct by construction;
+any change to the structure or the settings yields a new one, so a stale
+result cannot be served for a structure that no longer exists. An
+identifier built from a frame number, a directory name, or a timestamp
+collides across runs — and a cache keyed on a colliding identifier is
+prior art's newest-file-wins failure (§5.7) wearing new clothes.
+
+**What Kaleidoscope owns:** dispatch, caching, and tracking which units
+succeeded and which failed. **What it must not own:** what a snapshot
+means, which measure it feeds, or whether the batch was sufficient. Those
+stay here. The moment we want to bolt a results database onto it is the
+signal to adopt a real one instead — `VISION.md` principle 3 names this
+temptation in advance because it is a natural one.
+
+The manifest is retained as an artifact, because it *is* step 8's
+provenance record. Re-running an unchanged study should be a cache hit
+from end to end; if it is not, something changed, and the fingerprints
+say precisely what.
+
+### 8.6 The harvester, and the fact that failures are not random
+
+The harvester is handed the manifest. It does not go looking for a
+results directory, and it does not take the newest one (§5.7).
+
+Two channels come back. Quantities in ASE's vocabulary — total energy,
+forces — cross through ASE. Imago's own outputs, the effective charges
+and bond orders that are the reason for the whole exercise, ride the
+native channel and are parsed here.
+
+**M4 is all-or-nothing.** It is a difference of two endpoint energies. If
+either endpoint fails, the all-electron `interface_fidelity` is
+`unresolved`. It is never computed from one all-electron endpoint and one
+MLIP stand-in for the other, which would silently measure the very
+quantity the difference was supposed to test. And it remains gated by
+`subcell_truncation_error` exactly as the VASP variant is: the cheap
+method certifies the expensive method's input, whichever expensive
+method it happens to be.
+
+**M5 tolerates holes — but not every hole.** A series survives a missing
+frame; the record simply carries a smaller `realization_count`, and the
+missing frames are named. What it cannot survive is losing a *class* of
+frame, and here is the reason this subsection exists: **all-electron
+calculations do not fail at random.** They fail on the hard structures —
+the maximally stretched bond, the instant of breaking, the frame with the
+most distorted local geometry, which is also the frame whose atom-centered
+basis suits it worst. Those are exactly the frames carrying the signal. A
+harvester that averages whatever survived would report the easy physics
+and call it a trend.
+
+So the harvester reports **coverage by detector class**, not a single
+success count: bond-formation minima, maximum-stretch maxima, stress-drop
+spikes, each with how many were requested and how many returned. If a
+class is emptied, the trend it supported is `unresolved` even though most
+of the batch succeeded.
+
+Everything harvested becomes a §6.6 record and obeys §6.6's rules: an
+uncertainty across the frames it was reduced from, a `realization_count`,
+explicit units, a `fidelity` of `all-electron` for energies or
+`electronic` for descriptors, a `method` naming Imago and its version,
+and a `status`. **No bare numbers.** The harvester computes no verdicts
+of its own; §7's gate reads the records.
+
+### 8.7 What the gate does, and does not do, with step 8
+
+M4's Imago variant feeds `interface_fidelity`, which **gates** (§7.3): a
+failure there is diagnosed as `interface_coverage`, a problem with the
+potential's training data, and never as a protocol failure. That routing
+is the whole point of STRUCTURAL 3.
+
+M5's electronic descriptors **do not gate**. There is no defensible
+threshold on an effective charge that means "this bond is bad." They
+answer *what kind* of bond formed — how much charge moved, how covalent
+it is, how the coordination changed as the bond stretched — and their
+audience is the human scientist reading the report (§1.1). A number with
+no defensible threshold must not acquire one merely because it is printed
+beside numbers that have them.
+
+And Imago's all-electron value does not *replace* VASP's. §6.6's `method`
+field keeps them apart, and when both report, two all-electron references
+disagreeing is information — one is limited by its basis, the other by
+its pseudopotential — rather than a conflict to be settled by choosing a
+favourite.
+
+### 8.8 Step 8 is buildable before Imago can run it
+
+Three Imago-side deliverables are still in flight (`ARCHITECTURE.md` §4):
+a fast, lightweight analysis mode; the ASE adapter that lets a snapshot
+cross the boundary; and a database of good initial-guess potentials that
+makes large analyses affordable. `TODO.md` carries them as an unowned,
+undated schedule risk against SABSIM's own funded deliverable.
+
+The seam is what bounds that risk. The selector, the skeleton preparer,
+and the manifest builder are pure functions of data SABSIM already
+possesses; all three can be written and tested to completion with no
+Imago anywhere in sight. The harvester is testable against a recorded
+result from the four-structure campaign already validated on the cluster.
+Only **execution** waits.
+
+And §6.7's registry makes waiting a configuration rather than a
+degradation: M4 falls back to VASP **on the same subcell** — which is the
+entire reason §8.2 insisted on one structure convention — M5's electronic
+family reports `unresolved`, and the gate still runs. What a late Imago
+delays is a measure, not the pipeline.
+
+### 8.9 What we keep, what we replace, and v1
+
+**Keep:** the three detectors' shape; the full-basis choice; the
+Γ-point-only choice, now re-justified by cell size and demoted to a
+numerical setting with a convergence check; the 500–2000-atom cost
+envelope as a planning figure; and — newly established, against what
+`PRIOR_ART.md` previously claimed — the OLCAO **input format** itself,
+which Imago inherits with only file-layout and command-sequence changes.
+
+**Replace:** detectors run on the whole cell's potential energy (→ on the
+frozen subcell atom set, where the event is); local extrema taken without
+a prominence requirement (→ smoothed, and clearing §5.4's noise floor);
+near-duplicate frames merged by geometry (→ merged by event: an identical
+cross-interface bond set and an energy difference below the noise floor);
+`$OLCAO_RC` working-directory-as-configuration (→ a self-contained
+skeleton that is a pure function of explicit arguments — §1's inversion,
+restated at the seam); a newest-file-wins results fetch (→ a manifest
+whose identifiers are content fingerprints); prose output (→ §6.6
+records); and a silently truncated snapshot list (→ a budget whose drops
+are logged and whose adequacy is demonstrated by refinement).
+
+**Frozen for v1:** §6.4's interface subcell is the structure for every
+step-8 calculation, extracted once, frozen by atom identity at §5.3's
+reference state, and thinned only through undamaged crystalline
+substrate. The two relaxed endpoints are always analyzed; the descriptor
+series uses as-is finite-temperature frames. The manifest is the only
+interface to Kaleidoscope, and its identifiers are content fingerprints.
+The harvester reports coverage by detector class. M5's electronic
+descriptors are descriptive and never gate. M4's Imago variant reports
+beside — never instead of — the VASP backstop, and never without
+`subcell_truncation_error`.
+
+**Still DESIGN follow-ons:** the smoothing window and the prominence
+threshold behind each detector; the frame budget and the refinement that
+shows it adequate; the merge tolerance; the one-time denser-mesh check
+against Γ-only; the exact file-layout and command-sequence differences
+between Imago and legacy OLCAO; the atom-count envelope check of §8.2,
+and what §2's coincidence tolerance has to be to keep the subcell
+affordable for v1's pair; and Imago's failure taxonomy — which failures
+are retryable and which are structural, since §8.6's coverage rule needs
+to tell them apart.
