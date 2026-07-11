@@ -299,6 +299,9 @@ record NumericalKnobs:
                                       # step-8 atom envelope
     minimum_bulk_thickness: number    # undamaged substrate floor (§2.5)
     clash_floor:            number    # min cross-slab distance (§2.6)
+    contact_grid_spacing:   number    # grid cell size for the bonded
+                                      # contact-area fraction (§8.8,
+                                      # DESIGN §6.4); ~one cutoff/cell
 
 record EnsembleKnobs:
     master_seed:       integer    # one master seed; per-realization
@@ -1020,3 +1023,429 @@ convergence study (`DESIGN.md` §2.5); `select_termination_by_surface_
 energy`; `symmetrize_if_polar`'s four-strategy ladder (a future hook,
 `DESIGN.md` §2.5); and `density_dividing_surface`, `drop_disconnected`,
 `relieve_clash`, `assign_labeled_groups` (`DESIGN.md` §2.6).
+
+---
+
+## 8. Bond-outcome analyzer — algorithms (the measures and checks)
+
+This is the **second depth-first module pass** (`ARCHITECTURE.md` §5.4).
+It refines the `[DEPTH-FIRST]` measure bodies of §4 and the check math of
+`DESIGN.md` §6.5 to code-readiness. Depth is uneven again, but along a new
+axis: several measures bottom out entirely in the analyzer (the M1 work
+integral, the derived cutoffs, the bond graph, the geometric descriptors,
+every check), while others are code-ready in the analyzer's OWN part —
+forming a difference, splitting into pieces — yet DELEGATE a step to a
+module not written yet. Two such modules exist: a MINIMIZER/anneal step
+shared with the MD pass (§5-of-DESIGN), and the CHARACTERIZATION module
+(§8-of-DESIGN) that returns all-electron values and electronic
+descriptors. The analyzer never performs those; it consumes their
+results. §8.10 lists every delegation in one place.
+
+The organizing idea is `DESIGN.md` §6.1: the outcome is a VECTOR whose
+entries are meant to DISAGREE, and the gaps are observables. So the
+measures are written to make the gaps computable (§8.9's checks), never
+to reconcile them.
+
+### 8.1 The registry, made concrete
+
+§4 gave `run_analyzer` as a registry loop. The depth-first refinement is
+only to name the registered measures and what each declares it needs, so
+the resolve-what-you-can behaviour (`DESIGN.md` §6.7) is concrete:
+
+```
+function registered_measures():
+    # Each entry declares its input needs; run_analyzer (§4) computes the
+    # ones whose needs are met and marks the rest `unresolved`. The
+    # Imago-free walking skeleton resolves ONLY M1 + the geometric M5;
+    # everything all-electron or relaxation-based comes back unresolved,
+    # and the pipeline still runs (DESIGN §6.7, VISION goal 4).
+    return [
+        measure("mechanical_work_of_separation",       # M1  §8.4
+                needs = {force_vs_grip, reference_state,
+                         separation_point, interface_area}),
+        measure("work_of_adhesion_as_fractured",        # M2  §8.5
+                needs = {separated_endpoint, minimizer}),
+        measure("work_of_adhesion_relaxed",             # M2  §8.5
+                needs = {separated_endpoint, minimizer, anneal}),
+        measure("surface_healing_energy",               # M2  §8.5
+                needs = {work_of_adhesion_as_fractured,
+                         work_of_adhesion_relaxed}),
+        measure("transferred_atom_count",               # M2  §8.5
+                needs = {separated_endpoint, provenance}),
+        measure("quasi_static_curve",                   # M3  §8.6
+                needs = {minimizer, opening_ladder}),
+        measure("rate_gap",                             # M3  §8.6
+                needs = {quasi_static_curve, frames, minimizer}),
+        measure("interface_fidelity",                   # M4  §8.7
+                needs = {all_electron_value, m2_on_subcell}),
+        measure("subcell_truncation_error",             # M4  §8.7
+                needs = {m2_on_full, m2_on_subcell}),
+        measure("coordination_number",                  # M5g §8.8
+                needs = {frames, bond_cutoffs}),
+        measure("cross_interface_bond_density",         # M5g §8.8
+                needs = {frames, bond_cutoffs, provenance,
+                         interface_area}),
+        measure("contact_area_fraction",                # M5g §8.8
+                needs = {frames, bond_cutoffs, provenance}),
+        measure("effective_charge",                     # M5e §8.8
+                needs = {electronic_descriptors}),
+        measure("bond_order_electronic",                # M5e §8.8
+                needs = {electronic_descriptors}),
+        measure("dos_at_fermi",                         # M5e §8.8
+                needs = {electronic_descriptors}),
+        measure("gap_size",                             # M5e §8.8
+                needs = {electronic_descriptors})]
+    # The full RDF, DOS, and partial DOS are SPECTRA, not scalars: they
+    # are emitted as by-reference curve ARTIFACTS for human reading, not
+    # as records above (DESIGN §6.4, §6.6). Only the two DOS scalars
+    # (dos_at_fermi, gap_size) are reduced into the measure vector.
+```
+
+### 8.2 Derived bond cutoffs (`DESIGN.md` §6.3)
+
+```
+function derived_cutoffs(structure):
+    # ONE cutoff per unordered species pair, from the FIRST MINIMUM of
+    # that pair's partial g(r) — the boundary between first and second
+    # coordination shells, which is what "bonded" means. NOT the five
+    # hardcoded constants of prior art (PRIOR_ART.md §1.8).
+    cutoffs = empty map
+    for each unordered species pair (s, t) in structure:
+        # Adopt §3.5's partial-g(r) kernel WITH the density-reference
+        # normalization (a sound prior-art kernel, PRIOR_ART.md §1.8).
+        radial = partial_gr(structure, s, t)
+        minimum = first_minimum(radial)      # prior art's own unused
+                                             # first-peak/min finder
+        if minimum is resolved:
+            cutoffs[(s, t)] = minimum
+        else:
+            # Too few pairs, or a liquid-like g(r) with no clear shell.
+            # The DEPENDENT measure is marked unresolved downstream — we
+            # NEVER fall back to a constant (DESIGN §6.3).
+            cutoffs[(s, t)] = unresolved
+    return cutoffs      # written into Geometry.bond_cutoffs (§4)
+```
+
+Bottoms out: it composes two adopted kernels and a resolved/unresolved
+branch, no decision left to make.
+
+### 8.3 Provenance is not species: the bond graph and the fragments
+
+The one confusion §6.2 removes, made operational. Species is chemistry
+(what the potential sees, one global oxygen); provenance is which slab an
+atom was built in (bookkeeping the potential never sees). Both live on
+`Atom` (§3) as separate fields, so a cutoff lookup uses SPECIES and a
+cross-interface test uses PROVENANCE — prior art has one field doing both
+and is wrong in both directions at once (`DESIGN.md` §6.2).
+
+```
+function build_bond_graph(structure, cutoffs):
+    # An edge joins two atoms iff their MINIMUM-IMAGE distance is within
+    # the cutoff for their SPECIES pair (§8.2). Minimum image throughout
+    # (adopt §5's routine) — prior art omits it in the very function that
+    # defines a neighbour (PRIOR_ART.md §1.8).
+    graph = empty graph over structure.atoms
+    for each near pair (i, j) from a cell list:
+        pair_cutoff = cutoffs[species_pair(i, j)]
+        if pair_cutoff is resolved and
+           min_image_distance(i, j) <= pair_cutoff:
+            graph.add_edge(i, j)
+    return graph
+
+function is_cross_interface(edge):
+    # A bond is cross-interface iff its endpoints' PROVENANCE differs.
+    # This is the DEFAULT interface definition (DESIGN §6.2): always well
+    # defined, cheap, and the one under which atom transfer is
+    # expressible. An alternative — the surface of MINIMAL BOND STRENGTH,
+    # a weakest-cut that routes around truly integrated transferred atoms
+    # — is a documented registry alternative (DESIGN §6.2, §6.7); where
+    # both are computed, their disagreement measures true transfer.
+    return edge.i.provenance != edge.j.provenance
+
+function fragments_and_transfer(structure, cutoffs):
+    # The pieces of a separated state are the connected components of the
+    # bond graph (union-find) — the SAME connectivity kernel §2.6/§7.5
+    # use to strip ejecta, now used to split a fractured interface.
+    graph     = build_bond_graph(structure, cutoffs)
+    fragments = connected_components(graph)
+
+    # An atom TRANSFERRED iff its own provenance disagrees with the
+    # majority provenance of the fragment it ends in (DESIGN §6.2). This
+    # is measurable ONLY because provenance survives the migration.
+    transferred = 0
+    for each fragment in fragments:
+        home = majority_provenance(fragment)
+        transferred += count(atom in fragment
+                             where atom.provenance != home)
+    return (fragments, transferred)
+```
+
+Bottoms out: cell list + union-find + a majority count.
+
+### 8.4 M1 — the mechanical work integral (`DESIGN.md` §6.4, §5.5)
+
+```
+function mechanical_work_of_separation(trajectory, interface_area):
+    # The integral of resisting force over grip displacement, from the
+    # EQUILIBRATED zero-load reference (§5.3) to complete separation,
+    # per unit interface area. The headline, always available, needs no
+    # all-electron code (DESIGN §6.4, VISION goal 4).
+    curve = trajectory.force_vs_grip
+    # DISCARD the averaging fix's leading zero before integrating — it
+    # anchored both of prior art's headline artifacts (PRIOR_ART.md
+    # §1.8, DESIGN §5.5). Start at the reference grip position, not step 0.
+    curve = drop_leading_average_zero(curve)
+    start = trajectory.reference_state.grip_position
+    stop  = grip_position_at(trajectory.separation_point)
+    work  = trapezoid(curve, from = start, to = stop)   # eV
+    return work / interface_area                        # eV/A^2 -> J/m^2
+```
+
+M1 is **dissipative and rate-dependent** by construction, so the analyzer
+computes ONE M1 per rate on the §5.4 ladder, each averaged over the
+ensemble with its uncertainty (`DESIGN.md` §6.4). Bottoms out — a
+trapezoid over a curve the trajectory already carries.
+
+### 8.5 M2 — thermodynamic work of adhesion (`DESIGN.md` §6.4)
+
+The analyzer's OWN part is code-ready: split into pieces (§8.3), apply the
+energy formula, form the healing difference. The relaxations it needs are
+DELEGATED to the shared minimizer/anneal (§8.10).
+
+```
+function work_of_adhesion(bonded_energy, piece_one_energy,
+                          piece_two_energy, interface_area):
+    # Separated MINUS bonded, divided by area (DESIGN §6.4). The SIGN is
+    # the one prior art reversed (PRIOR_ART.md §1.8). Positive means the
+    # bonded system is lower in energy — adhesion costs energy to undo.
+    return (piece_one_energy + piece_two_energy
+            - bonded_energy) / interface_area
+
+function m2_on(cell_structure, trajectory, kind):
+    # Parameterized by WHICH cell (full system, or the §8.7 subcell) so
+    # M4 can reuse it on the subcell without a second definition. `kind`
+    # selects the reference: as_fractured or relaxed.
+    bonded = potential_energy(cell_structure)          # unambiguous
+    (pieces, _) = fragments_and_transfer(
+        separated_endpoint(cell_structure, trajectory),
+        derived_cutoffs(cell_structure))
+    # Each piece held at the SHARED lateral cell (DESIGN §6.4).
+    if kind == as_fractured:
+        # Relax each piece only into its NEAREST minimum — surfaces left
+        # damaged, matched to M1's endpoint (DELEGATE: local minimizer).
+        relaxed_pieces = map(minimize_local, pieces)
+    else:  # kind == relaxed
+        # Additionally ANNEAL so surfaces reorganize and dangling bonds
+        # pair — the reference that connects to W = gA + gB - gAB
+        # (DELEGATE: anneal; its SCHEDULE is a recorded knob, DESIGN §6.4).
+        relaxed_pieces = map(minimize_then_anneal, pieces)
+    e1, e2 = potential_energy(relaxed_pieces[0]),
+             potential_energy(relaxed_pieces[1])
+    return work_of_adhesion(bonded, e1, e2, interface_area(cell_structure))
+```
+
+`surface_healing_energy` = `as_fractured − relaxed` (>= 0, checked in
+§8.9); `transferred_atom_count` comes straight from §8.3. Each M2 entry is
+reported **twice** (`DESIGN.md` §6.4): a `potential_energy_difference` at
+0 K (the headline, comparable with M4's 0 K all-electron value) and a
+`free_energy_correction` at press temperature — the latter DELEGATES a
+per-endpoint phonon calc, so its ensemble may be smaller than M1's.
+
+### 8.6 M3 — the quasi-static curve and the rate gap (`DESIGN.md` §6.4)
+
+```
+function quasi_static_curve(structure, opening_ladder):
+    # A rate-FREE reversible curve: impose each prescribed interface
+    # opening and MINIMIZE at it (DELEGATE: constrained minimizer). Its
+    # integral is the primary quasi-static number M1's ladder aims at.
+    energies = empty list
+    for each opening in opening_ladder:
+        constrained = impose_opening(structure, opening)
+        energies.append(minimize_at_fixed_opening(constrained))
+    return curve_of(opening_ladder, energies)
+
+function rate_gap(quasi_static, trajectory):
+    # Minimize each §5 dynamic-pull FRAME and record its energy (DELEGATE:
+    # minimizer). This curve carries the pull's HISTORY, so it is NOT
+    # reversible and its openings are uneven — not a substitute. Its value
+    # is the GAP from the reversible ladder: how far the chosen pull rate
+    # sits from quasi-static, the assumption the whole ladder rests on.
+    relaxed_snapshots = map(minimize_local, trajectory.frames)
+    return gap_between(relaxed_snapshots, quasi_static)
+```
+
+Structure code-ready; every minimization is delegated (§8.10).
+
+### 8.7 M4 — forming the two differences (`DESIGN.md` §6.4)
+
+M4 is the same energy difference as M2 but at ALL-ELECTRON fidelity, and
+it is affordable only on a subcell. The trap §6.4 warns of: subtracting an
+all-electron subcell number from an MLIP FULL-cell number mixes the
+fidelity difference we want with a box-size difference we do not. So the
+analyzer forms TWO differences, each holding one thing fixed.
+
+```
+function m4_differences(structure, trajectory):
+    # The all-electron value on the SUBCELL comes from the
+    # CHARACTERIZATION module (VASP now, Imago at scale) — DELEGATE. The
+    # subcell itself is the whole-layer-quantized truncation of §6.4 /
+    # DESIGN §8.2, also owned there. The analyzer only FORMS the
+    # differences and gates one by the other.
+    subcell        = interface_subcell(structure)          # DELEGATE
+    m4_value       = all_electron_work_of_adhesion(subcell) # DELEGATE
+    m2_subcell     = m2_on(subcell,   trajectory, as_fractured)
+    m2_full        = m2_on(structure, trajectory, as_fractured)
+
+    # Two methods, ONE system: the STRUCTURAL-3 signal — a potential
+    # confidently wrong exactly where the bond number is read.
+    interface_fidelity = m4_value - m2_subcell
+    # One method, TWO systems: what truncation cost, and it is CHEAP
+    # (both terms from the potential, no all-electron calc).
+    subcell_truncation_error = m2_full - m2_subcell
+
+    # The cheap difference GATES the expensive one: if shrinking the cell
+    # moved the answer by as much as the fidelity gap we mean to read,
+    # the question was never askable on this subcell (DESIGN §6.4, §6.5).
+    if not small_compared_to(subcell_truncation_error,
+                             interface_fidelity):
+        interface_fidelity = unresolved
+    return (interface_fidelity, subcell_truncation_error)
+```
+
+The difference-forming and the gate bottom out here; the all-electron
+value and the subcell extraction delegate to characterization (§8.10).
+
+### 8.8 M5 — descriptors, two families kept nominally apart (§6.4)
+
+```
+function geometric_descriptors(trajectory, cutoffs, interface_area):
+    # From POSITIONS and the derived cutoffs only — no electrons. Computed
+    # along the whole trajectory. These are the graded contact-quality
+    # measure §5.1 needs.
+    series = empty list
+    for each frame in trajectory.frames:
+        graph = build_bond_graph(frame, cutoffs)          # §8.3
+        coordination = mean_degree(graph)
+        cross_bonds  = count(edge in graph
+                            where is_cross_interface(edge))
+        series.append({
+            coordination_number          : coordination,
+            cross_interface_bond_density : cross_bonds / interface_area,
+            contact_area_fraction        : contact_fraction(frame, graph)})
+    return series
+```
+
+Alongside the scalar series, the geometric family also emits the
+**partial RDF of the surface-region atoms across named stages** (pristine
+-> activated -> pressed -> as-fractured -> relaxed), reusing §8.2's
+partial-g(r) kernel not to derive a cutoff but as a structural diagnostic
+(`DESIGN.md` §6.4). It is a SPECTRUM, so it is stored as a by-reference
+curve ARTIFACT for human reading (§6.6), NOT reduced to a scalar record.
+
+The **electronic** family — `effective_charge` (Q\*) and
+`bond_order_electronic` — are properties of the electron density, not the
+neighbour list, and come from the CHARACTERIZATION module on §8-selected
+snapshots with endpoints relaxed first (DELEGATE). To these it adds the
+**total and partial density of states** (a signature Imago output, VASP
+backstop): the full DOS and partial DOS ride the native channel as
+by-reference curve ARTIFACTS (§8.6-of-DESIGN), and only two scalars are
+reduced from them — `dos_at_fermi` and `gap_size` (`DESIGN.md` §6.4).
+None of the electronic family may share a name with the geometric one:
+prior art calls a geometric neighbour count "bond order," so a reader
+would compare unlike things (`DESIGN.md` §6.4). The schema's `fidelity`
+field (`geometric` vs `electronic`, §4) keeps them apart for the gate too.
+
+`contact_fraction` is now defined (`DESIGN.md` §6.4 pins the geometry;
+the §7.6.1-style flag this pass raised is resolved):
+
+```
+function contact_fraction(frame, graph):
+    # Overlay the shared lateral cell with an EQUAL-AREA grid in
+    # FRACTIONAL coordinates (equal-area so a triclinic cell needs no
+    # special case), Nx x Ny cells sized near one cross-interface cutoff
+    # (contact_grid_spacing, a recorded NumericalKnob). A cell is IN
+    # CONTACT when it holds the MIDPOINT of a cross-interface bond (§8.3).
+    # This measures BONDED contact, not mere proximity (DESIGN §6.4).
+    occupied = empty set
+    for each edge in graph where is_cross_interface(edge):
+        midpoint = min_image_midpoint(edge)     # wrapped into the cell
+        (u, v)   = fractional_xy(midpoint, frame.lateral_cell)
+        occupied.add(grid_cell_of(u, v, contact_grid_spacing))
+    return size(occupied) / grid_cell_count(frame, contact_grid_spacing)
+```
+
+Bottoms out: a grid bin over the cross-interface bond midpoints §8.3
+already yields. Its one knob, `contact_grid_spacing`, is recorded and —
+like the subcell size (§6.4) — should be checked for insensitivity over
+a range rather than trusted at a single value.
+
+### 8.9 The check math (`DESIGN.md` §6.5)
+
+Each ordering in the inequality chain is a test on numbers already
+computed, emitted as a `CheckResult` (§4). None exists in prior art, whose
+analyzer contains no check that can fail (`PRIOR_ART.md` §1.8).
+
+```
+function analyzer_checks(measures):
+    checks = empty list
+    # Dissipation >= 0. A negative value means the reference state or the
+    # integral is wrong -> the run is REJECTED (void, §5.5), not reported.
+    checks.append(nonneg("dissipation",
+        measures.M1_slowest - measures.work_of_adhesion_as_fractured))
+    # Healing energy >= 0, else the anneal did not relax (DESIGN §6.5).
+    checks.append(nonneg("surface_healing_energy",
+        measures.work_of_adhesion_as_fractured
+        - measures.work_of_adhesion_relaxed))
+    # The rate ladder converges FROM ABOVE: M1 decreases monotonically
+    # toward as_fractured as the rate falls (DESIGN §5.4, §6.5).
+    checks.append(monotone_decreasing_toward(
+        "rate_ladder_from_above",
+        measures.M1_by_rate, measures.work_of_adhesion_as_fractured))
+    # Ladder closure: M3's force-integral must equal its endpoint energy
+    # difference — tests the INTEGRATOR independent of physics; the single
+    # check that catches a leading-zero or truncated-trajectory artifact.
+    checks.append(equal_within_tol("quasi_static_ladder_closure",
+        integral_of(measures.quasi_static_curve),
+        endpoint_energy_difference(measures.quasi_static_curve)))
+    # The subcell was big enough to ask the question (gates M4, §8.7).
+    checks.append(small_compared_to("subcell_adequate",
+        measures.subcell_truncation_error,
+        measures.interface_fidelity))
+    return checks
+```
+
+Bottoms out. These join §5's Newton residual, atom-count conservation,
+and trajectory completeness in the `checks` list of the MeasureVector (§4);
+the gate (§5) reads them by name.
+
+### 8.10 What bottoms out, what delegates
+
+`[BOTTOMS OUT here]` `derived_cutoffs` (§8.2); the bond graph, fragments,
+and transfer count (§8.3); the M1 work integral (§8.4); the
+work-of-adhesion formula and healing difference (§8.5); the M4
+difference-forming and its gate (§8.7); the geometric descriptors and the
+surface-region RDF-across-stages curve artifact (§8.8); and every check
+(§8.9). Each composes adopted kernels (partial g(r), minimum image,
+union-find, trapezoid) with a resolved/unresolved branch.
+
+`[DELEGATE -> MINIMIZER / anneal, shared with the MD pass §5-of-DESIGN,
+not yet written]` `minimize_local` (as_fractured pieces and the M3
+relaxed snapshots), `minimize_then_anneal` (relaxed pieces; SCHEDULE is a
+recorded knob), and `minimize_at_fixed_opening` (M3's constrained ladder).
+
+`[DELEGATE -> CHARACTERIZATION module, DESIGN §8, not yet written]` the
+all-electron value on the subcell and the subcell extraction itself
+(whole-layer quantized, §6.4/§8.2-of-DESIGN); and M5's electronic family
+(`effective_charge`, `bond_order_electronic`, and the DOS/partial-DOS
+curves with their two reduced scalars `dos_at_fermi` / `gap_size`) on
+§8-selected snapshots.
+
+`[DELEGATE -> PHONON calc]` M2's `free_energy_correction` per endpoint.
+
+`[DESIGN §6.4 open]` `contact_area_fraction`'s geometric definition
+(§8.8) — a flagged decision, `unresolved` until pinned.
+
+The pattern mirrors §7: the module's own algorithms reach code-readiness
+this pass, and what remains is either one adopted call away or owned by a
+module whose contract §3/§4 already froze — so none of it can force this
+one to change (`ARCHITECTURE.md` §5.1).

@@ -1381,6 +1381,37 @@ measurable at all: the transferred atoms are exactly those whose
 provenance disagrees with the fragment they end up in. Prior art cannot
 express this, because it has one field doing both jobs.
 
+**The interface itself admits more than one definition.** The rule just
+given — cross-interface means differing provenance — is the one SABSIM
+uses by default, because it is always well defined, it costs nothing, and
+it is the only definition under which atom transfer is even expressible.
+It has one honest limitation: an atom that migrates into the other
+material and becomes fully integrated there still carries its original
+provenance, so its new, strong, bulk-like bonds are all counted as
+cross-interface even though they are no longer the weld that holds the
+two wafers together.
+
+A second definition removes that limitation at the cost of uniqueness.
+Take the **interface to be the surface of minimal bond strength** — the
+weakest cross-section separating the two wafers, which is also the
+surface along which a pull would actually break the system. A bond is
+cross-interface when it lies on that surface. This routes the boundary
+*around* a truly integrated transferred atom, placing it on the side it
+is now bonded into, so only the genuinely weak welds are counted. Its
+price is that "bond strength" can be measured several ways — a pair
+energy, a force to break, an electronic bond order, or a geometric depth
+in the coordination shell — and these need not put the surface in the
+same place, so this is a *family* of definitions rather than one. SABSIM
+does not expect a perfect definition to exist. The two families are kept
+as alternatives — the analyzer is a registry (§6.7) — and where both are
+computed their **disagreement is itself the observable**: it measures how
+much true transfer and integration occurred, exactly the §6.1 stance that
+a gap between two honest measures is data, not error. The dynamic pull of
+§5 realizes the minimal-strength surface after the fact — it separates
+the system at its weakest cut — so the post-fracture pieces M2 already
+finds by connectivity (§6.4) are that surface as the run actually
+produced it.
+
 ### 6.3 Bond cutoffs are derived, not chosen
 
 Whether two atoms are bonded is decided by a distance cutoff, and prior
@@ -1555,15 +1586,55 @@ families, and they must never share a name:
   unit area, and contact-area fraction. These come from positions and
   the derived cutoffs of §6.3, cost nothing, and are computed along the
   whole trajectory. `contact_area_fraction` and the bond count are the
-  graded contact-quality measure §5.1 requires.
+  graded contact-quality measure §5.1 requires. A further geometric
+  output is the **partial radial distribution function of the
+  surface-region atoms, tracked across named stages** of the pipeline —
+  pristine, activated, pressed-and-bonded, separated-as-fractured, and
+  separated-relaxed. It is the same partial-g(r) kernel §3.5 already
+  runs, reused here not to derive a cutoff but to show how the interface
+  structure evolves. It is kept as a **curve for a human to read**, not
+  reduced to a scalar (see the note below and §6.6).
 - **Electronic** — effective charge (Q\*) and bond order, from Imago on
   the snapshots §8 selects, with endpoints relaxed first. These are
-  properties of the electron density, not of the neighbour list.
+  properties of the electron density, not of the neighbour list. To
+  these we add the **total and partial density of states**, a signature
+  Imago output (with VASP as the backstop, §8): the partial DOS on the
+  interfacial atoms is among the sharpest bonding diagnostics there is,
+  showing dangling-bond gap states in a poorly healed interface and the
+  bonding states that form as two surfaces join. Like the RDF it is kept
+  as a **curve for a human to read**; the only scalars extracted from it
+  are the **density of states at the Fermi energy** and the **gap size**.
 
 Prior art names a geometric neighbour count "bond order." A reader
 comparing that against an electronic bond order would be comparing
 unlike things with no warning. The distinction is preserved in the
 names, and the schema records which family each measure belongs to.
+
+**Defining `contact_area_fraction`.** Overlay the shared lateral cell
+(§2) with an **equal-area grid in fractional coordinates** — equal-area
+so a triclinic cell needs no special case — and mark a grid cell as *in
+contact* when it holds the **midpoint of a cross-interface bond** (§6.2:
+two atoms of differing provenance within the derived cutoff). The
+fraction is the number of contacting cells over the total. This measures
+**bonded** contact — the plane fraction actually welded — not mere
+geometric proximity, which is the right quantity for a bond study and
+keeps it consistent with the cross-interface bond definition. It
+complements the cross-interface bond *count*: the count is how many
+welds, the fraction is how spread out they are, so a few strong local
+welds and a uniform weak contact are told apart. Its one knob is the
+grid spacing, set near the mean cross-interface cutoff — about one
+contact's lateral footprint per cell — and recorded; like the subcell
+size it should be checked for insensitivity over a range rather than
+trusted at a single value.
+
+The RDF and the DOS are the analyzer's first **spectra** — curves over a
+coordinate (a separation, or an energy) rather than single numbers. They
+are handled the way §5 already handles a force curve: stored by
+reference as artifacts for a human to read, with only named scalars, if
+any, entering the measure vector (§6.6). At this stage that means the
+RDF contributes no automated scalar at all, and the DOS contributes only
+its Fermi-energy value and its gap size. Reducing them further is a
+later choice, not a design commitment now.
 
 ### 6.5 The inequality chain, and the checks it buys
 
@@ -1626,13 +1697,24 @@ The analyzer emits one machine-readable document per member, containing:
 - **Checks:** the outcome of every test in §6.5, plus §5's Newton
   residual, atom-count conservation, and trajectory completeness.
 
-Three rules govern it. **No bare numbers**: a value without an
+Four rules govern it. **No bare numbers**: a value without an
 uncertainty and a realization count is not a measure. **The gate reads
 by name and status**, never by position, so adding a measure cannot
 silently shift the meaning of another. And **units are explicit and
 carried**, with both the native `eV/Å²` and the SI `J/m²` recorded along
 with the conversion used (1 eV/Å² = 16.0218 J/m²; 1 eV/Å³ = 160.2176
 GPa), so no reader has to trust a factor typed into a report string.
+
+The fourth rule covers **spectra**. A radial distribution function or a
+density of states is a curve, not a scalar, and the record above is
+built for scalars — a `value` with an `uncertainty`. So a spectrum is
+stored **by reference as an artifact**, exactly as the large trajectory
+frames are (§5.5), and it is meant primarily for a human to read. Only a
+scalar *extracted* from a spectrum enters the measure vector as a record.
+At this time SABSIM extracts none from the RDF and only two from the DOS
+— the density of states at the Fermi energy and the gap size — because
+automating a fuller reduction is not yet worth its cost. Adding an
+extracted scalar later is a §6.7 registration, not a schema change.
 
 ### 6.7 The analyzer is a registry of measures
 
@@ -2428,9 +2510,12 @@ The harvester is handed the manifest. It does not go looking for a
 results directory, and it does not take the newest one (§5.7).
 
 Two channels come back. Quantities in ASE's vocabulary — total energy,
-forces — cross through ASE. Imago's own outputs, the effective charges
-and bond orders that are the reason for the whole exercise, ride the
-native channel and are parsed here.
+forces — cross through ASE. Imago's own outputs — the effective charges
+and bond orders that are the reason for the whole exercise, and the
+total and partial density of states (§6.4) — ride the native channel and
+are parsed here. The DOS and partial DOS are retained as curve artifacts
+for a human to read; only their Fermi-energy value and gap size are
+reduced to §6.6 records.
 
 **M4 is all-or-nothing.** It is a difference of two endpoint energies. If
 either endpoint fails, the all-electron `interface_fidelity` is
@@ -2475,10 +2560,13 @@ is the whole point of STRUCTURAL 3.
 M5's electronic descriptors **do not gate**. There is no defensible
 threshold on an effective charge that means "this bond is bad." They
 answer *what kind* of bond formed — how much charge moved, how covalent
-it is, how the coordination changed as the bond stretched — and their
-audience is the human scientist reading the report (§1.1). A number with
-no defensible threshold must not acquire one merely because it is printed
-beside numbers that have them.
+it is, whether dangling-bond gap states remain in the density of states,
+how the coordination changed as the bond stretched — and their audience
+is the human scientist reading the report (§1.1). The two scalars taken
+from the DOS, its Fermi-energy value and its gap size, are descriptive
+in the same way and gate no more than the curves they came from. A number
+with no defensible threshold must not acquire one merely because it is
+printed beside numbers that have them.
 
 And Imago's all-electron value does not *replace* VASP's. §6.6's `method`
 field keeps them apart, and when both report, two all-electron references

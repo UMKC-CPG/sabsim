@@ -324,6 +324,31 @@ foundations, interaction rules. -->
       test run with the potential itself); and the numeric tolerances on
       every check in `DESIGN.md` §6.5 (dissipation >= 0, healing >= 0,
       rate monotonicity, ladder closure, subcell truncation).
+- [ ] RDF + DOS as human-read spectra (added to `DESIGN.md` §6.4, §6.6,
+      §8.6, §8.7 on 2026-07-11). The surface-region partial RDF is
+      tracked across named stages and the DOS/partial-DOS come from Imago
+      (VASP backstop); both are stored as by-reference curve ARTIFACTS
+      for human reading, NOT auto-reduced — the only reduced scalars are
+      the DOS's `dos_at_fermi` and `gap_size`. Definitions still to pin:
+      (a) the exact set of NAMED STAGES and the surface-region atom
+      window (a depth from the §2.6 dividing surface) the RDF samples;
+      (b) how `dos_at_fermi` and `gap_size` are measured (broadening,
+      the E_F window, the gap criterion for a possibly gapless
+      interface). (c) `contact_area_fraction` — DEFINED 2026-07-11 as a
+      grid-based BONDED contact fraction (equal-area fractional grid; a
+      cell counts when it holds a cross-interface bond midpoint),
+      `DESIGN.md` §6.4 + `PSEUDOCODE.md` §8.8. Only its numeric knob
+      `contact_grid_spacing` remains to pin, with an insensitivity check.
+- [ ] Interface definition is plural (`DESIGN.md` §6.2, 2026-07-11).
+      Provenance (build-time identity) is the DEFAULT cross-interface
+      test; an alternative — the SURFACE OF MINIMAL BOND STRENGTH (a
+      weakest-cut, i.e. the fracture surface) — better handles truly
+      integrated transferred atoms but is non-unique (bond strength has
+      several measures: pair energy, force-to-break, electronic bond
+      order, coordination depth). To DO if useful: register the
+      minimal-strength interface as a §6.7 measure and report its
+      DISAGREEMENT with provenance as a true-transfer observable; the §5
+      pull's post-fracture M2 pieces are its a-posteriori realization.
 - [ ] STRUCTURAL 1b DESIGN follow-ons: BKS vs Vashishta as the silica
       generator, the amorphous-structure validation metrics + thresholds
       (g(r) / ring / coordination vs DFT + experiment), the seed-set
