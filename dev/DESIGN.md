@@ -462,13 +462,31 @@ sets the atom count; we require it to be positive, since a negative
 determinant would mirror the surface rather than tile it. The second
 slab gets its own whole-number matrix, `tiling_B`.
 
-**The twist.** Before tiling, the second slab may be **rotated in the
-surface plane** by an angle `twist_angle`. This is a real physical
-degree of freedom — nothing requires two bonded wafers to share a
-crystallographic orientation — and it is the single largest lever on how
-big the matched cell has to be, because rotating one lattice changes
-*which* whole-number combinations happen to line up with the other's.
-Prior art holds the twist at zero without saying so.
+**The twist.** The two slabs need not share a crystallographic
+orientation: the second may sit **rotated in the surface plane** by an
+angle `twist_angle` relative to the first. This is a real physical
+degree of freedom, and it is the single largest lever on how big the
+matched cell has to be, because a relative rotation changes *which*
+whole-number combinations line up with the other's. But it is worth
+being precise about how the twist ENTERS the search, because in the
+adopted algorithm it is not a knob we dial. The Zur-McGill enumerator
+(below) searches whole-number tilings of the two lattices at their
+GIVEN orientations; whenever a candidate pair of supercells matches in
+shape, the rigid rotation that brings one onto the other IS that
+candidate's twist, read out afterward rather than imposed beforehand.
+So the search DISCOVERS the twist each coincidence cell implies; it does
+not step twist across a grid. Prior art holds the twist at zero without
+saying so, and so never sees the smaller cells a nonzero discovered
+twist would have offered.
+
+An **explicit** twist grid — rotating one lattice by each of a list of
+prescribed angles and matching at every one — is needed only when the
+twist becomes a **controlled** physical variable in its own right: a
+study that deliberately compares, say, bonds formed at 0°, 15°, and 30°.
+That is a future study dimension, and it would enter as a protocol knob
+(§1.2), not as machinery the matcher always runs. Version 1 bonds at
+whatever twist the smallest cell implies, so it reads that twist out and
+records it as provenance, and imposes no grid.
 
 **The misfit.** For a candidate `(tiling_A, tiling_B, twist_angle)` the
 two supercells are almost never identical, so we ask what deformation
@@ -486,21 +504,21 @@ entries stretch the cell along each direction; its off-diagonal entries
 different cell angles. Prior art applies only a diagonal, two-number
 rescale and so cannot match two lattices whose angles differ at all.
 
-**The search.** Enumerate whole-number matrices up to an area limit and
-twist angles over a grid, keep every candidate whose largest strain
-component is within the misfit tolerance and whose atom count is within
-budget, and among the survivors take the smallest cell. Two properties
+**The search.** Enumerate whole-number matrices up to an area limit, at
+the two lattices' given orientations, keep every candidate whose largest
+strain component is within the misfit tolerance and whose atom count is
+within budget, and among the survivors take the smallest cell. Two properties
 are worth stating because they are exactly what prior art lacks:
 
 - Nothing in this ever assumes the two surface vectors have equal
   length, or meet at 90° or 120°, or that the same whole number is used
   in both directions. It is correct for any pair of surfaces.
-- Allowing off-diagonal whole numbers and a twist routinely finds a far
-  smaller cell at the same tolerance than the diagonal, twist-free
-  search does. Prior art's restriction is what forces its 7.9 nm,
-  ~72,500-atom bilayer — and cell size lands directly on the execution
-  walls of `ARCHITECTURE.md` §4.1, so this is a cost decision, not a
-  stylistic one.
+- Allowing off-diagonal whole numbers and a nonzero discovered rotation
+  routinely finds a far smaller cell at the same tolerance than the
+  diagonal, rotation-free search does. Prior art's restriction is what
+  forces its 7.9 nm, ~72,500-atom bilayer — and cell size lands directly
+  on the execution walls of `ARCHITECTURE.md` §4.1, so this is a cost
+  decision, not a stylistic one.
 
 This construction is due to **Zur and McGill (1984)** and is implemented
 in `pymatgen`'s interface-matching tools. We **adopt** the algorithm

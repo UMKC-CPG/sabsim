@@ -291,8 +291,12 @@ record NumericalKnobs:
     noise_floor:      number          # peak/curve threshold (§5.4)
     frame_stride:     integer         # store 1 frame per N MD steps
                                       # (e.g. 100-1000); NOT every step
-    misfit_tolerance:       number    # coincidence-match cutoff (§2.3;
-                                      # it prices step 8, DESIGN §8.2)
+    misfit_tolerance:       number    # coincidence-match strain cutoff
+                                      # (§2.3; largest strain component)
+    max_coincidence_area:   number    # atom-area budget for the match
+                                      # (§7.6): bounds atoms per layer,
+                                      # the lateral half of §8.2's total
+                                      # step-8 atom envelope
     minimum_bulk_thickness: number    # undamaged substrate floor (§2.5)
     clash_floor:            number    # min cross-slab distance (§2.6)
 
@@ -708,10 +712,10 @@ contract signatures only.
 ## 7. Structure builder — algorithms (steps 3, 5)
 
 This is the **first depth-first module pass** (`ARCHITECTURE.md` §5.4).
-It refines the `[DEPTH-FIRST]` structure bodies of §3 to code-readiness —
-*except* the coincidence-matcher search, which recurses one level further
-(§7.6). Depth here is uneven by design: the strain split bottoms out in a
-single formula, the matcher needs a sub-pass of its own.
+It refines the `[DEPTH-FIRST]` structure bodies of §3 to code-readiness,
+including the coincidence-matcher search, which took one further sub-pass
+of its own (§7.6). Depth here is uneven by design: the strain split
+bottomed out in a single formula, the matcher needed a sub-pass more.
 
 **The builder is not one call.** Pass 1's sequencer wrote
 `run_structure_stage(...)` as a single stage; decomposing it shows why
@@ -740,12 +744,14 @@ function build_slabs(member_specification, potential):
     # Steps up to and including step 3, for BOTH wafers. Stops before
     # activation, which the sequencer runs next.
     material_A, material_B = member_specification.material   # two wafers
-    misfit_tolerance       = member_specification.numerical.misfit_tolerance
+    numerical              = member_specification.numerical
 
     # The shared cell is solved ONCE, on the two SUBSTRATE lattices, and
-    # is an invariant of the pair (DESIGN §2.1, §2.3).
+    # is an invariant of the pair (DESIGN §2.1, §2.3). It reads two
+    # numerical knobs: the misfit tolerance and the atom-area budget.
     shared = solve_shared_cell(material_A, material_B, potential,
-                               misfit_tolerance)
+                               numerical.misfit_tolerance,
+                               numerical.max_coincidence_area)
 
     # Split the small residual misfit between the slabs (DESIGN §2.4).
     strain_A, strain_B = split_strain(shared, material_A, material_B,
@@ -774,7 +780,7 @@ label, and `grips` not yet set (assembly sets them, §7.5).
 
 ```
 function solve_shared_cell(material_A, material_B, potential,
-                           misfit_tolerance):
+                           misfit_tolerance, max_coincidence_area):
     # Lattices come from the POTENTIAL, not literature (DESIGN §2.2):
     # relax each bulk under the current committee, referenced to VASP.
     # The relaxed-vs-VASP disagreement is itself a potential-quality
@@ -783,10 +789,11 @@ function solve_shared_cell(material_A, material_B, potential,
     lattice_B = relaxed_lattice(material_B, potential)
 
     # The coincidence match: a Zur-McGill search over whole-number
-    # tilings of BOTH surface vectors plus a relative twist, scoring
-    # misfit as a strain TENSOR within the tolerance (DESIGN §2.3). This
-    # is the one structure body that recurses further (§7.6).
-    return coincidence_match(lattice_A, lattice_B, misfit_tolerance)
+    # tilings of BOTH surface vectors, scoring misfit as a strain TENSOR
+    # within the tolerance (DESIGN §2.3). Its algorithm is written in
+    # §7.6, adopting pymatgen rather than re-deriving the search.
+    return coincidence_match(lattice_A, lattice_B, misfit_tolerance,
+                             max_coincidence_area)
 ```
 
 ### 7.3 split_strain — a weighted formula (this one bottoms out)
@@ -893,19 +900,117 @@ function assemble_pair(slab_A, slab_B, shared, member_specification):
     return pair      # a Structure (§3): the facing pair, grips SET
 ```
 
-### 7.6 What recurses one level further
+### 7.6 coincidence_match — the Zur-McGill search (we adopt pymatgen)
 
-`[DEPTH-FIRST · one level deeper]` `coincidence_match` (§7.2) is the
-Zur-McGill search and is the only structure body not yet at code-
-readiness. Its next sub-pass writes: the enumeration of whole-number
-tiling matrices over both surface vectors up to a size bound; the
-relative in-plane twist sweep; the per-candidate misfit as a strain
-TENSOR (never a scalar length compare — prior art's error, `PRIOR_ART.md`
-§1.6); the tolerance cut; and the selection among admissible cells
-(smallest cell, least strain). Adopt pymatgen's implementation
-(`DESIGN.md` §2.3) rather than re-deriving. This is where "depth is
-uneven" (`ARCHITECTURE.md` §5.4) is concrete: §7.3 bottomed out in one
-level; this needs two.
+`[RESOLVED · was one level deeper]` This is the sub-pass §7.2 deferred,
+now brought to code-readiness. Depth here is TWO where §7.3 was one
+(`ARCHITECTURE.md` §5.4): the strain split bottomed out in a formula,
+but the match needs its own algorithm. The algorithm itself we do NOT
+write — we ADOPT pymatgen's Zur-McGill enumerator (`DESIGN.md` §2.3,
+`VISION.md` principle 2). What SABSIM writes AROUND it is the four
+things prior art got wrong or skipped (`PRIOR_ART.md` §1.6): scoring the
+misfit as a strain TENSOR, the single physical tolerance, the atom-area
+budget, and treating "no admissible cell" as a reported outcome.
+
+```
+function coincidence_match(lattice_A, lattice_B, misfit_tolerance,
+                           max_coincidence_area):
+    # The two in-plane surface vectors of each relaxed lattice (§7.2
+    # supplied the lattices; the requested Miller face fixes the plane).
+    surface_A = surface_vectors(lattice_A)      # a_1, a_2 in the plane
+    surface_B = surface_vectors(lattice_B)      # b_1, b_2 in the plane
+
+    # Adopt pymatgen's enumerator. Its length/angle tolerances are only
+    # a PREFILTER — the authoritative cut below is on our own strain
+    # tensor — so mapping the one physical knob onto both is safe: a
+    # diagonal strain IS a length change, an off-diagonal shear IS an
+    # angle change. Its area cap is the atom-area budget (below).
+    enumerator = zsl_generator(
+        max_length_tol = misfit_tolerance,      # fractional length
+        max_angle_tol  = misfit_tolerance,      # small-angle shear
+        max_area       = max_coincidence_area)
+
+    admissible = empty list
+    # Iterate EVERY match: pass pymatgen's `lowest = false`. Its `lowest`
+    # would pre-collapse to the smallest-AREA match, but our selection
+    # applies the strain-tensor tolerance cut FIRST and only then takes
+    # the smallest cell (below) — so we must see the whole stream, not
+    # pymatgen's area-only winner.
+    for each match in enumerator(surface_A, surface_B, lowest = false):
+        # A match carries whole-number 2x2 tilings for BOTH surfaces and
+        # the two aligned supercell vector sets. The clean names below
+        # map onto pymatgen's ZSLMatch fields (A = film, B = substrate,
+        # the call order above):
+        #   supercell_A  <-  match.film_sl_vectors
+        #   supercell_B  <-  match.substrate_sl_vectors
+        #   tiling_A     <-  match.film_transformation
+        #   tiling_B     <-  match.substrate_transformation
+        # `alignment_twist` is DERIVED, not a field: the rotation that
+        # carries B's supercell onto A's (§7.6.1).
+        strain = misfit_strain_tensor(match.supercell_A,
+                                      match.supercell_B)   # 2x2, shear
+        # The AUTHORITATIVE tolerance cut is the largest strain
+        # COMPONENT — not a scalar length ratio, which cannot even see
+        # the shear (DESIGN §2.3; prior art's two-number error, §1.6).
+        if max_component(strain) <= misfit_tolerance:
+            admissible.append(SharedCell(
+                lateral_cell    = match.supercell_A,
+                tiling_A        = match.tiling_A,
+                tiling_B        = match.tiling_B,
+                twist           = alignment_twist(match),   # §7.6.1
+                residual_strain = strain))
+
+    if admissible is empty:
+        # A FIRST-CLASS reported outcome, never a crash: within this
+        # tolerance and this area budget the two lattices share no cell.
+        # The member's structure measures go `unresolved` with this
+        # reason — the very envelope §8.2 prices step 8 against
+        # (DESIGN §2.3, §8.2). Loosening either knob is the human's
+        # call, never a silent widening (DESIGN §1.4).
+        return no_admissible_cell(surface_A, surface_B,
+                                  misfit_tolerance, max_coincidence_area)
+
+    # Among the survivors take the SMALLEST cell (fewest atoms per
+    # layer); break ties by least misfit (DESIGN §2.3). No stiffness is
+    # needed here — the stiffness-weighted split is the SEPARATE §7.3.
+    return smallest_then_least_misfit(admissible)
+```
+
+```
+function misfit_strain_tensor(supercell_A, supercell_B):
+    # Each supercell is a 2x2 matrix whose rows are its two in-plane
+    # vectors. The deformation carrying B's supercell onto A's is
+    # F = supercell_A * inverse(supercell_B); the misfit strain is
+    # F - I (DESIGN §2.3). The OFF-DIAGONAL entries are shear and are
+    # KEPT — discarding them is precisely prior art's diagonal rescale,
+    # which cannot match two surfaces whose cell angles differ.
+    deformation = matrix_multiply(supercell_A, inverse(supercell_B))
+    return deformation - identity_2x2
+```
+
+**7.6.1 A note on the twist (`DESIGN.md` §2.3).** The adopted enumerator
+takes no twist grid: it searches whole-number tilings at the lattices'
+GIVEN orientations, and the rigid rotation that aligns each matched pair
+IS that candidate's twist — read out by `alignment_twist`, not imposed.
+For v1's goal (the smallest cell for a nominally untwisted Si/SiO2 bond)
+this discovered rotation is sufficient. An EXPLICIT grid becomes the
+mechanism only when twist is promoted to a CONTROLLED physical knob (a
+future study dimension), where it would wrap the enumerator in an outer
+loop over grid angles. `DESIGN.md` §2.3 now carries this reconciliation
+directly — its earlier "over a grid" wording was updated to the
+discovered-twist reading.
+
+**7.6.2 The Si/Si null test.** For identical lattices the identity
+tiling matches exactly at zero strain and is trivially the smallest
+zero-strain cell, so the search returns identity tiling, zero twist,
+zero strain (`DESIGN.md` §2.3). The walking-skeleton Si/Si member (§6)
+is therefore ALSO the matcher's null test — a real exercise of this code
+path whose correct answer is the trivial one. Prior art's continued-
+fraction reasoning is the ONE-DIMENSIONAL shadow of this search
+(`DESIGN.md` §2.3) and is not wrong; the adopted enumerator subsumes it,
+so SABSIM seeds no candidates by hand.
+
+### 7.7 Routines that bottom out at this level
 
 `[DEPTH-FIRST · one level]` the small routines that are each one step
 from code and need no sub-decomposition: `relaxed_lattice` /
