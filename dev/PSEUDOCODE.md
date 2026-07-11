@@ -122,22 +122,27 @@ function exec_one_member(member_specification):
         () -> assemble_pair(slab_A, slab_B, shared, member_specification),
         STRUCTURE_CONTRACT)
 
-    # Steps 6-7: press then pull, on the MLIP (here, the stand-in).
-    trajectory = run_to_contract(
+    # Steps 6-7: press then pull, on the MLIP (here, the stand-in). The
+    # result is a BondDebondResult (§9.1): one press outcome + one
+    # reference + a per-rate list of pulls, NOT a bare Trajectory (§5.4's
+    # rate ladder). Named for what it is at this seam.
+    bond_debond_trajectory = run_to_contract(
         () -> run_bond_debond_md(structure, potential, member_specification),
-        TRAJECTORY_CONTRACT)
+        BOND_DEBOND_CONTRACT)
 
-    # The analyzer turns the trajectory into a measure vector (DESIGN
-    # §6). In the skeleton only the Imago-free mechanical measure is
-    # real; the rest report `unresolved`.
+    # The analyzer turns that result into a measure vector (DESIGN §6):
+    # it reads the press outcome into the Verdicts and iterates the
+    # per-rate pulls (§4). In the skeleton only the Imago-free mechanical
+    # measure is real; the rest report `unresolved`.
     measures = run_to_contract(
-        () -> run_analyzer(structure, trajectory, member_specification),
+        () -> run_analyzer(structure, bond_debond_trajectory,
+                           member_specification),
         MEASURE_VECTOR_CONTRACT)
 
     # Step 8 characterization feeds additional measures. In the skeleton
     # this is MOCKED and returns schema-valid `unresolved` records.
     characterization = run_to_contract(
-        () -> run_characterization(structure, trajectory,
+        () -> run_characterization(structure, bond_debond_trajectory,
                                    member_specification),
         MEASURE_VECTOR_CONTRACT)
     measures = merge_measures(measures, characterization)
@@ -218,7 +223,7 @@ function run_to_contract(work, contract):
 ```
 
 The contracts named at the call sites are exactly the seam schemas of
-this document: `STRUCTURE_CONTRACT` and `TRAJECTORY_CONTRACT` are §3,
+this document: `STRUCTURE_CONTRACT` and `BOND_DEBOND_CONTRACT` are §3,
 `MEASURE_VECTOR_CONTRACT` is §4. The structure stage's intermediate
 contracts are `SLABS_CONTRACT` (two valid `Slab`s plus their shared cell,
 §7.1) and `ACTIVATED_SLABS_CONTRACT` (both slabs amorphized and past the
@@ -281,8 +286,13 @@ record ProtocolKnobs:
     press_control:      one of {load, displacement}   # DESIGN §5.2
     press_load:         number    # load or pressure reached
     press_depth:        number
-    press_duration:     number
-    separation_speed:   number    # the pull rate (DESIGN §5.4)
+    press_duration:     number    # the hold; where bonding happens (§5.2)
+    press_temperature:  number    # thermostat setpoint for the hold (§5.2)
+    press_approach_rate: number   # grip ramp/approach speed; bounded by
+                                  # the no-impact guard (§9.3, DESIGN §5.2)
+    separation_speed:   number    # single-rate special case; the real
+                                  # pull uses numerical.pull_rate_ladder
+                                  # (DESIGN §5.4)
 
 record NumericalKnobs:
     # Filled as modules land (DESIGN §1.8). [DEPTH-FIRST] the full
@@ -302,6 +312,15 @@ record NumericalKnobs:
     contact_grid_spacing:   number    # grid cell size for the bonded
                                       # contact-area fraction (§8.8,
                                       # DESIGN §6.4); ~one cutoff/cell
+    contact_gap_threshold:  number    # dividing-surface gap that, with a
+                                      # positive mean normal stress, marks
+                                      # contact (§9.3, DESIGN §5.2)
+    bonded_contact_threshold: number  # contact quality above which the
+                                      # verdict is "bonded" (§9.3, §5.1)
+    force_average_window:   number    # pull force-average window, in grip
+                                      # DISPLACEMENT units (§9.5, §5.4)
+    reference_pe_drift:     number    # max PE drift for the reference to
+                                      # count as settled (§9.4, DESIGN §5.3)
 
 record EnsembleKnobs:
     master_seed:       integer    # one master seed; per-realization
@@ -473,6 +492,12 @@ record StateRef:
     potential_energy: number
 ```
 
+The press/pull STAGE does not emit a bare `Trajectory`: because bonding
+happens once but the pull repeats per rate (`DESIGN.md` §5.4), it emits a
+`BondDebondResult` (§9.1) that wraps a press outcome, one reference state,
+and a LIST of per-rate `Trajectory` records. `Trajectory` here is the
+shape of ONE pull; the wrapper is the concrete form of this seam.
+
 In the walking skeleton the analyzer needs only `force_vs_grip`,
 `reference_state`,
 `separation_point`, and the two gate flags (`complete`,
@@ -551,19 +576,37 @@ record CheckResult:
 ```
 
 ```
-function run_analyzer(structure, trajectory, member_specification):
+function run_analyzer(structure, bond_debond_trajectory,
+                      member_specification):
     # The analyzer is a REGISTRY of measures (DESIGN §6.7). Each measure
     # declares what it needs; the analyzer resolves those needs against
     # what the member produced, computes what it can, and marks the rest
     # `unresolved`. Adding a measure is registering one, not editing the
     # gate.
+    #
+    # The input is a BondDebondResult (§9.1): one press outcome + one
+    # reference + a LIST of per-rate pulls. Two things follow. (1) The
+    # press outcome IS the Verdicts (bonded / contact quality, §5.1) —
+    # read once, not through a measure. (2) A `per_rate` measure (M1 and
+    # the geometric series, §8.4/§8.8) is computed ONCE PER PULL, on that
+    # pull's single `Trajectory`, and each record carries its rate in
+    # provenance so §8.9's rate-ladder check can compare across them; a
+    # non-`per_rate` measure (M2, M3, M4, the electronic M5) reads the
+    # whole result and picks the pull(s) it needs itself.
+    verdicts = verdicts_from_press(bond_debond_trajectory.press)
+    pulls    = bond_debond_trajectory.pulls
+
     measures = empty_list
     for each measure in registered_measures():
-        if measure.inputs_available(structure, trajectory):
-            measures.append(measure.compute(structure, trajectory))
-        else:
+        if not measure.inputs_available(structure, bond_debond_trajectory):
             measures.append(measure.as_unresolved())
-    return MeasureVector{ measures: measures, ... }
+        else if measure.per_rate:
+            for each pull in pulls:            # one record per rate
+                measures.append(measure.compute(structure, pull))
+        else:
+            measures.append(
+                measure.compute(structure, bond_debond_trajectory))
+    return MeasureVector{ measures: measures, verdicts: verdicts, ... }
 ```
 
 In the walking skeleton only **M1**, the mechanical work-integral, is a
@@ -686,9 +729,10 @@ exists so every seam is exercised under real data flow.
     slabs      = build_slabs(...)               # step 3, real
     slabs      = stub_activate(slabs)           # step 4, STUB
     structure  = assemble_pair(slabs, shared)   # step 5, trivial (Si/Si)
-    trajectory = press_then_pull(structure)     # steps 6-7, real
-    measures   = run_analyzer(structure, trajectory)   # M1 real, the
-                                                       # rest unresolved
+    bond_debond_trajectory = press_then_pull(structure)   # steps 6-7,
+                                                          # real
+    measures   = run_analyzer(structure,               # M1 real, the
+                              bond_debond_trajectory)   # rest unresolved
     measures   = merge mock_characterization()  # step 8, MOCK
     gate       = evaluate_member_gates(measures)
     # -> the resulting MemberResult.trusted is FALSE (a plumbing member)
@@ -1062,7 +1106,8 @@ function registered_measures():
     return [
         measure("mechanical_work_of_separation",       # M1  §8.4
                 needs = {force_vs_grip, reference_state,
-                         separation_point, interface_area}),
+                         separation_point, interface_area},
+                per_rate = true),                       # once per pull
         measure("work_of_adhesion_as_fractured",        # M2  §8.5
                 needs = {separated_endpoint, minimizer}),
         measure("work_of_adhesion_relaxed",             # M2  §8.5
@@ -1075,18 +1120,21 @@ function registered_measures():
         measure("quasi_static_curve",                   # M3  §8.6
                 needs = {minimizer, opening_ladder}),
         measure("rate_gap",                             # M3  §8.6
-                needs = {quasi_static_curve, frames, minimizer}),
+                needs = {quasi_static_curve, frames, minimizer},
+                per_rate = true),
         measure("interface_fidelity",                   # M4  §8.7
                 needs = {all_electron_value, m2_on_subcell}),
         measure("subcell_truncation_error",             # M4  §8.7
                 needs = {m2_on_full, m2_on_subcell}),
         measure("coordination_number",                  # M5g §8.8
-                needs = {frames, bond_cutoffs}),
+                needs = {frames, bond_cutoffs},
+                per_rate = true),
         measure("cross_interface_bond_density",         # M5g §8.8
                 needs = {frames, bond_cutoffs, provenance,
-                         interface_area}),
+                         interface_area}, per_rate = true),
         measure("contact_area_fraction",                # M5g §8.8
-                needs = {frames, bond_cutoffs, provenance}),
+                needs = {frames, bond_cutoffs, provenance},
+                per_rate = true),
         measure("effective_charge",                     # M5e §8.8
                 needs = {electronic_descriptors}),
         measure("bond_order_electronic",                # M5e §8.8
@@ -1099,6 +1147,17 @@ function registered_measures():
     # are emitted as by-reference curve ARTIFACTS for human reading, not
     # as records above (DESIGN §6.4, §6.6). Only the two DOS scalars
     # (dos_at_fermi, gap_size) are reduced into the measure vector.
+    #
+    # `per_rate = true` marks a measure computed ONCE PER PULL, on that
+    # pull's single Trajectory (§4's loop iterates .pulls for these). The
+    # rest default to whole-result and take the entire BondDebondResult.
+    # Of those, the ones that still need a pull (M2, M4, and M5's
+    # electronic family) run on the REPRESENTATIVE pull — the slowest
+    # rung, closest to quasi-static — which each measure's compute selects
+    # from the result before calling its kernel; that is why the
+    # `trajectory` parameter of m2_on / m4_differences / etc. is a single
+    # pull. quasi_static_curve needs no pull at all. Which rung counts as
+    # "representative" is a DESIGN §6.4 detail (TODO), not the loop's.
 ```
 
 ### 8.2 Derived bond cutoffs (`DESIGN.md` §6.3)
@@ -1442,10 +1501,322 @@ curves with their two reduced scalars `dos_at_fermi` / `gap_size`) on
 
 `[DELEGATE -> PHONON calc]` M2's `free_energy_correction` per endpoint.
 
-`[DESIGN §6.4 open]` `contact_area_fraction`'s geometric definition
-(§8.8) — a flagged decision, `unresolved` until pinned.
+`[DEFINED]` `contact_area_fraction`'s geometry is now pinned (§8.8,
+`DESIGN.md` §6.4); only its knob `contact_grid_spacing` remains a numeric
+follow-on.
 
 The pattern mirrors §7: the module's own algorithms reach code-readiness
 this pass, and what remains is either one adopted call away or owned by a
 module whose contract §3/§4 already froze — so none of it can force this
 one to change (`ARCHITECTURE.md` §5.1).
+
+---
+
+## 9. Bond/debond MD — algorithms (steps 6, 7)
+
+This is the **third depth-first module pass** (`ARCHITECTURE.md` §5.4),
+on `DESIGN.md` §5. It refines the `run_bond_debond_md` body (the §6
+walking-skeleton stub) to code-readiness, and it also supplies the
+minimizer/anneal routines the analyzer §8 delegated back here (§8.5,
+§8.6) — they live here because they run on the SAME LAMMPS driver under
+the SAME MLIP. It runs on LAMMPS under `pair_style deepmd` on GPU
+(`ARCHITECTURE.md` §4.1). Almost everything bottoms out into LAMMPS
+fixes with a few real decisions on top; §9.8 lists the two things that
+delegate outward.
+
+Prior art built and RAN this stage, so its failures are concrete
+(`PRIOR_ART.md` §1.7): a chemistry-free interface escalated to a 150 m/s
+velocity impact, a thermostat that counted the drive as heat, a pull
+integrated from a stressed state, a kept leading-zero, a `max()` peak,
+and a truncated trajectory quoted as a result. Every routine below is
+built to refuse one of those.
+
+### 9.1 The module's top-level shape, and the press/pull seam
+
+**The press happens once; the pull repeats per rate.** Bonding is a
+single event, but the §5.4 rate ladder pulls the SAME bonded state at
+several rates. So the stage emits one press outcome, one gated reference
+state, and a LIST of per-rate pulls — not a single trajectory.
+
+```
+record BondDebondResult:
+    # The concrete form of the §3 press/pull stage output (what §1 calls
+    # BOND_DEBOND_CONTRACT). One press, one reference, many pulls.
+    press:     PressOutcome         # step 6 (§5.1, §5.2)
+    reference: StateRef             # gated zero-load reference (§5.3)
+    pulls:     list of Trajectory   # one §3 Trajectory per pull rate
+
+record PressOutcome:
+    bonded:           boolean   # verdict at the specified load (§5.1)
+    contact_quality:  number    # graded; reuses §8.8 geometric machinery
+    bonded_structure: StateRef  # the held, relaxed bonded state
+    load_reached:     number    # BOTH load AND depth are reported (§5.2)
+    depth_reached:    number
+```
+
+```
+function run_bond_debond_md(structure, potential, member_specification):
+    driver = open_lammps_driver(structure, potential,
+                                member_specification)   # §9.2, persistent
+
+    # Step 6: press the two activated surfaces together and let them bond.
+    press = press_and_bond(driver, member_specification)          # §9.3
+
+    # The gated zero-load reference the pull integrates from (§5.3).
+    reference = settle_reference(driver, press, member_specification)  # §9.4
+
+    # Step 7: pull ONCE PER RATE (§5.4), each from a fresh copy of the
+    # reference (a pull deforms it). The press is NOT repeated.
+    pulls = empty list
+    for each rate in member_specification.numerical.pull_rate_ladder:
+        pulls.append(pull_at_rate(driver, reference, rate,
+                                  member_specification))     # §9.5, §9.6
+    return BondDebondResult{ press: press, reference: reference,
+                            pulls: pulls }
+```
+
+`[SEAM — resolved]` this refines the §3 trajectory seam. `Trajectory`
+(§3) stays the shape of ONE pull; `BondDebondResult` wraps the press
+outcome and the per-rate list around it. Its consumers: `run_analyzer`
+(§4, §8) reads `press.bonded` / `press.contact_quality` into the
+`Verdicts` (§4) and iterates `pulls` for the per-rate measures (§8.4's
+"one M1 per rate"). The walking skeleton (§6) runs a single-rate ladder,
+so `pulls` has one element — the seam is exercised, not special-cased.
+RENAMED (the programmer's call): the stage-output object is the variable
+`bond_debond_trajectory` of type `BondDebondResult`, guarded by
+`BOND_DEBOND_CONTRACT`; the per-pull `Trajectory` record and the
+`trajectory` parameters inside the §8 measures keep their names, because
+those genuinely are one pull. `run_analyzer` now iterates `.pulls` for
+per-rate measures and reads `.press` into `Verdicts` (§4).
+
+### 9.2 The persistent LAMMPS driver
+
+```
+function open_lammps_driver(structure, potential, member_specification):
+    # ONE persistent LAMMPS process for the whole press+pull, NOT a fresh
+    # LAMMPS per impact with a full-slab disk round-trip (prior art's
+    # antipattern, PRIOR_ART.md §1.7). Load the MLIP once and map §2's
+    # labeled groups (§3 LabeledGroups) to LAMMPS groups and fixes:
+    #   frozen_base       -> immobile, no integrator
+    #   thermostat_border -> Langevin, BIAS-REMOVED (§9.3)
+    #   nve_interior      -> plain NVE
+    #   activated_skin    -> integrated as interior, tracked for §5.1
+    #   grips             -> press/pull handles, held or driven
+    # The lateral cell is HELD FIXED — no lateral barostat, or the
+    # recorded substrate strain relaxes away and the provenance number
+    # becomes a fiction (§5.6). The z-boundary is non-periodic, vacuum
+    # sized for the full pull distance plus margin.
+    return driver
+```
+
+### 9.3 press_and_bond — mode, no impact, honest thermostat, dual contact
+
+```
+function press_and_bond(driver, member_specification):
+    protocol  = member_specification.protocol
+    numerical = member_specification.numerical
+    # Pluggable control mode at ONE seam (§5.2). v1 freezes load-control;
+    # displacement-control is the SAME seam, run once on Si/Si as a
+    # cross-check (their disagreement measures press irreversibility).
+    if protocol.press_control == load:
+        drive = ramp_normal_stress(driver.grips.top, protocol.press_load,
+                                   protocol.press_approach_rate)
+    else:  # displacement
+        drive = drive_grip_down(driver.grips.top, protocol.press_depth,
+                                protocol.press_approach_rate)
+
+    # NO VELOCITY IMPACT (§5.2): approach speed far below the sound speed,
+    # acquired kinetic energy far below the bond scale — else the press is
+    # a collision and the interface is interlock, not adhesion. A GATE.
+    assert approach_is_quasistatic(drive)
+
+    # THE THERMOSTAT MUST NOT SEE THE DRIVE (§5.2): thermostat the
+    # INTERIOR ONLY, never the grips, and remove the center-of-mass bias
+    # from any thermostatted region that carries directed motion before
+    # applying the thermostat — so directed motion is never read as heat
+    # (prior art's nvt-on-the-drifting-slab error).
+    thermostat_interior_bias_removed(driver, protocol.press_temperature)
+
+    # CONTACT ON A DUAL CRITERION (§5.2, adapted from prior art's one good
+    # idea, find_contact_step): PRIMARY = the gap between the two §2.6
+    # density dividing surfaces has closed to a threshold; CONFIRM = a
+    # running average of the normal stress has turned positive. A gap can
+    # close on ONE asperity; positive normal stress means the surfaces
+    # genuinely load each other. Gap measured surface-to-surface, NOT
+    # between extremal atoms (prior art's asperity failure).
+    run_until(driver,
+        gap_between_dividing_surfaces(driver) <= numerical.contact_gap_threshold
+        and mean_normal_stress_positive(driver))
+
+    # The HOLD at temperature is where bonding actually happens (§5.2).
+    hold_at_temperature(driver, protocol.press_duration)
+
+    # The bonded/not-bonded VERDICT and graded contact quality (§5.1),
+    # reusing the §8.3/§8.8 geometric machinery rather than a second
+    # copy. A no-bond is a RESULT with its own diagnostic label (§7),
+    # NEVER a reason to escalate the drive.
+    quality   = contact_quality(current_frame(driver))
+    threshold = numerical.bonded_contact_threshold
+    return PressOutcome{
+        bonded: quality >= threshold, contact_quality: quality,
+        bonded_structure: snapshot(driver),
+        load_reached: measured_load(driver),
+        depth_reached: measured_depth(driver) }
+```
+
+### 9.4 settle_reference — a gated zero-load state (`DESIGN.md` §5.3)
+
+```
+function settle_reference(driver, press, member_specification):
+    numerical = member_specification.numerical
+    # The pull's curve must start at rest under NO applied load. Prior art
+    # minimizes, re-heats, and pulls at once, integrating from a stressed
+    # state (its PE jumps 481 eV in 0.5 ps). SABSIM GATES the reference:
+    minimize(driver)                          # to a local minimum
+    equilibrate_under_thermostat(driver)      # settle at temperature
+    # ASSERT the press actually settled; if not, REPORT, do not integrate
+    # over it (§5.3). Force floor reuses the pull's noise floor.
+    assert net_grip_force(driver) <= numerical.noise_floor
+    assert potential_energy_drift(driver) <= numerical.reference_pe_drift
+    return StateRef{ location: snapshot(driver),
+                     potential_energy: potential_energy(driver) }
+```
+
+### 9.5 pull_at_rate — one rung of the ladder (`DESIGN.md` §5.4)
+
+```
+function pull_at_rate(driver, reference, rate, member_specification):
+    numerical = member_specification.numerical
+    restore(driver, reference)           # a FRESH copy; the pull deforms it
+    hold(driver.grips.bottom)            # bottom grip held
+    drive_grip(driver.grips.top, rate)   # top grip at constant rate
+
+    # BOTH reaction forces are recorded; their sum is a FREE Newton check
+    # (§5.4). LAMMPS exposes the summed force on a held group BEFORE it is
+    # zeroed, so the check costs nothing. Prior art holds with setforce,
+    # never queries it, and throws the check away.
+    record_both_grip_reactions(driver)
+
+    # Force is TIME-AVERAGED and the average's WARM-UP is DISCARDED (§5.4).
+    # The window is in units of GRIP DISPLACEMENT (small vs a bond
+    # length), not timesteps. An averaging fix emits a leading ZERO before
+    # its first window closes — DROP it (prior art kept it as debond.dat's
+    # first point, anchoring both a trapezoid and a modulus fit).
+    curve = averaged_force_curve(driver,
+                window = numerical.force_average_window,
+                drop_leading_zero = true)
+
+    # A STRIDED atomic-coordinate dump -> FrameSetRef (§3); NEVER every
+    # step (frame_stride, §2). The by-reference frames feed §8 and §8-of-
+    # DESIGN's snapshot selector.
+    frames = strided_frame_dump(driver, numerical.frame_stride)
+
+    return reduce_to_trajectory(driver, curve, frames, reference, rate,
+                                member_specification)          # §9.6
+```
+
+### 9.6 reduce_to_trajectory — two curves, separation, and the gates
+
+```
+function reduce_to_trajectory(driver, curve, frames, reference, rate,
+                              member_specification):
+    numerical = member_specification.numerical
+    # TWO curves (§5.5). Force vs GRIP DISPLACEMENT is what a testing
+    # machine measures and the M1 integrand. Force vs INTERFACE OPENING
+    # (distance between the two §2.6 dividing surfaces) is where the
+    # interface actually is — separation is NOT grip displacement, which
+    # also contains the slabs' elastic stretch.
+    force_vs_grip    = curve
+    force_vs_opening = reexpress_versus_opening(curve, frames)
+
+    # COMPLETE SEPARATION (§5.5): the interface opening exceeds the
+    # potential cutoff (6 A, §4.6) AND the averaged force has returned to
+    # zero within the noise floor. The M1 integral (§8.4) stops HERE, not
+    # at the record's end (prior art integrated the whole noise tail).
+    separation = first_frame_where(frames,
+        opening_exceeds(potential_cutoff) and
+        abs(averaged_force) <= numerical.noise_floor)
+
+    # The PEAK is EXTRACTED above the noise floor by a stated margin, not
+    # max() over noise (§5.4); a below-margin peak is marked unresolved by
+    # the analyzer (§8), not here. This routine only carries the curves.
+
+    # GATES, not warnings (§5.6). A non-periodic box silently deletes an
+    # escaped atom, so atom-count conservation is a gate; and the run must
+    # be COMPLETE (walltime budgeted from distance/rate, not a flat
+    # clock) — prior art's headline came from a 122500/150000-step run in
+    # a dir named NOTE_INCOMPLETE.txt.
+    return Trajectory{
+        identifier:           new_trajectory_id(),
+        force_vs_grip:        force_vs_grip,
+        force_vs_opening:     force_vs_opening,
+        scalar_series:        series_of(driver),   # sigma_zz, PE, ...
+        reference_state:      reference,
+        separation_point:     separation,
+        complete:             ran_to_completion(driver),
+        atom_count_conserved: atom_count_unchanged(driver),
+        grip_reaction:        both_grip_curves(driver),
+        provenance:           provenance_of(rate, member_specification),
+        frames:               frames }
+```
+
+The **dissipation sign check** (§5.5) — mechanical work >= thermodynamic
+work of adhesion — is NOT run here: it needs the relaxed-endpoint W_adh
+that the analyzer computes (§8.5), so it lives in §8.9's check list. This
+module's part is to record the inputs it needs — the averaged curve and
+the bonded/separated relaxed endpoints (via §9.7) — honestly.
+
+### 9.7 The minimizer/anneal routines the analyzer delegates here
+
+The analyzer (§8.5, §8.6) delegates its relaxations to this module: they
+run on the same LAMMPS driver under the same MLIP, and they are
+minimizations, not dynamics, so they are cheap and deterministic given
+the potential.
+
+```
+function minimize_local(fragment_or_frame, potential):
+    # Relax into the NEAREST local minimum at FIXED lateral cell — no
+    # thermostat, no anneal (§8.5 as_fractured pieces; §8.6 relaxed
+    # snapshots). Surfaces are left as the pull/press left them.
+    return minimized_state
+
+function minimize_then_anneal(fragment, potential, anneal_schedule):
+    # minimize_local, then a short ANNEAL so surface atoms reorganize and
+    # dangling bonds pair (§8.5 relaxed reference). The SCHEDULE is a
+    # recorded knob: an amorphous surface is kinetically trapped, so
+    # "relaxed" means "as relaxed as this schedule got it" (DESIGN §6.4).
+    return annealed_state
+
+function minimize_at_fixed_opening(structure, opening, potential):
+    # Impose a prescribed interface opening and minimize with that opening
+    # CONSTRAINED (§8.6 M3's rate-free quasi-static ladder).
+    return constrained_minimum
+```
+
+### 9.8 What bottoms out, what delegates
+
+`[BOTTOMS OUT here]` the persistent driver and the labeled-group -> fix
+map (§9.2); `press_and_bond`'s mode switch, no-impact gate, bias-removed
+thermostat, dual contact criterion, and hold (§9.3); `settle_reference`'s
+gated minimize+equilibrate (§9.4); `pull_at_rate`'s both-grip recording,
+warm-up-discarded averaged force, and strided frames (§9.5);
+`reduce_to_trajectory`'s two curves, separation point, and gates (§9.6);
+and the three minimizer/anneal routines (§9.7). Each is a LAMMPS-driver
+operation plus a clear gate or extraction.
+
+`[DELEGATE -> POTENTIAL, DESIGN §4]` the MLIP the whole stage runs under
+is step 2's committee; this module is a CONSUMER of it (`pair_style
+deepmd`), never its author.
+
+`[ABOVE this module]` the ensemble (STRUCTURAL 4 amorphization seeds and
+thermal-velocity seeds, `DESIGN.md` §5.4) is looped by the sequencer via
+`realization_count` (§2); this module runs ONE realization, and the
+averaging over seeds is §6.6's uncertainty, not this module's job.
+
+`[CODE level, below pseudocode]` the exact LAMMPS fix syntax.
+
+`[DESIGN §5.9 numeric follow-ons]` the VALUES of the knobs added for this
+module — `press_temperature`, `press_approach_rate`, `contact_gap_
+threshold`, `bonded_contact_threshold`, `force_average_window`,
+`reference_pe_drift` — plus the target bonding pressure and hold duration.
+Their existence is pinned here; their numbers are a §5.9 DESIGN task.

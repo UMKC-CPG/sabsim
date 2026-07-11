@@ -349,6 +349,23 @@ foundations, interaction rules. -->
       minimal-strength interface as a §6.7 measure and report its
       DISAGREEMENT with provenance as a true-transfer observable; the §5
       pull's post-fracture M2 pieces are its a-posteriori realization.
+- [ ] Bond/debond MD §5 depth-first pass DONE (`PSEUDOCODE.md` §9,
+      2026-07-11). The stage-output seam was RENAMED (2026-07-11):
+      variable/parameter `bond_debond_trajectory`, type `BondDebondResult`,
+      contract `BOND_DEBOND_CONTRACT`; the per-pull `Trajectory` record
+      keeps its name. `run_analyzer` now reads `.press` into `Verdicts`
+      and iterates `.pulls` for `per_rate` measures. Left for the
+      programmer: (1) pin the numeric values of the knobs the pass
+      declared — `press_temperature`, `press_approach_rate`,
+      `contact_gap_threshold`, `bonded_contact_threshold`,
+      `force_average_window`, `reference_pe_drift` — plus `DESIGN.md`
+      §5.9's own open numbers (target bonding pressure, hold duration,
+      noise floors). (2) Pin the REPRESENTATIVE-pull rule: non-`per_rate`
+      measures that need a pull (M2, M4, M5-electronic) run on the slowest
+      rung by current design — confirm "slowest = representative" in
+      `DESIGN.md` §6.4. Also noted: `separation_speed` (ProtocolKnob) is
+      the single-rate special case, superseded by
+      `numerical.pull_rate_ladder`.
 - [ ] STRUCTURAL 1b DESIGN follow-ons: BKS vs Vashishta as the silica
       generator, the amorphous-structure validation metrics + thresholds
       (g(r) / ring / coordination vs DFT + experiment), the seed-set
