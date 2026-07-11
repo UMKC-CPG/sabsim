@@ -860,6 +860,23 @@ full depth up front would front-load the stable-behind-a-contract work
 before a single seam had been validated — a form of coding into a box in
 its own right.
 
+**"Depth" is recursive and uneven, not a fixed ladder of numbered
+levels.** After the shallow first pass there is no global "level 2, level
+3" applied uniformly. Going deep on a module means applying this same
+method one level down inside it — first lay out its internal control flow
+and sub-contracts shallowly, then recurse only into the parts that need
+it — and the recursion **bottoms out at the PSEUDOCODE↔Code boundary**:
+stop refining when the next step would add only language syntax, not an
+algorithmic decision. Because that boundary sits at a different depth for
+different pieces, one module's depth is uneven by nature — inside the
+structure builder the strain split is essentially one weighted formula
+(one level from code) while the coincidence-matcher search needs a
+sub-pass of its own. So "pass 2 on a module" is loose shorthand; the
+honest structure is **per-module recursion to code-readiness**, and how
+many sub-passes a module takes is set by its own complexity, not by a
+counter. A `/refine` should read "depth-first" this way — not as a
+uniform ladder.
+
 ### 5.5 Checkpoints and baselines
 
 The prior Imago/Kaleidoscope effort used numbered checkpoints (for
