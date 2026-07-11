@@ -117,15 +117,16 @@ MLIP is never asked to reproduce cascades.
   pipeline at a different material pair and drive it from their own
   code. Hand-editable settings are a convenience side door, not the
   main entrance.
-- **Run specification — the study, and five groups of knobs [BUILD].**
+- **Member specification — the study, and five groups of knobs [BUILD].**
   Per `VISION.md` goal 2 and principle 1, everything a user changes to
   point the pipeline at a new study lives in one editable place, apart
   from the fixed machinery. `DESIGN.md` §1 refines this in two ways.
-  First, the configured object is a **study** — a set of runs plus the
+  First, the configured object is a **study** — a set of members plus the
   **relations** among them — because the bond-outcome criterion is a
-  *ratio* between two runs and so belongs to neither one alone. A run
+  *ratio* between two members and so belongs to neither one alone. A
+  member
   remains self-contained and independently reproducible, and a study may
-  be assembled after the fact from runs that already exist. Each
+  be assembled after the fact from members that already exist. Each
   relation declares its own **contrast** (the fields it deliberately
   varies) and its **controls** (the fields it holds fixed) — the
   precondition cannot be a fixed rule, because a study comparing two
@@ -147,8 +148,8 @@ MLIP is never asked to reproduce cascades.
   physics.* The five are material, protocol, numerical (tolerances,
   cutoffs, strides, windows, budgets), ensemble (the master seed and the
   realization count — a coordinate one samples, not a knob one tunes),
-  and deployment, which lives in a separate document (§4.1) that the run
-  specification cannot express.
+  and deployment, which lives in a separate document (§4.1) that the
+  member specification cannot express.
   - **Material knobs:** per wafer, a crystal structure and one surface
     face (its Miller indices), plus the material identity itself —
     **never a lattice constant**, which §2.2 derives from the potential
@@ -165,7 +166,7 @@ MLIP is never asked to reproduce cascades.
     single value; the design admits distributions (energy/angle spread)
     later.
   v1 **freezes every protocol knob to a single value** so one complete
-  run is reachable within time constraints; *iterating* over them
+  member is reachable within time constraints; *iterating* over them
   (composition, dopant, activation level, pressure, temperature,
   crystal face) is deferred to the outer-loop coupling and convergence
   work still open in `TODO.md`. The design stays open-ended for that
@@ -175,7 +176,7 @@ MLIP is never asked to reproduce cascades.
   calibrates on the *relative* Si-Si-to-Si-SiO2 ratio (`VISION.md`
   goal 4) — one system yields only a point, the ratio needs both. Si/Si
   reuses the same {Si, O} potential (Si is a subset of its species) and
-  has no lattice mismatch, so it is a cheap second run under the *same*
+  has no lattice mismatch, so it is a cheap second member under the *same*
   frozen protocol. Ionic / polar pairs such as
   SiO2/LiNbO3 are supported by keeping the structure builder and the
   potential species-generic, with hooks documented for the extra
@@ -627,7 +628,7 @@ dependencies, by work group, are:
   dead-simple with plain `sbatch` scripts**; Parsl-driven submission
   arrives with automation. Still OPEN is only the *heavier workflow /
   provenance manager* that may sit on top once we query across hundreds
-  of runs or close the loop — candidates unchanged, light to heavy:
+  of members or close the loop — candidates unchanged, light to heavy:
   **Snakemake** (files-produce-files, weak at loops), **jobflow**
   (Python loops + moderate history), **AiiDA** (best-in-class provenance,
   heavy, hard to leave). Recommendation stands: provenance by discipline,
@@ -748,12 +749,14 @@ an order set by risk, not by step number.
   seam (`DESIGN.md` §2.6), the measure-vector schema the gate reads by
   name and status (`DESIGN.md` §6.6), the manifest and its content-
   fingerprint identity into Kaleidoscope (`DESIGN.md` §8.5, §1.4), the
-  file-contracts-on-shared-filesystem linking model (§4.1), and the run
-  specification itself (`DESIGN.md` §1). A seam schema, once written,
+  file-contracts-on-shared-filesystem linking model (§4.1), and the
+  member specification itself (`DESIGN.md` §1). A seam schema, once
+  written,
   changes only by deliberate amendment with a recorded note — the same
   discipline the design chain itself uses.
 - **A walking skeleton before any depth.** Build the thinnest end-to-end
-  thread first: a run spec for the **Si/Si** reference → structure builder
+  thread first: a member spec for the **Si/Si** reference → structure
+  builder
   → a **classical potential standing in for the MLIP** behind `pair_style`
   → LAMMPS press/pull → analyzer emitting only the mechanical work-
   integral (needs no Imago) → gate reports a verdict. It touches every
@@ -798,14 +801,14 @@ The pipeline's eight steps do not map one-to-one onto modules: three
 DESIGN sections cover two steps each, and three cover none — they are the
 frame that wraps every step.
 
-| Steps | Buildable unit        | Tool                | DESIGN §   |
-|-------|-----------------------|---------------------|------------|
-| 3, 5  | Structure builder     | ASE                 | §2         |
-| 4     | Activation            | LAMMPS + ZBL        | §3         |
-| 1, 2  | Bootstrap (training)  | VASP · ALF/DeePMD   | §4         |
-| 6, 7  | Bond/debond MD        | LAMMPS + MLIP       | §5         |
-| 8     | Characterization      | Imago/Kaleidoscope  | §8         |
-| —     | Frame                 | run-spec·schema·gate| §1, §6, §7 |
+| Steps | Buildable unit        | Tool                    | DESIGN §   |
+|-------|-----------------------|-------------------------|------------|
+| 3, 5  | Structure builder     | ASE                     | §2         |
+| 4     | Activation            | LAMMPS + ZBL            | §3         |
+| 1, 2  | Bootstrap (training)  | VASP · ALF/DeePMD       | §4         |
+| 6, 7  | Bond/debond MD        | LAMMPS + MLIP           | §5         |
+| 8     | Characterization      | Imago/Kaleidoscope      | §8         |
+| —     | Frame                 | member-spec·schema·gate | §1, §6, §7 |
 
 So construction sequences five units and a frame, not eight steps in
 numeric order.
@@ -850,7 +853,8 @@ the skeleton would quietly forfeit that freedom.
 
 The immediate next level obeys the same spine: **breadth-first shallow,
 then depth-first per module.** The first pseudocode pass covers control
-flow and the seam schemas — the Tier-A sequencer, run-spec load/validate,
+flow and the seam schemas — the Tier-A sequencer, member-spec
+load/validate,
 the structure contract, the measure schema, the gate's precedence chain —
 which is the walking skeleton expressed as pseudocode. The deep per-module
 algorithms (the coincidence matcher, the UDD bias, the detector

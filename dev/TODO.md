@@ -77,7 +77,7 @@ were not previously tracked anywhere. -->
       design the repeat logic (weakness-to-new-data mapping, iteration
       budget, non-convergence exit) (`ARCHITECTURE.md` §3; `VISION.md`
       principle 5).
-- [x] Run-specification knobs — RESOLVED for v1 (2026-07-07): the knob
+- [x] Member-specification knobs — RESOLVED for v1 (2026-07-07): the knob
       set is now split in `ARCHITECTURE.md` §2.3 into material knobs
       (crystal structure + one surface face per wafer, material
       identity) and protocol knobs (activation species, activation
@@ -477,10 +477,10 @@ foundations, interaction rules. -->
       `$OLCAO_RC` working-directory-as-config convention (the §1.2 item 7
       antipattern) or any script from that lineage.
 - [x] Settings-file shape — RESOLVED by `DESIGN.md` §1 (2026-07-09).
-      The configured object is a **study** (runs + relations), because
+      The configured object is a **study** (members + relations), because
       §7.4's criterion is a ratio and a ratio belongs to a *pair* of
-      runs; a run still stands alone and studies may be assembled after
-      the fact. Knobs split into **five** groups by a sharp test — a
+      members; a member still stands alone and studies may be assembled
+      after the fact. Knobs split into **five** groups by a sharp test — a
       numerical setting's effect must vanish under refinement, a
       protocol knob's effect *is* the physics — with ensemble (seeds)
       separate because a seed is sampled, not tuned, and deployment in
@@ -490,7 +490,7 @@ foundations, interaction rules. -->
       fingerprint**, not a version number (versioning is too linear;
       protocols branch). Lattice constants, the shared cell, bond
       cutoffs, subcell size and activated depth are **derived, never
-      settings**. `ARCHITECTURE.md` §2.3's run-spec bullet amended in
+      settings**. `ARCHITECTURE.md` §2.3's member-spec bullet amended in
       the same commit.
 - [ ] §1 follow-ons: the serialization format and schema mechanism; the
       exact fingerprint definition (which fields it covers, and how a
@@ -524,7 +524,7 @@ foundations, interaction rules. -->
 
 - [ ] First PSEUDOCODE pass follows `ARCHITECTURE.md` §5.4 — **breadth-
       first shallow, then depth-first per module.** Pass 1 covers only
-      control flow and the seam schemas (Tier-A sequencer, run-spec
+      control flow and the seam schemas (Tier-A sequencer, member-spec
       load/validate, the labeled-group structure contract, the measure
       schema, the gate precedence chain) — the walking skeleton expressed
       as pseudocode. Deep per-module algorithms (coincidence matcher, UDD

@@ -38,7 +38,7 @@ backend + bootstrap) first, as the most mature (already prototyped and
 unit-tested). Each heading below carries a one-line scope note and its
 sources; bodies are written section by section. -->
 
-## 1. Run specification and settings layer
+## 1. Member specification and settings layer
 
 This section designs the specification a user writes to point the
 pipeline at a study, and the rules that keep it honest. It was written
@@ -48,42 +48,44 @@ shape of the settings layer become visible — it is not one list but
 five, and the divisions between them carry meaning.
 
 Prior art states the problem by contradiction. Its `primeinput.py` reads
-a run's parameters out of the directory path it happens to be sitting in
+a member's parameters out of the directory path it happens to be
+sitting in
 (`jobs/<stage>/<material>/<layer>/<energy>/`) and bakes a partition
 name, a personal email address, and module versions into the scripts it
 emits (`PRIOR_ART.md` §1.2 item 7). SABSIM inverts this completely:
 **the configuration is an object, and the directory is an output.**
 
-### 1.1 The object is a study, and a run still stands alone
+### 1.1 The object is a study, and a member still stands alone
 
-The naive top-level object is a run: one material pair, one protocol,
+The naive top-level object is a member: one material pair, one protocol,
 one number out. But §7.4's headline criterion is a **ratio** — the work
 of separation of the Si/SiO₂ pair divided by that of the Si/Si reference
-— and a ratio is a property of a *pair* of runs, belonging to neither
-one. Give the settings layer only runs and the primary measure has
+— and a ratio is a property of a *pair* of members, belonging to neither
+one. Give the settings layer only members and the primary measure has
 nowhere to live. This is §2.1's discovery in a different costume: the
 object worth modelling sits one level above where you would first put
 it.
 
-So a **study** names its runs and declares the **relations** among them
-— which run is the subject and which the reference. Beneath it a **run**
-is one material pair under one protocol, and beneath that a
+So a **study** names its members and declares the **relations** among them
+— which member is the subject and which the reference. Beneath it a
+**member** is one material pair under one protocol, and beneath that a
 **realization** is one seed.
 
-But a run must remain **self-contained and independently reproducible**,
-executable on its own and identical whether or not a study ever mentions
-it. A study is a composition over runs, not an owner of them, and it may
-be assembled after the fact from runs that already exist.
+But a member must remain **self-contained and independently
+reproducible**, executable on its own and identical whether or not a
+study ever mentions it. A study is a composition over members, not an
+owner of them, and it may be assembled after the fact from members that
+already exist.
 
 That freedom has a price, and paying it is the interesting part. §7.4
-trusts the ratio because **the systematic errors common to both runs
+trusts the ratio because **the systematic errors common to both members
 cancel to first order** — the pull rate, the cell size, the thermostat,
 the mismatch of timescales. Cancellation requires that those systematics
-actually be shared. Two runs made with different potentials, or
+actually be shared. Two members made with different potentials, or
 different press loads, cancel nothing, and their ratio is worthless.
 
 **A relation declares what it varies and what it holds fixed.** It is
-tempting to write the precondition as a fixed rule — *the runs must
+tempting to write the precondition as a fixed rule — *the members must
 share a potential and a protocol* — but that rule forbids one of the
 studies we most want to run. Comparing two **protocols** on the same
 material pair (an activation-dose sweep, a press-load sweep) is a study
@@ -103,7 +105,7 @@ controlling the potential and the protocol. A dose sweep would contrast
 the **activation fluence** while controlling the material pair and
 everything else. Same machinery, opposite fields.
 
-**Report, never restrict.** Nothing in this section may prevent a run,
+**Report, never restrict.** Nothing in this section may prevent a member,
 a study, or a comparison from being performed. When a relation's
 controls disagree, or when it carries more than one contrast and is
 therefore *confounded* — a change in the result attributable to neither
@@ -125,7 +127,7 @@ grounds that it would not know how to grade the answer, has mistaken its
 role.
 
 **Every relation emits a difference set.** Controls agreeing is not the
-same as the runs being alike, and the gap between those two statements
+same as the members being alike, and the gap between those two statements
 is where a misleading comparison lives. Every field that differs is
 therefore reported alongside the value, sorted by *why* it differs:
 
@@ -172,7 +174,7 @@ on it.
   levels of §7.5, slab thickness, cell size. How carefully we compute.
 - **Ensemble** — the master seed and the realization count.
 - **Deployment** — resource class, node counts, walltime, modules. This
-  lives in a *separate document* (`ARCHITECTURE.md` §4.1) and the run
+  lives in a *separate document* (`ARCHITECTURE.md` §4.1) and the member
   specification cannot express it at all.
 
 The protocol/numerical line has a crisp test. **A numerical setting is
@@ -299,8 +301,9 @@ other thing. They reject a specification that **cannot be executed** — a
 species the potential has never heard of, a fluence in the wrong units,
 a slab too thin to contain its own activated layer. They never reject a
 specification whose *comparisons* would be hard to interpret. Whether
-two runs are worth comparing is a scientific judgment, made by a person,
-downstream, with the difference set in hand. Whether a run can be
+two members are worth comparing is a scientific judgment, made by a
+person, downstream, with the difference set in hand. Whether a member
+can be
 performed at all is a mechanical question, answered here.
 
 ### 1.6 The specification is the provenance record
@@ -345,7 +348,7 @@ convention.
 
 **Replace:** working-directory-as-configuration (→ the configuration is
 an object, the directory an output); site details baked into emitted
-scripts (→ a separate deployment document, §4.1, which the run spec
+scripts (→ a separate deployment document, §4.1, which the member spec
 cannot express); hand-typed lattice constants (→ derived from the
 potential, §2.2); hidden defaults (→ the loader rejects an incomplete
 specification); an unnamed, unrecorded protocol (→ inline values with a
@@ -396,7 +399,8 @@ and two surface faces, and emits, in one atomic step:
 - for each slab, the **integer tiling** that carries its own surface
   lattice into that cell (an output of the solver, never a user knob);
 - for each slab, the **residual strain** it must absorb, recorded in
-  the run's provenance record (`VISION.md` goal 3) and passed forward as
+  the member's provenance record (`VISION.md` goal 3) and passed forward
+  as
   a training-configuration dimension the MLIP must cover (STRUCTURAL 1b);
 - the two slabs themselves, already strained, already tiled.
 
@@ -510,7 +514,7 @@ candidate whole numbers.
 
 **A note on v1.** Si/Si has no mismatch, so the solver must return the
 identity tiling, zero twist, and exactly zero strain. That makes the
-same-material reference run (`ARCHITECTURE.md` §2.3) double as the
+same-material reference member (`ARCHITECTURE.md` §2.3) double as the
 matcher's null test.
 
 ### 2.4 Splitting the residual strain
@@ -620,7 +624,7 @@ unlucky adatom away from truncating the slab.
 between the two dividing surfaces. After placement the minimum
 cross-slab atomic distance is checked; if it violates the floor, the gap
 is backed off and the adjustment is recorded, rather than aborting the
-run as prior art does.
+member as prior art does.
 
 **There is no registry search.** Prior art exposes a `lateral_shift`
 knob "to explore different bonding registries." Registry is a
@@ -1587,7 +1591,7 @@ read them, which is precisely how a truncated trajectory and a
 wrong-file fetch survived into a quoted result. The schema below is
 therefore not bookkeeping — it is what makes §7 possible at all.
 
-The analyzer emits one machine-readable document per run, containing:
+The analyzer emits one machine-readable document per member, containing:
 
 - **Provenance** (`VISION.md` goal 3): the potential generation and
   committee size, the seed set, the press mode with the load and depth
@@ -1616,7 +1620,7 @@ GPa), so no reader has to trust a factor typed into a report string.
 
 Each measure declares what it needs — the bonded structure, the
 separated fragments, a force curve, a snapshot series — and emits
-records. The analyzer resolves those needs against what the run
+records. The analyzer resolves those needs against what the member
 produced, computes what it can, and marks the rest `unresolved`. This is
 what makes the measure vector **pluggable** (`ARCHITECTURE.md` §2.3):
 adding an Imago descriptor, or a second all-electron reference, is
@@ -1668,8 +1672,9 @@ in §6.5.
 
 ## 7. Quality gates and diagnosis
 
-This section designs the two checks that decide whether a run is worth
-believing, and the reasoning that turns a bad number into an instruction
+This section designs the two checks that decide whether a member is
+worth believing, and the reasoning that turns a bad number into an
+instruction
 about what to do next. It realizes STRUCTURAL 3.
 
 It is the first section whose inputs are entirely our own. §6 hands it a
@@ -1910,7 +1915,7 @@ decides what the comparison was worth.
 One entry in that set is unavoidable. Si/Si has no lattice mismatch and
 Si/SiO₂ does, so the residual-strain systematic that this criterion
 would most like to see cancel does not — and no care in setting up the
-runs can fix it, because **you cannot contrast two material pairs
+members can fix it, because **you cannot contrast two material pairs
 without contrasting their mismatch.** It is an *entailed* difference,
 the irreducible price of the contrast rather than a flaw in it. The
 ratio is reported as only partially cancelling on its account. The gate
@@ -1992,8 +1997,9 @@ the front, ahead of every question about cause, and it did not exist in
 `ARCHITECTURE.md`'s original three-way routing — it falls out of §5's
 refusal to accept truncated trajectories and §6.5's checks. The second
 is that the chain reports the *first* actionable cause while **all**
-checks still run and are recorded, so a run with two problems does not
-hide the second one; it simply names the one that must be fixed first.
+checks still run and are recorded, so a member with two problems does
+not hide the second one; it simply names the one that must be fixed
+first.
 
 ### 7.7 The conclusion and its basis are reported separately
 
@@ -2072,7 +2078,7 @@ undertrained potential (`bulk_model`); a trajectory truncated partway
 (`void`); a structure with atoms lost through the boundary (`void`); a
 measure vector with an energy in the wrong units (the sanity bracket);
 a potential trained only on bulk configurations (`interface_coverage`);
-and a run whose interface reference is missing entirely
+and a member whose interface reference is missing entirely
 (`undiagnosed`, never `pass`).
 
 This is the one requirement that most directly answers §1.8. Prior art's
@@ -2373,7 +2379,7 @@ one inside the other (`ARCHITECTURE.md` §4.1).
 
 Each unit is self-describing: where its skeleton lives, a stable
 identifier, which consumer it serves (an M4 endpoint, or an M5 frame and
-which detector found it), and provenance backpointers — the run, the
+which detector found it), and provenance backpointers — the member, the
 trajectory, the frame index, the subcell, the potential generation, the
 seed set.
 
@@ -2383,7 +2389,7 @@ identical identifier, so Kaleidoscope's cache is correct by construction;
 any change to the structure or the settings yields a new one, so a stale
 result cannot be served for a structure that no longer exists. An
 identifier built from a frame number, a directory name, or a timestamp
-collides across runs — and a cache keyed on a colliding identifier is
+collides across members — and a cache keyed on a colliding identifier is
 prior art's newest-file-wins failure (§5.7) wearing new clothes.
 
 **What Kaleidoscope owns:** dispatch, caching, and tracking which units
