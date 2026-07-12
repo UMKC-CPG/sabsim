@@ -594,6 +594,17 @@ foundations, interaction rules. -->
       appear in the specification file, since nothing may fall back to a
       hidden code default. Pinning them is still open; **housing** them
       no longer is.
+- [ ] Value pinning IN PROGRESS: literature-anchored v1 knob values
+      PROPOSED in `dev/V1_VALUES.md` (2026-07-12), awaiting the PI's
+      ratification. Tier C (study-point physics: Ar energy, fluence,
+      dopant, pressure, hold, faces, ensemble) drafted with sources plus
+      three open forks (Ar energy 500 eV vs ~1 keV; ensemble 3 vs 5
+      seeds; SiO2 face + cristobalite-vs-quartz); Tier B (numerical /
+      methodology) drafted as engineering defaults. On ratification:
+      distill into DESIGN §2.7 / §3.6 / §4.6 / §5.9, author the §1.4
+      generator study spec + deployment rc template, and point the
+      Tier-D items at `DESIGN.md` §1.3. See `dev/V1_VALUES.md`
+      "When we resume".
 - [ ] Principle recorded by `DESIGN.md` §1.1, worth defending in review:
       **report, never restrict.** Refusing to evaluate and refusing to
       certify are different acts, and SABSIM performs only the second. A
