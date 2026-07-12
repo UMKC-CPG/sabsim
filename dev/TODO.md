@@ -634,6 +634,20 @@ foundations, interaction rules. -->
       rebind -> `assemble_pair(slab_A, slab_B, shared)`, matching §1. The
       prose honoring note below it was already correct (`PSEUDOCODE.md`
       §6).
+- [x] Second whole-chain `/refine` after §11 (2026-07-12): chain
+      consistent (VISION->ARCH, ARCH->DESIGN untouched; DESIGN->PSEUDOCODE
+      faithful — §11 maps 1:1 onto DESIGN §4.5; PSEUDOCODE->Code still
+      N/A). ONE finding, FIXED same turn: the potential-quality gate was
+      asserted to be "the same gate" acting upstream (§11.6) and reporting
+      downstream (§5) but was NOT a shared unit — §5 inlined its two
+      checks and §11.6 named a `run_potential_quality_gate` defined
+      nowhere. Factored `potential_quality_gate` into ONE §5 function that
+      both `evaluate_member_gates` (reads into the five-way diagnosis) and
+      §11.6 (acts on `.passes`) call, added `PotentialQualityVerdict`, and
+      retyped `ConvergenceReport.quality_gate` to it. Also recorded a
+      no-change observation: two top-level entry points now exist
+      (`exec_full_study`, `bootstrap_potential`) with manual v1 ordering —
+      consistent by design (`PSEUDOCODE.md` §5, §11.6).
 
 ---
 

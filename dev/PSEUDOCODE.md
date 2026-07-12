@@ -664,19 +664,39 @@ it (`DESIGN.md` §7.1). In v1 the gate is a **reporter**: it evaluates and
 reports, and does not act (`DESIGN.md` §7, VISION principle 5).
 
 ```
+record PotentialQualityVerdict:
+    # THE potential-quality gate's output (DESIGN §7.2-§7.3), returned as
+    # ONE object so its two consumers share it (see below). bulk_surface
+    # and interface are the depth-first outputs of the two check_*
+    # functions; each carries at least `.passes`.
+    bulk_surface: CheckResult   # §7.2 bulk/surface half (folds in §3.5)
+    interface:    CheckResult   # §7.3 interface-fidelity (STRUCTURAL 3)
+    passes:       boolean       # both halves pass
+
+function potential_quality_gate(potential, measures):
+    # THE potential-quality gate, as ONE named unit (DESIGN §7.2-§7.3), so
+    # its two callers invoke the SAME object and only DIFFER in what they
+    # do with it: evaluate_member_gates (below) READS the verdict into the
+    # five-way diagnosis; the bootstrap's convergence check (§11.6) ACTS on
+    # `.passes` to drive its loop. Identical gate, opposite consequence --
+    # exactly the §1 marker's "acts upstream, reports downstream."
+    bulk_surface = check_bulk_surface(potential, measures)   # §7.2 half
+    interface    = check_interface_fidelity(measures)   # §7.3, STRUCTURAL 3
+    return PotentialQualityVerdict{
+        bulk_surface: bulk_surface, interface: interface,
+        passes: (bulk_surface.passes and interface.passes) }
+
 function evaluate_member_gates(measures, member_specification, potential):
-    # Potential-quality gate (DESIGN §7.2-§7.3): is the MLIP good on its
-    # own terms (bulk/surface) and at the interface? This is meaningful
-    # for a member on its OWN terms, independent of any comparison. A
-    # failure is a POTENTIAL problem -> the remedy is more training data.
-    bulk_surface = check_bulk_surface(potential, measures)
-    interface    = check_interface_fidelity(measures)   # STRUCTURAL 3
+    # The potential-quality gate is READ here, not acted on -- v1's gate
+    # reports (DESIGN §7, VISION principle 5). A failure is a POTENTIAL
+    # problem -> the remedy is more training data.
+    quality = potential_quality_gate(potential, measures)   # DESIGN §7.2-3
 
     # The five-way diagnosis routes the CAUSE of a questionable bond
     # number using those per-member signals (DESIGN §7.6). The bond-outcome
     # RATIO itself is a relation, graded at the study level (§1); a
     # single member has no ratio to grade.
-    return diagnose(measures, bulk_surface, interface)
+    return diagnose(measures, quality.bulk_surface, quality.interface)
 ```
 
 ```
@@ -2426,23 +2446,28 @@ upstream, where acting is possible.
 
 ```
 record ConvergenceReport:
-    committee_uncertainty: MetricVerdict  # sigma across a full run vs cut
-    quality_gate:          GateReport     # the §5 gate, run to ACT
+    committee_uncertainty: MetricVerdict            # sigma over run vs cut
+    quality_gate:          PotentialQualityVerdict  # the §5 gate, run to ACT
     passed:                boolean
 
 function test_convergence(committee, store, pair_specification):
-    # Test 1 — committee SPREAD across a FULL protocol run is below
-    # threshold: the potential is confident everywhere the protocol goes.
-    uncertainty = committee_spread_over_run(committee,
-                                            pair_specification)   # §4.4
+    # Both tests read ONE full protocol run under the current committee
+    # (activation §10 + press/pull §9), so run it once, measure two ways.
+    run = run_protocol_under(committee, pair_specification)   # §9, §10
+
+    # Test 1 — committee SPREAD across that run is below threshold: the
+    # potential is confident everywhere the protocol goes (§4.4).
+    uncertainty = committee_spread(run)
     below = uncertainty.measured <= uncertainty.threshold
 
-    # Test 2 — the §5 potential-quality gate (bulk/surface AND interface,
-    # DESIGN §7), run for its VERDICT, which here DRIVES the loop. This is
-    # STRUCTURAL 3's hand-off (DESIGN §4.5): the bulk/surface half folds in
-    # §3.5's amorphous-structure validation (g(r)/ring/coordination) too.
-    quality = run_potential_quality_gate(committee,
-                                         pair_specification)   # [-> §5]
+    # Test 2 — THE §5 potential-quality gate: call the SAME shared
+    # potential_quality_gate function evaluate_member_gates (§5) calls, but
+    # ACT on its `.passes` to drive the loop, where §5 only reads it. That
+    # one shared object is what makes the §1 marker's "acts here, reports
+    # there" literally true. The bulk/surface half folds in §3.5's
+    # amorphous-structure validation (STRUCTURAL 3, DESIGN §4.5's hand-off).
+    measures = analyze_run(run, pair_specification)          # §8
+    quality  = potential_quality_gate(committee, measures)   # [-> §5]
 
     passed = below and quality.passes
     return (passed, ConvergenceReport{
@@ -2470,9 +2495,9 @@ ADOPTED (`VISION.md` principle 2) — driven by config, never authored
 here. The prototype at `prototypes/alf_deepmd/` already implements and
 unit-tests the two ALF contracts and the converter round-trip.
 
-`[DELEGATE -> §5]` the acting convergence gate (§11.6) reuses the §5
-potential-quality machinery; only its CONSEQUENCE differs — act versus
-report.
+`[DELEGATE -> §5]` the acting convergence gate (§11.6) calls the SAME
+shared `potential_quality_gate` function §5's `evaluate_member_gates`
+calls; only its CONSEQUENCE differs — act versus report.
 
 `[ABOVE this module]` re-entry — more material pairs, or new training
 targeted at a study's gate weaknesses (§1's commented outer loop) — is by
