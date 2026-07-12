@@ -366,6 +366,24 @@ foundations, interaction rules. -->
       `DESIGN.md` §6.4. Also noted: `separation_speed` (ProtocolKnob) is
       the single-rate special case, superseded by
       `numerical.pull_rate_ladder`.
+- [ ] Activation §3 depth-first pass DONE (`PSEUDOCODE.md` §10,
+      2026-07-12). The step-4 output became a concrete seam:
+      `activate_surfaces` returns ONE `ActivatedSlabs` (both activated
+      slabs AND both gate verdicts), guarded by `ACTIVATED_SLABS_CONTRACT`;
+      the §1 unpack, the §6 `stub_activate` honoring note, and the §3
+      contract index were rippled to match. New ProtocolKnobs declared:
+      `activation_mechanism`, `activation_cospecies` (+fraction),
+      `cascade_duration`, `between_impact_relaxation`, `reanneal_schedule`.
+      Left for the programmer: (1) pin those knobs' VALUES plus the frozen
+      v1 fluence / energy / normal incidence — the validation-metric
+      thresholds and the re-anneal protocol are already tracked in the
+      STRUCTURAL 1b follow-on below (g(r) / ring / coordination vs DFT +
+      experiment), so not duplicated here. (2) WIRING decision: `DESIGN.md`
+      §3.5 says the activation gate "feeds the potential-quality gate (§7;
+      STRUCTURAL 1b)", but §10 only gates the PIPELINE at the §1 seam — the
+      `ActivationVerdict` is not yet threaded upward into `MemberResult` /
+      the §7 gate. Decide whether the verdict surfaces in the member report
+      (a sequencer concern above §10's module scope).
 - [ ] STRUCTURAL 1b DESIGN follow-ons: BKS vs Vashishta as the silica
       generator, the amorphous-structure validation metrics + thresholds
       (g(r) / ring / coordination vs DFT + experiment), the seed-set

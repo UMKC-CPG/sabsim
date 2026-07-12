@@ -111,11 +111,17 @@ function exec_one_member(member_specification):
     # Step 4 — activate (amorphize) each slab's surface. A SEPARATE
     # module (DESIGN §3) with its own pass/fail gate (§3.5); in the
     # skeleton it is stubbed. It does NOT assume it ran before assembly
-    # (§5.3).
-    (slab_A, slab_B) = run_to_contract(
+    # (§5.3). The stage returns ONE ActivatedSlabs (§10.1): both activated
+    # slabs AND both gate verdicts. The contract checks verdict_A.passed
+    # and verdict_B.passed, so a FAILED activation gate is contract-invalid
+    # and halts HERE (§10.1) — the gate is enforced at this seam, not
+    # buried in the module.
+    activated = run_to_contract(
         () -> activate_surfaces(slab_A, slab_B, member_specification,
                                 potential),
         ACTIVATED_SLABS_CONTRACT)
+    slab_A = activated.slab_A   # rebind to the activated slabs; the
+    slab_B = activated.slab_B   # verdicts rode the contract check above
 
     # Step 5 — assemble the facing pair from the activated slabs (§7).
     structure = run_to_contract(
@@ -227,7 +233,9 @@ this document: `STRUCTURE_CONTRACT` and `BOND_DEBOND_CONTRACT` are §3,
 `MEASURE_VECTOR_CONTRACT` is §4. The structure stage's intermediate
 contracts are `SLABS_CONTRACT` (two valid `Slab`s plus their shared cell,
 §7.1) and `ACTIVATED_SLABS_CONTRACT` (both slabs amorphized and past the
-activation gate, `DESIGN.md` §3.5). `POTENTIAL_CONTRACT` is the one
+activation gate, `DESIGN.md` §3.5; its concrete form is §10.1's
+`ActivatedSlabs`, which carries both slabs AND both gate verdicts).
+`POTENTIAL_CONTRACT` is the one
 exception — not a record of ours but the external potential's loadable
 `pair_style` interface (its *quality* is judged separately by the §5
 gate; the guard here only checks it is a usable potential).
@@ -274,14 +282,27 @@ record MaterialKnobs:             # one per wafer; two wafers per member
     # (DESIGN §1.3).
 
 record ProtocolKnobs:
-    # The skeleton touches press + separation; the activation fields are
-    # declared but UNUSED there (activation is stubbed). [DEPTH-FIRST] the
-    # energy/
-    # angle DISTRIBUTIONS and the full field set: DESIGN §3 and §5.
-    activation_species: string    # argon by default (DESIGN §1.2)
-    activation_energy:  number
-    activation_angle:   number
-    activation_fluence: number    # ions per A^2, cell-size-independent
+    # Press + separation are exercised by the skeleton; the activation
+    # fields are declared here and REFINED by §10 (activation's depth-
+    # first pass), no longer a stub. What stays [DEPTH-FIRST] is only the
+    # energy/angle DISTRIBUTIONS at code level — v1 freezes each field to a
+    # single value (§10.3), but a real beam is neither monoenergetic nor
+    # unidirectional (DESIGN §3.2).
+    activation_mechanism: string  # WHICH activation method (DESIGN §3.1);
+                                  # v1 registers only bombardment (§10.1)
+    activation_species:   string  # projectile; argon by default (§1.2)
+    activation_cospecies: string or none   # optional co-deposit (iron the
+                                  # first accommodated), else none (§3.2)
+    activation_cospecies_fraction: number  # co-deposit fraction, if used
+    activation_energy:    number  # impact energy (single value in v1)
+    activation_angle:     number  # angle of incidence (normal in v1)
+    activation_fluence:   number  # ions per A^2, cell-size-independent
+    cascade_duration:     number  # NVE cascade time per impact (~ps, §3.3)
+    between_impact_relaxation: number  # border-thermostat settle between
+                                  # impacts, so the next starts cool (§3.3)
+    reanneal_schedule:    AnnealSchedule   # the MLIP re-anneal (§3.4,
+                                  # §10.5): temperature, duration, ensemble.
+                                  # A trapped glass bounds how far it goes
     initial_gap:        number    # slab separation at assembly (§2.6)
     press_control:      one of {load, displacement}   # DESIGN §5.2
     press_load:         number    # load or pressure reached
@@ -738,8 +759,11 @@ exists so every seam is exercised under real data flow.
     # -> the resulting MemberResult.trusted is FALSE (a plumbing member)
 ```
 
-**What each stand-in must still honour:** `stub_activate` returns valid,
-amorphization-free `Slab`s (§3); `mock_characterization` returns
+**What each stand-in must still honour:** `stub_activate` returns an
+`ActivatedSlabs` (§10.1) whose two slabs are valid but amorphization-free
+and whose two gate verdicts trivially PASS — it satisfies the same
+contract the real activation does, so §1's unpack and gate check are
+exercised, not special-cased; `mock_characterization` returns
 schema-valid `unresolved` MeasureRecords (§4); `classical_pair_style`
 satisfies the same potential contract the trained MLIP will; and
 `press_then_pull` writes the strided atomic-coordinate dump so
@@ -1820,3 +1844,359 @@ module — `press_temperature`, `press_approach_rate`, `contact_gap_
 threshold`, `bonded_contact_threshold`, `force_average_window`,
 `reference_pe_drift` — plus the target bonding pressure and hold duration.
 Their existence is pinned here; their numbers are a §5.9 DESIGN task.
+
+## 10. Surface activation — algorithms (step 4)
+
+This is the **fourth (and final) depth-first module pass**
+(`ARCHITECTURE.md` §5.4), on `DESIGN.md` §3. It refines the
+`activate_surfaces` body — §1's step-4 seam, guarded by
+`ACTIVATED_SLABS_CONTRACT` — to code-readiness, and it defines the
+concrete form of that contract. Like §9 it runs on a persistent LAMMPS
+driver, but the cascade runs under a `hybrid/overlay` ZBL + classical
+splice, **not** the MLIP; the MLIP enters only at the re-anneal (§10.5),
+which delegates back to §9.7.
+
+Prior art built and RAN this stage, so its failures are concrete
+(`PRIOR_ART.md` §1.2, §1.5): argon-only ZBL channels, SiO₂-hardcoded
+metrics, a whole-slab NVT that over-couples and QUENCHES the cascade
+before damage accumulates, a newest tree that dropped the frozen layer
+and `p p f` so it fails to amorphize AT ALL, a fresh LAMMPS process plus
+a full-slab disk round-trip PER IMPACT, an impact-COUNT dose, unseeded
+randomness, and a report-only "verification" with no threshold. Every
+routine below refuses one of those.
+
+### 10.1 Top-level shape, the pluggable mechanism, and the contract
+
+Activation is **per-wafer**: each surface is amorphized independently in
+vacuum, BEFORE the two ever face each other — that is the whole point of
+surface-activated bonding (`DESIGN.md` §3.1). So `activate_surfaces`
+activates the two slabs independently and returns the concrete form of
+`ACTIVATED_SLABS_CONTRACT`.
+
+```
+record ActivatedSlabs:
+    # The concrete form of §1's ACTIVATED_SLABS_CONTRACT: both slabs
+    # amorphized AND past the gate (DESIGN §3.5). The verdict is CARRIED,
+    # not merely logged, so run_to_contract (§1) can check verdict.passed
+    # — a failed gate is a contract-invalid artifact and the pipeline
+    # HALTS (gate, not warn). Prior art only PRINTED an unthresholded g(r)
+    # RMSD, so a defective surface passed silently.
+    slab_A:    Structure           # activated slab A (grips still unset)
+    slab_B:    Structure           # activated slab B
+    verdict_A: ActivationVerdict   # A's pass/fail gate result
+    verdict_B: ActivationVerdict   # B's pass/fail gate result
+
+record ActivationVerdict:
+    passed:          boolean    # AND over every registered metric (§10.6)
+    per_metric:      map from metric-name to MetricVerdict
+    activated_depth: number     # MEASURED amorphization depth, A (§10.6)
+    reason:          string     # names the failing metric when not passed
+
+record MetricVerdict:
+    measured:  number or Curve    # scalar OR a human-read curve (g(r), …)
+    reference: string             # which DFT/experimental reference used
+    threshold: number
+    passed:    boolean
+```
+
+`[SEAM — flagged, not yet rippled]` this refines §1's step-4 seam the way
+§9.1 refined the press/pull seam. §1 currently unpacks
+`(slab_A, slab_B) = run_to_contract(...)`; the honest form is one
+`ActivatedSlabs` whose `.slab_A` / `.slab_B` feed `assemble_pair` and
+whose `.verdict_A.passed` / `.verdict_B.passed` the contract checks. Left
+as a flagged one-line refinement for the programmer to approve — exactly
+as the `bond_debond_trajectory` ripple was flagged before it was applied.
+
+```
+function activate_surfaces(slab_A, slab_B, member_specification,
+                           potential):
+    # Each surface is activated INDEPENDENTLY (both are still in vacuum,
+    # not yet facing). Two calls, never one co-activation; the pair does
+    # not co-exist here. Being independent, the sequencer's ensemble
+    # (§10.8) or a future parallel map may run the two concurrently.
+    activated_A = activate_surface(slab_A, member_specification, potential)
+    activated_B = activate_surface(slab_B, member_specification, potential)
+    return ActivatedSlabs{
+        slab_A:    activated_A.slab,    slab_B:    activated_B.slab,
+        verdict_A: activated_A.verdict, verdict_B: activated_B.verdict }
+```
+
+The mechanism is a SEAM, not a hard-coded procedure (`DESIGN.md` §3.1).
+v1 registers one mechanism — energetic-particle bombardment — but plasma
+or reactive activation slot in behind the SAME signature without touching
+step 4's consumers. An ion beam and a fast-atom beam are identical in
+classical MD, so both are just one setting of the projectile spec (§10.3),
+not separate mechanisms.
+
+```
+function activate_surface(slab, member_specification, potential):
+    # Dispatch on the configured mechanism (DESIGN §3.1) — the same
+    # registry idiom as the §8 measures and the §9 press-control switch.
+    # v1 registers exactly one; the seam is what makes a plasma or
+    # reactive method a NON-invasive addition later.
+    mechanism = ACTIVATION_MECHANISMS[
+        member_specification.protocol.activation_mechanism]
+    return mechanism(slab, member_specification, potential)
+```
+
+```
+function energetic_particle_bombardment(slab, member_specification,
+                                        potential):
+    # The v1 mechanism (DESIGN §3.2–§3.5). Four stages: derive the
+    # concrete impact plan, run the classical + ZBL cascade to the target
+    # fluence, re-anneal under the MLIP, then GATE — validation runs on
+    # the ACCURATE (re-annealed) structure, not the classical one (§3.4).
+    spec    = derive_bombardment_spec(slab, member_specification)   # §10.3
+    driver  = open_cascade_driver(slab, potential,
+                                  member_specification)             # §10.2
+    damaged = run_cascade_to_fluence(driver, spec)                  # §10.4
+    relaxed = mlip_reanneal(damaged, potential,
+                            member_specification)                   # §10.5
+    verdict = activation_gate(relaxed, slab, member_specification)  # §10.6
+    relaxed = label_activated_skin(relaxed, verdict.activated_depth)  # §10.7
+    return record{ slab: relaxed, verdict: verdict }
+```
+
+### 10.2 open_cascade_driver — the correctness core
+
+This is the part prior art gets wrong (`DESIGN.md` §3.3). It mirrors
+§9.2's persistent-driver discipline, but the potential and the boundaries
+are cascade-specific.
+
+```
+function open_cascade_driver(slab, potential, member_specification):
+    # ONE persistent LAMMPS process for the WHOLE impact train, NOT a
+    # fresh process + full-slab disk round-trip per impact (prior art's
+    # antipattern, DESIGN §3.3 — the same one §9.2 refuses). At the doses
+    # SAB needs (thousands of impacts) that overhead is prohibitive.
+    #
+    # POTENTIAL: hybrid/overlay ZBL + the config-selected CLASSICAL
+    # generator (BKS or Vashishta for silica, Munetoh-Tersoff a fallback;
+    # Buckingham for ionic — DESIGN §3.3, §4.6), NOT the MLIP. ZBL handles
+    # the short-range collision, the classical part the bonding. The ZBL
+    # Z-pair channels are DERIVED from the species set (§10.3), never
+    # hand-enumerated (prior art's argon-only failure).
+    #
+    # HEAT SINK AND BOUNDARIES — the root cause prior art tuned around:
+    #   frozen_base       -> immobile bottom layer; anchors the slab so it
+    #                        does not drift, and absorbs recoil (§3.3)
+    #   thermostat_border -> Langevin on the lower/side region; drains
+    #                        cascade heat at a PHYSICAL rate
+    #   nve_interior      -> plain NVE, so the cascade stays BALLISTIC and
+    #                        is never artificially quenched (prior art's
+    #                        whole-slab NVT quenches the damage away)
+    # These are the SLAB's OWN geometric regions (a standalone slab in
+    # vacuum), DISTINCT from the pair-level LabeledGroups (§3) that
+    # assembly emits later — activation runs before there IS a pair.
+    #
+    # Z-BOUNDARY is `p p f` (or shrink-wrap): sputtered atoms LEAVE rather
+    # than wrap into a periodic image (§3.3) — a true free surface. The
+    # newest prior-art tree dropped this AND the frozen layer, so it fails
+    # to amorphize at all. The LATERAL cell is HELD FIXED, so the recorded
+    # substrate strain does not relax away (same reason as §9.2). The
+    # substrate is held at the target temperature between impacts (§3.3).
+    return driver
+```
+
+### 10.3 derive_bombardment_spec — species-generic, dose as fluence
+
+```
+record BombardmentSpec:
+    projectile_mass:  number         # from the projectile species (§3.2)
+    zbl_channels:     list of Z-pair # DERIVED from the species set
+    energy:           Distribution   # one frozen value in v1 (§3.2)
+    angle:            Distribution   # normal incidence in v1
+    impact_count:     integer        # from fluence x area, NOT a count
+    impact_seeds:     list of integer  # derived from ONE master seed
+    cascade_duration: number         # NVE time per impact (§10.4)
+    between_impact_relaxation: number  # settle between impacts (§10.4)
+
+function derive_bombardment_spec(slab, member_specification):
+    protocol = member_specification.protocol
+    ensemble = member_specification.ensemble
+
+    # PROJECTILE is species-generic (DESIGN §3.2): argon by default, an
+    # OPTIONAL co-species (iron first) co-deposited at a set fraction.
+    # Mass follows from the species — nothing is hand-set per material.
+    projectile_species = species_set_with_cospecies(protocol)
+    species_present    = species_of(slab)
+
+    # ZBL channels are DERIVED from substrate ∪ projectile (DESIGN §3.2),
+    # so a new material or co-species needs NO code change — prior art
+    # hand-enumerated Si/O/Ar and broke on anything else.
+    zbl_channels = zbl_pairs_from_species(
+        union(species_present, projectile_species))
+    projectile_mass = mass_of(protocol.activation_species)
+
+    # DOSE AS FLUENCE (DESIGN §3.2): the impact COUNT follows from
+    # fluence x surface area, so activation is comparable across cell
+    # sizes — an impact COUNT (prior art's knob) is not.
+    surface_area = lateral_area(slab)
+    impact_count = round(protocol.activation_fluence * surface_area)
+
+    # A RECORDED master seed governs impact positions, velocities, and the
+    # LAMMPS seeds (DESIGN §3.2) — for reproducibility (VISION goal 3) AND
+    # so the bond metric can be averaged over amorphization realizations
+    # by varying it (§10.8). Per-impact seeds are DERIVED from the one
+    # master seed; prior art's rewrite is unseeded, so it does not
+    # reproduce.
+    impact_seeds = derive_seeds(ensemble.master_seed, impact_count)
+
+    # v1 FREEZES energy/angle/pattern to single values (the protocol-knob
+    # freeze), but the spec ADMITS distributions since a real beam is
+    # neither monoenergetic nor unidirectional (DESIGN §3.2). Here each is
+    # the degenerate one-value distribution.
+    return BombardmentSpec{
+        projectile_mass: projectile_mass, zbl_channels: zbl_channels,
+        energy: single_value(protocol.activation_energy),
+        angle:  single_value(protocol.activation_angle),
+        impact_count: impact_count, impact_seeds: impact_seeds,
+        cascade_duration: protocol.cascade_duration,
+        between_impact_relaxation: protocol.between_impact_relaxation }
+```
+
+### 10.4 run_cascade_to_fluence — the per-impact loop
+
+```
+function run_cascade_to_fluence(driver, spec):
+    # The per-impact cycle (DESIGN §3.3), run on the PERSISTENT driver so
+    # there is no per-impact relaunch or disk round-trip.
+    for each seed in spec.impact_seeds:
+        # Insert the projectile above the surface with the spec'd velocity
+        # (sampled from the energy/angle distributions; v1 = one value).
+        position = sample_impact_position(driver, seed)
+        velocity = sample_impact_velocity(spec.energy, spec.angle, seed)
+        insert_projectile(driver, spec.projectile_mass, position, velocity)
+
+        # A few-ps NVE cascade: the collision stays ballistic in the
+        # interior while the Langevin border drains the heat (§10.2).
+        run_nve_cascade(driver, spec.cascade_duration)
+
+        # Short border-thermostatted relaxation back toward the target
+        # temperature BETWEEN impacts (DESIGN §3.3), so the next impact
+        # starts from an equilibrated substrate, not a hot one.
+        relax_border_thermostat(driver, spec.between_impact_relaxation)
+
+        # Atoms sputtered THROUGH the `p p f` boundary have left; a non-
+        # periodic box drops them, and here that loss is EXPECTED (a free
+        # surface) — the OPPOSITE of the pull's atom-count GATE (§9.6),
+        # where the box is closed and a lost atom is a failure.
+    return damaged_slab_snapshot(driver)
+```
+
+### 10.5 mlip_reanneal — the SABSIM addition (`DESIGN.md` §3.4)
+
+```
+function mlip_reanneal(damaged_slab, potential, member_specification):
+    # A stage prior art does NOT have (DESIGN §3.4). The classical cascade
+    # MADE the disorder; now re-equilibrate GENTLY under the MLIP so the
+    # final structure is MLIP/DFT-quality, not classical-quality — the
+    # first rung of the fidelity ladder (DESIGN §4.5). This is where the
+    # classical->accurate correction happens, and it runs BEFORE the gate
+    # (§10.6), so the gate judges the accurate structure.
+    #
+    # It DELEGATES to §9.7's minimize_then_anneal: the SAME MLIP driver, a
+    # near-equilibrium schedule. A kinetically trapped glass will not fully
+    # rearrange, so "re-annealed" means "as relaxed as this schedule got
+    # it" — the classical start must be a reasonable basin (STRUCTURAL 1b).
+    schedule = member_specification.protocol.reanneal_schedule
+    return minimize_then_anneal(damaged_slab, potential, schedule)  # §9.7
+```
+
+### 10.6 activation_gate — pass/fail with pluggable metrics (`§3.5`)
+
+```
+function activation_gate(activated_slab, crystalline_slab,
+                         member_specification):
+    # A GATE, not a report (DESIGN §3.5). Prior art's check_amorphous only
+    # PRINTED a g(r) RMSD with NO threshold, hardcoded the pairs to Si/O,
+    # and scanned depth top-down — stopping at the first crystalline-
+    # looking layer, so it could report 0 A of damage beneath a defective
+    # surface. Each metric here is pluggable, species-derived, and
+    # compared to a reference with a real THRESHOLD.
+    per_metric = empty map
+    for each metric in ACTIVATION_METRICS:   # a registry, like §8 measures
+        per_metric[metric.name] = metric.evaluate(
+            activated_slab, crystalline_slab, member_specification)
+
+    # The amorphization DEPTH profile is the AUTHORITATIVE measurement that
+    # build_slab's thickness criterion (§7.4) only ESTIMATED a-priori via
+    # activated_depth_of(material) — closing that loop — and that §10.7
+    # uses to label the activated skin.
+    activated_depth = per_metric["amorphization_depth"].measured
+
+    # PASS iff EVERY metric passes; one failure fails the gate, and the
+    # reason names WHICH, so the §1 halt is diagnosable.
+    passed = all(v.passed for v in per_metric.values)
+    reason = "" if passed else first_failing_metric(per_metric)
+    return ActivationVerdict{
+        passed: passed, per_metric: per_metric,
+        activated_depth: activated_depth, reason: reason }
+```
+
+The registered metrics (`ACTIVATION_METRICS`, DESIGN §3.5) — each a
+species-derived measurement compared to a DFT/experimental reference:
+
+- **g(r) and partial g_AB(r)**, pairs DERIVED from the species present,
+  using the density-reference normalization prior art got right: the
+  near-surface amorphous region is ~20% less dense than the crystal
+  below, so the reference density must be the LOCAL slab's, not the full
+  cell's (a genuinely good kernel to KEEP, `PRIOR_ART.md` §1.5).
+- **Coordination-number distribution and per-species defect fraction**,
+  generic over species — not the Si-only form prior art hardcoded.
+- **Ring statistics** — absent from prior art — the network-topology
+  check that separates a TRUE amorphous network from a merely defective
+  crystal.
+- **A robust amorphization-depth profile** (disorder vs depth), replacing
+  the fragile top-down scan and yielding the `activated_depth` above.
+
+### 10.7 label_activated_skin — record what the cascade amorphized
+
+```
+function label_activated_skin(slab, activated_depth):
+    # The cascade CHANGED which atoms are amorphous; record it. The
+    # activated_skin (LabeledGroups, §3) is the set of atoms shallower than
+    # the MEASURED amorphization depth (§10.6), NOT an a-priori guess.
+    # Assembly (§7.5) re-emits the PAIR-level labeled groups, but the
+    # activated_skin it needs is THIS measured set — step 6's press tracks
+    # it (§9.3). Written here so the measurement is not recomputed later.
+    slab.labeled_groups.activated_skin =
+        atoms_shallower_than(slab, activated_depth)
+    return slab
+```
+
+### 10.8 What bottoms out, what delegates
+
+`[BOTTOMS OUT here]` the persistent cascade driver — hybrid/overlay ZBL
+splice, frozen-base / Langevin-border / NVE-interior heat sink, and the
+`p p f` boundary (§10.2); the species-generic spec derivation — fluence
+-> count, ZBL channels from the species set, seed derivation (§10.3); the
+per-impact insert/cascade/relax loop (§10.4); the gate's pluggable
+species-derived metrics and their AND (§10.6); and the activated-skin
+labeling (§10.7). Each is a LAMMPS-driver operation or a metric plus a
+threshold.
+
+`[DELEGATE -> §9.7]` the MLIP re-anneal (§10.5) reuses
+`minimize_then_anneal` — the same MLIP driver, a near-equilibrium
+schedule. Activation AUTHORED the disorder; §9.7 relaxes it.
+
+`[DELEGATE -> POTENTIAL, DESIGN §4]` the classical generator
+(BKS/Vashishta/Munetoh-Tersoff/Buckingham, config-selected, §4.6) and the
+MLIP committee (step 2) are §4 concerns; this module CONSUMES both, never
+authors them.
+
+`[ABOVE this module]` the ensemble (STRUCTURAL 4: averaging the bond
+metric over amorphization realizations, `DESIGN.md` §3.2) is looped by the
+sequencer via `realization_count` (§2), varying the master seed; this
+module runs ONE realization. Same division of labor as §9.8.
+
+`[CODE level, below pseudocode]` the exact LAMMPS fix syntax, the ring-
+statistics algorithm (likely an adopted library, `VISION.md` principle 2),
+and the g(r)/coordination kernels — some of which are the good prior-art
+kernels to KEEP (the density-reference normalization, DESIGN §3.6).
+
+`[DESIGN §3.6 / numeric follow-ons]` the FROZEN v1 values — the single
+fluence, energy, and normal incidence; the cascade duration and between-
+impact relaxation; the re-anneal schedule; and every gate THRESHOLD with
+its DFT/experimental reference DATA. Their existence is pinned here; the
+numbers and the reference curves are a DESIGN task.
