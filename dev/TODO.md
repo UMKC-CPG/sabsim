@@ -249,11 +249,19 @@ so they are not discovered late (two touch non-negotiable goals). -->
       pressing is a DESIGN-level option (`ARCHITECTURE.md` §2.3 MLIP +
       surface-dynamics bullets).
 - [ ] Carry "what to run" vs "where to run it" separation into the
-      module boundaries — now located (2026-07-08): the "where" lives in
-      the deployment / resource-class layer of `ARCHITECTURE.md` §4.1
-      (per-job CPU/GPU class, nodes, walltime, env), externalized from
-      code. Residual: settle the exact deployment-config shape at DESIGN
-      time (`VISION.md` principle 1, `ARCHITECTURE.md` §2.3, §4.1).
+      module boundaries — located (2026-07-08), STRUCTURE decided
+      (2026-07-12): the "where" is a single machine-local deployment
+      config with TWO sections — a hardware inventory (the per-cluster
+      swap unit) and a per-KIND-OF-JOB usage map keyed by resource class
+      (`cascade-md`, `bond-md`, direct `vasp`, the `sequence` footprint);
+      Tier B (ALF, Kaleidoscope) is EXCLUDED — it owns its own Parsl/SLURM
+      and the config points at it, never duplicates it
+      (`ARCHITECTURE.md` §4.1). The input fork was also resolved: the CWD
+      study spec is self-complete (material + protocol + numerical +
+      ensemble); the rc-style file is deployment-ONLY, no layered defaults
+      (`DESIGN.md` §1.2, §1.4). Residual: the serialization FORMAT
+      (TOML/YAML/...) stays a §1.8 DESIGN follow-on (`VISION.md`
+      principle 1, `ARCHITECTURE.md` §4.1).
 - [ ] Decide which module owns provenance-by-discipline record-keeping
       (each step recording its inputs, exact tool version, and
       settings) (`ARCHITECTURE.md` §2.3 / §4, `VISION.md` goal 3 and

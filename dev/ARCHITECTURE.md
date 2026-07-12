@@ -697,6 +697,44 @@ CPU and then a gentle MLIP anneal on GPU:
 | MLIP re-anneal + press / separate      | GPU (`deepmd`) |
 | Imago (step 8)                         | CPU            |
 
+**Structure of the deployment config — two concerns, one file.** The
+config separates *what the machine has* from *how each kind of work uses
+it*, because the two change on different clocks:
+
+- **Hardware section** — the machine's inventory: partitions, cores and
+  GPUs per node, memory, walltime ceilings, the module / environment
+  stack, the scheduler. Stable; it changes only when the machine does, so
+  it is the **per-cluster swap unit** — retargeting to a new HPC rewrites
+  this section and nothing above it.
+- **Usage section** — keyed by **kind of job**, not by script: the LAMMPS
+  `cascade-md` and `bond-md` runs, any direct `vasp` not inside ALF, and
+  the thin `sequence` footprint. Each names a resource *class* and a size
+  (node / GPU counts, walltime). This is mostly machine-independent — a
+  cascade wants "CPU, ~1 node" on any cluster — so it travels with the
+  pipeline, not with the site.
+
+The seam between the two is the word **class**: usage names an abstract
+class plus a size; the hardware section binds that class to *this*
+machine's concrete partition and modules, so retargeting is a one-section
+swap. Keying usage by *kind of job* rather than by script follows from
+"routing is per job, not per step" and `VISION.md` principle 7 — the
+Tier-A sequencer is one script that launches several job kinds, so a
+per-script key would lump resource shapes that must differ, while a
+per-kind key lets two scripts that launch the same work share a profile.
+
+**The Tier-B boundary — not all resource config is ours.** The usage
+section covers **Tier C** (the LAMMPS cascade and press / pull, plus any
+direct VASP) and the **Tier-A** sequencer. **Tier B is excluded by
+design:** ALF (DeePMD training and the VASP-inside-ALF labeling) and
+Kaleidoscope (Imago characterization) each own their own Parsl + SLURM
+submission (the "no Parsl in Parsl" rule and wall 5), so the deployment
+config *points at* their configs rather than duplicating them — DeePMD
+GPU counts live in ALF's Parsl config, not here. Three of the five rows
+above (VASP-inside-ALF, DeePMD training, Imago) are Tier B and so
+informational — work the pipeline pays for but does not itself route; the
+cascade and re-anneal / press-pull rows are the Tier-C jobs the usage
+section actually keys.
+
 **Execution walls, flagged for DESIGN.**
 1. **Parsl-in-Parsl** — avoided by the tier separation above.
 2. **CPU/GPU routing** — every job carries a resource class the

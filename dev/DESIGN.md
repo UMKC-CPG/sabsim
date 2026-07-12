@@ -175,7 +175,15 @@ on it.
 - **Ensemble** — the master seed and the realization count.
 - **Deployment** — resource class, node counts, walltime, modules. This
   lives in a *separate document* (`ARCHITECTURE.md` §4.1) and the member
-  specification cannot express it at all.
+  specification cannot express it at all. That document is a single
+  machine-local config with two sections — a hardware inventory (the
+  per-cluster swap unit) and a per-**kind-of-job** usage map (§4.1) — and
+  it is the ONLY input route outside the study spec. The strict-vs-layered
+  input question is resolved in favor of strict: the CWD study
+  specification carries material, protocol, numerical, and ensemble
+  **self-completely** (§1.4), and the deployment file is deployment-ONLY —
+  it never layers a scientific or numerical default into the spec, so
+  nothing that moves the answer can hide in a settings file.
 
 The protocol/numerical line has a crisp test. **A numerical setting is
 one whose influence on the answer must vanish as it is refined. A
