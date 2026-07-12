@@ -91,6 +91,20 @@ function exec_one_member(member_specification):
     # walking skeleton satisfies it with a classical pair_style
     # stand-in; the bootstrap wave (steps 1-2) later satisfies it with
     # the trained MLIP through the SAME seam (ARCHITECTURE §5.1).
+    #
+    # WHAT LIVES BEHIND THIS SEAM (the /refine marker). resolve_potential
+    # LOOKS UP a fingerprinted, already-manufactured potential (the
+    # potential_ref of DESIGN §1.6); it does NOT train one inline. The
+    # manufacturing is the bootstrap loop (§11, DESIGN §4.5), a SEPARATE
+    # top-level process that runs UPSTREAM of every member. That placement
+    # decides WHERE the potential-quality gate ACTS: the bootstrap's
+    # convergence criterion (§11.6) IS the acting form of the §5 gate --
+    # inside it the potential is still mutable, so a fail DRIVES the loop.
+    # By the time a member reaches HERE the potential is FROZEN, so the
+    # same gate can only REPORT (§5, evaluate_member_gates). The
+    # production-side bulk/surface check reads as a reporter for THAT
+    # reason, not by oversight -- DESIGN §7.2's "gate the build" is
+    # discharged upstream, where acting is still possible.
     potential = run_to_contract(
         () -> resolve_potential(member_specification),   # skeleton:
                                                           # classical
@@ -238,7 +252,9 @@ activation gate, `DESIGN.md` §3.5; its concrete form is §10.1's
 `POTENTIAL_CONTRACT` is the one
 exception — not a record of ours but the external potential's loadable
 `pair_style` interface (its *quality* is judged separately by the §5
-gate; the guard here only checks it is a usable potential).
+gate — as a REPORT here, and as the ACTING convergence check inside the
+bootstrap, §11.6, that manufactured it; the guard here only checks it is
+a usable potential the member looks up by fingerprint).
 
 `[DEPTH-FIRST]` the bodies of the structure stages (`build_slabs` /
 `assemble_pair`, now in §7), `activate_surfaces`, `run_bond_debond_md`,
@@ -747,9 +763,12 @@ exists so every seam is exercised under real data flow.
 ```
 # exec_one_member, each stage resolved to its walking-skeleton stand-in:
     potential  = classical_pair_style(...)      # steps 1-2 SKIPPED
-    slabs      = build_slabs(...)               # step 3, real
-    slabs      = stub_activate(slabs)           # step 4, STUB
-    structure  = assemble_pair(slabs, shared)   # step 5, trivial (Si/Si)
+    (slab_A, slab_B, shared) = build_slabs(...)  # step 3, real
+    activated  = stub_activate(slab_A, slab_B)   # step 4, STUB: returns
+    slab_A     = activated.slab_A                # an ActivatedSlabs
+    slab_B     = activated.slab_B                # (§10.1), verdicts PASS
+    structure  = assemble_pair(slab_A, slab_B,   # step 5, trivial (Si/Si)
+                               shared)
     bond_debond_trajectory = press_then_pull(structure)   # steps 6-7,
                                                           # real
     measures   = run_analyzer(structure,               # M1 real, the
@@ -2200,3 +2219,269 @@ fluence, energy, and normal incidence; the cascade duration and between-
 impact relaxation; the re-anneal schedule; and every gate THRESHOLD with
 its DFT/experimental reference DATA. Their existence is pinned here; the
 numbers and the reference curves are a DESIGN task.
+
+---
+
+## 11. Bootstrap — manufacturing the potential (steps 1, 2)
+
+This is the **fifth and last depth-first module pass**
+(`ARCHITECTURE.md` §5.4), on `DESIGN.md` §4 (especially §4.5). It is the
+one buildable unit (`ARCHITECTURE.md` §5.2) that had no pass until now:
+the process that MANUFACTURES the machine-learned potential every member
+consumes. The earlier "all modules at depth" was really FOUR — this
+closes the count to five.
+
+**It is orchestration, not new physics.** Almost every DOING step here
+is adopted (`VISION.md` principle 2): the training task and the ensemble
+loader are the two ALF contracts (`DESIGN.md` §4.2), the HDF5<->DeePMD
+bridge is the unit-tested converter (§4.3), the committee-uncertainty
+and UDD math live in ALF's `MLMD_calculator` (§4.4), and the labels come
+from VASP. What is OURS is the LOOP that wires them and, above all, the
+config GENERATION (§11.3), which REUSES the activation (§10) and
+bond/debond (§9) stages already written — run to HARVEST the
+configurations they visit, not to produce a measurement. So this pass is
+short and mostly delegates; §11.7 is a long ledger for that reason.
+
+**It sits ABOVE `exec_one_member`.** The bootstrap runs ONCE per
+material pair (the species union, STRUCTURAL 1a) and emits ONE
+fingerprinted potential that many members then look up by `potential_ref`
+(§1, `DESIGN.md` §1.6). So it is a top-level process alongside
+`exec_full_study` (§1), NOT a stage inside the per-member pipeline —
+which is exactly why §1's `resolve_potential` is a LOOKUP, not a call
+that trains.
+
+**The circularity it resolves.** Steps 4/6/7 run MD *on* the potential,
+but the configurations they visit are what the potential must be trained
+on (`DESIGN.md` §4.5). The builder also consumes the potential's relaxed
+lattice constants (§7.2) while the potential must be trained on the
+builder's strained substrates (STRUCTURAL 4) — a TWO-WAY coupling, which
+is why this is a LOOP and not a straight line.
+
+### 11.1 The module's top-level shape
+
+The loop is seed -> generate -> label -> retrain -> refine, repeated
+until the potential passes BOTH convergence tests (§11.6). This is one
+pass of the OUTER loop (`VISION.md` principle 5), run by hand in v1: the
+inner refine-loop iterates, but re-entry for MORE pairs or study-driven
+weaknesses is manual.
+
+```
+record BootstrapResult:
+    # What the bootstrap emits and §1's resolve_potential later looks up.
+    potential:   PotentialHandle    # loadable pair_style deepmd committee
+    fingerprint: string             # content id (§1.6) = a potential_ref
+    convergence: ConvergenceReport  # the two tests of §11.6, for provenance
+    provenance:  Provenance         # seed set, VASP subset, ALF rounds, seeds
+```
+
+```
+function bootstrap_potential(pair_specification, reference_data):
+    # STEP 1 (seed): a committee that just does not explode near
+    # equilibrium; its only job is to survive step-2 generation (§11.2).
+    committee = seed_committee(pair_specification, reference_data)   # §11.2
+    store = new_training_store(reference_data)   # ANI-style HDF5 (§4.3),
+                                                 # primed with the seed labels
+
+    # STEP 2 (generate the hard configs cheaply, ONCE): the violent cascade
+    # on the classical+ZBL potential (no MLIP), the interface/separation on
+    # the seed committee — the configurations the potential must cover but a
+    # near-equilibrium seed has never seen (§11.3).
+    configs = generate_hard_configs(committee, pair_specification)   # §11.3
+
+    # STEP 3 (label, convert, retrain): VASP labels a selected subset, the
+    # converter folds it into the store, ALF retrains -> the first committee
+    # that has actually SEEN the hard region (§11.4).
+    committee = label_convert_retrain(configs, store,
+                                      pair_specification)            # §11.4
+
+    # STEP 4 (refine by sampling): re-run the protocol under the committee;
+    # the sampler flags where it is STILL uncertain; VASP labels those;
+    # retrain; repeat until BOTH convergence tests pass (§11.6). v1 iterates
+    # THIS loop; the outer re-entry stays by hand (VISION principle 5).
+    converged = false
+    while not converged:
+        (committee, converged, report) = refine_by_sampling(
+            committee, store, pair_specification)          # §11.5, §11.6
+
+    return BootstrapResult{
+        potential:   freeze(committee),
+        fingerprint: fingerprint_of(committee, store),
+        convergence: report,
+        provenance:  provenance_of(store) }
+```
+
+### 11.2 seed_committee — enough not to explode near equilibrium
+
+```
+function seed_committee(pair_specification, reference_data):
+    # DESIGN §4.5 step 1. Train an INITIAL committee on hand-built near-
+    # equilibrium DFT: bulk Si and cristobalite, their surfaces, the
+    # STRUCTURAL-4 strained substrates, and moderate-T rattled snapshots.
+    # The bar is LOW on purpose — "does not fly apart near equilibrium",
+    # not "accurate" — because its only job is to run step-2 generation
+    # long enough to REACH the hard configs (§11.3). The strained-substrate
+    # entries are here because the builder (§7.2) will demand exactly them.
+    #
+    # DELEGATES to ALF contract 1 (train_DEEPMD_ensemble_task, §4.2):
+    # n_models potentials from different seeds (§4.4). We supply the seed
+    # SET; ALF does the training.
+    seed_set = assemble_seed_set(pair_specification, reference_data)
+    return train_committee(seed_set)      # [DELEGATE -> ALF, §4.2]
+```
+
+### 11.3 generate_hard_configs — reuse §9/§10 in "generate" mode
+
+The one genuinely OURS step, and the one worth stating carefully: the
+bootstrap has NO cascade and NO MD of its own. It RUNS the activation
+(§10) and bond/debond (§9) stages and HARVESTS the configurations they
+visit. "Generate mode" is a CONSUMER difference, not a stage fork:
+production reads the verdict and measures off these stages; the bootstrap
+reads their trajectory FRAMES as unlabeled training candidates. The
+stages themselves are unchanged — the same code, read two ways.
+
+```
+function generate_hard_configs(committee, pair_specification):
+    # DESIGN §4.5 step 2. Two config families, from the two stages; in
+    # BOTH the gate verdict is INFORMATIONAL, never halting — a "failed"
+    # activation is a valuable hard config to LABEL, not a pipeline stop
+    # (the §1 halt is a PRODUCTION rule, not a generation one).
+    candidates = empty list
+
+    # (a) Amorphized-surface configs. Inside activation the cascade ITSELF
+    # always runs on the classical+ZBL potential (§10.2), in production and
+    # here alike; the committee enters only via the gentle re-anneal
+    # (§10.5). So the MLIP is never asked to reproduce a cascade (§3.3).
+    (slab_A, slab_B, shared) = build_slabs(pair_specification, committee)
+    activated = activate_surfaces(slab_A, slab_B, pair_specification,
+                                  committee)                        # §10
+    candidates.extend(harvest_frames(activated))
+
+    # (b) Pressed-interface and bond-breaking configs. These run on the
+    # COMMITTEE (§9) — the very region the potential must get right, so its
+    # own trajectory is where the training signal is richest.
+    structure = assemble_pair(activated.slab_A, activated.slab_B,
+                              shared, pair_specification)           # §7.5
+    bond_debond = run_bond_debond_md(structure, committee,
+                                     pair_specification)            # §9
+    candidates.extend(harvest_frames(bond_debond))
+
+    return candidates
+```
+
+### 11.4 label_convert_retrain — VASP truth, then ALF retrains
+
+```
+function label_convert_retrain(candidates, store, pair_specification):
+    # DESIGN §4.5 step 3. The DOING is all adopted; ours is only the
+    # SELECTION of what to label and the interface-subcell framing.
+    #
+    # Pick a SUBSET to label — VASP is the cost bottleneck. Interface
+    # configs are labeled as INTERFACE SUBCELLS (§6.4), not whole
+    # production cells: the potential is short-ranged so the signal is
+    # local, and all-electron cost climbs steeply with atom count. A
+    # TRAINING config need only be valid and relevant, which frees the
+    # subcell choice — unlike the §7.3 cross-check, which must fix the
+    # system across two methods (DESIGN §4.5's stated asymmetry).
+    subset = select_for_labeling(candidates, pair_specification)
+
+    labels = vasp_label(subset)        # [DELEGATE -> VASP, ALF QM_task]
+    absorb_converted(store, labels)    # [DELEGATE -> converter, §4.3]
+    return train_committee(store)      # [DELEGATE -> ALF contract 1, §4.2]
+```
+
+### 11.5 refine_by_sampling — chase the potential's own uncertainty
+
+```
+function refine_by_sampling(committee, store, pair_specification):
+    # DESIGN §4.5 step 4. Re-run the protocol under the CURRENT committee
+    # and let it TELL us where it is still ignorant, instead of guessing.
+    # Two sampler modes, both from ALF's MLMD_calculator (§4.4), both
+    # potential-agnostic:
+    #   - uncertainty-triggered capture: grab a frame when sigma_E or
+    #     sigma_F exceeds Escut/Fscut (what it is ALREADY unsure about);
+    #   - UDD bias: add E_bias = w * sigma_E so the dynamics climb the
+    #     uncertainty gradient INTO weak regions (Kulichenko 2023).
+    # A run the §7.3 live monitor ABORTS is not wasted: it feeds exactly
+    # here, and the bounded UDD excursion from its triggering config is the
+    # most targeted sampler we have (DESIGN §4.5, §7.3).
+    flagged = resample_high_uncertainty(committee,
+                                        pair_specification)     # §4.4
+    committee = label_convert_retrain(flagged, store,
+                                      pair_specification)       # §11.4 again
+    (converged, report) = test_convergence(committee, store,
+                                           pair_specification)  # §11.6
+    return (committee, converged, report)
+```
+
+### 11.6 test_convergence — the ACTING form of the §5 gate
+
+This is the section the §1 marker points at. Convergence is TWO tests
+together (`DESIGN.md` §4.5), and the second IS the potential-quality gate
+of §5 — but here it ACTS, because the potential is still mutable: a fail
+does not report, it sends the loop back to §11.5 for more data. The SAME
+gate, downstream in §5, can only report, because by then the potential is
+frozen. That is the whole resolution of the `/refine` sequencing finding:
+DESIGN §7.2's "gate the build, before the builder" is discharged HERE,
+upstream, where acting is possible.
+
+```
+record ConvergenceReport:
+    committee_uncertainty: MetricVerdict  # sigma across a full run vs cut
+    quality_gate:          GateReport     # the §5 gate, run to ACT
+    passed:                boolean
+
+function test_convergence(committee, store, pair_specification):
+    # Test 1 — committee SPREAD across a FULL protocol run is below
+    # threshold: the potential is confident everywhere the protocol goes.
+    uncertainty = committee_spread_over_run(committee,
+                                            pair_specification)   # §4.4
+    below = uncertainty.measured <= uncertainty.threshold
+
+    # Test 2 — the §5 potential-quality gate (bulk/surface AND interface,
+    # DESIGN §7), run for its VERDICT, which here DRIVES the loop. This is
+    # STRUCTURAL 3's hand-off (DESIGN §4.5): the bulk/surface half folds in
+    # §3.5's amorphous-structure validation (g(r)/ring/coordination) too.
+    quality = run_potential_quality_gate(committee,
+                                         pair_specification)   # [-> §5]
+
+    passed = below and quality.passes
+    return (passed, ConvergenceReport{
+        committee_uncertainty: uncertainty,
+        quality_gate: quality, passed: passed })
+```
+
+### 11.7 What bottoms out, what delegates
+
+`[OURS, bottoms out here]` the LOOP structure (§11.1); the seed-set
+COMPOSITION (§11.2 — which structures to hand ALF); the "generate mode"
+frame-harvesting that reuses §9/§10 (§11.3); the label-SUBSET selection
+and the interface-subcell framing (§11.4); and the TWO-test convergence
+with the gate run to ACT (§11.6). These are our orchestration decisions.
+
+`[DELEGATE -> §9, §10, §7]` all config GENERATION runs the already-
+written activation (§10), bond/debond (§9), and structure (§7) stages
+UNCHANGED; the bootstrap only harvests their frames. No stage forks for
+this — the "generate" reading is a consumer choice (§11.3).
+
+`[DELEGATE -> ALF/DeePMD/VASP, DESIGN §4.2-§4.4]` training
+(`train_DEEPMD_ensemble_task`), the ensemble loader, the HDF5<->DeePMD
+converter, the committee sigma and the UDD bias, and VASP labeling are
+ADOPTED (`VISION.md` principle 2) — driven by config, never authored
+here. The prototype at `prototypes/alf_deepmd/` already implements and
+unit-tests the two ALF contracts and the converter round-trip.
+
+`[DELEGATE -> §5]` the acting convergence gate (§11.6) reuses the §5
+potential-quality machinery; only its CONSEQUENCE differs — act versus
+report.
+
+`[ABOVE this module]` re-entry — more material pairs, or new training
+targeted at a study's gate weaknesses (§1's commented outer loop) — is by
+hand in v1 (`VISION.md` principle 5). This module manufactures ONE
+potential per invocation.
+
+`[DESIGN §4.6 / numeric follow-ons]` the FROZEN v1 values — descriptor
+`se_e2_a` and r_cut 6.0 A, `n_models` 4, the loss schedule, `Escut` /
+`Fscut`, the UDD weight `E_en_bias_weight`, the committee-sigma
+convergence threshold, and the seed-set composition — are pinned as
+EXISTING here; the numbers themselves are a DESIGN task (the STRUCTURAL
+1b/3 follow-ons).

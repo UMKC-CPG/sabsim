@@ -384,6 +384,26 @@ foundations, interaction rules. -->
       `ActivationVerdict` is not yet threaded upward into `MemberResult` /
       the §7 gate. Decide whether the verdict surfaces in the member report
       (a sequencer concern above §10's module scope).
+- [ ] Bootstrap §4 depth-first pass DONE (`PSEUDOCODE.md` §11,
+      2026-07-12) — the FIFTH and last buildable-unit pass
+      (`ARCHITECTURE.md` §5.2), closing the "all modules at depth" count
+      from four to five (the bootstrap had been deferred as "the Wave-2
+      thing behind the seam"). §11 refines `DESIGN.md` §4.5's seed ->
+      generate -> label -> retrain -> refine loop as ORCHESTRATION over
+      the already-written stages: config generation REUSES activation
+      (§10) and bond/debond (§9) in "generate mode" (harvest trajectory
+      frames, no stage fork), and training/labeling/conversion DELEGATE to
+      the two ALF contracts plus the `prototypes/alf_deepmd/` converter
+      (`DESIGN.md` §4.2-§4.4). The bootstrap is a TOP-LEVEL process above
+      `exec_one_member` (it manufactures ONE fingerprinted potential per
+      pair; §1's `resolve_potential` is a LOOKUP, not a training call). A
+      §1 MARKER now records that the potential-quality gate's ACTING form
+      is the bootstrap's convergence check (§11.6) — which is precisely
+      why the production-side bulk/surface gate only REPORTS. Left for the
+      programmer: the §4.6 numeric values are already tracked in the
+      STRUCTURAL 1b follow-on (descriptor/r_cut, `n_models`, loss
+      schedule, `Escut`/`Fscut`, UDD weight, committee-sigma convergence
+      threshold, seed-set composition), so not duplicated here.
 - [ ] STRUCTURAL 1b DESIGN follow-ons: BKS vs Vashishta as the silica
       generator, the amorphous-structure validation metrics + thresholds
       (g(r) / ring / coordination vs DFT + experiment), the seed-set
@@ -593,13 +613,27 @@ foundations, interaction rules. -->
       full depth up front is itself a way to code into a box (§5.1). Open
       scope question for the session that starts this: confirm the Si/Si
       walking-thread membership from §5.3 Wave 0 before pseudocoding it.
-- [ ] `/refine` note: `ARCHITECTURE.md` §5 governs PSEUDOCODE's SHAPE
-      (build order, skeleton-first), not just its content — a future
-      refine should check the pseudocode's *sequencing* against §5.3's
-      waves, not only whether each algorithm matches its DESIGN section.
-      (The pre-existing per-atom-committee-spread question stays filed in
-      the DESIGN section above, tagged "a code-level question for
-      PSEUDOCODE"; not duplicated here.)
+- [x] `/refine` note — sequencing check RAN (2026-07-12). The standing
+      ask (does the pseudocode's SHAPE — build order, skeleton-first —
+      obey `ARCHITECTURE.md` §5.3's waves, not just its content?) was
+      executed. Result: Wave-0 order (§6 vs §5.3), the steps-3/4/5 reorder
+      freedom, and the potential/characterization seams all matched. ONE
+      substantive finding — the potential-quality gate's two-times split
+      (`DESIGN.md` §7.2: bulk/surface BEFORE the builder) was absent from
+      §1's control flow — was resolved not by moving the production gate
+      but by recognizing its ACTING form lives upstream in the bootstrap's
+      convergence check: a §1 marker plus the new bootstrap pass
+      (`PSEUDOCODE.md` §11; see the DESIGN-section DONE item above). The
+      pre-existing per-atom-committee-spread question stays filed in the
+      DESIGN section, tagged "a code-level question for PSEUDOCODE".
+- [x] `/refine` leftover — FIXED (2026-07-12): the §6 walking-skeleton
+      snippet had shown the PRE-ripple bare-`slabs` flow, contradicting
+      §1's post-ripple `ActivatedSlabs` unpack. Now updated to
+      `(slab_A, slab_B, shared) = build_slabs(...)` ->
+      `activated = stub_activate(slab_A, slab_B)` -> the `slab_A`/`slab_B`
+      rebind -> `assemble_pair(slab_A, slab_B, shared)`, matching §1. The
+      prose honoring note below it was already correct (`PSEUDOCODE.md`
+      §6).
 
 ---
 
