@@ -115,9 +115,11 @@ Propose-and-move-on unless the PI objects; converge later:
 - **`reanneal_schedule`:** relax → short NVT hold at ~300–500 K for
   ~tens of ps → quench to 300 K. Gentle by design: it must not un-trap
   the kinetically frozen glass.
-- **`force_average_window`:** ~a few ps; noise floors (reference PE
-  drift, "force returned to zero," peak resolution) set relative to the
-  thermal RMS.
+- **`force_average_window`:** in grip-DISPLACEMENT units, small vs a
+  bond length (DESIGN §5.4), NOT time — a length window resolves the
+  pull peak identically across the rate ladder, while a time window
+  would smear each rate differently. Noise floors (reference PE drift,
+  "force returned to zero," peak resolution) stay relative to thermal RMS.
 - **`minimum_bulk_thickness`:** stays a §2.5 convergence study, NOT a
   fixed number here.
 

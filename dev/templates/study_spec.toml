@@ -179,10 +179,12 @@ pull_rate_ladder = [
   { value = 3.2,  unit = "m/s" },
   { value = 10.0, unit = "m/s" },
 ]
-# Averaging window for the pull force (§5.4, §9.5). NOTE: §2 describes
-# this in grip-DISPLACEMENT units; V1_VALUES sets it as a time (~ps).
-# Kept as a time here; the units follow-on reconciles the two.
-force_average_window = { value = 3.0, unit = "ps" }
+# Averaging window for the pull force, in grip-DISPLACEMENT units
+# (§5.4, §9.5): the force-vs-displacement curve is smoothed over a fixed
+# LENGTH so its peak resolves identically at every rate rung. A time
+# window would smear each rate by a different displacement and corrupt
+# the ladder. Small vs a bond length; provisional value (redline later).
+force_average_window = { value = 0.5, unit = "angstrom" }
 frame_stride         = 100        # store 1 frame per N MD steps (§5.4)
 # --- [DEPTH-FIRST] in §2: provisional starting values, converged when
 # --- each owning module lands. Present so nothing the run uses hides.
