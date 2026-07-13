@@ -1,0 +1,154 @@
+"""The seam guard and the contracts it enforces (PSEUDOCODE.md §1).
+
+Every pipeline stage is routed through one guard, ``run_to_contract``.
+The sequencer never calls a stage and hopes: it runs the stage, then
+refuses to let the pipeline advance unless the stage's output satisfies
+the contract the NEXT stage depends on, halting loudly instead of
+passing a bad artifact downstream (ARCHITECTURE.md §4.1, §5.1). This is
+the "gate, don't warn" rule that the prior-art failure of quoting an
+incomplete run as a result would have been caught by (DESIGN.md §5.7).
+
+A contract here is a name plus a validator: a function that inspects an
+artifact and returns a failure reason, or None if the artifact is good.
+The validators are shape checks in W0 — the depth-first schema detail is
+a later concern (PSEUDOCODE.md §1) — but the guard around them is the
+permanent structure.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from sabsim.pipeline.exec_artifacts import (
+    ActivatedSlabs,
+    BondDebondResult,
+    Potential,
+    Slab,
+    SharedCell,
+    Structure,
+)
+from sabsim.pipeline.measures import MeasureStatus, MeasureVector
+
+
+class PipelineHalt(Exception):
+    """Raised when a stage produces a contract-invalid artifact.
+
+    Halting is deliberate: a contract-invalid artifact stops the whole
+    pipeline (ARCHITECTURE.md §4.1) rather than corrupting every stage
+    downstream. The message names the seam and the reason.
+    """
+
+
+@dataclass(frozen=True)
+class Contract:
+    """A named check on the artifact passing one seam (PSEUDOCODE §1)."""
+
+    name: str
+    validate: Callable[[object], str | None]   # returns a reason, or None
+
+
+def check_contract(artifact: object, contract: Contract) -> str | None:
+    """Return the contract's failure reason for ``artifact``, or None."""
+    return contract.validate(artifact)
+
+
+def halt_pipeline(reason: str) -> None:
+    """Stop the pipeline at a broken seam, loudly (ARCHITECTURE §4.1)."""
+    raise PipelineHalt(reason)
+
+
+def run_to_contract(work: Callable[[], object], contract: Contract):
+    """Run one stage, then hold its output to the next stage's contract.
+
+    ``work`` is a zero-argument callable — the stage with its inputs
+    already supplied, written ``lambda: stage(args)`` at the call site,
+    so a stage of any arity fits this one guard signature. If the result
+    fails ``contract`` the pipeline halts; otherwise the artifact is
+    returned for the next stage.
+    """
+    artifact = work()
+    failure = check_contract(artifact, contract)
+    if failure is not None:
+        halt_pipeline(f"contract '{contract.name}' not met: {failure}")
+    return artifact
+
+
+# ---------------------------------------------------------------------
+# The named contracts referenced at the sequencer's call sites. Each is
+# the shape the NEXT stage depends on (PSEUDOCODE.md §1).
+# ---------------------------------------------------------------------
+
+def _validate_potential(artifact: object) -> str | None:
+    """A usable potential the member can load (POTENTIAL_CONTRACT, §1)."""
+    if not isinstance(artifact, Potential):
+        return "expected a Potential artifact"
+    if not artifact.loadable:
+        return "potential is not loadable"
+    if not artifact.pair_style:
+        return "potential has no pair_style interface"
+    return None
+
+
+def _validate_slabs(artifact: object) -> str | None:
+    """Two built slabs plus their shared cell (SLABS_CONTRACT, §7.1)."""
+    if not (isinstance(artifact, tuple) and len(artifact) == 3):
+        return "expected (slab_a, slab_b, shared_cell)"
+    slab_a, slab_b, shared = artifact
+    if not (isinstance(slab_a, Slab) and isinstance(slab_b, Slab)):
+        return "both slabs must be Slab artifacts"
+    if not isinstance(shared, SharedCell):
+        return "missing the shared coincidence cell"
+    return None
+
+
+def _validate_activated(artifact: object) -> str | None:
+    """Both slabs amorphized AND past the gate (ACTIVATED, §10.1)."""
+    if not isinstance(artifact, ActivatedSlabs):
+        return "expected an ActivatedSlabs artifact"
+    if not artifact.verdict_a.passed:
+        return f"slab A failed activation: {artifact.verdict_a.reason}"
+    if not artifact.verdict_b.passed:
+        return f"slab B failed activation: {artifact.verdict_b.reason}"
+    return None
+
+
+def _validate_structure(artifact: object) -> str | None:
+    """An assembled pair with labeled groups (STRUCTURE_CONTRACT, §3)."""
+    if not isinstance(artifact, Structure):
+        return "expected a Structure artifact"
+    if not artifact.labeled_groups:
+        return "structure carries no labeled groups"
+    return None
+
+
+def _validate_bond_debond(artifact: object) -> str | None:
+    """A press outcome plus at least one pull (BOND_DEBOND, §9.1)."""
+    if not isinstance(artifact, BondDebondResult):
+        return "expected a BondDebondResult artifact"
+    if artifact.press is None:
+        return "no press outcome recorded"
+    if not artifact.pulls:
+        return "the pull-rate ladder produced no pulls"
+    return None
+
+
+def _validate_measure_vector(artifact: object) -> str | None:
+    """Every measure carries a status (MEASURE_VECTOR_CONTRACT, §4)."""
+    if not isinstance(artifact, MeasureVector):
+        return "expected a MeasureVector artifact"
+    for measure in artifact.measures:
+        if not isinstance(measure.status, MeasureStatus):
+            return f"measure '{measure.name}' has no valid status"
+    return None
+
+
+POTENTIAL_CONTRACT = Contract("POTENTIAL_CONTRACT", _validate_potential)
+SLABS_CONTRACT = Contract("SLABS_CONTRACT", _validate_slabs)
+ACTIVATED_SLABS_CONTRACT = Contract(
+    "ACTIVATED_SLABS_CONTRACT", _validate_activated)
+STRUCTURE_CONTRACT = Contract("STRUCTURE_CONTRACT", _validate_structure)
+BOND_DEBOND_CONTRACT = Contract(
+    "BOND_DEBOND_CONTRACT", _validate_bond_debond)
+MEASURE_VECTOR_CONTRACT = Contract(
+    "MEASURE_VECTOR_CONTRACT", _validate_measure_vector)
