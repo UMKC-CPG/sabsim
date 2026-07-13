@@ -677,6 +677,37 @@ through on-disk file formats, so passing data between them is just
 reading and writing on the cluster's shared parallel filesystem — no
 explicit staging. Large trajectories go on scratch, not home.
 
+**Driving the Tier-C engines — a native binding behind an ASE membrane.**
+The LAMMPS Tier-C runs (the step-4 cascade and the step-6/7 press/pull)
+are driven through LAMMPS's **Python binding**, not by emitting a static
+input script. The press/pull is a stateful, multi-phase protocol whose
+transitions are decided mid-run — the §5.2 dual contact criterion reads a
+running-average normal stress to know when contact is real — and it is
+fix- and group-heavy (frozen base, Langevin border, NVE interior, moving
+grips, load control). A persistent in-process driver expresses all of
+that and reads forces and stresses back without a disk round-trip: this
+is the "persistent LAMMPS driver" `DESIGN.md` §3 chose over prior art's
+fresh-process-per-phase. **ASE is the structure membrane** (`VISION.md`
+principle 4): the builder hands the driver an ASE `Atoms` object and
+takes frames back as `Atoms`, so the common currency crossing every seam
+is ASE while the fix-heavy MD rides LAMMPS's native channel. **LAMMPS
+dumps stay the durable trajectory artifact** the analyzer consumes and
+`run_to_contract` guards, so the file-contract model above and a
+hand-rerunnable reproducer both survive; the live read-back is only for
+control decisions. **Parallelism comes from running the binding under
+MPI** — `mpirun -np N python driver.py`, each rank building a `lammps`
+instance over `MPI_COMM_WORLD`, so LAMMPS domain-decomposes and scales
+exactly as `lmp_mpi` does; the binding is not single-core. The one
+discipline this imposes: control decisions key on GLOBAL, collective
+quantities (a thermo `pzz`, a summed grip force) so every rank decides
+identically and stays in lockstep, or are computed on rank 0 and
+broadcast — never on rank-local data, which would desync the ranks. The
+standalone `lmp_mpi` executable is kept as a hand-rerunnable reproducer
+(the driver can dump the exact script) and a fallback, NOT as the source
+of parallelism. The whole `mpirun` invocation is the submitted `bond-md`
+job, so a native crash is a failed job the sequencer halts on cleanly
+(wall 4) — that job boundary is the isolation.
+
 **Deployment / resource layer — the "where to run" knob.** Per
 `VISION.md` principle 1, every site-specific and resource choice lives in
 an editable deployment config, never in code: resource *class* (CPU vs
