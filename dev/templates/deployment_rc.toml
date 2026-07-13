@@ -55,7 +55,9 @@ nodes     = 1
 walltime  = { value = 18.0, unit = "h" }
 
 [usage.vasp]
-# Direct DFT labeling calls made by the bootstrap (§4, §11): CPU-heavy.
+# Direct VASP NOT inside ALF — the bootstrap's hand-built seed configs
+# (§4, §11): CPU-heavy. VASP called from WITHIN ALF is Tier B, excluded
+# above; only this direct, non-ALF DFT is routed here.
 partition = "cpu"
 nodes     = 4
 walltime  = { value = 6.0, unit = "h" }

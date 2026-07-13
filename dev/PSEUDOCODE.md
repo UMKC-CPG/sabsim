@@ -281,7 +281,7 @@ record MemberSpecification:
     material:      MaterialKnobs   # per-wafer crystal + face + identity
     protocol:      ProtocolKnobs   # activation, press, separate settings
     numerical:     NumericalKnobs  # tolerances, cutoffs, strides, budgets
-    ensemble:      EnsembleKnobs   # master seed + realization count
+    ensemble:      EnsembleKnobs   # master seed + two realization counts
     potential_ref: string         # WHICH potential generation this member
                                   # uses — a content fingerprint, or the
                                   # classical stand-in marker in the
@@ -360,9 +360,17 @@ record NumericalKnobs:
                                       # count as settled (§9.4, DESIGN §5.3)
 
 record EnsembleKnobs:
-    master_seed:       integer    # one master seed; per-realization
-                                  # seeds are derived from it (DESIGN §1.2)
-    realization_count: integer    # how many seeds to average over
+    # TWO sampling axes, not one (V1_VALUES; DESIGN §6.6). The amorphized
+    # skin and the thermal state are independent sources of run-to-run
+    # spread, so each gets its own realization count; the §6.6 error bar
+    # is taken over their product.
+    master_seed:         integer  # one master seed; every per-realization
+                                  # seed is derived from it (DESIGN §1.2)
+    amorphization_count: integer  # independent cascade realizations, i.e.
+                                  # how many amorphized skins to average
+                                  # over (the dominant axis; v1 uses 3)
+    velocity_count:      integer  # thermal-velocity reseeds PER amorph
+                                  # realization (the second axis; v1 = 1)
 
 record Relation:
     # A relation compares a subset of the study's members across one or
