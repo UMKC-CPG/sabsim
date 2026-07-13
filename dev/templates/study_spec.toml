@@ -210,5 +210,5 @@ reference_pe_drift   = { value = 0.001, unit = "eV/atom" }
 # ---------------------------------------------------------------------
 [ensemble]
 master_seed         = 20260713
-amorphization_seeds = 3         # v1 (ratified); more tightens the spread
-velocity_seeds      = 1         # thermal reseeds per amorph realization
+amorphization_count = 3         # v1 (ratified); more tightens the spread
+velocity_count      = 1         # thermal reseeds per amorph realization
