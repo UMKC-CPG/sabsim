@@ -259,9 +259,10 @@ so they are not discovered late (two touch non-negotiable goals). -->
       (`ARCHITECTURE.md` §4.1). The input fork was also resolved: the CWD
       study spec is self-complete (material + protocol + numerical +
       ensemble); the rc-style file is deployment-ONLY, no layered defaults
-      (`DESIGN.md` §1.2, §1.4). Residual: the serialization FORMAT
-      (TOML/YAML/...) stays a §1.8 DESIGN follow-on (`VISION.md`
-      principle 1, `ARCHITECTURE.md` §4.1).
+      (`DESIGN.md` §1.2, §1.4). Serialization FORMAT resolved to **TOML**
+      (ratified 2026-07-13, `DESIGN.md` §1.8); the schema mechanism on
+      top of it stays a follow-on. Templates authored:
+      `dev/templates/study_spec.toml` and `dev/templates/deployment_rc.toml`.
 - [ ] Decide which module owns provenance-by-discipline record-keeping
       (each step recording its inputs, exact tool version, and
       settings) (`ARCHITECTURE.md` §2.3 / §4, `VISION.md` goal 3 and
@@ -594,17 +595,25 @@ foundations, interaction rules. -->
       appear in the specification file, since nothing may fall back to a
       hidden code default. Pinning them is still open; **housing** them
       no longer is.
-- [ ] Value pinning IN PROGRESS: literature-anchored v1 knob values
-      PROPOSED in `dev/V1_VALUES.md` (2026-07-12), awaiting the PI's
-      ratification. Tier C (study-point physics: Ar energy, fluence,
-      dopant, pressure, hold, faces, ensemble) drafted with sources plus
-      three open forks (Ar energy 500 eV vs ~1 keV; ensemble 3 vs 5
-      seeds; SiO2 face + cristobalite-vs-quartz); Tier B (numerical /
-      methodology) drafted as engineering defaults. On ratification:
-      distill into DESIGN §2.7 / §3.6 / §4.6 / §5.9, author the §1.4
-      generator study spec + deployment rc template, and point the
-      Tier-D items at `DESIGN.md` §1.3. See `dev/V1_VALUES.md`
-      "When we resume".
+- [x] Value pinning RATIFIED (2026-07-13): the literature-anchored v1
+      knob values in `dev/V1_VALUES.md` are accepted. The three forks
+      resolved: **Ar energy 500 eV** default (user-overridable across
+      50-500 eV, optionally lower e.g. 50 eV); **3 amorphization seeds**;
+      **beta-cristobalite(100) SiO2 / Si(100)**. Format = **TOML**. The
+      values are distilled INTO DESIGN §2.7 (faces), §3.6 (energy /
+      fluence-to-depth / seeds), §5.9 (pressure / temperature / hold /
+      rate ladder); §4.6 needed no change (the forks touch no MLIP-backend
+      knob). Templates authored under `dev/templates/`. Face, polymorph,
+      material, energy, and seed count are v1 DEFAULTS, not freezes.
+- [ ] Tier-D numeric follow-ons are NOT "pick a value" — they are
+      derived or need reference DATASETS (`DESIGN.md` §1.3): lattice
+      constants, shared cell / tiling / strain, bond cutoffs, the
+      interface-subcell size, the activated depth, and the potential; the
+      gate THRESHOLDS (g(r), ring stats, coordination, surface energies,
+      the Maszara ratio) need reference data, not chosen constants. These
+      are reclassified out of value-pinning; resolve them via their owning
+      section's derivation or convergence study, not by typing a number.
+      See `dev/V1_VALUES.md` "Tier D".
 - [ ] Principle recorded by `DESIGN.md` §1.1, worth defending in review:
       **report, never restrict.** Refusing to evaluate and refusing to
       certify are different acts, and SABSIM performs only the second. A

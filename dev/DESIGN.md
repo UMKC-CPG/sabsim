@@ -373,7 +373,14 @@ temperature or crystal face is the outer-loop sweep deferred in
 `TODO.md`; §1's contribution to it is that a sweep becomes a set of
 specifications rather than an edit to the machinery.
 
-**Still DESIGN follow-ons:** the serialization format and the schema
+**Serialization format — TOML** (ratified 2026-07-13), for both the
+study input file and the deployment rc file. TOML was chosen for its
+readable, typed key/value tables and unambiguous parse; a change would
+need a concrete blocker. The **schema mechanism** built on top of it
+(how required-versus-optional keys are declared and validated) is still
+a follow-on.
+
+**Still DESIGN follow-ons:** the schema
 mechanism; the exact fingerprint definition (which fields are included,
 and how a value declared irrelevant to comparability is excluded); the
 initial classification of difference-set fields into
@@ -690,13 +697,16 @@ registry knob (→ no registry; ensemble over seeds); ad hoc region
 selection in every input file (→ the labeled-group contract); and
 adopting one slab's box for the pair (→ assert commensurability).
 
-**Frozen for v1:** crystalline β-cristobalite SiO₂ against crystalline
-Si, plus the Si/Si same-material reference that null-tests the matcher;
-lattices from the current committee, checked against VASP; the misfit
-tolerance and cell-area budget set to admit the amorphous interlayer's
-buffering (STRUCTURAL 4). Still DESIGN follow-ons: the exact Miller
-faces (a material knob), the tolerance and budget values themselves, and
-cristobalite versus quartz.
+**Frozen for v1:** crystalline **β-cristobalite(100) SiO₂ against
+crystalline Si(100)** (ratified 2026-07-13), plus the Si/Si
+same-material reference that null-tests the matcher; lattices from the
+current committee, checked against VASP; the misfit tolerance and
+cell-area budget set to admit the amorphous interlayer's buffering
+(STRUCTURAL 4). β-cristobalite is cubic and the closest lattice match to
+silicon, so (100) is a clean low-index face on both sides. The face,
+the polymorph, and the target material are v1 **defaults**, not freezes:
+each is a study-input knob a user may change later. Still DESIGN
+follow-ons: the misfit tolerance and cell-area budget values themselves.
 
 ## 3. Surface activation (amorphization)
 
@@ -832,10 +842,20 @@ impact-count dose; unseeded randomness; and working-directory-as-config
 (`PRIOR_ART.md` §1.2 item 7).
 
 **Frozen for v1:** mechanism = bombardment; projectile = argon (iron the
-first accommodated co-species); a single frozen fluence, energy, and
-normal incidence; the generator is a config-selected classical + ZBL
-potential (silica per §4 and STRUCTURAL 1b); the MLIP re-anneal and the
-validation gate are both mandatory, not optional.
+first accommodated co-species); **argon energy 500 eV** (ratified
+2026-07-13, a user-overridable default — MD amorphization is validated
+across 50–500 eV, and 500 eV amorphizes reliably while keeping the
+cascade box tractable; a user may go **lower, e.g. 50 eV**, for a
+gentler cascade, or higher toward the experimental fast-atom-beam ~1 keV
+at the cost of a bigger box); **normal incidence**; the **fluence is the
+knob and the ~2–3 nm amorphized skin depth is the measured target** —
+iterate fluence until §3.5's depth profile hits ~2–3 nm; **3
+amorphization seeds** for the ensemble spread (the cheaper rung; more
+seeds tighten the error bar at linear cost). The generator is a
+config-selected classical + ZBL potential (silica per §4 and STRUCTURAL
+1b); the MLIP re-anneal and the validation gate are both mandatory, not
+optional. Energy, angle, and
+seed count are v1 defaults, not freezes — each is a study-input knob.
 
 ## 4. MLIP backend and bootstrap
 
@@ -1327,14 +1347,21 @@ flat walltime and a truncated trajectory (→ budgeted walltime and a
 completeness gate); and a report string that names a potential the run
 did not use (→ provenance emitted from the run, not typed).
 
-**Frozen for v1:** load-controlled press to a single target pressure,
-with one displacement-controlled cross-check on the Si/Si reference; a
-single press temperature, depth allowance, and hold duration; at least
-three pull rates spanning a decade; bonded/not-bonded plus contact
-quality always reported. Still DESIGN follow-ons: the target bonding
-pressure and hold duration, the noise-floor thresholds for the reference
-state and for "force returned to zero," the contact-quality definition's
-bond-counting cutoff, and the ensemble size in seeds.
+**Frozen for v1:** load-controlled press to a **target pressure of
+~1 MPa** (ratified 2026-07-13 — Si wafers bond near 0.8 MPa and contact
+loads sit below ~1.6 MPa), with one displacement-controlled cross-check
+on the Si/Si reference; **press/hold temperature 300 K** (SAB is a
+room-temperature process, fixed by VISION); a single depth allowance;
+**hold duration ~100–200 ps** (a convergence-tested MD quantity, not a
+match to the experimental ~300 s, which is inaccessible); a **pull-rate
+ladder of {1, 3.2, 10} m/s** (three rungs, one decade, log-spaced —
+§5.4 wants ≥3 rates over a decade, and slower is better but cost-bounded,
+with M3 reporting the distance to quasi-static); bonded/not-bonded plus
+contact quality always reported. Pressure, temperature, hold, and the
+rate ladder are v1 defaults, not freezes — each is a study-input knob.
+Still DESIGN follow-ons: the noise-floor thresholds for the reference
+state and for "force returned to zero," and the contact-quality
+definition's bond-counting cutoff.
 
 ## 6. Bond-outcome analyzer and measures
 

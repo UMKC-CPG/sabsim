@@ -1,0 +1,67 @@
+# =====================================================================
+# SABSIM deployment configuration (the "rc" file) — machine-local
+# ---------------------------------------------------------------------
+# This is the ONLY input route outside the study spec (DESIGN.md §1.2),
+# and it is deployment-ONLY: it NEVER layers a scientific or numerical
+# default into the study, so nothing that moves the answer can hide here
+# (ARCHITECTURE.md §4.1). Physics lives in the CWD study spec; only
+# "where to run" lives here.
+#
+# It carries TWO concerns in ONE file:
+#   [hardware]   what this cluster HAS  (the per-cluster swap unit)
+#   [usage.*]    how to USE it, keyed by KIND OF JOB, not by script
+# Routing is per job, not per step (§4.1). Move to a new machine by
+# swapping the [hardware] block; the usage map keeps working unchanged.
+#
+# EXCLUDED here on purpose: Tier-B tools that own their own Parsl/SLURM
+# (ALF, Kaleidoscope). There is no Parsl-in-Parsl (§4.1 wall 5), so we
+# do not route their internal steps. The values below are EXAMPLES for
+# the local admin to set; they are not defaults baked into the code.
+# =====================================================================
+
+[hardware]
+# The per-cluster swap unit: replace this block to move machines.
+cluster_name    = "pixstor"
+scheduler       = "slurm"
+default_account = "cpg"
+modules         = ["lammps/2024", "deepmd-kit/3.0", "vasp/6.4"]
+
+  [hardware.partitions.cpu]
+  name           = "general"
+  cores_per_node = 64
+  max_walltime   = { value = 48.0, unit = "h" }
+
+  [hardware.partitions.gpu]
+  name          = "gpu"
+  gpus_per_node = 4
+  max_walltime  = { value = 24.0, unit = "h" }
+
+# ---------------------------------------------------------------------
+# Usage map: one block per KIND OF JOB (§4.1). The "partition" seam
+# names an abstract resource class the [hardware] section resolves, so
+# the same map survives a hardware swap. The four v1 job kinds match
+# ARCHITECTURE.md §4.1: cascade-md, bond-md, vasp, and sequence.
+# ---------------------------------------------------------------------
+[usage.cascade-md]
+# Classical + ZBL amorphization cascades (§3): CPU-bound LAMMPS.
+partition = "cpu"
+nodes     = 2
+walltime  = { value = 12.0, unit = "h" }
+
+[usage.bond-md]
+# MLIP bond/debond MD (§5): GPU-accelerated DeePMD evaluation.
+partition = "gpu"
+nodes     = 1
+walltime  = { value = 18.0, unit = "h" }
+
+[usage.vasp]
+# Direct DFT labeling calls made by the bootstrap (§4, §11): CPU-heavy.
+partition = "cpu"
+nodes     = 4
+walltime  = { value = 6.0, unit = "h" }
+
+[usage.sequence]
+# The orchestrating driver that submits and chains the jobs above.
+partition = "cpu"
+nodes     = 1
+walltime  = { value = 48.0, unit = "h" }

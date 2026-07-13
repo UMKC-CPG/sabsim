@@ -1,15 +1,38 @@
-# v1 Knob Values — PROPOSED, awaiting ratification
+# v1 Knob Values — RATIFIED
 
-> **Status:** PROPOSED (2026-07-12), **NOT yet ratified.** These are
-> literature-anchored starting values for the v1 frozen point, drafted
-> for the PI to ratify. Once ratified they distill INTO DESIGN's
-> "…and v1" subsections (§2.7, §3.6, §4.6, §5.9) and become the content
-> of the §1.4 generator's fully-populated study spec plus the deployment
-> rc template. Until then, treat nothing here as canonical.
+> **Status:** RATIFIED (2026-07-13). The three open forks are resolved
+> (see "Ratified decisions" immediately below); the serialization format
+> is TOML. These literature-anchored values are now the v1 frozen point.
+> The remaining work is to distill them INTO DESIGN's "…and v1"
+> subsections (§2.7, §3.6, §4.6, §5.9) and to populate the §1.4
+> generator's study spec plus the deployment rc template. This document
+> stays as the provenance record for WHY each value was chosen.
 >
 > **Role:** a working/staging document, **not** a chain level. It exists
-> so the value-pinning task survives between sessions. When resumed, see
-> "When we resume" at the bottom.
+> so the value-pinning task survives between sessions.
+
+## Ratified decisions (2026-07-13)
+
+The PI resolved the three forks and fixed the file format:
+
+1. **Ar energy — 500 eV** is the v1 default (the MD-tractable choice). A
+   user may override it through the study input file; it is not
+   hard-frozen, only defaulted. The validated MD band is 50–500 eV, so
+   a user may optionally go **lower (e.g. 50 eV)** for a gentler cascade,
+   or higher toward the experimental ~1 keV at a larger-box cost.
+2. **Ensemble size — 3 amorphization seeds** to start (the cheaper rung).
+3. **SiO₂ face + polymorph — β-cristobalite(100).** The (100) face was
+   chosen; the polymorph stays β-cristobalite (closest lattice match to
+   silicon), which is cubic, so (100) is a clean low-index face.
+4. **Serialization format — TOML** for both the study spec and the
+   deployment rc file, unless a concrete blocker appears.
+
+**These are v1 defaults, not freezes.** The Ar energy (1), the crystal
+face and polymorph (3), and the target material itself are all knobs the
+user changes later through the study input file. v1 fixes a specific,
+runnable starting point; it does not remove the choice. Only quantities
+listed in Tier D / §1.3 (derived or reference-data-bound) are genuinely
+"not a setting."
 
 ## Why some "physical" knobs are really MD choices
 
@@ -110,16 +133,16 @@ worth recording now that it is anchored:
   fracture. The exact SAB-regime numbers still need pinning from one
   specific paper (the standing `VISION.md` TODO).
 
-## Open forks for the PI
+## Open forks for the PI — RESOLVED (2026-07-13)
 
-1. **Ar energy** — 500 eV (MD-tractable) or ~1 keV (match experiment,
-   bigger box)?
-2. **Ensemble size** — 3 amorphization seeds (cheap) or 5 (tighter error
-   bar)?
-3. **SiO₂ face + cristobalite-vs-quartz** — pick the face and polymorph
-   (a §2.7 material-knob follow-on).
+1. **Ar energy** — resolved to **500 eV** (MD-tractable default;
+   user-overridable across 50–500 eV, optionally lower e.g. 50 eV).
+2. **Ensemble size** — resolved to **3 amorphization seeds** (the cheaper
+   rung; more tightens the error bar at linear cost).
+3. **SiO₂ face + polymorph** — resolved to **β-cristobalite(100)** faced
+   against **Si(100)**.
 
-Everything else above is proposed to take as-is unless redlined.
+Everything else above was taken as proposed.
 
 ## Tier D — reminder: these are NOT knobs
 
@@ -132,19 +155,26 @@ Maszara ratio) need reference DATASETS, not chosen constants. Part of
 finishing the pinning is pointing the TODO "numeric follow-ons" at §1.3
 so they stop masquerading as pinnable.
 
-## When we resume
+## What was completed on ratification (2026-07-13)
 
-1. PI ratifies the Tier-C table and resolves the three forks above.
-2. Distill the ratified values INTO DESIGN §2.7 / §3.6 / §4.6 / §5.9
-   ("…and v1" subsections), replacing "still DESIGN follow-ons" prose.
-3. Author the §1.4 generator's fully-populated **study spec** (the
-   physics: material + protocol + numerical + ensemble) and the
-   deployment **rc template** (hardware + per-kind-of-job usage, `ARCH`
-   §4.1).
-4. Point the Tier-D "numeric follow-ons" in `TODO.md` at `DESIGN.md`
-   §1.3, reclassifying them out of "pick a value."
-5. Decide the serialization FORMAT (TOML/YAML/…), the last §1.8 follow-
-   on, before the spec files are real.
+All five resume steps are now done:
+
+1. ✅ PI ratified the Tier-C table and resolved the three forks.
+2. ✅ Distilled the ratified values INTO DESIGN §2.7 (faces),
+   §3.6 (energy / fluence-to-depth / seeds), §5.9 (pressure /
+   temperature / hold / rate ladder). §4.6 needed no change — the forks
+   touch no MLIP-backend knob.
+3. ✅ Authored the §1.4 generator's fully-populated **study spec**
+   (`dev/templates/study_spec.toml`) and the deployment **rc template**
+   (`dev/templates/deployment_rc.toml`, hardware + per-kind-of-job usage).
+4. ✅ Pointed the Tier-D "numeric follow-ons" in `TODO.md` at
+   `DESIGN.md` §1.3, reclassified out of "pick a value."
+5. ✅ Serialization FORMAT decided — **TOML** (§1.8).
+
+**Still genuinely open** (not value-pinning): the schema mechanism on
+top of TOML (§1.8); the Tier-D reference-data thresholds and derivations
+listed above; and the STRUCTURAL 1b classical-silica choice (BKS vs
+Vashishta) behind the bootstrap generator.
 
 ## Sources
 
