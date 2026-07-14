@@ -784,10 +784,10 @@ the root cause rather than inherit a tuned single point.
 **Per-impact cycle:** insert the projectile above the surface with the
 spec'd velocity → NVE cascade (a few ps) → short border-thermostatted
 relaxation → repeat to the target fluence. **Execution uses a persistent
-LAMMPS driver** (an in-LAMMPS impact loop, or the LAMMPS Python library),
-*not* a fresh process plus a full-slab disk round-trip per impact as prior
-art does — at the doses SAB needs (thousands of impacts) that overhead is
-prohibitive.
+LAMMPS driver** — the LAMMPS **Python binding**, held in-process across
+every impact (`ARCHITECTURE.md` §4.1), *not* a fresh process plus a
+full-slab disk round-trip per impact as prior art does — at the doses SAB
+needs (thousands of impacts) that overhead is prohibitive.
 
 ### 3.4 The MLIP re-anneal (a SABSIM addition)
 
@@ -1052,6 +1052,24 @@ This section designs steps 6 and 7 — pressing the two activated surfaces
 together, letting them bond, and pulling them apart while recording the
 force that resists. It runs on LAMMPS under the MLIP (`pair_style
 deepmd`, GPU; `ARCHITECTURE.md` §4.1).
+
+**The whole press/pull runs on one persistent in-process driver.** It is
+a single stateful, multi-phase run whose transitions are decided mid-run:
+§5.2's dual-contact criterion reads a running-average normal stress to
+know when contact is real, §5.3 asserts the grip force has settled before
+the pull begins, and §5.4 reads both grip reaction forces as it pulls.
+None of that is expressible by emitting a static input script and walking
+away, so steps 6-7 are driven through **LAMMPS's Python binding** as a
+persistent driver that reads forces and stresses back without a disk
+round-trip. This is the same driver §3.3 adopts for the step-4 cascade,
+here settled on the Python binding and carried across the entire
+press/pull; `ARCHITECTURE.md` §4.1 gives the execution and parallelism
+model — the binding runs under MPI (`srun -n N python`), so every control
+decision above keys on **global, collective** quantities (a thermo `pzz`,
+a summed grip force) and stays identical across ranks. The LAMMPS dump
+stays the durable trajectory artifact the analyzer consumes and
+`run_to_contract` guards; the live read-back serves only the control
+decisions, never replaces the on-disk record.
 
 Prior art built this stage and ran it, which makes it the most dangerous
 prior art we have: it produced a number. `PRIOR_ART.md` §1.7 records the
