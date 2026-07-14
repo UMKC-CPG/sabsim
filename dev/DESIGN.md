@@ -642,6 +642,33 @@ first entry of a list, in list order. Where a face admits several
 terminations, SABSIM enumerates them and selects by computed surface
 energy, which the potential-quality gate already needs anyway.
 
+**How the surface energy is computed.** It is the energy cost, per unit
+area, of creating the face — cutting the crystal breaks bonds that were
+satisfied in the interior, and that cost per area is what we compare.
+For each candidate termination, build a slab, relax it under the current
+model (the classical/seed model at bootstrap, the trained committee
+after — §2.2), and take
+
+```
+surface_energy = (slab_energy - atom_count * bulk_energy_per_atom)
+                 / (2 * face_area)
+```
+
+with the factor of two because a slab has two faces. The cheapest
+termination is the one nature prefers, and the one we keep. For a
+**compound** the candidate terminations can expose different proportions
+of the elements, so a slab is no longer a whole number of formula units
+and the plain subtraction above fails; the surface energy then becomes a
+function of how available each element is (for an oxide, how oxygen-rich
+the surroundings are), and the termination kept is the one that stays
+most stable across the physically allowed range. pymatgen's surface
+tooling supplies exactly this, so it arrives with the adopted machinery
+rather than hand-rolled. One caveat follows from the recipe: because it
+**relaxes a slab under the force model**, surface-energy selection is an
+execution-layer activity — it lands with the engine, alongside §2.2's
+cold-start relaxation, and since v1's faces are non-polar and Si/Si has
+a single termination, it does not bite until the first compound face.
+
 **The polar-slab symmetrizer is a hook, and a gate.** v1's faces are
 non-polar, so the four-strategy symmetrization ladder of `PRIOR_ART.md`
 §1.2 enters as a documented hook for future ionic and polar pairs
