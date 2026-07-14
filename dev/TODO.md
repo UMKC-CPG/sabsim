@@ -734,15 +734,21 @@ foundations, interaction rules. -->
          mismatch rather than faking it, so wiring waits for that wave (or
          a Si/Si-only integration path). The skeleton stub stands until
          then; the pipeline stays green end-to-end.
-      2. Driver command-generation — build the LAMMPS input command
-         stream from a `BuiltPair` + protocol knobs (`PSEUDOCODE.md`
-         §9.2-§9.5). PURE `{value,unit}` -> command mapping; unit-testable
-         with NO LAMMPS. The force-model invocation is a PARAMETER (one
-         line in the stream): classical stand-in now, trained MLIP later —
-         BOTH served by one generator. Generate BOTH control modes, load
-         AND displacement (`PSEUDOCODE.md` §9.3, `DESIGN.md` §5.2) — they
-         differ by a single press-phase command, so the §9.3 cross-check
-         is available at once.
+      2. Driver command-generation — DONE (2026-07-14). New `driver/`
+         package: `driver/commands.py` maps a `BuiltPair` + protocol/
+         numerical knobs to the ordered LAMMPS command stream for the
+         press (§9.3) and pull (§9.5). PURE `{value,unit}` -> command
+         mapping (metal-units conversion + pressure->force), no LAMMPS.
+         The force-model line is a PARAMETER (`ForceModel`): classical
+         stand-in (`classical_si_stand_in`) now, trained MLIP
+         (`deepmd_model`) later — BOTH served by one generator. BOTH
+         control modes generated (load = ramped `aveforce`, displacement
+         = `fix move`), one command apart (`DESIGN.md` §5.2). Region
+         carving, bias-removed Langevin thermostat (§5.2), grip drives,
+         and strided recording all pure functions. 15 unit tests; full
+         suite 42 passed. NOTE: the mid-run STOP conditions (dual contact,
+         separation) are slice 3, and the region thicknesses + load-ramp
+         schedule are documented §3/§5.9 stand-ins, flagged in code.
       3. Control + analysis math — the press-contact / settle-reference
          gate logic and the two reduce-to-trajectory curves
          (`PSEUDOCODE.md` §9.3, §9.6). PURE numerics on arrays;
