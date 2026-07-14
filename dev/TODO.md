@@ -777,11 +777,22 @@ foundations, interaction rules. -->
          cannot de-risk; write + debug it against live LAMMPS via
          `srun -n N python` (NOT the login node), plus confirm the emitted
          command strings parse and the `Si.sw` potential loads.
-      5. Thin LAMMPS execution layer — the persistent driver that actually
-         steps the press/pull MD (`PSEUDOCODE.md` §9.2; `ARCHITECTURE.md`
-         §4.1 native binding behind the ASE membrane). Runs under
-         `srun -n N python` on a COMPUTE node and MUST NOT be spawned from
-         the login node (see the SABSIM-environment memory).
+      5. Press/pull execution layer — MOCK SIDE DONE (2026-07-14).
+         `driver/press_pull.py` is the three §9 control loops — press to
+         the DUAL contact criterion (§9.3), settle to the gated zero-load
+         reference (§9.4), pull to complete separation then reduce (§9.5,
+         §9.6) — written ENTIRELY against the `Engine` seam, so each
+         mid-run decision is exercised against a SCRIPTED `MockEngine`
+         (opening closes, stress turns positive, force decays) with NO
+         LAMMPS. Extended the seam with `positions` / `normal_stress` /
+         `grip_reaction`. 6 tests; full suite 70 passed. REMAINING
+         (compute node): (a) the REAL `Engine` adapter — the SAME one
+         slice 4 needs, now implementing the extra read-backs too — via
+         `srun -n N python`, NOT the login node; (b) thin sequencing of
+         press+settle+pulls into a `BondDebondResult` with a fresh
+         restore per pull rung (persistent-engine lifecycle, real-adapter
+         territory); (c) the bonded-quality grading (§8 machinery, still
+         deferred).
       Slices 1-3 are login-node work; slices 4-5 are compute-node
       integration (the two that need LAMMPS). The Wave-4 knob follow-on
       (three §2 NumericalKnobs) is tracked in the PSEUDOCODE section

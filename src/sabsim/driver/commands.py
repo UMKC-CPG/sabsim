@@ -55,6 +55,9 @@ _METAL_UNITS = {
     "MPa": ("pressure", 10.0),      # 1 MPa = 1e6 Pa = 10 bar
     "GPa": ("pressure", 1.0e4),     # 1 GPa = 1e9 Pa = 1e4 bar
     "Pa": ("pressure", 1.0e-5),
+    "eV/angstrom": ("force", 1.0),  # already the metal force unit
+    "eV": ("energy", 1.0),
+    "eV/atom": ("energy_per_atom", 1.0),
 }
 
 # 1 bar expressed in eV/Å³ (metal energy density), so a pressure times an
