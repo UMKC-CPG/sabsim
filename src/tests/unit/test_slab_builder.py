@@ -20,8 +20,10 @@ from sabsim.structure.slab_builder import (
     assemble_facing_pair,
     build_facing_pair,
     build_slab,
+    bulk_atoms,
     load_crystal,
     match_surfaces,
+    write_bulk_data,
     write_lammps_data,
 )
 
@@ -100,3 +102,22 @@ def test_lammps_data_round_trips_atom_count(tmp_path):
     restored = ase_read(
         data_path, format="lammps-data", atom_style="atomic")
     assert len(restored) == len(pair.atoms)
+
+
+def test_bulk_block_replicates_the_conventional_cell():
+    """A bulk block is the 8-atom Si cell replicated to N per axis."""
+    block = bulk_atoms(load_crystal(_SI_CIF), cells_per_axis=2)
+    # 8 atoms in the conventional diamond cell, times 2x2x2.
+    assert len(block) == 8 * 2 * 2 * 2
+    assert set(block.get_chemical_symbols()) == {"Si"}
+
+
+def test_write_bulk_data_round_trips_and_maps_species(tmp_path):
+    """The bulk data file writes every atom and returns its type map."""
+    data_path = os.path.join(tmp_path, "bulk.data")
+    type_map = write_bulk_data(load_crystal(_SI_CIF), 1, data_path)
+    assert type_map == {"Si": 1}
+
+    restored = ase_read(
+        data_path, format="lammps-data", atom_style="atomic")
+    assert len(restored) == 8

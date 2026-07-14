@@ -311,3 +311,36 @@ def write_lammps_data(built: BuiltPair, path: str) -> None:
     ase_write(
         path, built.atoms, format="lammps-data",
         atom_style="atomic", specorder=species_order)
+
+
+def bulk_atoms(crystal: Structure, cells_per_axis: int) -> Atoms:
+    """Replicate a crystal's cell into a periodic bulk block (§2.2).
+
+    The bulk relaxation (:mod:`sabsim.driver.bulk_relax`) needs a fully
+    periodic block, not a slab: the crystal converted to an ASE object
+    and replicated ``cells_per_axis`` times along each axis. No surface,
+    no vacuum — this is the model's own equilibrium lattice being found,
+    not a surface being cut.
+    """
+    block = AseAtomsAdaptor.get_atoms(crystal)
+    return block * (cells_per_axis, cells_per_axis, cells_per_axis)
+
+
+def write_bulk_data(
+        crystal: Structure, cells_per_axis: int, path: str) -> dict:
+    """Write a bulk block to a LAMMPS data file; return its type map.
+
+    The companion to :func:`write_lammps_data` for the §2.2 relaxation:
+    same ASE membrane, ``atom_style atomic``, deterministic species
+    order. The returned type map lets the caller build the matching
+    :class:`~sabsim.driver.commands.ForceModel` under the same
+    species-order contract (STRUCTURAL 1a).
+    """
+    atoms = bulk_atoms(crystal, cells_per_axis)
+    type_map = _type_map_of(atoms)
+    species_order = sorted(
+        type_map, key=lambda symbol: type_map[symbol])
+    ase_write(
+        path, atoms, format="lammps-data",
+        atom_style="atomic", specorder=species_order)
+    return type_map

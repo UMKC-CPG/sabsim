@@ -761,11 +761,22 @@ foundations, interaction rules. -->
          grading (`contact_quality`, cross-interface bonds + contact
          fraction) reuses §8 geometric machinery not yet built; the
          quasistatic margins are documented §5.9 stand-ins.
-      4. Bulk-relaxation execution — the FIRST, smallest use of the force
-         engine: relax the bulk under the current (classical stand-in)
-         model to DERIVE the lattice, retiring the hardcoded stand-in
-         constant (`DESIGN.md` §2.2 cold start). A few-atom relax, far
-         smaller than the press/pull. COMPUTE node (needs LAMMPS).
+      4. Bulk-relaxation execution — MOCK SIDE DONE (2026-07-14). The
+         FIRST, smallest use of the force engine: relax the bulk under the
+         current (classical stand-in) model to DERIVE the lattice, so the
+         hardcoded 5.43 A stand-in is retired (`DESIGN.md` §2.2 cold
+         start). Introduced the narrow engine seam `driver/engine.py`
+         (`Engine` ABC + `MockEngine`) so the orchestration is written
+         ONCE and tested with NO LAMMPS. `driver/bulk_relax.py` builds the
+         `p p p` box/relax minimize stream and derives the cubic lattice
+         from the relaxed box; `structure/slab_builder.write_bulk_data`
+         writes the bulk block. 9 tests; full suite 64 passed. REMAINING
+         (compute node): the REAL `Engine` adapter wrapping the LAMMPS
+         Python binding (~100-150 lines: `commands`->`commands_list`,
+         `energy`/`box`/`atom_count`->extracts) — the ONLY piece the mock
+         cannot de-risk; write + debug it against live LAMMPS via
+         `srun -n N python` (NOT the login node), plus confirm the emitted
+         command strings parse and the `Si.sw` potential loads.
       5. Thin LAMMPS execution layer — the persistent driver that actually
          steps the press/pull MD (`PSEUDOCODE.md` §9.2; `ARCHITECTURE.md`
          §4.1 native binding behind the ASE membrane). Runs under
