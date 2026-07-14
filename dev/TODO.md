@@ -731,6 +731,27 @@ foundations, interaction rules. -->
       Slices 2-3 are login-node unit tests; slice 4 is compute-node
       integration. The Wave-4 knob follow-on (three §2 NumericalKnobs) is
       tracked in the PSEUDOCODE section above.
+- [ ] Widen the MeasureVector seam to carry VERDICTS (`/refine` #6). The
+      `PSEUDOCODE.md` §4 seam is a five-field record — provenance,
+      geometry, measures, verdicts, checks — but the code
+      `MeasureVector` (`pipeline/measures.py`) carries only `measures`,
+      so the press outcome is LOST: `run_analyzer`
+      (`pipeline/skeleton_stages.py`) emits two measures and never reads
+      `result.press`, dropping the `bonded` / `contact_quality` verdict
+      the §4 analyzer is supposed to read once and surface. Add a
+      `Verdicts` record (`bonded`, `contact_quality`), hang it on the
+      vector, and have `run_analyzer` populate it from the
+      `PressOutcome`. FIXED below in the same session.
+- [ ] Consult the relation guards before grading (`/refine` #7). The
+      `Relation` record already carries validator-computed `confounded`
+      and `controls_disagree` flags (`spec/records.py`), but
+      `_evaluate_one_relation` (`pipeline/sequencer.py`) grades the ratio
+      unconditionally and never reads them. Per `DESIGN.md` §1.1 a
+      confounded relation is still COMPUTED, but its gate verdict is
+      WITHHELD — so the outcome must carry the confounded / controls-
+      disagree caveat rather than presenting a clean ratio. Surface the
+      flag in the `RelationOutcome` note (and, once the live gate lands
+      in a later wave, withhold the verdict). Deferred, not yet fixed.
 
 ---
 
