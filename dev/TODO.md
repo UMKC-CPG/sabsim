@@ -749,10 +749,18 @@ foundations, interaction rules. -->
          suite 42 passed. NOTE: the mid-run STOP conditions (dual contact,
          separation) are slice 3, and the region thicknesses + load-ramp
          schedule are documented §3/§5.9 stand-ins, flagged in code.
-      3. Control + analysis math — the press-contact / settle-reference
-         gate logic and the two reduce-to-trajectory curves
-         (`PSEUDOCODE.md` §9.3, §9.6). PURE numerics on arrays;
-         unit-testable with NO LAMMPS.
+      3. Control + analysis math — DONE (2026-07-14). `driver/analysis.py`
+         is the pure numerics the live driver reads back with:
+         density dividing-surfaces + interface opening (§2.6), the
+         no-impact gate + DUAL contact criterion (§9.3), the two
+         settle-reference gates (§9.4), and the displacement-windowed
+         averaged force curve (leading warm-up dropped), its
+         re-expression vs interface opening, the separation point, and
+         the atom-count gate (§9.6). PURE array math, NO LAMMPS. 13 unit
+         tests; full suite 55 passed. NOTE deferred: the bonded-quality
+         grading (`contact_quality`, cross-interface bonds + contact
+         fraction) reuses §8 geometric machinery not yet built; the
+         quasistatic margins are documented §5.9 stand-ins.
       4. Bulk-relaxation execution — the FIRST, smallest use of the force
          engine: relax the bulk under the current (classical stand-in)
          model to DERIVE the lattice, retiring the hardcoded stand-in
