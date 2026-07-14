@@ -664,7 +664,7 @@ them.
 their own Parsl kernel; wrapping them in an outer Parsl workflow would
 nest Parsl in Parsl, which is fragile. So the outer tier stays a
 lightweight sequencer and each Parsl tool owns its own SLURM submission
-independently — "thin orchestration" (`VISION.md` principle 6) made
+independently — "thin orchestration" (`VISION.md` principle 3) made
 concrete.
 
 **Dispatch substrate.** Parsl is the project's common dispatch technology
@@ -681,11 +681,12 @@ explicit staging. Large trajectories go on scratch, not home.
 The LAMMPS Tier-C runs (the step-4 cascade and the step-6/7 press/pull)
 are driven through LAMMPS's **Python binding**, not by emitting a static
 input script. The press/pull is a stateful, multi-phase protocol whose
-transitions are decided mid-run — the §5.2 dual contact criterion reads a
-running-average normal stress to know when contact is real — and it is
-fix- and group-heavy (frozen base, Langevin border, NVE interior, moving
-grips, load control). A persistent in-process driver expresses all of
-that and reads forces and stresses back without a disk round-trip: this
+transitions are decided mid-run — the `DESIGN.md` §5.2 dual contact
+criterion reads a running-average normal stress to know when contact is
+real — and it is fix- and group-heavy (frozen base, Langevin border, NVE
+interior, moving grips, load control). A persistent in-process driver
+expresses all of that and reads forces and stresses back without a disk
+round-trip: this
 is the "persistent LAMMPS driver" `DESIGN.md` §3 chose over prior art's
 fresh-process-per-phase. **ASE is the structure membrane** (`VISION.md`
 principle 4): the builder hands the driver an ASE `Atoms` object and

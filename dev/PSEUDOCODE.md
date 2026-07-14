@@ -2685,9 +2685,11 @@ function prepare_skeleton(structure, settings):
 
     # [DEPTH-FIRST] the EXACT file layout and command sequence. The FORMAT
     # is inherited from legacy OLCAO with only layout / command tweaks
-    # (§8.4), but those tweaks are still being finalized in the
-    # in-development Imago; pin them against a known-good reference input
-    # when it lands. Everything ABOVE this line is fixed now.
+    # (§8.4). The known-good reference input EXISTS NOW — from the
+    # validated four-structure campaign (§8.4, §8.8) — so this preparer is
+    # testable to COMPLETION against it today; what stays open is only the
+    # residual Imago-vs-OLCAO tweaks (§8.9), pinned when the in-development
+    # Imago finalizes them. Everything ABOVE this line is fixed now.
     return emit_imago_skeleton(atoms, basis, k_sampling, settings)
 ```
 
