@@ -809,6 +809,25 @@ foundations, interaction rules. -->
       `PullResult` omits it. Read `engine.atom_count()` before/after the
       pull and carry the verdict. Ties to the real-adapter wiring, which
       is where a live before/after count exists.
+- [ ] DECISION PENDING — labeled-group ownership (`/refine` #3). The
+      press/pull zones (frozen anchor, thermostat buffer, free interior,
+      activated skin, grips) are, in `PSEUDOCODE.md` §7.5 + §9.2, EMITTED
+      by the builder as atom-index sets and READ downstream; the code
+      instead records per-wafer z-ranges (`slab_builder.BuiltPair`) and
+      the driver CARVES regions by depth (`driver/commands.
+      region_group_commands`) with its own names (`bottom_grip`/
+      `top_grip`/`lower_border`/`upper_border`), no `frozen_base`/
+      `activated_skin`. Three resolutions were laid out for the
+      programmer (elaborated jargon-free in the session): (A) builder
+      tags all five zones -> align code to docs (costs builder its
+      protocol-ignorance); (B) driver carves the four depth-zones ->
+      align docs to code (but the ACTIVATED SKIN is a MEASURED irregular
+      set, §10.7, not a depth cut, so it needs its own carry either way);
+      (C) HYBRID (my recommendation) — driver carves the four depth-zones
+      from the builder's z-ranges, the activated skin travels as a
+      measured atom set, docs updated to that split. Awaiting the
+      programmer's pick; then also reconcile the region NAMES. This
+      determines wording in DESIGN §2.6/§7.5/§9.2 and possibly code.
 - [x] Widen the MeasureVector seam to carry VERDICTS (`/refine` #6). The
       `PSEUDOCODE.md` §4 seam is a five-field record — provenance,
       geometry, measures, verdicts, checks — but the code
