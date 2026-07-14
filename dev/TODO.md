@@ -786,9 +786,13 @@ foundations, interaction rules. -->
          (opening closes, stress turns positive, force decays) with NO
          LAMMPS. Extended the seam with `positions` / `normal_stress` /
          `grip_reaction`. 6 tests; full suite 70 passed. REMAINING
-         (compute node): (a) the REAL `Engine` adapter — the SAME one
-         slice 4 needs, now implementing the extra read-backs too — via
-         `srun -n N python`, NOT the login node; (b) thin sequencing of
+         (compute node): (a) the REAL `Engine` adapter — SKELETON DRAFTED
+         at `driver/lammps_engine.py` (best-effort binding calls +
+         `# VERIFY` markers; API surface import-confirmed, lazy import so
+         it loads with no LAMMPS; interface-completeness tested). Fill in
+         + debug against live LAMMPS via `srun -n N python`, NOT the login
+         node — the ONE adapter serves BOTH slice 4 and 5; (b) thin
+         sequencing of
          press+settle+pulls into a `BondDebondResult` with a fresh
          restore per pull rung (persistent-engine lifecycle, real-adapter
          territory); (c) the bonded-quality grading (§8 machinery, still
