@@ -695,7 +695,15 @@ is ASE while the fix-heavy MD rides LAMMPS's native channel. **LAMMPS
 dumps stay the durable trajectory artifact** the analyzer consumes and
 `run_to_contract` guards, so the file-contract model above and a
 hand-rerunnable reproducer both survive; the live read-back is only for
-control decisions. **Parallelism comes from running the binding under
+control decisions. **The binding sits behind a narrow driver
+interface** — a handful of operations (issue commands, run, and read
+back energy, positions, forces, stress, and grip reactions), with two
+implementations: the real LAMMPS adapter and a lightweight mock. This is
+§5.1's "the contract is the unit of stability" applied to the LAMMPS
+boundary — it lets the mid-run press/pull control logic be tested on a
+login node with no engine, and it is the SAME seam the classical
+stand-in and the trained MLIP swap behind.
+**Parallelism comes from running the binding under
 MPI** — `mpirun -np N python driver.py`, each rank building a `lammps`
 instance over `MPI_COMM_WORLD`, so LAMMPS domain-decomposes and scales
 exactly as `lmp_mpi` does; the binding is not single-core. The one

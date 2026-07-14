@@ -801,6 +801,14 @@ foundations, interaction rules. -->
       integration (the two that need LAMMPS). The Wave-4 knob follow-on
       (three §2 NumericalKnobs) is tracked in the PSEUDOCODE section
       above.
+- [ ] Apply the atom-count conservation gate in the pull (`/refine` #4).
+      `PSEUDOCODE.md` §9.6 makes `atom_count_conserved` a GATE on the
+      Trajectory — an atom escaping the open-z box voids the run (§5.6) —
+      and `driver/analysis.py` has the function (tested), but
+      `pull_at_rate` (`driver/press_pull.py`) never calls it and
+      `PullResult` omits it. Read `engine.atom_count()` before/after the
+      pull and carry the verdict. Ties to the real-adapter wiring, which
+      is where a live before/after count exists.
 - [x] Widen the MeasureVector seam to carry VERDICTS (`/refine` #6). The
       `PSEUDOCODE.md` §4 seam is a five-field record — provenance,
       geometry, measures, verdicts, checks — but the code

@@ -291,11 +291,16 @@ record MemberSpecification:
                                   # for provenance (DESIGN §1.6, §6.6).
 
 record MaterialKnobs:             # one per wafer; two wafers per member
-    crystal_structure: string     # e.g. Si diamond, cristobalite
+    cif_source:        path        # AUTHORITATIVE crystal (a CIF):
+                                   # symmetry/basis/connectivity, serves
+                                   # ANY material (DESIGN §1.2)
+    crystal_structure: string      # a human LABEL (e.g. "diamond"); the
+                                   # CIF is authoritative, never this
     surface_face:      Miller indices
-    identity:          string     # the material itself
-    # NEVER a lattice constant — §2.2 derives it from the potential
-    # (DESIGN §1.3).
+    identity:          string      # the material itself
+    # NEVER a lattice constant — the CIF fixes symmetry/basis but its
+    # SCALE is a starting geometry only; §2.2 derives the working lattice
+    # from the potential (DESIGN §1.3).
 
 record ProtocolKnobs:
     # Press + separation are exercised by the skeleton; the activation
@@ -903,9 +908,13 @@ label, and `grips` not yet set (assembly sets them, §7.5).
 function solve_shared_cell(material_A, material_B, potential,
                            misfit_tolerance, max_coincidence_area):
     # Lattices come from the POTENTIAL, not literature (DESIGN §2.2):
-    # relax each bulk under the current committee, referenced to VASP.
-    # The relaxed-vs-VASP disagreement is itself a potential-quality
-    # measure (DESIGN §2.2, §7-of-DESIGN) — recorded, not discarded.
+    # load each crystal from its CIF (material.cif_source — symmetry and
+    # basis, DESIGN §1.2) and relax the bulk under the current model,
+    # referenced to VASP. At the COLD START the current model is the
+    # classical/seed model, not yet a trained committee (DESIGN §2.2);
+    # the relaxation itself is a driver minimization (§9.7). The
+    # relaxed-vs-VASP disagreement is itself a potential-quality measure
+    # (DESIGN §2.2, §7-of-DESIGN) — recorded, not discarded.
     lattice_A = relaxed_lattice(material_A, potential)   # vs VASP
     lattice_B = relaxed_lattice(material_B, potential)
 
@@ -948,6 +957,8 @@ function build_slab(material, shared, applied_strain, potential,
                     member_specification):
     # Step 3 for one wafer. Adopted ASE machinery cleaves and tiles;
     # three decisions sit on top (DESIGN §2.5).
+    # The crystal comes from material.cif_source (a CIF — DESIGN §1.2):
+    # relaxed_bulk loads it, then relaxes to the model's own lattice.
     bulk = relaxed_bulk(material, potential)             # DESIGN §2.2
 
     # Cleave along the requested Miller face, tile to the shared cell,
