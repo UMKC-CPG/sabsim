@@ -131,9 +131,17 @@ def _require_face(table: dict, key: str, context: str) -> tuple:
 # ---------------------------------------------------------------------
 
 def _material_from_wafer(table: dict, context: str) -> MaterialKnobs:
-    """Build one wafer's MaterialKnobs from its ``[member.wafer_x]``."""
+    """Build one wafer's MaterialKnobs from its ``[member.wafer_x]``.
+
+    The ``cif`` key names the authoritative structure file (DESIGN.md
+    §1.2). The loader keeps it as a string; whether the file EXISTS and
+    parses is checked by the structure builder when it opens it, the same
+    way material composition against the type map is a later-wave check
+    (§1.5) — not something this reader can know from the spec alone.
+    """
     return MaterialKnobs(
         identity=str(_require(table, "material", context)),
+        cif_source=str(_require(table, "cif", context)),
         crystal_structure=str(_require(table, "structure", context)),
         surface_face=_require_face(table, "face", context),
     )

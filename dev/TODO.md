@@ -711,19 +711,29 @@ foundations, interaction rules. -->
       sequencer 11, slabs 5). Commits `8537d69`, `c576c9e`, `1ca43cc`.
 - [ ] NEXT — replace the skeleton stubs with the real Si/Si run, in
       slices, each landing behind its already-frozen contract. Order:
-      1. GENERAL slab builder — ONE `structure/slab_builder` (retires the
-         Si-only `structure/si_slabs` stand-in) that reads a crystal from
-         a CIF (the authoritative structure, `DESIGN.md` §1.2) plus a
-         Miller face, cuts the slab, and assembles the facing pair through
+      1a. GENERAL slab builder — DONE (2026-07-14). ONE
+         `structure/slab_builder` (retired the Si-only `structure/si_slabs`
+         stand-in) reads a crystal from a CIF (the authoritative
+         structure, `DESIGN.md` §1.2) plus a Miller face, cuts the slab
+         (pymatgen `SlabGenerator`), and assembles the facing pair through
          pymatgen's Zur-McGill matcher (`DESIGN.md` §2.3 — the ADOPTED
-         algorithm, NOT a hand-written matcher). No per-material or
-         per-pair script: Si/Si is just the first INPUT, and it exercises
-         the matcher's identity/null case (`DESIGN.md` §2.548). Wires into
-         the `build_slabs` + `assemble_pair` stages. Ripple: `MaterialKnobs`
-         gains a CIF source (`spec/records.py`, one new field), so the
-         loader, the study-spec template, and the loader fixtures move
-         with it (no hidden defaults, §1.4). Login-node geometry (pymatgen
-         + ASE membrane), NO force engine.
+         algorithm, NOT hand-written). No per-material or per-pair script:
+         Si/Si is just the first INPUT and exercises the matcher's
+         identity/null case (`DESIGN.md` §2.548). `MaterialKnobs` gained a
+         CIF source (`spec/records.py`); the loader and study-spec template
+         moved with it (no hidden defaults, §1.4). Ships a real Si diamond
+         CIF as reference data. 7 unit tests on Si/Si (build, identity
+         match, gap, box, type map, LAMMPS round-trip). Login-node geometry
+         (pymatgen + ASE membrane), NO force engine. Commit `PENDING`.
+      1b. Wire the builder into the pipeline — DEFERRED, coupled to the
+         compound build (wave 3). `build_slabs` / `assemble_pair` cannot
+         switch to the real builder yet: the live study runs the SiO2/Si
+         member, whose real build needs the strained-mismatch assembly
+         (`DESIGN.md` §2.4), the SiO2 CIF, and surface-energy termination
+         — all wave-3 / execution-layer work. Slice 1a REFUSES a real
+         mismatch rather than faking it, so wiring waits for that wave (or
+         a Si/Si-only integration path). The skeleton stub stands until
+         then; the pipeline stays green end-to-end.
       2. Driver command-generation — build the LAMMPS input command
          stream from a `BuiltPair` + protocol knobs (`PSEUDOCODE.md`
          §9.2-§9.5). PURE `{value,unit}` -> command mapping; unit-testable

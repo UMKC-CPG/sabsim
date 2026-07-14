@@ -1,9 +1,13 @@
 """Structure building — slabs and facing pairs (DESIGN.md §2).
 
-Wave 0 provides a minimal Si/Si builder (:mod:`sabsim.structure.si_slabs`)
-behind the same idea the full §2 builder will fill in: ASE is the
-structure membrane (VISION principle 4), so a slab is an ASE ``Atoms``
-object and the only thing that crosses to LAMMPS is a data file written
-from it. The coincidence matcher and the §2.5 thickness convergence
-arrive with the Si/SiO2 milestone (ARCHITECTURE.md §5, wave 3).
+The builder (:mod:`sabsim.structure.slab_builder`) is written ONCE for
+any material: a wafer is a CIF (the authoritative structure, §1.2) plus
+a Miller face, and the same code path builds silicon, silicon dioxide,
+or anything else. ASE is the structure membrane (VISION principle 4), so
+a slab is an ASE ``Atoms`` object and the only thing that crosses to
+LAMMPS is a data file written from it, while pymatgen supplies the
+adopted heavy geometry — the slab cut and the Zur-McGill coincidence
+matcher (§2.3). Silicon-on-silicon is the first input and the matcher's
+identity/null test; the strained-mismatch assembly and the §2.5
+surface-energy termination arrive with the force engine (wave 3).
 """

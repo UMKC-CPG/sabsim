@@ -44,16 +44,24 @@ class Quantity:
 
 @dataclass(frozen=True)
 class MaterialKnobs:
-    """What one wafer IS: its material, crystal form, and cut face.
+    """What one wafer IS: its crystal (a CIF), its cut face, its label.
 
     One :class:`MaterialKnobs` describes a single wafer; a member pairs
-    two of them (PSEUDOCODE.md §2). The lattice constant is deliberately
-    absent — it is DERIVED from the potential by §2.2, not a setting one
-    types in (DESIGN.md §1.3).
+    two of them (PSEUDOCODE.md §2). The crystal is supplied as a CIF —
+    the authoritative structure that fixes symmetry, basis, and
+    connectivity for ANY material (DESIGN.md §1.2), so one uniform input
+    serves silicon, silicon dioxide, and the rest with no per-material
+    code. Two things are deliberately NOT fields here: the CIF's lattice
+    SCALE is a starting geometry only — the working lattice constant is
+    derived by relaxing the bulk under the potential (§1.3, §2.2) — and
+    ``crystal_structure`` is a human-readable LABEL for the report, not
+    an authoritative source (the CIF is), so it can never disagree with
+    the geometry the builder actually uses.
     """
 
     identity: str                    # the material itself, e.g. "Si"
-    crystal_structure: str           # e.g. "diamond", "beta-cristobalite"
+    cif_source: str                  # path to the authoritative CIF
+    crystal_structure: str           # human label, e.g. "diamond"
     surface_face: tuple[int, int, int]   # Miller indices of the bond face
 
 

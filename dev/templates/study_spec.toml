@@ -74,15 +74,24 @@ controls = ["protocol", "potential"]
 # potential, so both carry the same reference. The study POINTS at a
 # potential; it does not CHOOSE one.
 # ---------------------------------------------------------------------
+# The `cif` key names the AUTHORITATIVE structure the builder reads
+# (§1.2): symmetry, basis, and connectivity come from it, so one uniform
+# input serves any material. Its lattice SCALE is only a starting
+# geometry — the working constant is relaxation-derived (§2.2) — and
+# `structure` is a human LABEL, not a source. The Si CIF ships as
+# reference data; the beta-cristobalite CIF is created with the compound
+# build (wave 3), so its path is where it will live.
 [[member]]
 name          = "si-sio2"
 potential_ref = "PENDING-BOOTSTRAP"    # resolved by §11 on convergence
   [member.wafer_a]
   material  = "Si"
-  structure = "diamond"
+  cif       = "src/sabsim/structure/data/si_diamond.cif"
+  structure = "diamond"        # human label; the CIF is authoritative
   face      = [1, 0, 0]        # Miller indices of the bonding surface
   [member.wafer_b]
   material  = "SiO2"
+  cif       = "src/sabsim/structure/data/sio2_beta_cristobalite.cif"
   structure = "beta-cristobalite"   # closest lattice match to Si (cubic)
   face      = [1, 0, 0]
 
@@ -91,11 +100,13 @@ name          = "si-si-reference"   # same-material null test (§2.7, §7.4)
 potential_ref = "PENDING-BOOTSTRAP"    # the SAME generation as above
   [member.wafer_a]
   material  = "Si"
-  structure = "diamond"
+  cif       = "src/sabsim/structure/data/si_diamond.cif"
+  structure = "diamond"        # human label; the CIF is authoritative
   face      = [1, 0, 0]
   [member.wafer_b]
   material  = "Si"
-  structure = "diamond"
+  cif       = "src/sabsim/structure/data/si_diamond.cif"
+  structure = "diamond"        # human label; the CIF is authoritative
   face      = [1, 0, 0]
 
 # ---------------------------------------------------------------------
