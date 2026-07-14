@@ -698,6 +698,40 @@ foundations, interaction rules. -->
 
 <!-- Tasks related to implementation. -->
 
+- [x] Wave-0 walking skeleton BUILT and tested (2026-07-13) — the
+      `ARCHITECTURE.md` §5.3 Wave-0 target reached: the Tier-A thread runs
+      end-to-end on Si/Si to an HONESTLY UNTRUSTED measure. What exists
+      under `src/sabsim/`: the study-spec loader + records (`spec/`, no
+      hidden defaults, `PSEUDOCODE.md` §1.4), the sequencer with the
+      `run_to_contract` guard plus the measure and exec-artifact schemas
+      (`pipeline/`, `PSEUDOCODE.md` §1), stub stages that pass through
+      honest verdicts (`pipeline/skeleton_stages.py`), and the minimal
+      Si-(100) slab / facing-pair builder (`structure/si_slabs.py`,
+      `PSEUDOCODE.md` §7 minus the matcher). 25 tests pass (loader 9,
+      sequencer 11, slabs 5). Commits `8537d69`, `c576c9e`, `1ca43cc`.
+- [ ] NEXT — replace the skeleton stubs with the real Si/Si run, in
+      slices, each landing behind its already-frozen contract. Order:
+      1. Wire the real slab builder in — `structure/si_slabs` into the
+         `build_slabs` + `assemble_pair` stages (replacing those stubs),
+         trivial Si/Si matcher, NO coincidence search (`PSEUDOCODE.md`
+         §7; Wave-0 walking-thread membership).
+      2. Driver command-generation — build the LAMMPS input command
+         stream from a `BuiltPair` + protocol knobs (`PSEUDOCODE.md`
+         §9.2-§9.5). PURE `{value,unit}` -> command mapping; unit-testable
+         with NO LAMMPS.
+      3. Control + analysis math — the press-contact / settle-reference
+         gate logic and the two reduce-to-trajectory curves
+         (`PSEUDOCODE.md` §9.3, §9.6). PURE numerics on arrays;
+         unit-testable with NO LAMMPS.
+      4. Thin LAMMPS execution layer — the persistent driver that actually
+         steps MD (`PSEUDOCODE.md` §9.2; `ARCHITECTURE.md` §4.1 native
+         binding behind the ASE membrane). The ONLY slice needing LAMMPS;
+         runs under `srun -n N python` on a COMPUTE node and MUST NOT be
+         spawned from the login node (see the SABSIM-environment memory).
+      Slices 2-3 are login-node unit tests; slice 4 is compute-node
+      integration. The Wave-4 knob follow-on (three §2 NumericalKnobs) is
+      tracked in the PSEUDOCODE section above.
+
 ---
 
 ## ARCHIVE
