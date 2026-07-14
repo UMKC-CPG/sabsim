@@ -731,7 +731,7 @@ foundations, interaction rules. -->
       Slices 2-3 are login-node unit tests; slice 4 is compute-node
       integration. The Wave-4 knob follow-on (three §2 NumericalKnobs) is
       tracked in the PSEUDOCODE section above.
-- [ ] Widen the MeasureVector seam to carry VERDICTS (`/refine` #6). The
+- [x] Widen the MeasureVector seam to carry VERDICTS (`/refine` #6). The
       `PSEUDOCODE.md` §4 seam is a five-field record — provenance,
       geometry, measures, verdicts, checks — but the code
       `MeasureVector` (`pipeline/measures.py`) carries only `measures`,

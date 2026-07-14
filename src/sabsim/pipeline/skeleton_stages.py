@@ -27,6 +27,7 @@ from sabsim.pipeline.measures import (
     Measure,
     MeasureStatus,
     MeasureVector,
+    Verdicts,
 )
 from sabsim.spec.records import MemberSpecification
 
@@ -137,7 +138,16 @@ def run_analyzer(
     higher-fidelity measures ``unresolved``, exactly as PSEUDOCODE.md §1
     describes for the skeleton. The value is a stand-in, not physics;
     the member it belongs to is flagged untrusted.
+
+    The press outcome is read ONCE here into the vector's
+    :class:`Verdicts` (PSEUDOCODE.md §4): the bond decision is a fact
+    about the run, not an averaged measure, so it is surfaced directly
+    rather than dropped. ``contact_quality`` stays None in W0, where the
+    press is stubbed and only the ``bonded`` flag is meaningful.
     """
+    verdicts = Verdicts(
+        bonded=result.press.bonded,
+        contact_quality=None)      # §5.2 fraction not computed in W0
     seeds = member.ensemble.amorphization_count
     mechanical = Measure(
         name="mechanical_work_of_separation",
@@ -159,7 +169,9 @@ def run_analyzer(
         fidelity="mlip",
         method="not computed in wave 0",
         status=MeasureStatus.UNRESOLVED)
-    return MeasureVector(measures=(mechanical, thermodynamic))
+    return MeasureVector(
+        measures=(mechanical, thermodynamic),
+        verdicts=verdicts)
 
 
 def run_characterization(

@@ -49,10 +49,36 @@ class Measure:
 
 
 @dataclass(frozen=True)
+class Verdicts:
+    """The press/pull OUTCOME the analyzer reads once (PSEUDOCODE §4).
+
+    A bond decision is a FACT about the run, not an averaged quantity:
+    DESIGN.md §5.2 settles it mid-press from a running-average normal
+    stress, so it rides the measure vector as its own field rather than
+    being dressed up as a :class:`Measure`. PSEUDOCODE.md §4 states it
+    directly — "the press outcome IS the Verdicts, read once, not
+    through a measure." ``contact_quality`` is the §5.2 dual-contact
+    fraction; it is None in wave 0, where the press is stubbed and only
+    the ``bonded`` flag is carried through the seam.
+    """
+
+    bonded: bool | None            # did the pair bond under the press?
+    contact_quality: float | None  # §5.2 contact fraction; None if unknown
+
+
+@dataclass(frozen=True)
 class MeasureVector:
-    """The complete set of measures a single member produced (§6)."""
+    """The complete set of measures a single member produced (§6).
+
+    Beyond the measures themselves the vector carries the run's
+    :class:`Verdicts` — the press outcome the §4 analyzer reads ONCE
+    from the trajectory, never re-derived through a measure. It is None
+    on a vector that reports no verdict, such as the step-8
+    characterization vector or a merge intermediate (DESIGN.md §4, §8).
+    """
 
     measures: tuple[Measure, ...]
+    verdicts: Verdicts | None = None
 
     def by_name(self, name: str) -> Measure | None:
         """Return the measure called ``name``, or None if it is absent.
@@ -81,4 +107,15 @@ def merge_measures(
         if measure.name in seen:
             raise ValueError(
                 f"measure '{measure.name}' produced by two stages")
-    return MeasureVector(measures=first.measures + second.measures)
+    # Only the analyzer produces Verdicts (from the press); the step-8
+    # characterization vector carries none. Carry whichever side set
+    # them, and refuse the ambiguous case of two live verdict sets,
+    # mirroring the name-collision rule above.
+    if first.verdicts is not None and second.verdicts is not None:
+        raise ValueError("two measure vectors both carry verdicts")
+    merged_verdicts = (
+        first.verdicts if first.verdicts is not None
+        else second.verdicts)
+    return MeasureVector(
+        measures=first.measures + second.measures,
+        verdicts=merged_verdicts)

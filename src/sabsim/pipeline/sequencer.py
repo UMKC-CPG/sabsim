@@ -260,6 +260,22 @@ def _provenance_to_record(provenance: Provenance) -> dict:
     }
 
 
+def _verdicts_to_record(measures: MeasureVector) -> dict | None:
+    """Serialize the vector's press Verdicts, or None if it carries none.
+
+    The bond decision is read once by the §4 analyzer and rides the
+    vector as its own field (not a measure), so it is emitted alongside
+    the measures rather than folded into them.
+    """
+    verdicts = measures.verdicts
+    if verdicts is None:
+        return None
+    return {
+        "bonded": verdicts.bonded,
+        "contact_quality": verdicts.contact_quality,
+    }
+
+
 def _member_to_record(result: MemberResult) -> dict:
     """Serialize one member's result to a plain dict."""
     return {
@@ -269,6 +285,7 @@ def _member_to_record(result: MemberResult) -> dict:
         "measures": [
             _measure_to_record(measure)
             for measure in result.measures.measures],
+        "verdicts": _verdicts_to_record(result.measures),
         "gate": {
             "summary": result.gate.summary,
             "acted": result.gate.acted,
