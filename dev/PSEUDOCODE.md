@@ -358,6 +358,9 @@ record NumericalKnobs:
                                       # DISPLACEMENT units (§9.5, §5.4)
     reference_pe_drift:     number    # max PE drift for the reference to
                                       # count as settled (§9.4, DESIGN §5.3)
+    detector_smoothing_window: number  # smooths each §12.2 detector series
+    detector_prominence:    number    # min event prominence vs §5.4 floor
+    frame_budget:           integer   # max frames to step 8; §1.2 knob
 
 record EnsembleKnobs:
     # TWO sampling axes, not one (V1_VALUES; DESIGN §6.6). The amorphized
@@ -2518,3 +2521,277 @@ potential per invocation.
 convergence threshold, and the seed-set composition — are pinned as
 EXISTING here; the numbers themselves are a DESIGN task (the STRUCTURAL
 1b/3 follow-ons).
+
+## 12. Step-8 characterization — algorithms (step 8)
+
+This is the SIXTH module pass, on `DESIGN.md` §8. It closes the
+DESIGN->PSEUDOCODE boundary: the one buildable unit
+(`ARCHITECTURE.md` §5.2) whose depth pass was left for last — marked
+`[DEPTH-FIRST]` in §1 and mocked in §6. It is written now because the
+design is settled, so this is transcription, not speculation.
+
+**It designs a SEAM, not a module SABSIM runs.** Imago (the all-electron
+code) and Kaleidoscope (its batch manager) are sibling projects, not
+ours (`DESIGN.md` §8). SABSIM owns FOUR artifacts on its side: a
+SELECTOR (which frames earn the expense, §12.2), a SKELETON PREPARER (a
+structure -> an input Imago accepts, §12.3), a MANIFEST (the whole
+conversation with Kaleidoscope, §12.4), and a HARVESTER (results -> §6.6
+records, §12.5). `DESIGN.md` §8.8 is emphatic that all four are PURE
+FUNCTIONS testable to completion with no Imago present. Only EXECUTION
+waits.
+
+**Two consumers, opposite demands (`DESIGN.md` §8.1).** M4 (all-electron
+work of adhesion) wants exactly TWO relaxed, 0 K, commensurable
+endpoints; M5's electronic family wants a consistent finite-T UNRELAXED
+frame SERIES at the chemically-eventful moments. One structure
+convention and one dispatch path serve both — but never as one job.
+
+**What genuinely waits on Imago** is narrow, and `[DEPTH-FIRST]` where it
+lands: the EXACT input file-layout / command-sequence (§12.3 — the
+FORMAT is inherited from OLCAO, but the tweaks are still being finalized
+in the in-development Imago) and Imago's FAILURE TAXONOMY (§12.5).
+Everything else is OURS and bottoms out here.
+
+### 12.1 The module's top-level shape
+
+```
+record AnalysisUnit:
+    # One Imago calculation, self-describing (`DESIGN.md` §8.5).
+    skeleton:   SkeletonDir    # a self-contained input dir (§12.3)
+    identifier: string         # CONTENT fingerprint of the skeleton (§1.4)
+    consumer:   one of {m4_endpoint, m5_frame}    # which measure it feeds
+    detector:   DetectorClass or none   # for an m5_frame, which detector
+                                        # found it; none for an m4 endpoint
+    provenance: Provenance     # member, trajectory, frame index, subcell,
+                               # potential generation, seed set (§8.5)
+
+record Manifest:
+    # The WHOLE interface to Kaleidoscope (`DESIGN.md` §8.5): one list,
+    # handed over, waited on. Retained as step 8's provenance record.
+    units: list of AnalysisUnit
+
+function run_characterization(structure, bond_debond_trajectory,
+                              member_specification):
+    # DESIGN §8. Turn a finished press/pull into the all-electron and
+    # descriptor measures, or into schema-valid `unresolved` records when
+    # the subcell is unaffordable (§8.2) or Imago is late (§8.8). Returns
+    # a MeasureVector (the §4 contract); §1 merges it with the analyzer's.
+
+    # ONE structure convention: §6.4's interface subcell, extracted ONCE
+    # at §5.3's reference state, frozen by atom identity (§8.2). If it
+    # exceeds the affordable envelope, step 8 cannot run for this pair
+    # without breaking a §6.4 rule — SAY SO, do not break one quietly.
+    subcell = extract_interface_subcell(
+        structure, member_specification)     # [DELEGATE -> §6.4 / §8.2]
+    if not subcell.affordable:
+        return all_unresolved(
+            "interface subcell exceeds the step-8 envelope (§8.2)")
+
+    # SELECT the frames worth the expense (§12.2). The two relaxed M4
+    # endpoints are NOT detected — they are computed states from §5, and
+    # they enter the batch unconditionally (§8.3).
+    frames    = select_frames(bond_debond_trajectory, subcell,
+                              member_specification)          # §12.2
+    endpoints = relaxed_endpoints(bond_debond_trajectory,
+                              subcell)   # [DELEGATE -> §5 / §8 M2 relax]
+
+    # PREPARE a skeleton per unit (§12.3), BUILD the manifest (§12.4),
+    # DISPATCH the batch and wait (§12.5).
+    units = ([make_unit(e, m4_endpoint, none) for e in endpoints]
+           + [make_unit(f.structure, m5_frame, f.detector)
+              for f in frames])
+    manifest = build_manifest(units)                         # §12.4
+    results  = dispatch_batch(manifest)  # [DELEGATE -> Kaleidoscope, §8.5;
+                                         # EXECUTION waits on Imago, §8.8]
+
+    # HARVEST into §6.6 records, reporting coverage BY DETECTOR CLASS
+    # because all-electron runs fail on the hard frames, not at random.
+    return harvest(manifest, results, member_specification)  # §12.5
+```
+
+### 12.2 select_frames — three detectors, on the subcell, merged by event
+
+```
+function select_frames(trajectory, subcell, member_specification):
+    # DESIGN §8.3. The genuinely OURS piece, and a PURE, DETERMINISTIC
+    # function of the trajectory and the settings — re-runnable, auditable
+    # long after the MD is gone, part of provenance (§1.6). Three
+    # detectors, each a physically meaningful moment:
+    #   - PE local MINIMA in the hold -> a bond forming, shedding energy
+    #   - PE local MAXIMA in the pull -> a bond stretched to its limit
+    #   - sharp DROPS in sigma_zz     -> a bond breaking, shedding load
+    numerical = member_specification.numerical
+
+    # FIX 1 — measure where the event IS. Read per-atom PE and virial
+    # summed over the FROZEN SUBCELL SET alone, stress from the subcell's
+    # own volume; the whole cell's thermal noise dwarfs one bond (§8.3).
+    signal = subcell_series(trajectory, subcell)
+
+    candidates = empty list
+    for detector in {hold_minima, pull_maxima, stress_drops}:
+        # FIX 2 — a local extremum of a noisy series is not an event.
+        # Smooth over a few vibrational periods, then require PROMINENCE
+        # above the §5.4 noise floor; without it every thermal wiggle
+        # reads as a bond (§8.3).
+        extrema = detect_extrema(
+            signal, detector,
+            window = numerical.detector_smoothing_window)
+        for candidate in extrema:
+            if prominence(candidate, signal) >= (
+                    numerical.detector_prominence):
+                candidates.append(tag(candidate, detector))
+
+    # FIX 3 — merge by EVENT, not geometry. Two frames are one when their
+    # CROSS-INTERFACE BOND SETS are identical (cutoffs §6.3, bonds by
+    # PROVENANCE not species §6.2) and their subcell energies differ by
+    # less than the noise floor. An RMSD criterion merges across a break
+    # and keeps phonon-only pairs — backwards both ways (§8.3).
+    merged = merge_by_event(candidates, subcell,
+                            tolerance = numerical.noise_floor)
+
+    # RANK by prominence, TRUNCATE to the budget, LOG the drops — a silent
+    # truncation reads downstream as full coverage (§8.3). The budget is a
+    # §1.2 numerical knob: raise it and the trend must stop moving.
+    kept = rank_and_truncate(merged, budget = numerical.frame_budget)
+    log_dropped(dropped = merged - kept)
+    return kept
+```
+
+### 12.3 prepare_skeleton — a self-contained input, pure by construction
+
+```
+function prepare_skeleton(structure, settings):
+    # DESIGN §8.4. A SKELETON is a self-contained directory whose ENTIRE
+    # content is a function of explicit arguments: no clock, no working
+    # directory, no environment. That is §1's inversion restated at the
+    # seam, and what makes this testable by EXACT comparison against a
+    # known-good input with NO Imago present (closing the last STRUCTURAL
+    # 2 follow-on). It must NOT read the `$OLCAO_RC` working-dir-as-config
+    # convention prior art carried (§8.4).
+    #
+    # ASE is the MEMBRANE, not the vocabulary (VISION principle 4): ASE
+    # carries species / positions / cell across the boundary; the basis,
+    # sampling, and command sequence are Imago's OWN vocabulary and do not
+    # pass through ASE's (which would flatten them, §8.4).
+    atoms = ase_atoms_of(structure)          # [DELEGATE -> ASE membrane]
+
+    # Two inherited physics choices, frozen for v1 (§8.4):
+    basis      = FULL         # the bond redistributes charge BETWEEN
+                              # atoms, so small near-eq sets misfit here
+    k_sampling = GAMMA_ONLY   # primary reason is CELL SIZE (large real
+                              # cell -> small reciprocal cell); a §1.2
+                              # numerical setting, checked once vs a
+                              # denser mesh (§8.4)
+
+    # [DEPTH-FIRST] the EXACT file layout and command sequence. The FORMAT
+    # is inherited from legacy OLCAO with only layout / command tweaks
+    # (§8.4), but those tweaks are still being finalized in the
+    # in-development Imago; pin them against a known-good reference input
+    # when it lands. Everything ABOVE this line is fixed now.
+    return emit_imago_skeleton(atoms, basis, k_sampling, settings)
+```
+
+### 12.4 build_manifest — content-fingerprint identifiers
+
+```
+function build_manifest(units):
+    # DESIGN §8.5. Each unit's IDENTIFIER is a CONTENT FINGERPRINT of its
+    # skeleton, reusing §1.4's rule, not a second one: identical content
+    # -> identical id, so Kaleidoscope's cache is correct by construction;
+    # any change -> a new id, so a stale result is never served for a
+    # structure that no longer exists. A frame-number / directory /
+    # timestamp id COLLIDES across members — prior art's newest-file-wins
+    # failure (§5.7) in new clothes.
+    for unit in units:
+        unit.identifier = content_fingerprint(unit.skeleton)   # [-> §1.4]
+    return Manifest{ units: units }       # kept as step 8's provenance
+```
+
+### 12.5 dispatch and harvest — coverage by class, failures not random
+
+```
+function dispatch_batch(manifest):
+    # DESIGN §8.5. Hand Kaleidoscope ONE manifest and wait; the outer
+    # sequencer treats the batch as a single opaque step (no Parsl in
+    # Parsl, §4.1). Kaleidoscope owns DISPATCH, CACHING, and success /
+    # failure TRACKING — NOT what a snapshot means, which measure it
+    # feeds, or whether the batch sufficed (those stay here, §8.5).
+    #
+    # [DELEGATE -> Kaleidoscope]; EXECUTION waits on Imago (§8.8). Until
+    # it lands, M4 falls back to VASP ON THE SAME SUBCELL (§6.4) and M5's
+    # electronic family is `unresolved`; the gate still runs. Waiting is a
+    # CONFIGURATION, not a degradation (§6.7).
+    return kaleidoscope_run(manifest)
+
+function harvest(manifest, results, member_specification):
+    # DESIGN §8.6. Read results BY the manifest — never a results-dir
+    # scan, never newest-file-wins (§5.7). Two channels: ASE-vocabulary
+    # quantities (energy, forces) cross through ASE; Imago's own outputs
+    # (effective charge, bond order, total / partial DOS §6.4) ride the
+    # native channel, parsed here. DOS / pDOS are kept as human-read CURVE
+    # artifacts; only `dos_at_fermi` and `gap_size` reduce to §6.6.
+
+    # M4 is ALL-OR-NOTHING: a difference of two endpoint energies, so if
+    # EITHER endpoint failed, `interface_fidelity` is `unresolved` — never
+    # one all-electron endpoint against one MLIP stand-in, which would
+    # measure the very thing the difference tests. Still gated by
+    # `subcell_truncation_error` (§6.4): the cheap method certifies the
+    # expensive method's input, whichever it is.
+    m4 = form_m4_difference(results, manifest)   # [-> §8.7 (analyzer M4)]
+
+    # M5 survives a missing FRAME (smaller realization_count, frames
+    # named) but NOT a missing CLASS: all-electron runs fail on the HARD,
+    # signal-carrying frames (max stretch, the break), so averaging the
+    # survivors reports the easy physics as a trend. Report COVERAGE BY
+    # DETECTOR CLASS; empty a class and its trend is `unresolved` even if
+    # most of the batch succeeded (§8.6).
+    m5 = form_m5_by_class(results, manifest)     # [-> §8.8 (descriptors)]
+
+    # [DEPTH-FIRST] Imago's FAILURE TAXONOMY — which failures are RETRYABLE
+    # (dispatch, non-convergence) vs STRUCTURAL (the basis cannot fit this
+    # geometry). §8.6's coverage-by-class needs the distinction to know if
+    # an emptied class is recoverable; the taxonomy comes from the
+    # in-development Imago. Until pinned, treat every failure as terminal
+    # for its unit — the safe reading never over-reports coverage.
+
+    # Every harvested value is a §6.6 record: uncertainty over its frames,
+    # realization_count, units, fidelity (all-electron | electronic),
+    # method (Imago + version), status. NO bare numbers, NO verdicts here
+    # — §7's gate reads the records (§8.6, §8.7).
+    return assemble_measures(m4, m5)      # a MeasureVector (§4 contract)
+```
+
+### 12.6 What bottoms out, what delegates
+
+`[OURS, bottoms out here]` the four-artifact SEAM shape (§12.1); the
+three-detector SELECTION with subcell scope, prominence bar, and
+merge-by-event (§12.2); the SELF-CONTAINED skeleton discipline, pure of
+clock / cwd / env (§12.3); the CONTENT-FINGERPRINT manifest (§12.4); and
+the COVERAGE-BY-CLASS harvest with M4 all-or-nothing, M5
+holes-not-classes (§12.5). All buildable and testable with no Imago
+(`DESIGN.md` §8.8), against the validated four-structure campaign.
+
+`[DELEGATE -> §6.4 / §5 / §8]` the interface SUBCELL is §6.4's (§8.2);
+the relaxed M4 ENDPOINTS come from §5 / the §8 M2 relax; the M4
+DIFFERENCE and M5 DESCRIPTOR reductions are the analyzer's §8.7-§8.8.
+Characterization SELECTS, PREPARES, and HARVESTS; it does not redefine a
+measure.
+
+`[DELEGATE -> Kaleidoscope, DESIGN §8.5]` dispatch, caching, and
+success / failure tracking; meaning, measure-routing, and sufficiency
+stay here. The batch is one opaque step (§4.1).
+
+`[DEPTH-FIRST]` two narrow spots wait on the in-development Imago: the
+EXACT input file-layout / command-sequence (§12.3) and Imago's FAILURE
+TAXONOMY (§12.5). Everything else is fixed — the honest boundary of
+"finish the pseudocode" before Imago exists.
+
+`[ABOVE this module]` step-8 EXECUTION is Wave 4 (`ARCHITECTURE.md`
+§5.3): the four artifacts are fixture-tested now; they connect to real
+Imago when it lands, with the VASP subcell backstop carrying M4 until
+then.
+
+`[DESIGN §8.9 / numeric follow-ons]` the detector smoothing window and
+prominence, the frame budget and its adequacy refinement, the merge
+tolerance, and the one-time denser-mesh Γ check are DECLARED here (the
+three new NumericalKnobs in §2) with their VALUES left as DESIGN tasks.

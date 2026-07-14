@@ -676,6 +676,21 @@ foundations, interaction rules. -->
       no-change observation: two top-level entry points now exist
       (`exec_full_study`, `bootstrap_potential`) with manual v1 ordering —
       consistent by design (`PSEUDOCODE.md` §5, §11.6).
+- [ ] Step-8 characterization §12 pass DONE (`PSEUDOCODE.md` §12,
+      2026-07-13) — the SIXTH and last module pass, on `DESIGN.md` §8,
+      CLOSING the DESIGN->PSEUDOCODE boundary (all five buildable units +
+      the frame now at depth). The four SABSIM-side artifacts are pure
+      functions: selector (§12.2), skeleton-prep (§12.3), manifest
+      (§12.4), harvester (§12.5). TWO narrow spots stay `[DEPTH-FIRST]`
+      pending the in-development Imago — the exact input file-layout /
+      command-sequence (§12.3) and Imago's failure taxonomy (§12.5) —
+      the honest limit of "finish the pseudocode" pre-Imago (`DESIGN.md`
+      §8.8: the SABSIM side needs no Imago; only execution does). CODE
+      follow-on: §12 declared three new NumericalKnobs in §2
+      (`detector_smoothing_window`, `detector_prominence`, `frame_budget`);
+      add them to `src/sabsim/spec/records.py` + the study-spec template
+      when step-8 is built (Wave 4). Their VALUES are the DESIGN §8.9
+      follow-ons tracked above.
 
 ---
 
