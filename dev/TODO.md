@@ -711,26 +711,46 @@ foundations, interaction rules. -->
       sequencer 11, slabs 5). Commits `8537d69`, `c576c9e`, `1ca43cc`.
 - [ ] NEXT — replace the skeleton stubs with the real Si/Si run, in
       slices, each landing behind its already-frozen contract. Order:
-      1. Wire the real slab builder in — `structure/si_slabs` into the
-         `build_slabs` + `assemble_pair` stages (replacing those stubs),
-         trivial Si/Si matcher, NO coincidence search (`PSEUDOCODE.md`
-         §7; Wave-0 walking-thread membership).
+      1. GENERAL slab builder — ONE `structure/slab_builder` (retires the
+         Si-only `structure/si_slabs` stand-in) that reads a crystal from
+         a CIF (the authoritative structure, `DESIGN.md` §1.2) plus a
+         Miller face, cuts the slab, and assembles the facing pair through
+         pymatgen's Zur-McGill matcher (`DESIGN.md` §2.3 — the ADOPTED
+         algorithm, NOT a hand-written matcher). No per-material or
+         per-pair script: Si/Si is just the first INPUT, and it exercises
+         the matcher's identity/null case (`DESIGN.md` §2.548). Wires into
+         the `build_slabs` + `assemble_pair` stages. Ripple: `MaterialKnobs`
+         gains a CIF source (`spec/records.py`, one new field), so the
+         loader, the study-spec template, and the loader fixtures move
+         with it (no hidden defaults, §1.4). Login-node geometry (pymatgen
+         + ASE membrane), NO force engine.
       2. Driver command-generation — build the LAMMPS input command
          stream from a `BuiltPair` + protocol knobs (`PSEUDOCODE.md`
          §9.2-§9.5). PURE `{value,unit}` -> command mapping; unit-testable
-         with NO LAMMPS.
+         with NO LAMMPS. The force-model invocation is a PARAMETER (one
+         line in the stream): classical stand-in now, trained MLIP later —
+         BOTH served by one generator. Generate BOTH control modes, load
+         AND displacement (`PSEUDOCODE.md` §9.3, `DESIGN.md` §5.2) — they
+         differ by a single press-phase command, so the §9.3 cross-check
+         is available at once.
       3. Control + analysis math — the press-contact / settle-reference
          gate logic and the two reduce-to-trajectory curves
          (`PSEUDOCODE.md` §9.3, §9.6). PURE numerics on arrays;
          unit-testable with NO LAMMPS.
-      4. Thin LAMMPS execution layer — the persistent driver that actually
-         steps MD (`PSEUDOCODE.md` §9.2; `ARCHITECTURE.md` §4.1 native
-         binding behind the ASE membrane). The ONLY slice needing LAMMPS;
-         runs under `srun -n N python` on a COMPUTE node and MUST NOT be
-         spawned from the login node (see the SABSIM-environment memory).
-      Slices 2-3 are login-node unit tests; slice 4 is compute-node
-      integration. The Wave-4 knob follow-on (three §2 NumericalKnobs) is
-      tracked in the PSEUDOCODE section above.
+      4. Bulk-relaxation execution — the FIRST, smallest use of the force
+         engine: relax the bulk under the current (classical stand-in)
+         model to DERIVE the lattice, retiring the hardcoded stand-in
+         constant (`DESIGN.md` §2.2 cold start). A few-atom relax, far
+         smaller than the press/pull. COMPUTE node (needs LAMMPS).
+      5. Thin LAMMPS execution layer — the persistent driver that actually
+         steps the press/pull MD (`PSEUDOCODE.md` §9.2; `ARCHITECTURE.md`
+         §4.1 native binding behind the ASE membrane). Runs under
+         `srun -n N python` on a COMPUTE node and MUST NOT be spawned from
+         the login node (see the SABSIM-environment memory).
+      Slices 1-3 are login-node work; slices 4-5 are compute-node
+      integration (the two that need LAMMPS). The Wave-4 knob follow-on
+      (three §2 NumericalKnobs) is tracked in the PSEUDOCODE section
+      above.
 - [x] Widen the MeasureVector seam to carry VERDICTS (`/refine` #6). The
       `PSEUDOCODE.md` §4 seam is a five-field record — provenance,
       geometry, measures, verdicts, checks — but the code
@@ -742,16 +762,20 @@ foundations, interaction rules. -->
       `Verdicts` record (`bonded`, `contact_quality`), hang it on the
       vector, and have `run_analyzer` populate it from the
       `PressOutcome`. FIXED below in the same session.
-- [ ] Consult the relation guards before grading (`/refine` #7). The
-      `Relation` record already carries validator-computed `confounded`
-      and `controls_disagree` flags (`spec/records.py`), but
-      `_evaluate_one_relation` (`pipeline/sequencer.py`) grades the ratio
-      unconditionally and never reads them. Per `DESIGN.md` §1.1 a
-      confounded relation is still COMPUTED, but its gate verdict is
-      WITHHELD — so the outcome must carry the confounded / controls-
-      disagree caveat rather than presenting a clean ratio. Surface the
-      flag in the `RelationOutcome` note (and, once the live gate lands
-      in a later wave, withhold the verdict). Deferred, not yet fixed.
+- [x] Relation guards — DESCOPED (2026-07-14, was `/refine` #7).
+      Comparison judgment — which systems to compare, which variables
+      make a FAIR contrast, whether a difference is entailed or
+      incidental — stays the USER's to make by hand. There are too many
+      ways to modify a system, and not every modification degrades a
+      comparison equally, for an automated confound-check to earn its
+      rigidity; a strict guard would obstruct more than it protects.
+      This rips nothing out: `DESIGN.md` §1.1 already keeps relations
+      REPORT-ONLY, and `_evaluate_one_relation` (`pipeline/sequencer.py`)
+      already computes and reports the ratio. The validator-computed
+      `confounded` / `controls_disagree` flags (`spec/records.py`) stay
+      as informational provenance a user MAY read. We deliberately do
+      NOT build the caveat-surfacing / verdict-withholding machinery once
+      planned here, so this effort never competes with core capability.
 
 ---
 

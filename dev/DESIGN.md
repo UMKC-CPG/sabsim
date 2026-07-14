@@ -162,9 +162,13 @@ deployment held apart. Writing §2 through §7 produced two more, and the
 line between them is worth drawing sharply because a great deal depends
 on it.
 
-- **Material** — per wafer: the crystal structure, one surface face
-  given by its Miller indices, and the material identity. What we are
-  studying.
+- **Material** — per wafer: the crystal, supplied as a **structure file
+  (CIF)** that fixes its symmetry, its atomic basis, and its
+  connectivity; one surface face given by its Miller indices; and the
+  material identity. The CIF names WHICH crystal, not its scale — the
+  lattice constant is still derived by relaxation (§1.3, §2.2), never
+  read off the file — so one uniform input serves every material with no
+  per-material code. What we are studying.
 - **Protocol** — the activation species, energy, angle of incidence and
   fluence; the press mode, load, depth and duration; the hold
   temperature; the pull rates of §5.4's ladder. How the experiment is
@@ -219,8 +223,12 @@ paid for it.
   current potential, referenced to VASP (§2.2). Prior art hardcoded
   literature CIF values, and `PRIOR_ART.md` §1.6 traces its Stage-1.5
   step-zero pressure of −30 to −40 GPa directly to that choice. The
-  settings name a material and its structure type; never its lattice
-  constant.
+  distinction is exact: SABSIM reads the crystal's *symmetry and basis*
+  from a CIF but not its *scale* — the CIF cell is a starting geometry
+  the relaxation then resizes, so the number that reaches the box is the
+  potential's own equilibrium lattice, never the file's. The settings
+  supply a material and its crystal (as a CIF) and a surface face; never
+  the lattice constant itself.
 - **The shared lateral cell, the tiling matrices, and the residual
   strain.** Outputs of the coincidence solver (§2.3), never user knobs.
 - **Bond cutoffs.** Derived per species pair from the first minimum of
@@ -454,6 +462,21 @@ steps 4, 6 and 7. Two consequences follow:
   potential-quality gate (§7) alongside stiffness and surface energy. A
   potential whose lattice constant is off is a potential that will build
   the wrong box; that belongs in the gate, not in a silent relaxation.
+
+**Cold start.** At the very beginning there is no production potential to
+relax under — the bootstrap (§4.5) has not yet trained one. So "the
+current potential" means the **classical/seed model** that opens the
+bootstrap: the first cell is relaxed under it, giving a crude but
+self-consistent lattice, and §2.2's rule is re-applied under the trained
+committee the moment it exists, re-deriving the cell then. The step is
+identical; only the model beneath it changes. This makes "**derive the
+lattice by relaxing the bulk under the current model**" a first-class,
+named pipeline step in its own right, not a hidden preprocessing detail.
+Its first *real* execution is deliberately the **smallest** use of the
+LAMMPS execution layer (`ARCHITECTURE.md` §4.1) — a few-atom bulk relax —
+and that is exactly the moment the walking skeleton's hardcoded stand-in
+lattice is retired: not smuggled into the plumbing-only skeleton before a
+force engine exists, and not left hardcoded once one does.
 
 ### 2.3 Matching two surface lattices
 
