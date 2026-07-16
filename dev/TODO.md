@@ -691,6 +691,56 @@ foundations, interaction rules. -->
       add them to `src/sabsim/spec/records.py` + the study-spec template
       when step-8 is built (Wave 4). Their VALUES are the DESIGN §8.9
       follow-ons tracked above.
+- [ ] §9.2 THERMOSTAT BORDER — decide whether the Langevin border is
+      meant to MOVE, and say so before the code changes. Found on a
+      compute node (stage 5, 2026-07-16) by running the real press: the
+      border does not move AT ALL. Measured, max |displacement| per
+      group over `run 500` — bottom_grip 0.000000 A, border 0.000000 A,
+      interior 0.900304 A, top_grip 0.250000 A (the top grip's number is
+      exactly the 0.5 A/ps drive x 0.5 ps, so the drive itself is
+      right). CAUSE: `integrator_commands` (`driver/commands.py`) issues
+      `fix nve` on the INTERIOR only, and LAMMPS's `fix langevin`
+      modifies forces WITHOUT integrating — so the border is
+      thermostatted but never advanced. It is a frozen wall, not the
+      heat sink `DESIGN.md` §5.2 describes, and it cannot conduct heat
+      out of the interior. The mechanical fix is the standard idiom
+      (`fix nve_border border nve` alongside the Langevin), but it
+      CHANGES the physics of every press and pull, so §9.2 and
+      `DESIGN.md` §5.2 should first say what the border is FOR. Couples
+      to a second question this exposed: whether the GRIPS should be
+      integrated at all. They currently are not — which is why `fix
+      setforce` on the bottom grip is really acting as a READ-BACK
+      mechanism rather than a hold.
+- [ ] §9.4 SETTLE SEQUENCING — the settle phase cannot run in the
+      protocol's own order, and §9.4 does not say what it holds. Found
+      on a compute node (stage 5, 2026-07-16): the press reached contact
+      on the dual criterion at chunk 37, then `settle_reference` died
+      with `ERROR: lammps_extract_fix(): Fix hold_bottom does not
+      exist`. CAUSE: `settle_reference` (`driver/press_pull.py`) reads
+      `grip_reaction("bottom")` and `("top")`, which need `fix
+      hold_bottom` and `compute top_reaction` — and those are created
+      ONLY by `pull_drive_commands` (§9.5). There is a `_press_setup`
+      and a `_pull_setup` but NO settle setup, so in the real order
+      (press -> settle -> pull) the read-back fixes do not exist yet.
+      §9.4 also says the reference must be at rest under NO applied
+      load, yet nothing issues `unfix drive_top`, so the press drive
+      would still be ramping through the settle. TWO decisions before
+      code: (a) what the settle phase HOLDS — both grips, or the bottom
+      only? (note the top grip has no integrator, so it does not move
+      either way); and (b) whether the grip read-backs should be
+      factored out of `pull_drive_commands` into one shared block that
+      press, settle, and pull all issue. Blocks the phase-sequencing
+      item in the CODE section below.
+- [ ] Note on BOTH findings above: neither is visible to the mock, and
+      that is structural rather than an oversight in the tests.
+      `MockEngine.grip_reaction` returns a scripted number whether or
+      not the command stream ever defined the fix it names, and the mock
+      integrates nothing, so a group that never moves is
+      indistinguishable from one that does. The seam validates the
+      ORCHESTRATION; both of these are facts about what the ENGINE does
+      with the stream. Worth remembering when judging what a green
+      mock-side suite does and does not license — the same shape as the
+      `Masses` and `gather_atoms` faults found at stages 2-4.
 
 ---
 
@@ -770,13 +820,23 @@ foundations, interaction rules. -->
          ONCE and tested with NO LAMMPS. `driver/bulk_relax.py` builds the
          `p p p` box/relax minimize stream and derives the cubic lattice
          from the relaxed box; `structure/slab_builder.write_bulk_data`
-         writes the bulk block. 9 tests; full suite 64 passed. REMAINING
-         (compute node): the REAL `Engine` adapter wrapping the LAMMPS
-         Python binding (~100-150 lines: `commands`->`commands_list`,
-         `energy`/`box`/`atom_count`->extracts) — the ONLY piece the mock
-         cannot de-risk; write + debug it against live LAMMPS via
-         `srun -n N python` (NOT the login node), plus confirm the emitted
-         command strings parse and the `Si.sw` potential loads.
+         writes the bulk block. 9 tests; full suite 64 passed. COMPUTE
+         SIDE NOW DONE (2026-07-16, commit `e1a1e30`): the real adapter
+         runs, `Si.sw` loads, and the emitted stream parses. SW silicon
+         relaxes to a = 5.4309 A at -4.3366 eV/atom, matching SW's own
+         parameterisation (5.431 A; 2*epsilon = 4.3366). Started
+         deliberately 2% DILATED so the answer could not be confused
+         with a relaxation that did nothing: it moved 5.5386 -> 5.4309 A,
+         shedding 1.3812 eV. Caught one real bug the mock could not —
+         both data writers omitted the `Masses` section (ASE defaults
+         `masses=False`), which LAMMPS refuses outright; a data file
+         identifies species ONLY through `Masses`, so ASE read it back
+         with the right atom COUNT and every Si silently relabelled H,
+         which is exactly why the count-only round-trip test passed over
+         it. NOTE for later materials: Si is the benign case where the
+         model and published lattices nearly coincide (5.4309 vs
+         5.4300), so this run is a WEAK demonstration of why §2.2 exists;
+         the gap should matter far more for SiO2 and LiNbO3.
       5. Press/pull execution layer — MOCK SIDE DONE (2026-07-14).
          `driver/press_pull.py` is the three §9 control loops — press to
          the DUAL contact criterion (§9.3), settle to the gated zero-load
@@ -785,18 +845,32 @@ foundations, interaction rules. -->
          mid-run decision is exercised against a SCRIPTED `MockEngine`
          (opening closes, stress turns positive, force decays) with NO
          LAMMPS. Extended the seam with `positions` / `normal_stress` /
-         `grip_reaction`. 6 tests; full suite 70 passed. REMAINING
-         (compute node): (a) the REAL `Engine` adapter — SKELETON DRAFTED
-         at `driver/lammps_engine.py` (best-effort binding calls +
-         `# VERIFY` markers; API surface import-confirmed, lazy import so
-         it loads with no LAMMPS; interface-completeness tested). Fill in
-         + debug against live LAMMPS via `srun -n N python`, NOT the login
-         node — the ONE adapter serves BOTH slice 4 and 5; (b) thin
-         sequencing of
-         press+settle+pulls into a `BondDebondResult` with a fresh
-         restore per pull rung (persistent-engine lifecycle, real-adapter
-         territory); (c) the bonded-quality grading (§8 machinery, still
-         deferred).
+         `grip_reaction`. 6 tests; full suite 70 passed. STATUS:
+         (a) the REAL `Engine` adapter — DONE and VALIDATED (2026-07-16,
+         commit `e1a1e30`, LAMMPS 22 Jul 2025, at 1 and 4 MPI ranks). All
+         four `# VERIFY` items resolved, each against an INDEPENDENT
+         reference rather than its own assumption: `extract_fix` is
+         0-BASED (fz = index 2), `pzz` is positive in compression and so
+         already matches §9.3 (the feared flip was unnecessary),
+         `gather_atoms` returns the builder's own write order, and
+         `get_thermo` is not cached across chunks. Two real faults fixed:
+         `positions` called `lmp.numpy.gather_atoms`, which does not
+         exist, and the grip reactions came back tension-NEGATIVE while
+         the mock scripted tension-POSITIVE — §8.4 would have integrated
+         a NEGATIVE work of separation while failing nothing. The
+         `Engine` contract now STATES the sign convention (positive in
+         tension, load-cell sense) instead of leaving each implementation
+         to guess; that silence was the actual defect.
+         (b) PARTLY EXERCISED, then BLOCKED (stage 5, 2026-07-16). The
+         press runs against the real engine and reaches contact on the
+         dual criterion (chunk 37, tiny 32-atom Si/Si cell). Settle then
+         dies, and the pull is still UNTESTED — see the two §9.2 / §9.4
+         items in the PSEUDOCODE section above, which must be decided at
+         the design level first. The sequencing also needs a `write_data`
+         of the settled reference between settle and pull: the pull
+         re-reads a data file, and handing it the ORIGINAL pair data
+         would silently discard the press entirely.
+         (c) the bonded-quality grading (§8 machinery, still deferred).
       Slices 1-3 are login-node work; slices 4-5 are compute-node
       integration (the two that need LAMMPS). The Wave-4 knob follow-on
       (three §2 NumericalKnobs) is tracked in the PSEUDOCODE section
@@ -809,7 +883,19 @@ foundations, interaction rules. -->
       persistent-engine lifecycle (`PSEUDOCODE.md` §9, `DESIGN.md` §5.4).
       This is real-adapter territory — the restore/lifecycle only exists
       against a live LAMMPS instance — so it lands with the compute-node
-      adapter work below.
+      adapter work below. BLOCKED (2026-07-16) on the §9.2 / §9.4
+      decisions recorded in the PSEUDOCODE section. What stage 5 pinned
+      down about the lifecycle, so it need not be re-derived: press and
+      pull EACH re-read a data file (`preamble_commands` issues `units` +
+      `read_data`), and LAMMPS rejects `units` once a box exists, so each
+      needs a FRESH engine; settle issues no `read_data` and so can share
+      the press's engine. The settled reference must be written out
+      (`write_data`) between settle and pull, because the pull restores
+      from a FILE — handing it the original pair data would discard the
+      press. Also note `recording_commands` takes a BARE dump filename,
+      so the driver writes its trajectory into whatever directory it was
+      launched from; the job-directory / scratch-root scheme should own
+      that path rather than the CWD.
 - [ ] Bonded-quality grading — `contact_quality` / cross-interface bonds
       / contact fraction (promoted 2026-07-15 from slice-3 and slice-5
       sub-notes). `driver/analysis.py` computes the geometric contact
