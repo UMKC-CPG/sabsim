@@ -1,26 +1,32 @@
-"""The real LAMMPS :class:`Engine` adapter — an UNVALIDATED skeleton.
+"""The real LAMMPS :class:`Engine` adapter — VALIDATED against LAMMPS.
 
 This is the one piece the mock cannot de-risk (see the slice-4/5 ledger).
 It implements the :class:`~sabsim.driver.engine.Engine` seam by wrapping
 the LAMMPS Python binding, so the same orchestration that runs against
 ``MockEngine`` on the login node runs against real LAMMPS on a compute
-node — unchanged — once this adapter is filled in and debugged.
+node, unchanged.
 
-**What is real here and what is not.** Every method below contains the
-best-effort binding call it should use; none has been RUN against live
-LAMMPS. The binding's API SURFACE is confirmed, though: a pure import
-(no instance, no run) on this environment's LAMMPS verified the
-constructor keywords (``cmdargs``, ``comm``), the three ``LMP_*``
-constants, and that every method called here exists (``commands_list``,
-``get_thermo``, ``extract_box``, ``extract_fix``, ``extract_compute``,
-``get_natoms``). What remains are RUNTIME facts an import cannot show,
-each marked ``# VERIFY`` and to be checked on a compute node: the
-``extract_fix`` component index and its 0-vs-1 base, the SIGN and units
-of the extracted stress and the grip reactions, and that the gathered
-atom order matches the builder's tag order. This module imports cleanly
-with NO LAMMPS present too (the binding is imported lazily inside the
-constructor), so its shape is reviewable and its interface-completeness
-testable on the login node; nothing instantiates it until the cluster.
+**Validation status (stage 4, LAMMPS 22 Jul 2025, 1 and 4 MPI ranks).**
+Every read-back below has now been RUN against live LAMMPS and checked
+against an independent reference — a second LAMMPS code path, or a known
+physical state — rather than against its own assumption. Resolved:
+``extract_fix``'s component index is 0-BASED (fz is index 2), ``pzz`` is
+positive in compression and so already matches what §9.3 asks for, and
+``gather_atoms`` returns atoms in the builder's own write order under
+both 1 and 4 ranks.
+
+Two things the walking skeleton got WRONG, which only a live engine could
+show, are worth remembering as evidence for why this seam is worth its
+cost. ``positions`` called ``lmp.numpy.gather_atoms``, which does not
+exist — the numpy wrapper has no such method, and the pure import that
+"confirmed the API surface" never listed it. And the grip reactions came
+back with the OPPOSITE sign to the one the mock scripted, which would
+have integrated §8.4 to a negative work of separation while failing
+nothing: see :meth:`LammpsEngine.grip_reaction`.
+
+The module still imports cleanly with NO LAMMPS present (the binding is
+imported lazily inside the constructor), so its shape stays reviewable
+and its interface-completeness testable on the login node.
 
 **Where it runs.** LAMMPS runs on a COMPUTE node, launched with
 ``srun -n N python``; it MUST NOT be spawned from the login node. Under
@@ -101,8 +107,14 @@ class LammpsEngine(Engine):
         """Return the potential energy in eV (the ``pe`` thermo value).
 
         ``get_thermo`` reads the most recent thermo evaluation, so this
-        is valid after a ``run`` (or a ``run 0``). VERIFY it reflects the
-        current state and not a stale step when called mid-loop.
+        is valid after a ``run`` (or a ``run 0``).
+
+        VERIFIED on a compute node (stage 4) that the value is FRESH and
+        not cached across a chunked loop: five successive ``run 50``
+        chunks under NVE at 300 K returned five distinct energies. This
+        matters because the §9.4 settle gate reads this once per chunk
+        and tests the series for drift — a cached value would read as a
+        perfectly flat line and pass a reference that never settled.
         """
         return float(self._lmp.get_thermo("pe"))
 
@@ -130,38 +142,94 @@ class LammpsEngine(Engine):
     def positions(self) -> np.ndarray:
         """Return the atom positions as an (N, 3) array, in atom-id order.
 
-        ``gather_atoms`` returns every atom ordered by id on every rank,
-        which is what the control loop needs to split by wafer tag.
-        VERIFY the id order matches the builder's write order (the tag
-        array in :class:`~sabsim.structure.slab_builder.BuiltPair`), so a
-        position row and its tag line up.
+        ``gather_atoms`` is COLLECTIVE: every rank gets all N atoms
+        ordered by atom id, regardless of which rank owns them. That is
+        what the control loop needs, because it pairs this array
+        row-for-row with the builder's tag array (``press_pull`` §9.5) —
+        a rank-local view would pair a position with another atom's tag.
+        Note this lives on the plain LAMMPS object and NOT on its
+        ``numpy`` wrapper, which has no ``gather_atoms``; it hands back a
+        flat ctypes buffer of 3N doubles (``dtype=1``, ``count=3``) that
+        is copied into a real array here.
+
+        VERIFIED on a compute node (stage 4): the gathered id order is
+        1..N and matches the builder's write order exactly, under both 1
+        and 4 MPI ranks, so a position row and its tag line up.
         """
-        return self._lmp.numpy.gather_atoms("x", 1, 3).reshape(-1, 3)
+        flat_positions = self._lmp.gather_atoms("x", 1, 3)
+        return np.array(flat_positions, dtype=float).reshape(-1, 3)
 
     def normal_stress(self) -> float:
         """Return the global normal (zz) stress, in metal pressure units.
 
         Read as the ``pzz`` thermo keyword (the zz pressure-tensor
-        component). VERIFY the SIGN convention the dual contact criterion
-        expects: §9.3 wants this POSITIVE when the surfaces load each
-        other; LAMMPS reports pressure positive under compression, so a
-        sign flip may be needed here.
+        component). NO sign flip is applied, and none is needed.
+
+        VERIFIED on a compute node (stage 4) against bulk silicon held at
+        three known volumes, which pins the convention from the physics
+        rather than from the documentation:
+
+        ==================  ==================
+        state               pzz
+        ==================  ==================
+        compressed (a*0.98)     +67820 bar
+        near equilibrium           -76 bar
+        dilated    (a*1.02)     -54800 bar
+        ==================  ==================
+
+        So LAMMPS reports pressure POSITIVE under compression, and §9.3
+        wants this positive exactly when the surfaces load (compress)
+        each other. The two conventions already agree — the skeleton's
+        worry that "a sign flip may be needed" was unfounded.
         """
-        return float(self._lmp.get_thermo("pzz"))     # VERIFY sign
+        return float(self._lmp.get_thermo("pzz"))
 
     def grip_reaction(self, side: str) -> float:
         """Return the summed z reaction force (eV/Å) on a grip.
 
         The bottom grip is held by ``fix setforce``, which exposes the
         total pre-zero force on the group as a global 3-vector; the top
-        grip's reaction is the ``compute reduce sum fz`` scalar. VERIFY:
-        the ``extract_fix`` component index (is fz index 2, and is the
-        index 0- or 1-based in this binding?), and the SIGN of each — the
-        pull curve wants the force resisting the drive.
+        grip's reaction is the ``compute reduce sum fz`` scalar.
+
+        The component index is VERIFIED on a compute node (stage 4)
+        against an independent ``compute reduce sum fx/fy/fz`` on the
+        same group, with the atoms randomly displaced so the three
+        components were distinct and no degeneracy could hide a mix-up:
+        the index is 0-BASED, so fz is index 2 (``i=3`` raises), and both
+        read-backs reproduced their reference to all printed digits. The
+        indexing below is therefore correct as written.
+
+        SIGN — the ``-`` below is REQUIRED by the Engine contract, which
+        asks for the force the GRIP exerts on the MATERIAL (positive in
+        tension, the load-cell sense). LAMMPS reports the opposite: both
+        ``fix setforce``'s stored vector and ``compute reduce sum fz``
+        give the force the MATERIAL exerts ON the grip. Measured on a
+        compute node (stage 4), displacing ONLY the top grip so the
+        wafer genuinely strains, RAW LAMMPS values were:
+
+        ==========================  ==================
+        drive (top grip only)       raw fz
+        ==========================  ==================
+        pulled up   (stretch)          -2.3034 eV/Å
+        held        (rest)             +0.0049 eV/Å
+        pushed down (squash)           +3.4269 eV/Å
+        ==========================  ==================
+
+        Raw, a pull reads NEGATIVE, which would have integrated §8.4 to
+        a negative work of separation without ever failing — the mock
+        meanwhile scripted a pull POSITIVE. Negating restores tension-
+        positive and reconciles the two.
+
+        The flip is applied to BOTH sides deliberately. Negating one
+        grip only would break the §9.4 settle gate, whose third-law
+        check reads ``|top + bottom|`` and expects zero at a balanced
+        reference: with one side flipped that sum becomes ``2*|F|`` and
+        a perfectly settled state would read as maximally unsettled.
+        Negating both leaves the sum invariant.
         """
         if side == "bottom":
-            return float(self._lmp.extract_fix(
+            return -float(self._lmp.extract_fix(
                 _BOTTOM_GRIP_FIX, self._style_global, self._type_vector,
-                2, 0))                                  # VERIFY index/base
-        return float(self._lmp.extract_compute(
+                2, 0))
+        return -float(self._lmp.extract_compute(
             _TOP_GRIP_COMPUTE, self._style_global, self._type_scalar))

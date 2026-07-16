@@ -46,10 +46,12 @@ from pymatgen.core import Structure
 from pymatgen.core.surface import SlabGenerator
 from pymatgen.io.ase import AseAtomsAdaptor
 
-# Provenance tags — which wafer an atom was built in (DESIGN.md §6),
-# distinct from its chemical species. A cross-interface bond is later one
-# whose endpoints carry different tags; a transferred atom is one that
-# ends in the fragment whose tag it does not share.
+# Provenance tags — which of the two bonding partners an atom was built
+# in (DESIGN.md §6), distinct from its chemical species. A cross-interface
+# bond is later one whose endpoints carry different tags; a transferred
+# atom is one that ends in the fragment whose tag it does not share.
+# Wafer A is the BOTTOM slab and wafer B the TOP by construction (see
+# BuiltPair), so these tags also split the pair into bottom vs top.
 WAFER_A_TAG = 1
 WAFER_B_TAG = 2
 
@@ -83,16 +85,24 @@ class BuiltPair:
 
     ``atoms`` is the whole assembled pair as one ASE object; the
     per-wafer z-ranges and the interface plane let the driver carve the
-    frozen-base, thermostat-border, interior, and grip regions BY
-    POSITION, so this builder need not know the MD protocol. ``match``
-    carries the coincidence provenance the member records (DESIGN.md
-    §2.1).
+    grip, thermostat-border, and interior regions BY POSITION, so this
+    builder need not know the MD protocol (option C, DESIGN.md §2.6).
+    ``match`` carries the coincidence provenance the member records
+    (DESIGN.md §2.1).
+
+    The A/B labels are the two bonding partners (the same A/B as the
+    §6 work-of-adhesion math, W = gamma_A + gamma_B - gamma_AB). By
+    CONSTRUCTION wafer A is always assembled as the BOTTOM slab and
+    wafer B as the TOP, so ``wafer_a_z_range`` is invariably the bottom
+    slab's z-extent and ``wafer_b_z_range`` the top slab's — the driver
+    relies on that invariant to know which grip is which.
     """
 
     atoms: Atoms
     interface_z: float                    # where the two slabs face
-    wafer_a_z_range: tuple[float, float]  # low, high z of wafer A
-    wafer_b_z_range: tuple[float, float]  # low, high z of wafer B
+    # A = bottom slab, B = top slab (invariant of assembly, see above).
+    wafer_a_z_range: tuple[float, float]  # low, high z of wafer A (bottom)
+    wafer_b_z_range: tuple[float, float]  # low, high z of wafer B (top)
     type_map: dict                        # species symbol -> LAMMPS type
     match: SurfaceMatch                   # the coincidence provenance
 
@@ -305,12 +315,18 @@ def write_lammps_data(built: BuiltPair, path: str) -> None:
     and the {Si,O} MLIP are both charge-free at this fidelity) and pins
     the species order to ``built.type_map`` so LAMMPS type ids match the
     potential's expectation.
+
+    ``masses=True`` is REQUIRED, not cosmetic: ASE omits the ``Masses``
+    section by default, and LAMMPS then rejects any run with "Not all
+    per-type masses are set". Writing them keeps the data file
+    self-contained, so no separate ``mass`` command has to be threaded
+    through the command generator to make the file loadable.
     """
     species_order = sorted(
         built.type_map, key=lambda symbol: built.type_map[symbol])
     ase_write(
         path, built.atoms, format="lammps-data",
-        atom_style="atomic", specorder=species_order)
+        atom_style="atomic", specorder=species_order, masses=True)
 
 
 def bulk_atoms(crystal: Structure, cells_per_axis: int) -> Atoms:
@@ -332,7 +348,9 @@ def write_bulk_data(
 
     The companion to :func:`write_lammps_data` for the §2.2 relaxation:
     same ASE membrane, ``atom_style atomic``, deterministic species
-    order. The returned type map lets the caller build the matching
+    order, and the same required ``masses=True`` (see that function —
+    LAMMPS will not run a data file whose per-type masses are unset).
+    The returned type map lets the caller build the matching
     :class:`~sabsim.driver.commands.ForceModel` under the same
     species-order contract (STRUCTURAL 1a).
     """
@@ -342,5 +360,5 @@ def write_bulk_data(
         type_map, key=lambda symbol: type_map[symbol])
     ase_write(
         path, atoms, format="lammps-data",
-        atom_style="atomic", specorder=species_order)
+        atom_style="atomic", specorder=species_order, masses=True)
     return type_map

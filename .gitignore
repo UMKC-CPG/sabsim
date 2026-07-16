@@ -18,6 +18,13 @@ dist/
 # Test-runner cache.
 .pytest_cache/
 
+# LAMMPS run debris. LAMMPS writes log.lammps into the CURRENT directory
+# unless told otherwise, so a driver run started from the repo root drops
+# one here. Real runs redirect it into the job directory on scratch
+# (`-log <job_dir>/log.<tag>`); this rule catches the stragglers.
+log.lammps
+log.cite
+
 # Machine-local Claude Code settings (permissions allowlist, etc.).
 # The shared skills under .claude/commands/ ARE tracked; only the
 # per-machine settings file is ignored.

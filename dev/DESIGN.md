@@ -717,14 +717,21 @@ dissimilar bonding works. The lateral offset survives only as one more
 realization variable, alongside the amorphization seed, for the
 ensemble the bond metric is averaged over.
 
-**The builder emits labeled groups.** The frozen base, the thermostatted
-border, the NVE interior (§3.3), the activated skin, and the press/pull
-grips (§5) are all geometric facts the builder knows and every
-downstream stage needs. Prior art re-derives each region ad hoc inside
-every LAMMPS input, from hardcoded per-material layer thicknesses.
-SABSIM makes the labeled group set part of the structure contract that
-crosses the step-3/4/5/6/7 seam, so the cascade and the pull agree on
-what "the substrate" means without either of them measuring it again.
+**The builder records the zone geometry; each driver carves its own
+zones.** The region a stage needs — a frozen base for the cascade, two
+grips for the press and pull, a thermostat border and an NVE interior
+for both (§3.3) — is a geometric fact, but *which* regions a stage wants
+is a protocol fact the builder should not carry. So (option C, resolved
+2026-07-15) the builder records only the per-wafer z-ranges and the
+interface plane, and each stage's driver carves its own depth zones from
+them at open time. The activated skin is the one exception: it is a
+*measured*, irregular atom set (§3.5), not a depth cut, so it travels as
+an explicit atom set from activation to the press that tracks it. Prior
+art re-derived each region ad hoc inside every LAMMPS input, from
+hardcoded per-material layer thicknesses; SABSIM carves them once per
+stage from the structure's own z-ranges plus a single region-geometry
+setting, so the cascade and the pull agree on what "the substrate" means
+without either of them re-measuring it.
 
 ### 2.7 What we keep, what we replace, and v1
 
@@ -744,8 +751,9 @@ surface energy); warn-and-continue on an uncancelled dipole (→ hard
 fail); the extremal-atom gap and the 4 Å ejecta threshold (→ the
 density-profile surface plane and bonded-cluster connectivity); the
 registry knob (→ no registry; ensemble over seeds); ad hoc region
-selection in every input file (→ the labeled-group contract); and
-adopting one slab's box for the pair (→ assert commensurability).
+selection in every input file (→ z-ranges recorded once, depth zones
+carved per stage by its driver — option C, §2.6); and adopting one
+slab's box for the pair (→ assert commensurability).
 
 **Frozen for v1:** crystalline **β-cristobalite(100) SiO₂ against
 crystalline Si(100)** (ratified 2026-07-13), plus the Si/Si
@@ -1238,9 +1246,9 @@ settle, and that is reported rather than integrated over.
 ### 5.4 The pull
 
 The bottom grip is held, the top grip is displaced at a constant rate,
-and the reaction force is recorded. Grip thicknesses come from §2's
-labeled-group contract, not from a hardcoded per-material layer
-thickness.
+and the reaction force is recorded. The grips are carved by the driver
+from §2's z-ranges plus a single region-geometry setting (option C, §2.6),
+not from a hardcoded per-material layer thickness.
 
 **Both reaction forces are recorded, and their sum is a free correctness
 check.** Newton's third law requires the forces on the two grips to
@@ -1473,9 +1481,9 @@ SABSIM separates the two ideas explicitly. Every atom carries:
 - a **species**, from the single global element map of §4.3 — this is
   chemistry, it is what the potential sees, and there is exactly one
   oxygen (STRUCTURAL 1a);
-- a **provenance label**, from §2's labeled-group contract — this
-  records which slab the atom was built in, it is bookkeeping, and the
-  potential never sees it.
+- a **provenance label**, a per-atom field of §2's structure contract —
+  this records which slab the atom was built in, it is bookkeeping, and
+  the potential never sees it.
 
 A bond is **cross-interface** when its two atoms carry different
 provenance labels. An atom that migrated across during pressing keeps

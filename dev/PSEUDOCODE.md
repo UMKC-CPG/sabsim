@@ -469,13 +469,23 @@ record Atom:
     position:   vector
 
 record LabeledGroups:
-    # Geometric regions every downstream stage needs, computed ONCE by
-    # the builder rather than re-derived per LAMMPS input (DESIGN §2.6).
-    frozen_base:       atom-index set
-    thermostat_border: atom-index set
-    nve_interior:      atom-index set
+    # The structure's contribution to region definition (DESIGN §2.6).
+    # Option C (labeled-group ownership, resolved 2026-07-15): the four
+    # DEPTH zones — a frozen base OR two grips, the thermostat border, the
+    # NVE interior — are NOT stored here as atom-index sets. The builder
+    # records only the per-wafer z-RANGES below; each stage's DRIVER
+    # carves the zones IT needs from them, by depth, at open time. This
+    # keeps the builder ignorant of the MD protocol: the cascade wants a
+    # frozen base, the press/pull wants two grips, and that stage-specific
+    # choice does not belong to the geometry.
+    wafer_a_z_range:   (low, high)    # bottom slab's z-extent
+    wafer_b_z_range:   (low, high)    # top slab's z-extent
+    interface_z:       scalar         # the dividing plane between slabs
+    # The activated skin is the ONE exception: a MEASURED, irregular atom
+    # set (§10.7 — the atoms the cascade actually amorphized), NOT a depth
+    # cut. It cannot be re-carved from z-ranges, so it travels as an
+    # atom-index set from activation to the press that tracks it (§9.3).
     activated_skin:    atom-index set
-    grips:             atom-index set   # press/pull handles (DESIGN §5)
 ```
 
 The builder ASSERTS commensurability rather than assuming it: both slabs
@@ -1025,11 +1035,12 @@ function assemble_pair(slab_A, slab_B, shared, member_specification):
     # (STRUCTURAL 4, DESIGN §2.6). The lateral offset survives only as an
     # ensemble realization variable, never a tuned knob.
 
-    # Emit the labeled-group contract (§3) ONCE: frozen base, thermostat
-    # border, NVE interior, activated skin, grips. Every downstream stage
-    # reads these rather than re-deriving them per LAMMPS input (§2.6).
-    pair.labeled_groups = assign_labeled_groups(pair, member_specification)
-    return pair      # a Structure (§3): the facing pair, grips SET
+    # Record the labeled-group GEOMETRY (§3), NOT four atom-index sets:
+    # the per-wafer z-ranges and the interface plane the driver carves its
+    # depth zones from (option C, §2.6). The measured activated_skin is
+    # already attached by activation (§10.7) and is carried through here.
+    pair.labeled_groups = record_zone_geometry(pair)
+    return pair      # a Structure (§3): the facing pair, z-ranges SET
 ```
 
 ### 7.6 coincidence_match — the Zur-McGill search (we adopt pymatgen)
@@ -1151,7 +1162,8 @@ potential, `DESIGN.md` §2.2); `cleave_and_tile` and `ensure_thickness`'s
 convergence study (`DESIGN.md` §2.5); `select_termination_by_surface_
 energy`; `symmetrize_if_polar`'s four-strategy ladder (a future hook,
 `DESIGN.md` §2.5); and `density_dividing_surface`, `drop_disconnected`,
-`relieve_clash`, `assign_labeled_groups` (`DESIGN.md` §2.6).
+`relieve_clash`, `record_zone_geometry` (the z-ranges the driver carves
+zones from — option C, `DESIGN.md` §2.6).
 
 ---
 
@@ -1680,13 +1692,18 @@ per-rate measures and reads `.press` into `Verdicts` (§4).
 function open_lammps_driver(structure, potential, member_specification):
     # ONE persistent LAMMPS process for the whole press+pull, NOT a fresh
     # LAMMPS per impact with a full-slab disk round-trip (prior art's
-    # antipattern, PRIOR_ART.md §1.7). Load the MLIP once and map §2's
-    # labeled groups (§3 LabeledGroups) to LAMMPS groups and fixes:
-    #   frozen_base       -> immobile, no integrator
-    #   thermostat_border -> Langevin, BIAS-REMOVED (§9.3)
-    #   nve_interior      -> plain NVE
-    #   activated_skin    -> integrated as interior, tracked for §5.1
-    #   grips             -> press/pull handles, held or driven
+    # antipattern, PRIOR_ART.md §1.7). Load the potential once, then CARVE
+    # press/pull depth zones from §2's z-ranges (§3 LabeledGroups, option
+    # C) — the builder does NOT hand these over as atom-index sets; the
+    # driver cuts them by depth at open time:
+    #   bottom_grip       -> held handle, the press/pull anchor (§9.5)
+    #   top_grip          -> driven handle, ramped or moved (§9.3, §9.5)
+    #   border            -> Langevin just inside each grip, BIAS-REMOVED
+    #   interior          -> plain NVE, everything left over
+    # The activated_skin is NOT carved here: it is the MEASURED set
+    # (§10.7) carried from activation, integrated as interior but TRACKED
+    # for §5.1. (The cascade driver, §10.2, carves a frozen_base instead
+    # of grips from the same z-ranges — the zones are stage-appropriate.)
     # The lateral cell is HELD FIXED — no lateral barostat, or the
     # recorded substrate strain relaxes away and the provenance number
     # becomes a fiction (§5.6). The z-boundary is non-periodic, vacuum
@@ -1880,8 +1897,8 @@ function minimize_at_fixed_opening(structure, opening, potential):
 
 ### 9.8 What bottoms out, what delegates
 
-`[BOTTOMS OUT here]` the persistent driver and the labeled-group -> fix
-map (§9.2); `press_and_bond`'s mode switch, no-impact gate, bias-removed
+`[BOTTOMS OUT here]` the persistent driver and its depth-zone carve +
+group -> fix map (§9.2); `press_and_bond`'s mode switch, no-impact gate, bias-removed
 thermostat, dual contact criterion, and hold (§9.3); `settle_reference`'s
 gated minimize+equilibrate (§9.4); `pull_at_rate`'s both-grip recording,
 warm-up-discarded averaged force, and strided frames (§9.5);
@@ -2047,7 +2064,7 @@ function open_cascade_driver(slab, potential, member_specification):
     #                        is never artificially quenched (prior art's
     #                        whole-slab NVT quenches the damage away)
     # These are the SLAB's OWN geometric regions (a standalone slab in
-    # vacuum), DISTINCT from the pair-level LabeledGroups (§3) that
+    # vacuum), DISTINCT from the pair-level LabeledGroups geometry (§3)
     # assembly emits later — activation runs before there IS a pair.
     #
     # Z-BOUNDARY is `p p f` (or shrink-wrap): sputtered atoms LEAVE rather
@@ -2218,9 +2235,10 @@ function label_activated_skin(slab, activated_depth):
     # The cascade CHANGED which atoms are amorphous; record it. The
     # activated_skin (LabeledGroups, §3) is the set of atoms shallower than
     # the MEASURED amorphization depth (§10.6), NOT an a-priori guess.
-    # Assembly (§7.5) re-emits the PAIR-level labeled groups, but the
-    # activated_skin it needs is THIS measured set — step 6's press tracks
-    # it (§9.3). Written here so the measurement is not recomputed later.
+    # Assembly (§7.5) records the pair-level zone GEOMETRY (z-ranges), but
+    # the activated_skin is the ONE labeled group that is a measured atom
+    # set — step 6's press carries and tracks THIS set (§9.3), never
+    # re-carving it from depth. Written here so it is not recomputed later.
     slab.labeled_groups.activated_skin =
         atoms_shallower_than(slab, activated_depth)
     return slab

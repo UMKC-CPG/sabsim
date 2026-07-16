@@ -105,7 +105,12 @@ class PullResult:
 
 
 def _wafer_z(positions: np.ndarray, tags: np.ndarray) -> tuple:
-    """Split a position frame into the two wafers' z-columns by tag."""
+    """Split a position frame into the two wafers' z-columns by tag.
+
+    Wafer A is the bottom slab and wafer B the top by construction (see
+    ``slab_builder``), so the A-tagged atoms give the lower z-column and
+    the B-tagged atoms the upper one.
+    """
     z_lower = positions[tags == WAFER_A_TAG][:, 2]
     z_upper = positions[tags == WAFER_B_TAG][:, 2]
     return z_lower, z_upper

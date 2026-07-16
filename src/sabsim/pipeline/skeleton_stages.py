@@ -31,12 +31,17 @@ from sabsim.pipeline.measures import (
 )
 from sabsim.spec.records import MemberSpecification
 
-# The labeled groups the structure builder tags for the MD stages: the
-# heat-sink design from DESIGN.md §3 that crosses the build->press->pull
-# seam. Placeholder membership in W0, but the names are the real seam.
+# What the structure builder contributes to region definition, crossing
+# the build->press->pull seam. Under option C (labeled-group ownership,
+# 2026-07-15) the builder records only the zone GEOMETRY — the per-wafer
+# z-ranges each stage's driver carves its depth zones from (DESIGN.md
+# §2.6) — plus the ONE measured set the driver cannot re-carve, the
+# activated_skin. Placeholder membership in W0; the real z-ranges live on
+# slab_builder.BuiltPair, wired into the pipeline at slice 1b. Wafer A is
+# the bottom slab and wafer B the top by construction (see BuiltPair).
 _LABELED_GROUPS = (
-    "frozen_base", "thermostat_border", "nve_interior",
-    "activated_skin", "grips",
+    "wafer_a_z_range", "wafer_b_z_range", "interface_z",
+    "activated_skin",
 )
 
 

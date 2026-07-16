@@ -74,6 +74,28 @@ class Engine(ABC):
         ``side`` is ``"bottom"`` or ``"top"``. Both are read so the pull
         force curve and the settle-reference net force are available, and
         their sum is a free Newton's-third-law check (§5.4, §9.4).
+
+        SIGN — POSITIVE IN TENSION. This is the force the GRIP exerts on
+        the MATERIAL: what a testing machine's load cell reads, positive
+        while the grip pulls the material apart. It is therefore the
+        NEGATIVE of the force the material exerts on the grip, which is
+        what a raw ``fix setforce`` / ``compute reduce sum fz`` hands
+        back — an implementation owes the flip (see
+        :class:`~sabsim.driver.lammps_engine.LammpsEngine`).
+
+        This convention is part of the CONTRACT, not an implementation
+        detail, because it is invisible at the seam: a sign error here
+        does not crash, it silently flips the sign of the §8.4 work of
+        separation. Stating it is what keeps the mock and the real
+        engine from each picking their own — which they did, and
+        disagreed, until stage 4 measured it.
+
+        Two consequences worth keeping in view. The §8.4 integrand is
+        then positive over a pull, so M1 integrates to a POSITIVE work,
+        as "the integral of resisting force" intends. And the flip is
+        applied to BOTH grips, never one, so the third-law cancellation
+        the settle gate (§9.4) depends on still holds: negating both
+        leaves their sum zero at a balanced reference.
         """
 
 

@@ -801,6 +801,23 @@ foundations, interaction rules. -->
       integration (the two that need LAMMPS). The Wave-4 knob follow-on
       (three §2 NumericalKnobs) is tracked in the PSEUDOCODE section
       above.
+- [ ] Phase-sequence press + settle + pulls into a `BondDebondResult`
+      (promoted 2026-07-15 from a slice-5 sub-note so it is not lost when
+      slice 5 is ticked). `driver/press_pull.py` has the three §9 control
+      loops as separate functions, but nothing yet drives them in order
+      with a FRESH restore of the settled reference per pull rung and a
+      persistent-engine lifecycle (`PSEUDOCODE.md` §9, `DESIGN.md` §5.4).
+      This is real-adapter territory — the restore/lifecycle only exists
+      against a live LAMMPS instance — so it lands with the compute-node
+      adapter work below.
+- [ ] Bonded-quality grading — `contact_quality` / cross-interface bonds
+      / contact fraction (promoted 2026-07-15 from slice-3 and slice-5
+      sub-notes). `driver/analysis.py` computes the geometric contact
+      criteria but NOT the bonded-quality grade, which reuses the §8
+      geometric machinery (bond cutoffs from partial g(r), the grid-based
+      `contact_area_fraction`, `DESIGN.md` §6.4) that is not built yet.
+      Ties to the §8 characterization build (Wave 4); tracked separately
+      here so the grade is not forgotten inside the press/pull ledger.
 - [ ] Apply the atom-count conservation gate in the pull (`/refine` #4).
       `PSEUDOCODE.md` §9.6 makes `atom_count_conserved` a GATE on the
       Trajectory — an atom escaping the open-z box voids the run (§5.6) —
@@ -809,25 +826,23 @@ foundations, interaction rules. -->
       `PullResult` omits it. Read `engine.atom_count()` before/after the
       pull and carry the verdict. Ties to the real-adapter wiring, which
       is where a live before/after count exists.
-- [ ] DECISION PENDING — labeled-group ownership (`/refine` #3). The
-      press/pull zones (frozen anchor, thermostat buffer, free interior,
-      activated skin, grips) are, in `PSEUDOCODE.md` §7.5 + §9.2, EMITTED
-      by the builder as atom-index sets and READ downstream; the code
-      instead records per-wafer z-ranges (`slab_builder.BuiltPair`) and
-      the driver CARVES regions by depth (`driver/commands.
-      region_group_commands`) with its own names (`bottom_grip`/
-      `top_grip`/`lower_border`/`upper_border`), no `frozen_base`/
-      `activated_skin`. Three resolutions were laid out for the
-      programmer (elaborated jargon-free in the session): (A) builder
-      tags all five zones -> align code to docs (costs builder its
-      protocol-ignorance); (B) driver carves the four depth-zones ->
-      align docs to code (but the ACTIVATED SKIN is a MEASURED irregular
-      set, §10.7, not a depth cut, so it needs its own carry either way);
-      (C) HYBRID (my recommendation) — driver carves the four depth-zones
-      from the builder's z-ranges, the activated skin travels as a
-      measured atom set, docs updated to that split. Awaiting the
-      programmer's pick; then also reconcile the region NAMES. This
-      determines wording in DESIGN §2.6/§7.5/§9.2 and possibly code.
+- [x] Labeled-group ownership (`/refine` #3) — RESOLVED option C
+      (2026-07-15). The DRIVER carves the four depth zones (a frozen base
+      OR two grips, the thermostat border, the NVE interior) from the
+      builder's per-wafer z-ranges at open time; the builder stays
+      protocol-ignorant, recording only the zone GEOMETRY. The activated
+      skin is the ONE exception — a MEASURED, irregular atom set
+      (`PSEUDOCODE.md` §10.7), not a depth cut — so it travels as an
+      explicit atom set from activation to the press. The code already
+      carved by depth (`driver/commands.region_group_commands`), so this
+      was a docs-catch-up: `LabeledGroups` (§3) now holds the z-ranges +
+      `activated_skin`, §7.5 emits `record_zone_geometry`, §9.2 CARVES the
+      zones, `DESIGN.md` §2.6/§2.7/§5.4/§6.2 were reworded, and the
+      pipeline placeholder (`skeleton_stages._LABELED_GROUPS`) + the
+      `BuiltPair` docs were aligned. NAMES: identity stays A/B (spec,
+      atom tags, the §6 γ_A/γ_B math); the A = bottom / B = top assembly
+      invariant is now stated loudly wherever the z-ranges or tags appear
+      (decided 2026-07-15). 72 tests still green. Commit PENDING.
 - [x] Widen the MeasureVector seam to carry VERDICTS (`/refine` #6). The
       `PSEUDOCODE.md` §4 seam is a five-field record — provenance,
       geometry, measures, verdicts, checks — but the code

@@ -11,6 +11,7 @@ serves any crystal, so nothing here is silicon-specific but the CIF.
 
 import os
 
+import pytest
 from ase.io import read as ase_read
 
 import sabsim.structure
@@ -94,7 +95,13 @@ def test_type_map_is_silicon_only():
 
 
 def test_lammps_data_round_trips_atom_count(tmp_path):
-    """Writing then reading the data file preserves every atom."""
+    """Writing then reading the data file preserves every atom.
+
+    The species check is not decoration: a data file identifies its
+    species ONLY through the ``Masses`` section, so a count-only
+    assertion passes on a file whose atoms all read back as hydrogen
+    (see :func:`_masses_in_data_file`).
+    """
     pair = build_facing_pair(_SI_CIF, _SI_100, _SI_CIF, _SI_100, gap=3.0)
     data_path = os.path.join(tmp_path, "pair.data")
     write_lammps_data(pair, data_path)
@@ -102,6 +109,7 @@ def test_lammps_data_round_trips_atom_count(tmp_path):
     restored = ase_read(
         data_path, format="lammps-data", atom_style="atomic")
     assert len(restored) == len(pair.atoms)
+    assert set(restored.get_chemical_symbols()) == {"Si"}
 
 
 def test_bulk_block_replicates_the_conventional_cell():
@@ -113,7 +121,12 @@ def test_bulk_block_replicates_the_conventional_cell():
 
 
 def test_write_bulk_data_round_trips_and_maps_species(tmp_path):
-    """The bulk data file writes every atom and returns its type map."""
+    """The bulk data file writes every atom and returns its type map.
+
+    Named "maps species", so it asserts the species actually survive the
+    round trip rather than the atom count alone (see
+    :func:`_masses_in_data_file` for why those differ).
+    """
     data_path = os.path.join(tmp_path, "bulk.data")
     type_map = write_bulk_data(load_crystal(_SI_CIF), 1, data_path)
     assert type_map == {"Si": 1}
@@ -121,3 +134,75 @@ def test_write_bulk_data_round_trips_and_maps_species(tmp_path):
     restored = ase_read(
         data_path, format="lammps-data", atom_style="atomic")
     assert len(restored) == 8
+    assert set(restored.get_chemical_symbols()) == {"Si"}
+
+
+# The mass LAMMPS must find for silicon, in metal units (amu). Compared
+# loosely: the writer's value carries the isotope-averaged tail
+# (28.0849999...), and the point here is that a RIGHT mass is present,
+# not that a particular number of digits round-trips.
+_SILICON_MASS_AMU = 28.085
+
+
+def _masses_in_data_file(data_path: str) -> dict:
+    """Parse a LAMMPS data file's ``Masses`` section: type id -> mass.
+
+    Parsed by hand rather than through ASE's reader on purpose. A LAMMPS
+    data file carries no element symbols — ``Masses`` is what identifies
+    each type's species, and the ``Atoms`` section names only bare type
+    ids. So a file written without it does not fail loudly on read-back:
+    ASE returns the right NUMBER of atoms with every species silently
+    mislabelled (silicon comes back as hydrogen, type id read as an
+    atomic number). A round-trip asserting only the atom count therefore
+    passes over a file LAMMPS itself refuses to load. This reads the
+    bytes as LAMMPS reads them.
+    """
+    with open(data_path) as data_file:
+        lines = [line.strip() for line in data_file]
+    if "Masses" not in lines:
+        return {}
+    masses = {}
+    for line in lines[lines.index("Masses") + 1:]:
+        if not line:
+            continue
+        if not line[0].isdigit():
+            break              # the next section header ends the block
+        fields = line.split()
+        masses[int(fields[0])] = float(fields[1])
+    return masses
+
+
+def test_pair_data_file_carries_per_type_masses(tmp_path):
+    """The pair data file sets every type's mass, or LAMMPS won't run.
+
+    A regression guard for a real failure: ASE omits the ``Masses``
+    section unless explicitly asked, and LAMMPS then rejects the file
+    with "Not all per-type masses are set" before reaching any run.
+    ``MockEngine`` never parses a data file, so the whole mock-side
+    suite passed over a file the real engine would not load. This is
+    where that gap closes — on the login node, with no LAMMPS present.
+    """
+    pair = build_facing_pair(_SI_CIF, _SI_100, _SI_CIF, _SI_100, gap=3.0)
+    data_path = os.path.join(tmp_path, "pair.data")
+    write_lammps_data(pair, data_path)
+
+    masses = _masses_in_data_file(data_path)
+    assert set(masses) == set(pair.type_map.values())
+    assert masses[pair.type_map["Si"]] == pytest.approx(
+        _SILICON_MASS_AMU, abs=1.0e-2)
+
+
+def test_bulk_data_file_carries_per_type_masses(tmp_path):
+    """The bulk data file sets its type's mass (same §2.2 requirement).
+
+    The bulk block is the FIRST thing the force engine ever loads (the
+    §2.2 lattice derivation), so a massless data file breaks the
+    pipeline at its earliest engine contact.
+    """
+    data_path = os.path.join(tmp_path, "bulk.data")
+    type_map = write_bulk_data(load_crystal(_SI_CIF), 1, data_path)
+
+    masses = _masses_in_data_file(data_path)
+    assert set(masses) == set(type_map.values())
+    assert masses[type_map["Si"]] == pytest.approx(
+        _SILICON_MASS_AMU, abs=1.0e-2)
