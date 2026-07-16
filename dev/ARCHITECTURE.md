@@ -677,6 +677,76 @@ through on-disk file formats, so passing data between them is just
 reading and writing on the cluster's shared parallel filesystem — no
 explicit staging. Large trajectories go on scratch, not home.
 
+**Three roots, split by access pattern.** "Scratch, not home" needs
+somewhere to point, so every path the pipeline reads or writes resolves
+under one of three roots, each named by an environment variable. The
+split is by how a file is *used*, not what it contains, because that is
+what decides who may write it, whether losing it matters, and whether it
+is safe to purge:
+
+- **`SABSIM_SCRATCH`** — per-user, write-heavy, regenerable, purgeable.
+  Run output: LAMMPS data files, trajectory dumps, per-phase logs.
+- **`SABSIM_SHARE`** — group, read-mostly, authoritative, expensive to
+  recreate. The install (LAMMPS / ALF / SABSIM), source potentials,
+  reference datasets.
+- **`SABSIM_LOCAL`** — per-user, read-mostly, an override. A personal
+  copy of anything otherwise found in `SABSIM_SHARE`.
+
+None is defaulted. Guessing a location and writing gigabytes into it is
+how a home quota dies, and principle 1 is that "where to run" is
+*stated*, not inferred — so an unset root is an error the caller sees at
+once, never a silent fallback to somewhere plausible.
+
+**Resolution: `SABSIM_LOCAL` first, then `SABSIM_SHARE`.** For any
+shared input — a potential, a reference dataset, the deployment config
+itself — look in the override, fall back to the group copy. This is the
+ordinary override path (`$HOME/.local` before `/usr`), and the config
+obeys it too, so the scheme is self-consistent top to bottom.
+`SABSIM_SCRATCH` is outside it: per-user output has nothing to override.
+
+The SABSIM-specific catch is provenance. `VISION.md` goal 3 wants every
+number traceable to its exact inputs, so **the manifest records the
+resolved absolute path and the fingerprint of whatever actually won** —
+never the logical name. An override that is not recorded is a silent
+reproducibility hole: two people get different numbers from "the same"
+study because one had a personal potential shadowing the group's, and
+nothing in either record says so. Recorded, the override is auditable;
+unrecorded, it is a trap. That recording is the only machinery v1 builds
+here — `SABSIM_LOCAL` is **declared but inert**, an empty override that
+every lookup falls straight through, until someone needs one. The seam
+costs nothing now and cannot be retrofitted cheaply later.
+
+**Scratch is a mirror tree, linked from the project.** Run output is
+bulky, and a scratch path is long, machine-specific, and easy to lose
+track of. So scratch holds a *mirror* of the project's own directory
+layout, and each job directory carries a symlink named `intermediate`
+pointing into it — the pattern this group's other codes (imago, olcao)
+already use, so the muscle memory carries across. The job directory
+stays small and legible while the bytes live where the sysadmins want
+them, and a reader who lands in a job directory follows one obvious link
+instead of reconstructing a path. The link matters more than it looks:
+a scratch directory nothing points at is an orphan that survives only as
+long as someone remembers it exists.
+
+The mirror is keyed **by path down to the job, then by identity inside
+it**. Path, because `jobs/` may nest several levels before the job
+itself (`jobs/2026-07/si-ladder/`) and that nesting is the researcher's
+own organisation — flattening it to a bare job name would collide across
+groups and discard the grouping. Identity inside, because within a job
+the pipeline iterates over studies and members, and a path cannot
+express "member 3 of study X" without reinventing a naming convention
+the spec already has. The realization is `sabsim/deploy/scratch.py`;
+`jobs/` is untracked, since nothing in it is needed to reproduce a run
+once the manifest holds the resolved path.
+
+A link is a convenience, never evidence. The roots are therefore used as
+*configured* rather than resolved through their mounts — on the current
+cluster `$HOME/data` is a link to `/mnt/pixstor/data/<user>`, and baking
+that into every symlink would leak a sysadmin's implementation detail
+into the project tree and strand the links the day the mount moves. The
+manifest resolves at record time, which is exactly when a frozen,
+unambiguous string is what is wanted.
+
 **Driving the Tier-C engines — a native binding behind an ASE membrane.**
 The LAMMPS Tier-C runs (the step-4 cascade and the step-6/7 press/pull)
 are driven through LAMMPS's **Python binding**, not by emitting a static
@@ -787,7 +857,10 @@ section actually keys.
    (a CPU-QM executor + a GPU-train executor), not a fork. The bootstrap
    loop (STRUCTURAL 1b) is the most execution-intensive part: ALF's Parsl
    interleaved with our LAMMPS protocol runs.
-6. **Large trajectory I/O** — scratch vs home.
+6. **Large trajectory I/O** — scratch vs home. ADDRESSED above by the
+   three roots and the scratch mirror tree; what remains for DESIGN is
+   the trajectory's own size budget (`frame_stride`, the §2 frame
+   budget), not where it lands.
 
 **Current target machine (one instance; the model stays generic).**
 Today's cluster is a **SLURM** system with a shared **PixStor** parallel

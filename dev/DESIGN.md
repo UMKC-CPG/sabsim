@@ -1206,9 +1206,33 @@ interface it forms is interlock rather than adhesion.
 containing the drifting slab with a plain `nvt`, so 150 m/s of directed
 motion is counted as heat; the thermostat then fights the drive and
 never reaches its setpoint (its own log runs about 227 K against a 300 K
-target). SABSIM thermostats **only the interior** — never the grips —
+target). SABSIM thermostats **a border layer just inside each grip, and
+nothing else** — never the grips themselves, and never the interface —
 and, where any thermostatted region carries directed motion, removes the
-center-of-mass bias from the temperature before applying it.
+center-of-mass bias from that region's temperature before applying it.
+Each border is biased separately, because the two drift differently: in
+a pull the upper border rides the driven wafer while the lower one stays
+with the held wafer, so a bias removed over both at once would remove
+neither's.
+
+**Why the sink sits at the grips and not at the interface.** The layer
+stack for the press and pull is the same border-thermostat + NVE-interior
+design §3.3 argues for the cascade, but the *reason* does not carry over
+and is worth stating in its own right. §3.3 keeps the interior on NVE so
+the collision cascade stays ballistic; there is no cascade in a slow
+press. The press/pull reason is that **§6.4's M1 is dissipative by
+construction**, and §6.5's dissipation identity reads `M1 −
+work_of_adhesion_as_fractured` as the energy dissipated in the pull. A
+thermostat near the interface would drain exactly that energy — it would
+delete the observable rather than merely perturb it. So the interface
+must evolve under NVE, and the heat the pull generates has to reach a
+sink that is as far from the interface as the slab allows: the border,
+just inside the grips. This is the same reasoning that makes the border
+non-negotiable rather than decorative — with no sink at all, the
+interior is bounded by rigid handles and the dissipated energy has
+nowhere to go but into heating the interface it was measured from.
+(Consequently the border must actually be integrated; a thermostatted
+layer that is never advanced is a reflecting wall, not a sink.)
 
 **Contact begins from a defined gap, and is confirmed by a stress.** The
 starting separation is the one §2.6 established between the two
