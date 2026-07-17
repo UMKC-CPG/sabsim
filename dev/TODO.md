@@ -898,20 +898,45 @@ foundations, interaction rules. -->
          the border is integrated, the grip gauges are shared across all
          three phases, the press drive is released before the settle, the
          load-driven grip has its own integrator (option 1), and the
-         settle writes the reference data file the pull restores from. All
-         still login-node command-list work — the settle and the pull
-         have STILL never completed against the real engine, so a
-         compute-node re-run (press closes -> settle gates -> pull
-         separates, at 1 and 4 ranks) is the next real-adapter step.
-         WATCH on that run (suspected, not yet verified): the load press
-         drives with `variable press_fz equal ramp(0.0,-force)` while
-         `press_and_bond` advances in a LOOP of short `run` chunks, and
-         LAMMPS `ramp()` interpolates over the CURRENT run's timesteps —
-         so the load likely RESTARTS from zero each chunk (a sawtooth),
-         not a ramp-to-target-then-hold. A press-drive bug distinct from
-         the settle work; confirm on the re-run and, if real, drive the
-         ramp off a persistent step counter or split approach/hold spans.
+         settle writes the reference data file the pull restores from.
+         COMPUTE-NODE RE-RUN DONE (2026-07-17, single rank, exit 0): the
+         full press -> settle -> pull SEQUENCE now runs end to end on real
+         LAMMPS via a throwaway driver (`jobs/bulk_si/run_press_settle_
+         pull.py`, gitignored) — the §9.4 settle CRASH is gone (settle ran
+         and gated), the pull runs and reduces with NO lost atoms, and the
+         load-grip integrator + border integration run clean. It ALSO
+         found and FIXED a real load-magnitude bug: `fix aveforce` sets the
+         per-atom AVERAGE force but `press_drive_commands` passed the TOTAL
+         P*A, so the grip felt N_grip x too much — a nominal 500 MPa read
+         back 72730 bar (~7.3 GPa). FIXED by dividing by `count(top_grip)`
+         at runtime; the re-run then read 4014 bar, the right order.
          (c) the bonded-quality grading (§8 machinery, still deferred).
+      FOUR items the 2026-07-17 re-run left open (none a settle/border
+      regression):
+      1. RAMP SAWTOOTH (suspected, unconfirmed): the load drives with
+         `ramp(0.0,-F)/count(top_grip)` while `press_and_bond` advances in
+         a LOOP of short `run` chunks, and LAMMPS `ramp()` interpolates
+         over the CURRENT run's timesteps, so the load likely RESTARTS
+         each chunk — lowering the effective sustained load. Confirm; if
+         real, drive the ramp off a persistent step counter or split the
+         approach and hold into their own spans. A press-drive issue,
+         distinct from the settle work.
+      2. CONTACT NOT REACHED at the now-correct gentle ~0.4 GPa load
+         within the smoke budget — EXPECTED, a tuning matter (more steps,
+         a modestly higher test load, or a smaller start gap), not a bug.
+      3. REGISTRY CAVEAT: a same-material identity pair (Si/Si) tiled and
+         stacked is in PERFECT lateral registry, so pressing it heals
+         toward BULK (gamma_AB -> 0), not a bond — no number from the
+         smoke test is a real adhesion measurement. The real pipeline
+         breaks registry via activation (step 4) and the §2.6 lateral-
+         shift ensemble variable, both absent here. A DESIGN §2.6/§3 point
+         for the same-material reference, not just the driver.
+      4. FOUR-RANK LAUNCH: plain `srun -n 4 python` ran 4 INDEPENDENT
+         serial copies (each rank 0 of a size-1 world); `srun --mpi=pmix`
+         fails on this cluster (PMIx psec/munge). The known-good multi-
+         rank launcher is OpenMPI `mpirun` in the allocation (already how
+         stage 4 validated 4-rank gather order). A launcher-wiring task,
+         not a code gap.
       Slices 1-3 are login-node work; slices 4-5 are compute-node
       integration (the two that need LAMMPS). The Wave-4 knob follow-on
       (three §2 NumericalKnobs) is tracked in the PSEUDOCODE section

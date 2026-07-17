@@ -170,6 +170,10 @@ def test_press_drive_load_mode_ramps_a_normal_force():
     # The grip needs its own integrator, or aveforce moves nothing and
     # the surfaces never approach (the option-1 fix).
     assert "fix drive_top_nve top_grip nve" in text
+    # The total force is divided by the grip's atom count: aveforce sets
+    # the per-atom AVERAGE, so omitting this over-loads by N_grip (a
+    # compute-node run read ~7.3 GPa for a nominal 500 MPa).
+    assert "/count(top_grip)" in text
 
 
 def test_press_drive_displacement_mode_moves_the_grip():

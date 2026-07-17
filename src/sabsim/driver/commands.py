@@ -295,28 +295,34 @@ def press_drive_commands(built, member: MemberSpecification) -> list:
     """The press drive — load OR displacement, one command apart (§9.3).
 
     Load control applies a target normal FORCE (pressure times the cell
-    cross-section) to the top grip, ramped from zero to avoid a shock;
-    ``aveforce`` spreads it over the grip's atoms. Displacement control
-    rigidly MOVES the top grip downward at the approach rate. Either way
-    the grip is a rigid handle, so no thermostat sees the drive (§5.2).
-    The exact load path/ramp is a §5.9 follow-on; the ramp variable makes
-    the current choice explicit rather than hidden.
+    cross-section) to the top grip, ramped from zero to avoid a shock.
+    Displacement control rigidly MOVES the top grip downward at the
+    approach rate. Under load the driven grip is INTEGRATED so the applied
+    pressure can move it (option 1, PSEUDOCODE.md §9.3); under
+    displacement it is driven kinematically. The exact load path/ramp is a
+    §5.9 follow-on; the ramp variable makes the current choice explicit.
     """
     protocol = member.protocol
     if protocol.press_control == "load":
         area = _cell_cross_section_area(built)
         force = normal_force_from_pressure(protocol.press_load, area)
-        # The grip needs its OWN integrator here. ``aveforce`` SETS the
-        # average force on the grip but, like ``fix langevin``, does not
-        # advance it — a force with no integrator moves nothing, so the
-        # surfaces would never approach (found on a compute node, the
-        # same class of fault as the frozen thermostat border). Under
-        # LOAD control the grip is therefore a real, integrated slab that
-        # the applied pressure pushes down (option 1); the settle later
-        # releases both this integrator and the drive so the reference
-        # settles under no load (:func:`press_release_commands`).
+        # ``fix aveforce`` sets the AVERAGE per-atom force on the group,
+        # NOT the total, so the total it applies is (per-atom value) times
+        # the grip's atom count. To land the intended TOTAL force P*A on
+        # the grip we therefore divide by the atom count — done at runtime
+        # with ``count(top_grip)`` so this generator needs no atom count.
+        # Omitting the divisor applied N_grip times too much load: a
+        # compute-node run at a nominal 500 MPa read back ~7.3 GPa of
+        # normal stress, a ~15x overshoot matching the ~15-atom grip.
+        # The grip also needs its OWN integrator: ``aveforce`` (like ``fix
+        # langevin``) sets a force but does not advance, so a grip without
+        # ``nve`` never moves and the surfaces never approach (the same
+        # class of fault as the frozen thermostat border). The settle
+        # later releases both this integrator and the drive so the
+        # reference settles under no load (:func:`press_release_commands`).
         return [
-            f"variable press_fz equal ramp(0.0,{_num(-force)})",
+            f"variable press_fz equal "
+            f"ramp(0.0,{_num(-force)})/count(top_grip)",
             "fix drive_top_nve top_grip nve",
             "fix drive_top top_grip aveforce 0.0 0.0 v_press_fz",
         ]
