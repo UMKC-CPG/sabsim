@@ -61,8 +61,11 @@ reflow_transcript.py
 onboarding-overview.md
 imago-session-summary.md
 
-# A student's prior wafer-bonding pipeline, dropped in for study. It is
-# not part of the SABSIM source tree; its reusable assets are catalogued
-# in dev/PRIOR_ART.md, which is what the repository actually carries.
-# Kept local so we can mine it without vendoring someone else's project.
+# A student's wafer-bonding pipeline, dropped in for study (two drops:
+# sunita/ and the newer sunita2/ with a built amorphization stage). Not
+# part of the SABSIM source tree; the reusable assets and deficiencies
+# are catalogued in dev/PRIOR_ART.md (§1.6-§1.9), which is what the
+# repository actually carries. Kept local so we can mine it without
+# vendoring someone else's project.
 sunita/
+sunita2/
