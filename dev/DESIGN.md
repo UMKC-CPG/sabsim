@@ -1180,7 +1180,12 @@ and the depth actually reached):
   target bonding pressure and hold. This is the experimental knob
   (`ARCHITECTURE.md` §2.3 lists "load or pressure"), and it is the mode
   in which "did it bond?" is a clean question, since the load is the
-  input and the approach is the response.
+  input and the approach is the response. Applying a load is setting a
+  *force*, and a force accelerates nothing that is not integrated, so
+  the driven grip is given mass in this mode — it is the one place a
+  grip is not a rigid handle. The pressure then pushes it down and the
+  approach is a genuine response; the settle re-freezes it afterward
+  (§5.3).
 - **Displacement-controlled.** Drive the top grip down at a fixed slow
   rate to a target press depth and hold. Numerically better behaved,
   since the grip cannot accelerate; here the load is the observable.
@@ -1261,11 +1266,19 @@ its first genuine force sample already reads −47 eV/Å at five hundredths
 of an ångström of displacement. It integrates from a stressed state and
 subtracts no baseline.
 
-SABSIM makes the reference state a gated artifact: minimize, then
-equilibrate under the thermostat, then **assert** that the net force on
-each grip has fallen within the thermal noise floor and that the
-potential energy has stopped drifting. If it has not, the press did not
-settle, and that is reported rather than integrated over.
+SABSIM makes the reference state a gated artifact: **release the press
+load first** — remove the drive, and in load-controlled mode re-freeze
+the driven grip that was given mass in §5.2, so nothing is still pressing
+the interface — then minimize, then equilibrate under the thermostat,
+then **assert** that the net force on each grip has fallen within the
+thermal noise floor and that the potential energy has stopped drifting.
+If it has not, the press did not settle, and that is reported rather than
+integrated over. Releasing the load is not a detail: equilibrating while
+the press drive is still live would settle a *loaded* state and the
+zero-load gate would pass a state that is not at zero load. The settled
+state is written to a file, because the pull restores from it on a fresh
+instance (§5.4); handing the pull the original pre-press structure
+instead would silently throw the press away.
 
 ### 5.4 The pull
 

@@ -730,26 +730,36 @@ foundations, interaction rules. -->
       setforce` on the bottom grip acts as a READ-BACK mechanism rather
       than a hold. Deliberately untouched by the border fix; entangled
       with §9.4's "what does the settle hold?" decision.
-- [ ] §9.4 SETTLE SEQUENCING — the settle phase cannot run in the
-      protocol's own order, and §9.4 does not say what it holds. Found
-      on a compute node (stage 5, 2026-07-16): the press reached contact
-      on the dual criterion at chunk 37, then `settle_reference` died
-      with `ERROR: lammps_extract_fix(): Fix hold_bottom does not
-      exist`. CAUSE: `settle_reference` (`driver/press_pull.py`) reads
-      `grip_reaction("bottom")` and `("top")`, which need `fix
-      hold_bottom` and `compute top_reaction` — and those are created
-      ONLY by `pull_drive_commands` (§9.5). There is a `_press_setup`
-      and a `_pull_setup` but NO settle setup, so in the real order
-      (press -> settle -> pull) the read-back fixes do not exist yet.
-      §9.4 also says the reference must be at rest under NO applied
-      load, yet nothing issues `unfix drive_top`, so the press drive
-      would still be ramping through the settle. TWO decisions before
-      code: (a) what the settle phase HOLDS — both grips, or the bottom
-      only? (note the top grip has no integrator, so it does not move
-      either way); and (b) whether the grip read-backs should be
-      factored out of `pull_drive_commands` into one shared block that
-      press, settle, and pull all issue. Blocks the phase-sequencing
-      item in the CODE section below.
+- [x] §9.4 SETTLE SEQUENCING — RESOLVED (2026-07-17, option 1). Found on
+      a compute node (stage 5, 2026-07-16): the press reached contact on
+      the dual criterion at chunk 37, then `settle_reference` died with
+      `ERROR: lammps_extract_fix(): Fix hold_bottom does not exist`. Three
+      coupled faults, all fixed. (1) The read-back gauges (`fix
+      hold_bottom` setforce, `compute top_reaction`) were created ONLY by
+      `pull_drive_commands`, so in the real order (press -> settle ->
+      pull) they did not exist for the settle. FIX: factored into a shared
+      `grip_hold_and_readback_commands` issued by the press, settle
+      (via the shared instance), and pull. (2) Nothing released the press
+      drive, so the reference would have equilibrated while still being
+      pressed. FIX: new `press_release_commands` unfixes `drive_top`
+      (every mode) and the load-mode grip integrator, issued at the top
+      of `settle_reference` before the minimize. (3) DEEPER, exposed on
+      re-read: under the v1-default LOAD control the driven grip had NO
+      integrator, and `aveforce` sets a force without advancing — so the
+      surfaces never approached (the SAME class as the frozen border; the
+      stage-5 run that reached contact must have been displacement mode).
+      DECISION (asked, user chose option 1): handles are RIGID except the
+      load-driven grip, which gets its own `fix nve` so the pressure moves
+      it; the settle re-freezes it. Option 3 (rigid-platen via `fix
+      rigid`) was priced (~same LOC, ~3 extra compute-node read-back
+      re-verifications) and deferred — it is a contained one-function
+      swap in `press_drive_commands` if grip deformation ever matters.
+      settle now also writes the settled reference to a data file and
+      returns its path in `ReferenceResult` (the artifact the pull reads).
+      DESIGN §5.2/§5.3 + PSEUDOCODE §9.3/§9.4 reworded; 92 tests green.
+      STILL a login-node command-list change — the physical claims (load
+      press now closes the gap; settle gate passes on a real bond) need
+      the compute-node re-run, which also confirms the border fix above.
 - [ ] Note on BOTH findings above: neither is visible to the mock, and
       that is structural rather than an oversight in the tests.
       `MockEngine.grip_reaction` returns a scripted number whether or
@@ -880,15 +890,27 @@ foundations, interaction rules. -->
          `Engine` contract now STATES the sign convention (positive in
          tension, load-cell sense) instead of leaving each implementation
          to guess; that silence was the actual defect.
-         (b) PARTLY EXERCISED, then BLOCKED (stage 5, 2026-07-16). The
-         press runs against the real engine and reaches contact on the
-         dual criterion (chunk 37, tiny 32-atom Si/Si cell). Settle then
-         dies, and the pull is still UNTESTED — see the two §9.2 / §9.4
-         items in the PSEUDOCODE section above, which must be decided at
-         the design level first. The sequencing also needs a `write_data`
-         of the settled reference between settle and pull: the pull
-         re-reads a data file, and handing it the ORIGINAL pair data
-         would silently discard the press entirely.
+         (b) PARTLY EXERCISED on a compute node (stage 5, 2026-07-16),
+         then UNBLOCKED at the design/code level (2026-07-17). The press
+         reached contact on the dual criterion (chunk 37, tiny 32-atom
+         Si/Si cell) but the settle died; the §9.2 border and §9.4 settle
+         findings are both now resolved (see the PSEUDOCODE items above):
+         the border is integrated, the grip gauges are shared across all
+         three phases, the press drive is released before the settle, the
+         load-driven grip has its own integrator (option 1), and the
+         settle writes the reference data file the pull restores from. All
+         still login-node command-list work — the settle and the pull
+         have STILL never completed against the real engine, so a
+         compute-node re-run (press closes -> settle gates -> pull
+         separates, at 1 and 4 ranks) is the next real-adapter step.
+         WATCH on that run (suspected, not yet verified): the load press
+         drives with `variable press_fz equal ramp(0.0,-force)` while
+         `press_and_bond` advances in a LOOP of short `run` chunks, and
+         LAMMPS `ramp()` interpolates over the CURRENT run's timesteps —
+         so the load likely RESTARTS from zero each chunk (a sawtooth),
+         not a ramp-to-target-then-hold. A press-drive bug distinct from
+         the settle work; confirm on the re-run and, if real, drive the
+         ramp off a persistent step counter or split approach/hold spans.
          (c) the bonded-quality grading (§8 machinery, still deferred).
       Slices 1-3 are login-node work; slices 4-5 are compute-node
       integration (the two that need LAMMPS). The Wave-4 knob follow-on
@@ -902,16 +924,20 @@ foundations, interaction rules. -->
       persistent-engine lifecycle (`PSEUDOCODE.md` §9, `DESIGN.md` §5.4).
       This is real-adapter territory — the restore/lifecycle only exists
       against a live LAMMPS instance — so it lands with the compute-node
-      adapter work below. BLOCKED (2026-07-16) on the §9.2 / §9.4
-      decisions recorded in the PSEUDOCODE section. What stage 5 pinned
-      down about the lifecycle, so it need not be re-derived: press and
-      pull EACH re-read a data file (`preamble_commands` issues `units` +
+      adapter work below. UNBLOCKED (2026-07-17): the §9.2 / §9.4
+      decisions it waited on are resolved, and `settle_reference` now
+      writes the reference data file itself, so the sequencer just threads
+      that path into each pull's `restore`. What stage 5 pinned down about
+      the lifecycle, so it need not be re-derived: press and pull EACH
+      re-read a data file (`preamble_commands` issues `units` +
       `read_data`), and LAMMPS rejects `units` once a box exists, so each
-      needs a FRESH engine; settle issues no `read_data` and so can share
-      the press's engine. The settled reference must be written out
-      (`write_data`) between settle and pull, because the pull restores
-      from a FILE — handing it the original pair data would discard the
-      press. Also note `recording_commands` takes a BARE dump filename,
+      needs a FRESH engine; settle issues no `read_data` and so shares the
+      press's engine (which is WHY the shared grip gauges installed at
+      press setup are still alive for the settle). The settled reference
+      is written out (`write_data`) between settle and pull, because the
+      pull restores from a FILE — handing it the original pair data would
+      discard the press. Also note `recording_commands` takes a BARE dump
+      filename,
       so the driver writes its trajectory into whatever directory it was
       launched from; the job-directory / scratch-root scheme should own
       that path rather than the CWD.

@@ -306,11 +306,23 @@ def press_drive_commands(built, member: MemberSpecification) -> list:
     if protocol.press_control == "load":
         area = _cell_cross_section_area(built)
         force = normal_force_from_pressure(protocol.press_load, area)
+        # The grip needs its OWN integrator here. ``aveforce`` SETS the
+        # average force on the grip but, like ``fix langevin``, does not
+        # advance it — a force with no integrator moves nothing, so the
+        # surfaces would never approach (found on a compute node, the
+        # same class of fault as the frozen thermostat border). Under
+        # LOAD control the grip is therefore a real, integrated slab that
+        # the applied pressure pushes down (option 1); the settle later
+        # releases both this integrator and the drive so the reference
+        # settles under no load (:func:`press_release_commands`).
         return [
             f"variable press_fz equal ramp(0.0,{_num(-force)})",
+            "fix drive_top_nve top_grip nve",
             "fix drive_top top_grip aveforce 0.0 0.0 v_press_fz",
         ]
-    # displacement control: drive the grip down at the approach rate
+    # Displacement control drives the grip KINEMATICALLY: ``fix move``
+    # overrides integration and advances the grip itself, so it needs no
+    # companion integrator (contrast the load branch above).
     rate = to_metal(protocol.press_approach_rate, "velocity")
     return [
         f"fix drive_top top_grip move linear 0.0 0.0 {_num(-rate)} "
@@ -318,22 +330,62 @@ def press_drive_commands(built, member: MemberSpecification) -> list:
     ]
 
 
-def pull_drive_commands(rate: Quantity) -> list:
-    """Hold the bottom grip and pull the top grip apart at ``rate`` (§9.5).
+def grip_hold_and_readback_commands() -> list:
+    """Hold the bottom grip and install BOTH grip force gauges (§5.4, §9.4).
 
-    The bottom grip is held with ``setforce`` (which exposes the summed
-    pre-zero force as ``f_hold_bottom[3]``) and the top grip is moved
-    upward at the ladder rate. Recording BOTH reactions makes Newton's
-    third law a free check (§5.4): the held grip's stored force and the
-    driven grip's summed force should be equal and opposite.
+    These two lines are shared by the press, the settle, and the pull,
+    because all three need to read the grip reactions — that shared need
+    is why they live here rather than inside any one phase's drive. The
+    bottom grip is held with ``setforce``, which zeroes its net force AND
+    exposes the summed pre-zero force as ``f_hold_bottom[3]``; the top
+    grip's reaction is the ``compute reduce sum fz`` scalar. Recording
+    both makes Newton's third law a free check (§5.4): the held grip's
+    stored force and the driven grip's summed force should be equal and
+    opposite at a balanced state.
+
+    Issue these ONCE per LAMMPS instance (a compute cannot be redefined),
+    after the groups are carved. The press and settle share one instance,
+    so the press setup issues them and the settle reuses them; the pull
+    runs on a FRESH instance and issues them again.
+    """
+    return [
+        "fix hold_bottom bottom_grip setforce 0.0 0.0 0.0",
+        "compute top_reaction top_grip reduce sum fz",
+    ]
+
+
+def pull_drive_commands(rate: Quantity) -> list:
+    """Drive the top grip apart at ``rate`` (§9.5).
+
+    The bottom grip is held and both reactions are gauged by the shared
+    :func:`grip_hold_and_readback_commands`; this adds only the pull's own
+    action — moving the top grip upward at the ladder rate. ``fix move``
+    drives it kinematically, so (as in the displacement press) it needs no
+    companion integrator.
     """
     speed = to_metal(rate, "velocity")
     return [
-        "fix hold_bottom bottom_grip setforce 0.0 0.0 0.0",
         f"fix drive_top top_grip move linear 0.0 0.0 {_num(speed)} "
         f"units box",
-        "compute top_reaction top_grip reduce sum fz",
     ]
+
+
+def press_release_commands(member: MemberSpecification) -> list:
+    """Release the press drive so the reference settles under NO load (§9.4).
+
+    The settle's zero-load reference (§5.3) must be at rest under no
+    applied load, so before it minimizes and equilibrates it must undo
+    whatever the press was driving with. The drive fix ``drive_top`` is
+    removed in every mode; under LOAD control the grip's own integrator
+    ``drive_top_nve`` is removed too, which re-freezes the grip into a
+    rigid handle at the depth it reached. The grip force gauges from
+    :func:`grip_hold_and_readback_commands` are deliberately LEFT in
+    place — the settle reads them to check the reference is balanced.
+    """
+    releases = ["unfix drive_top"]
+    if member.protocol.press_control == "load":
+        releases.append("unfix drive_top_nve")
+    return releases
 
 
 def recording_commands(
@@ -387,6 +439,7 @@ def press_script(
     commands += region_group_commands(built, geometry)
     commands += integrator_commands(member, seed)
     commands += press_drive_commands(built, member)
+    commands += grip_hold_and_readback_commands()
 
     # Approach span: the time to close the initial gap at the approach
     # rate (a deterministic upper bound; slice 3 stops early on contact).
@@ -428,6 +481,7 @@ def pull_script(
     commands += force_model_commands(force_model)
     commands += region_group_commands(built, geometry)
     commands += integrator_commands(member, seed)
+    commands += grip_hold_and_readback_commands()
     commands += pull_drive_commands(rate)
     commands += recording_commands(member, dump_file)
 

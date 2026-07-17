@@ -1727,6 +1727,12 @@ function press_and_bond(driver, member_specification):
     # Pluggable control mode at ONE seam (§5.2). v1 freezes load-control;
     # displacement-control is the SAME seam, run once on Si/Si as a
     # cross-check (their disagreement measures press irreversibility).
+    # HANDLES ARE RIGID by default, with ONE exception: applying a load is
+    # setting a FORCE, and a force moves nothing unless something
+    # integrates it, so under load-control the driven grip is given its
+    # OWN integrator (mass) and the pressure pushes it down. Under
+    # displacement-control the grip is driven kinematically, so it needs
+    # no integrator. Either way the settle later re-freezes it (§9.4).
     if protocol.press_control == load:
         drive = ramp_normal_stress(driver.grips.top, protocol.press_load,
                                    protocol.press_approach_rate)
@@ -1784,14 +1790,28 @@ function settle_reference(driver, press, member_specification):
     numerical = member_specification.numerical
     # The pull's curve must start at rest under NO applied load. Prior art
     # minimizes, re-heats, and pulls at once, integrating from a stressed
-    # state (its PE jumps 481 eV in 0.5 ps). SABSIM GATES the reference:
+    # state (its PE jumps 481 eV in 0.5 ps). SABSIM GATES the reference.
+    #
+    # RUNS ON THE PRESS'S OWN LAMMPS INSTANCE (no re-read of a data file),
+    # so the box, the carved groups, and the grip force GAUGES all persist
+    # from the press — the settle reads the gauges, it does not recreate
+    # them. FIRST release the press drive so nothing is still loading the
+    # interface: remove the drive fix, and under LOAD control also remove
+    # the driven grip's own integrator, which re-freezes it into a rigid
+    # handle at the depth it reached. Without this the reference would
+    # equilibrate WHILE STILL BEING PRESSED and the zero-load gate would
+    # be a lie.
+    release_press_drive(driver, member_specification)
     minimize(driver)                          # to a local minimum
     equilibrate_under_thermostat(driver)      # settle at temperature
     # ASSERT the press actually settled; if not, REPORT, do not integrate
     # over it (§5.3). Force floor reuses the pull's noise floor.
     assert net_grip_force(driver) <= numerical.noise_floor
     assert potential_energy_drift(driver) <= numerical.reference_pe_drift
-    return StateRef{ location: snapshot(driver),
+    # The location is a WRITTEN data file, because the pull restores from a
+    # file on a fresh instance (§9.6); handing it the original pair data
+    # would silently discard the whole press.
+    return StateRef{ location: write_reference(driver),
                      potential_energy: potential_energy(driver) }
 ```
 

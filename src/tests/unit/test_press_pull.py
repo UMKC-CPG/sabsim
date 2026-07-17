@@ -119,6 +119,29 @@ def test_settle_reports_a_drifting_reference_as_unsettled():
     assert not result.report.drift_ok
 
 
+def test_settle_releases_the_drive_and_writes_the_reference():
+    """Settle unloads the press, then writes the reference the pull reads."""
+    engine = MockEngine(
+        energies=[-100.0] * 4, bottom_reaction=[1.0] * 4,
+        top_reaction=[-1.0] * 4, atom_count=64)
+    result = settle_reference(
+        engine, _member(), RunControl(equilibrate_chunks=4),
+        reference_data_file="settled.data")
+    stream = engine.received_commands
+    # The press drive is released BEFORE the minimize, or the reference
+    # would settle while still being pressed (§5.3). Template is load
+    # mode, so the grip integrator is released too.
+    assert "unfix drive_top" in stream
+    assert "unfix drive_top_nve" in stream
+    assert stream.index("unfix drive_top") < stream.index(
+        "minimize 1e-8 1e-8 1000 10000")
+    # The settled state is written out and its path returned — the
+    # artifact the pull restores from (handing it the original pair data
+    # would discard the whole press).
+    assert "write_data settled.data" in stream
+    assert result.reference_data_file == "settled.data"
+
+
 # ---------------------------------------------------------------------
 # pull_at_rate — stop at complete separation, then reduce (§9.5, §9.6).
 # ---------------------------------------------------------------------

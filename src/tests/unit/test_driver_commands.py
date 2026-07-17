@@ -23,10 +23,12 @@ from sabsim.driver.commands import (
     classical_si_stand_in,
     deepmd_model,
     force_model_commands,
+    grip_hold_and_readback_commands,
     integrator_commands,
     normal_force_from_pressure,
     preamble_commands,
     press_drive_commands,
+    press_release_commands,
     press_script,
     pull_drive_commands,
     pull_script,
@@ -160,11 +162,14 @@ def test_integrator_thermostats_border_bias_removed():
 
 
 def test_press_drive_load_mode_ramps_a_normal_force():
-    """Load control applies a ramped normal force via aveforce (§9.3)."""
+    """Load control ramps a normal force AND integrates the grip (§9.3)."""
     commands = press_drive_commands(_fake_pair(), _template_member())
     text = "\n".join(commands)
     assert "variable press_fz equal ramp(0.0," in text
     assert "fix drive_top top_grip aveforce 0.0 0.0 v_press_fz" in text
+    # The grip needs its own integrator, or aveforce moves nothing and
+    # the surfaces never approach (the option-1 fix).
+    assert "fix drive_top_nve top_grip nve" in text
 
 
 def test_press_drive_displacement_mode_moves_the_grip():
@@ -180,14 +185,34 @@ def test_press_drive_displacement_mode_moves_the_grip():
         "fix drive_top top_grip move linear 0.0 0.0 -0.01 units box"]
 
 
-def test_pull_drive_holds_bottom_and_records_both_reactions():
-    """The pull holds the bottom grip and records both reactions (§5.4)."""
+def test_pull_drive_moves_the_top_grip_apart():
+    """The pull adds only its own drive; the gauges are shared (§9.5)."""
     commands = pull_drive_commands(Quantity(3.2, "m/s"))
-    text = "\n".join(commands)
+    # 3.2 m/s = 0.032 Å/ps, upward (positive z). The bottom-grip hold and
+    # both reaction gauges now live in the shared readback block, so the
+    # pull drive itself is just the top-grip motion.
+    assert commands == [
+        "fix drive_top top_grip move linear 0.0 0.0 0.032 units box"]
+
+
+def test_grip_readback_holds_bottom_and_gauges_both_reactions():
+    """The shared block holds the bottom grip and gauges both grips (§5.4)."""
+    text = "\n".join(grip_hold_and_readback_commands())
     assert "fix hold_bottom bottom_grip setforce 0.0 0.0 0.0" in text
-    # 3.2 m/s = 0.032 Å/ps, upward (positive z).
-    assert "fix drive_top top_grip move linear 0.0 0.0 0.032 units box" in text
     assert "compute top_reaction top_grip reduce sum fz" in text
+
+
+def test_press_release_unfixes_drive_and_load_integrator():
+    """Settle releases the drive AND, in load mode, the grip integrator."""
+    load_member = _template_member()          # template freezes load mode
+    assert press_release_commands(load_member) == [
+        "unfix drive_top", "unfix drive_top_nve"]
+    displacement = dataclasses.replace(
+        load_member,
+        protocol=dataclasses.replace(
+            load_member.protocol, press_control="displacement"))
+    # Displacement drive has no companion integrator, so only the drive.
+    assert press_release_commands(displacement) == ["unfix drive_top"]
 
 
 # ---------------------------------------------------------------------

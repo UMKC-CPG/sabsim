@@ -40,9 +40,11 @@ from sabsim.driver.commands import (
     ForceModel,
     RegionGeometry,
     force_model_commands,
+    grip_hold_and_readback_commands,
     integrator_commands,
     preamble_commands,
     press_drive_commands,
+    press_release_commands,
     pull_drive_commands,
     recording_commands,
     region_group_commands,
@@ -85,11 +87,18 @@ class PressResult:
 
 @dataclass(frozen=True)
 class ReferenceResult:
-    """The settled zero-load reference and its two gates (§9.4)."""
+    """The settled zero-load reference and its two gates (§9.4).
+
+    ``reference_data_file`` is the path the settled state was written to,
+    the artifact the pull restores from (§9.6). It is ``None`` when the
+    settle was asked to write nowhere (the unit tests, which exercise the
+    gates against a scripted engine and need no file on disk).
+    """
 
     settled: bool
     report: SettleReport
     potential_energy: float
+    reference_data_file: str | None = None
 
 
 @dataclass(frozen=True)
@@ -124,13 +133,19 @@ def _steps(duration: Quantity, timestep: Quantity) -> int:
 
 def _press_setup(
         built, member, force_model, data_file, seed, geometry) -> list:
-    """The press command block WITHOUT the runs (the loop issues those)."""
+    """The press command block WITHOUT the runs (the loop issues those).
+
+    Installs the shared grip force gauges here, on the instance the press
+    and settle share, so the settle can read them without redefining a
+    compute (:func:`grip_hold_and_readback_commands`).
+    """
     return (
         preamble_commands(data_file, member.numerical.md_timestep)
         + force_model_commands(force_model)
         + region_group_commands(built, geometry)
         + integrator_commands(member, seed)
-        + press_drive_commands(built, member))
+        + press_drive_commands(built, member)
+        + grip_hold_and_readback_commands())
 
 
 def press_and_bond(
@@ -186,16 +201,30 @@ def press_and_bond(
 def settle_reference(
         engine: Engine,
         member: MemberSpecification,
-        control: RunControl = RunControl()) -> ReferenceResult:
+        control: RunControl = RunControl(),
+        reference_data_file: str | None = None) -> ReferenceResult:
     """Minimize and equilibrate to a GATED zero-load reference (§9.4).
 
-    Relaxes to a local minimum, equilibrates in chunks while collecting
-    the potential-energy series and both grip reactions, then applies the
-    two gates (:func:`reference_is_settled`): the net grip force within
-    the noise floor and the PE drift within threshold. A reference that
-    fails either is reported as unsettled, never integrated over (§5.3).
+    Runs on the SAME engine as the preceding press (the settle re-reads no
+    data file, so the box, the groups, and the grip force gauges all
+    persist). It first RELEASES the press drive
+    (:func:`press_release_commands`) so the reference settles under no
+    applied load — otherwise it would equilibrate a structure that is
+    still being pressed. It then relaxes to a local minimum, equilibrates
+    in chunks while collecting the potential-energy series and both grip
+    reactions, and applies the two gates
+    (:func:`reference_is_settled`): the net grip force within the noise
+    floor and the PE drift within threshold. A reference that fails either
+    is reported as unsettled, never integrated over (§5.3).
+
+    When ``reference_data_file`` is given, the settled state is written
+    there and its path returned — the artifact the pull restores from,
+    since the pull runs on a fresh engine and reads a file (§9.6). Handing
+    the pull the ORIGINAL pair data instead would silently discard the
+    whole press.
     """
     numerical = member.numerical
+    engine.commands(press_release_commands(member))
     engine.commands(["min_style cg", "minimize 1e-8 1e-8 1000 10000"])
 
     energies: list = []
@@ -215,9 +244,13 @@ def settle_reference(
         * engine.atom_count())
     report = reference_is_settled(
         net_force, noise_floor, drift, drift_threshold)
+
+    if reference_data_file is not None:
+        engine.commands([f"write_data {reference_data_file}"])
     return ReferenceResult(
         settled=report.settled, report=report,
-        potential_energy=energies[-1] if energies else engine.energy())
+        potential_energy=energies[-1] if energies else engine.energy(),
+        reference_data_file=reference_data_file)
 
 
 def _pull_setup(
@@ -228,6 +261,7 @@ def _pull_setup(
         + force_model_commands(force_model)
         + region_group_commands(built, geometry)
         + integrator_commands(member, seed)
+        + grip_hold_and_readback_commands()
         + pull_drive_commands(rate)
         + recording_commands(member, f"{member.name}_pull.dump"))
 
