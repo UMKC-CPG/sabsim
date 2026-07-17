@@ -165,8 +165,13 @@ def test_press_drive_load_mode_ramps_a_normal_force():
     """Load control ramps a normal force AND integrates the grip (§9.3)."""
     commands = press_drive_commands(_fake_pair(), _template_member())
     text = "\n".join(commands)
-    assert "variable press_fz equal ramp(0.0," in text
     assert "fix drive_top top_grip aveforce 0.0 0.0 v_press_fz" in text
+    # The load climbs off the ABSOLUTE step and then holds — a boolean
+    # blend (step<R gives the rising fraction, step>=R holds at 1) — not
+    # LAMMPS ramp(), which restarts each run chunk (the confirmed
+    # sawtooth). LAMMPS has no scalar min(), hence the blend.
+    assert "(step/" in text and "(step<" in text and "(step>=" in text
+    assert "ramp(" not in text and "min(" not in text
     # The grip needs its own integrator, or aveforce moves nothing and
     # the surfaces never approach (the option-1 fix).
     assert "fix drive_top_nve top_grip nve" in text

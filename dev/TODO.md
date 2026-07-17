@@ -913,14 +913,23 @@ foundations, interaction rules. -->
          (c) the bonded-quality grading (§8 machinery, still deferred).
       FOUR items the 2026-07-17 re-run left open (none a settle/border
       regression):
-      1. RAMP SAWTOOTH (suspected, unconfirmed): the load drives with
-         `ramp(0.0,-F)/count(top_grip)` while `press_and_bond` advances in
-         a LOOP of short `run` chunks, and LAMMPS `ramp()` interpolates
-         over the CURRENT run's timesteps, so the load likely RESTARTS
-         each chunk — lowering the effective sustained load. Confirm; if
-         real, drive the ramp off a persistent step counter or split the
-         approach and hold into their own spans. A press-drive issue,
-         distinct from the settle work.
+      1. RAMP SAWTOOTH — CONFIRMED on a compute node (2026-07-17). The
+         load drives with `ramp(0.0,-F)/count(top_grip)` while
+         `press_and_bond` advances in a LOOP of short `run` chunks, and
+         LAMMPS `ramp()` interpolates over the CURRENT run's timesteps.
+         A `fix ave/time` probe of `v_press_fz` over eight 200-step chunks
+         (`jobs/bulk_si/probe_press_force.py`) showed it climb 0 -> target
+         within each chunk and RESET to the one-step value at every 200-
+         step boundary, perfectly periodic — so the load never rose once
+         and HELD, and its time-average was roughly half the target.
+         FIXED (2026-07-17): the drive now uses the ABSOLUTE step via a
+         boolean blend — `step<R` selects the rising fraction `step/R`,
+         `step>=R` holds at 1 (LAMMPS has no scalar `min()`) — over a
+         documented §5.9 rise-time STAND-IN `_LOAD_RISE_TIME_STANDIN =
+         10 ps` (commands.py). Re-probed: `v_press_fz` climbs once over
+         10 ps then holds flat, with NO reset at any chunk boundary. The
+         real load RISE-TIME as a first-class SPEC knob stays a §5.9
+         follow-on. A press-drive issue, distinct from the settle work.
       2. CONTACT NOT REACHED at the now-correct gentle ~0.4 GPa load
          within the smoke budget — EXPECTED, a tuning matter (more steps,
          a modestly higher test load, or a smaller start gap), not a bug.

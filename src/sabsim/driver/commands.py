@@ -292,38 +292,60 @@ def integrator_commands(member: MemberSpecification, seed: int) -> list:
     ]
 
 
+# The load RISE TIME: how long the press load takes to climb from zero to
+# the target before it HOLDS there. A documented §5.9 STAND-IN, not a
+# converged value — the real load-schedule knob is a follow-on
+# (dev/TODO.md). It must be SHORT relative to the whole press yet long
+# enough that the onset is a gentle squeeze and not a shock; 10 ps is a
+# placeholder in that spirit. Driving the ramp off this rise time and the
+# ABSOLUTE step is what stops the load sawtoothing across the run chunks.
+_LOAD_RISE_TIME_STANDIN = Quantity(10.0, "ps")
+
+
 def press_drive_commands(built, member: MemberSpecification) -> list:
     """The press drive — load OR displacement, one command apart (§9.3).
 
     Load control applies a target normal FORCE (pressure times the cell
-    cross-section) to the top grip, ramped from zero to avoid a shock.
-    Displacement control rigidly MOVES the top grip downward at the
-    approach rate. Under load the driven grip is INTEGRATED so the applied
-    pressure can move it (option 1, PSEUDOCODE.md §9.3); under
-    displacement it is driven kinematically. The exact load path/ramp is a
-    §5.9 follow-on; the ramp variable makes the current choice explicit.
+    cross-section) to the top grip, climbing from zero to the target over
+    a rise time and then HOLDING — driven off the absolute step so it does
+    not sawtooth across the run's chunks. Displacement control rigidly
+    MOVES the top grip downward at the approach rate. Under load the driven
+    grip is INTEGRATED so the applied pressure can move it (option 1,
+    PSEUDOCODE.md §9.3); under displacement it is driven kinematically. The
+    load rise time is a §5.9 follow-on (:data:`_LOAD_RISE_TIME_STANDIN`).
     """
     protocol = member.protocol
     if protocol.press_control == "load":
         area = _cell_cross_section_area(built)
         force = normal_force_from_pressure(protocol.press_load, area)
-        # ``fix aveforce`` sets the AVERAGE per-atom force on the group,
-        # NOT the total, so the total it applies is (per-atom value) times
-        # the grip's atom count. To land the intended TOTAL force P*A on
-        # the grip we therefore divide by the atom count — done at runtime
-        # with ``count(top_grip)`` so this generator needs no atom count.
-        # Omitting the divisor applied N_grip times too much load: a
-        # compute-node run at a nominal 500 MPa read back ~7.3 GPa of
-        # normal stress, a ~15x overshoot matching the ~15-atom grip.
-        # The grip also needs its OWN integrator: ``aveforce`` (like ``fix
-        # langevin``) sets a force but does not advance, so a grip without
-        # ``nve`` never moves and the surfaces never approach (the same
-        # class of fault as the frozen thermostat border). The settle
-        # later releases both this integrator and the drive so the
-        # reference settles under no load (:func:`press_release_commands`).
+        rise_steps = max(1, round(
+            to_metal(_LOAD_RISE_TIME_STANDIN, "time")
+            / to_metal(member.numerical.md_timestep, "time")))
+        # THREE things this drive gets right, each learned on a compute
+        # node. (1) RAMP SHAPE. The load climbs from zero to the target
+        # over the rise time and then HOLDS, driven off the ABSOLUTE step
+        # via a boolean blend: ``step<rise`` selects the rising fraction
+        # ``step/rise`` and ``step>=rise`` holds it at 1 (LAMMPS boolean
+        # operators return 1/0, and it has no scalar ``min()``). LAMMPS
+        # ``ramp()`` was wrong here: it interpolates over the CURRENT
+        # ``run`` command, and the press runs as many short ``run`` chunks,
+        # so the load SAWTOOTHED — climbing then resetting to zero every
+        # chunk, never holding (confirmed by a force probe). The absolute
+        # step keeps counting across chunks, so the ramp happens once.
+        # (2) MAGNITUDE. ``fix aveforce`` sets the AVERAGE per-atom force,
+        # not the total, so we divide the target total P*A by the grip's
+        # atom count with ``count(top_grip)`` (at runtime, so this
+        # generator needs no atom count). Omitting it over-loaded by
+        # N_grip: a nominal 500 MPa read back ~7.3 GPa, a ~15x overshoot.
+        # (3) INTEGRATOR. ``aveforce`` (like ``fix langevin``) sets a force
+        # but does not advance, so the grip needs its own ``nve`` or it
+        # never moves and the surfaces never approach. The settle later
+        # releases both the integrator and the drive so the reference
+        # settles under no load (:func:`press_release_commands`).
         return [
-            f"variable press_fz equal "
-            f"ramp(0.0,{_num(-force)})/count(top_grip)",
+            f"variable press_fz equal {_num(-force)}*"
+            f"((step/{rise_steps})*(step<{rise_steps})"
+            f"+(step>={rise_steps}))/count(top_grip)",
             "fix drive_top_nve top_grip nve",
             "fix drive_top top_grip aveforce 0.0 0.0 v_press_fz",
         ]
