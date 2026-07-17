@@ -256,19 +256,34 @@ def region_group_commands(built, geometry: RegionGeometry) -> list:
 
 
 def integrator_commands(member: MemberSpecification, seed: int) -> list:
-    """Integrate the interior and thermostat the border, bias-removed.
+    """Integrate interior AND border; thermostat the border, bias-removed.
 
-    The interior runs plain NVE; the border runs a Langevin thermostat
-    whose center-of-mass drift is removed FIRST (``temp/com`` +
-    ``fix_modify``), so directed motion is never counted as heat — the
-    §5.2 fix for prior art's nvt-on-the-drifting-slab error. The grips
-    are driven or held by their own fixes, so they are not integrated
-    here.
+    Both the interior and the border are advanced in time by their own
+    ``fix nve``. The border ALSO carries a Langevin thermostat whose
+    center-of-mass drift is removed FIRST (``temp/com`` + ``fix_modify``),
+    so directed motion is never counted as heat — the §5.2 fix for prior
+    art's nvt-on-the-drifting-slab error.
+
+    The border needs its OWN ``fix nve`` and cannot rely on the Langevin
+    fix to move it: in LAMMPS ``fix langevin`` adds thermostatting forces
+    but does NOT integrate the equations of motion. A border given only
+    the Langevin fix is thermostatted yet never advances — a reflecting
+    wall, not the heat sink DESIGN.md §5.2 requires, so the dissipated
+    energy the pull measures has nowhere to go but back into the
+    interface it was measured from. Integrating the border is what turns
+    it into a real sink (verified on a compute node, stage 5: with the
+    interior-only integrator the border's max displacement over 500 steps
+    was exactly 0 A).
+
+    The grips are driven or held by their own fixes and are deliberately
+    NOT integrated here — whether they SHOULD be is a separate open
+    question (PSEUDOCODE.md §9.2 / §9.4), untouched by this border fix.
     """
     temperature = to_metal(member.protocol.press_temperature, "temperature")
     damping = to_metal(member.numerical.langevin_damping, "time")
     return [
         "fix nve_interior interior nve",
+        "fix nve_border border nve",
         "compute border_temp border temp/com",
         f"fix langevin_border border langevin {_num(temperature)} "
         f"{_num(temperature)} {_num(damping)} {seed}",

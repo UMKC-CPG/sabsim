@@ -145,10 +145,14 @@ def test_region_groups_carve_by_z_position():
 # ---------------------------------------------------------------------
 
 def test_integrator_thermostats_border_bias_removed():
-    """NVE interior + Langevin border with the COM bias removed (§5.2)."""
+    """NVE interior + NVE-and-Langevin border, COM bias removed (§5.2)."""
     commands = integrator_commands(_template_member(), seed=12345)
     text = "\n".join(commands)
     assert "fix nve_interior interior nve" in text
+    # The border is INTEGRATED as well as thermostatted: a Langevin fix
+    # alone adds forces but never advances, leaving a reflecting wall
+    # rather than the §5.2 heat sink. Its own nve is what makes it move.
+    assert "fix nve_border border nve" in text
     assert "compute border_temp border temp/com" in text
     # 300 K setpoint, 0.5 ps damping, the given seed.
     assert "fix langevin_border border langevin 300 300 0.5 12345" in text

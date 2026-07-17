@@ -1698,8 +1698,15 @@ function open_lammps_driver(structure, potential, member_specification):
     # driver cuts them by depth at open time:
     #   bottom_grip       -> held handle, the press/pull anchor (§9.5)
     #   top_grip          -> driven handle, ramped or moved (§9.3, §9.5)
-    #   border            -> Langevin just inside each grip, BIAS-REMOVED
-    #   interior          -> plain NVE, everything left over
+    #   border            -> just inside each grip, INTEGRATED (nve) AND
+    #                        Langevin-thermostatted, BIAS-REMOVED. The nve
+    #                        is not optional: a Langevin fix adds forces
+    #                        but does not advance, so a border without its
+    #                        own nve is a reflecting wall, not the §5.2
+    #                        heat sink (found on a compute node, stage 5).
+    #   interior          -> plain NVE, everything left over. "Interior"
+    #                        here names ONLY this free group, never the
+    #                        border; see §9.3's thermostat note.
     # The activated_skin is NOT carved here: it is the MEASURED set
     # (§10.7) carried from activation, integrated as interior but TRACKED
     # for §5.1. (The cascade driver, §10.2, carves a frozen_base instead
@@ -1732,12 +1739,16 @@ function press_and_bond(driver, member_specification):
     # a collision and the interface is interlock, not adhesion. A GATE.
     assert approach_is_quasistatic(drive)
 
-    # THE THERMOSTAT MUST NOT SEE THE DRIVE (§5.2): thermostat the
-    # INTERIOR ONLY, never the grips, and remove the center-of-mass bias
-    # from any thermostatted region that carries directed motion before
-    # applying the thermostat — so directed motion is never read as heat
-    # (prior art's nvt-on-the-drifting-slab error).
-    thermostat_interior_bias_removed(driver, protocol.press_temperature)
+    # THE THERMOSTAT MUST NOT SEE THE DRIVE (§5.2): thermostat the BORDER
+    # ONLY — the layer just inside each grip — never the grips and never
+    # the interface. Integrate BOTH the border and the interior (each
+    # nve), because the Langevin thermostat on the border adds forces but
+    # does not advance; a border that is thermostatted but never moved is
+    # a reflecting wall, not a heat sink (§9.2). Remove the center-of-mass
+    # bias from the border before thermostatting it, so directed drift is
+    # never read as heat (prior art's nvt-on-the-drifting-slab error).
+    integrate_interior_and_border(driver)
+    thermostat_border_bias_removed(driver, protocol.press_temperature)
 
     # CONTACT ON A DUAL CRITERION (§5.2, adapted from prior art's one good
     # idea, find_contact_step): PRIMARY = the gap between the two §2.6
