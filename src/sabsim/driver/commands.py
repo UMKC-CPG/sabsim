@@ -27,6 +27,7 @@ Three design commitments show up directly here:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -412,6 +413,21 @@ def recording_commands(
     ]
 
 
+def pull_dump_file(
+        output_directory: str, member: MemberSpecification) -> str:
+    """Where a pull's trajectory dump is written (ARCHITECTURE.md §4.1).
+
+    Run output belongs under the run's OWN directory — the scratch job
+    directory the deployment layer owns — never the current working
+    directory, or LAMMPS drops the dump wherever the process happened to
+    launch from (which is how one once landed in the repo root). The
+    orchestrator passes that directory in; this library owns only the file
+    NAME, because the §8 snapshot selector reads the dump back by that
+    name, so it is part of the contract rather than a caller's choice.
+    """
+    return os.path.join(output_directory, f"{member.name}_pull.dump")
+
+
 # ---------------------------------------------------------------------
 # The two assemblers. Each stitches the blocks above into the ordered
 # command stream for one phase, including the deterministic `run`s. The
@@ -468,19 +484,23 @@ def pull_script(
         rate: Quantity,
         pull_distance: Quantity,
         seed: int,
-        geometry: RegionGeometry = RegionGeometry()) -> list:
+        geometry: RegionGeometry = RegionGeometry(),
+        *,
+        output_directory: str) -> list:
     """The full ordered pull command stream for one rate (PSEUDOCODE §9.5).
 
     Reads the settled reference state, loads the force model, carves the
     groups, starts the thermostatted integrators, holds the bottom grip
     and drives the top grip apart at ``rate``, and records the strided
-    frames and grip reactions. The ``run`` spans ``pull_distance`` at the
-    rate; slice 3 stops it EARLY at complete separation (opening past the
-    cutoff with the force returned to the noise floor, §9.6).
+    frames and grip reactions into ``output_directory`` (a required
+    keyword — the run states where its output lands, it is never inferred
+    from the working directory). The ``run`` spans ``pull_distance`` at
+    the rate; slice 3 stops it EARLY at complete separation (opening past
+    the cutoff with the force returned to the noise floor, §9.6).
     """
     numerical = member.numerical
     timestep_ps = to_metal(numerical.md_timestep, "time")
-    dump_file = f"{member.name}_pull.dump"
+    dump_file = pull_dump_file(output_directory, member)
 
     commands = []
     commands += preamble_commands(data_file, numerical.md_timestep)

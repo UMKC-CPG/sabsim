@@ -25,11 +25,6 @@ dist/
 log.lammps
 log.cite
 
-# Strided trajectory dumps also land in the CWD, because recording_commands
-# still takes a bare dump filename (a tracked CODE follow-on: the job-dir /
-# scratch scheme should own that path). Catch the stragglers here.
-*.dump
-
 # Job working directories — run output, never project source. Each job
 # directory holds an `intermediate` symlink into the SABSIM_SCRATCH
 # mirror (see sabsim/deploy/scratch.py) plus whatever the run drops

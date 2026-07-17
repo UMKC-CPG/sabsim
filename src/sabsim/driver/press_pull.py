@@ -46,6 +46,7 @@ from sabsim.driver.commands import (
     press_drive_commands,
     press_release_commands,
     pull_drive_commands,
+    pull_dump_file,
     recording_commands,
     region_group_commands,
     to_metal,
@@ -254,7 +255,8 @@ def settle_reference(
 
 
 def _pull_setup(
-        built, member, force_model, data_file, rate, seed, geometry) -> list:
+        built, member, force_model, data_file, rate, seed, geometry,
+        output_directory) -> list:
     """The pull command block WITHOUT the run (the loop issues that)."""
     return (
         preamble_commands(data_file, member.numerical.md_timestep)
@@ -263,7 +265,8 @@ def _pull_setup(
         + integrator_commands(member, seed)
         + grip_hold_and_readback_commands()
         + pull_drive_commands(rate)
-        + recording_commands(member, f"{member.name}_pull.dump"))
+        + recording_commands(
+            member, pull_dump_file(output_directory, member)))
 
 
 def pull_at_rate(
@@ -275,7 +278,9 @@ def pull_at_rate(
         rate: Quantity,
         seed: int,
         geometry: RegionGeometry = RegionGeometry(),
-        control: RunControl = RunControl()) -> PullResult:
+        control: RunControl = RunControl(),
+        *,
+        output_directory: str) -> PullResult:
     """Pull apart at one rate until complete separation, then reduce (§9.5).
 
     Restores the reference (a fresh setup reading its data file), then
@@ -284,11 +289,14 @@ def pull_at_rate(
     separation — opening past the cutoff with the force at the noise floor
     — then reduces to the two curves: the averaged force versus grip
     displacement (leading warm-up dropped) and versus interface opening,
-    plus the separation point (§9.6).
+    plus the separation point (§9.6). The strided trajectory dump lands in
+    ``output_directory`` (a required keyword — the run states where its
+    output goes, never the current working directory).
     """
     numerical = member.numerical
     engine.commands(_pull_setup(
-        built, member, force_model, data_file, rate, seed, geometry))
+        built, member, force_model, data_file, rate, seed, geometry,
+        output_directory))
 
     tags = np.asarray(built.atoms.get_tags())
     timestep = to_metal(numerical.md_timestep, "time")

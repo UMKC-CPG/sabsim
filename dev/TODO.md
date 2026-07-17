@@ -961,11 +961,16 @@ foundations, interaction rules. -->
       press setup are still alive for the settle). The settled reference
       is written out (`write_data`) between settle and pull, because the
       pull restores from a FILE — handing it the original pair data would
-      discard the press. Also note `recording_commands` takes a BARE dump
-      filename,
-      so the driver writes its trajectory into whatever directory it was
-      launched from; the job-directory / scratch-root scheme should own
-      that path rather than the CWD.
+      discard the press. Trajectory-dump LOCATION now FIXED (2026-07-17):
+      `pull_at_rate` / `pull_script` take a REQUIRED keyword
+      `output_directory` and compose the dump path with
+      `pull_dump_file(output_directory, member)`, so run output lands under
+      the run's scratch job directory, never the CWD (this library owns
+      only the dump NAME, which §8 reads back by). Verified on a compute
+      node: the dump landed in scratch and the repo root stayed clean.
+      Follow-on for the multi-rung ladder: the name is per-MEMBER, so
+      several pull rungs would overwrite one file — add the rate/rung to
+      the name when the ladder is sequenced.
 - [ ] Bonded-quality grading — `contact_quality` / cross-interface bonds
       / contact fraction (promoted 2026-07-15 from slice-3 and slice-5
       sub-notes). `driver/analysis.py` computes the geometric contact

@@ -146,7 +146,7 @@ def test_settle_releases_the_drive_and_writes_the_reference():
 # pull_at_rate — stop at complete separation, then reduce (§9.5, §9.6).
 # ---------------------------------------------------------------------
 
-def test_pull_stops_at_complete_separation():
+def test_pull_stops_at_complete_separation(tmp_path):
     """The pull stops when the interface opens past the cutoff at ~0 force."""
     # Openings ~3, 5, 7, 9; the cutoff is 6, so frames 3-4 are open. The
     # force decays; only the last is within the noise floor (0.05).
@@ -156,18 +156,20 @@ def test_pull_stops_at_complete_separation():
 
     result = pull_at_rate(
         engine, _fake_built(), _member(), _MODEL, "ref.data",
-        rate=Quantity(3.2, "m/s"), seed=1)
+        rate=Quantity(3.2, "m/s"), seed=1,
+        output_directory=str(tmp_path))
 
     assert result.complete
     assert isinstance(result.grip_displacement, np.ndarray)
 
 
-def test_pull_reports_incomplete_when_it_never_separates():
+def test_pull_reports_incomplete_when_it_never_separates(tmp_path):
     """A pull that never opens past the cutoff is flagged incomplete."""
     engine = MockEngine(
         positions=[_frame(12.0)], top_reaction=[1.0])
     result = pull_at_rate(
         engine, _fake_built(), _member(), _MODEL, "ref.data",
         rate=Quantity(3.2, "m/s"), seed=1,
-        control=RunControl(max_chunks=3))
+        control=RunControl(max_chunks=3),
+        output_directory=str(tmp_path))
     assert not result.complete

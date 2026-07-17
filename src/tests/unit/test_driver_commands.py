@@ -239,18 +239,21 @@ def test_press_script_is_ordered_and_runs_the_hold():
     assert runs == ["run 300000", "run 150000"]
 
 
-def test_pull_script_records_and_runs_the_distance():
+def test_pull_script_records_and_runs_the_distance(tmp_path):
     """The pull script drives, records strided frames, and runs once."""
     member = _template_member()
     model = classical_si_stand_in({"Si": 1})
     commands = pull_script(
         _fake_pair(), member, model, "reference.data",
         rate=Quantity(3.2, "m/s"),
-        pull_distance=Quantity(20.0, "angstrom"), seed=7)
+        pull_distance=Quantity(20.0, "angstrom"), seed=7,
+        output_directory=str(tmp_path))
 
     text = "\n".join(commands)
     assert "fix hold_bottom bottom_grip setforce 0.0 0.0 0.0" in text
-    assert "dump traj all custom 100 si-sio2_pull.dump id type x y z" in text
+    # The dump lands under the supplied output directory, not the CWD.
+    dump = os.path.join(str(tmp_path), "si-sio2_pull.dump")
+    assert f"dump traj all custom 100 {dump} id type x y z" in text
     # 20 Å at 3.2 m/s (0.032 Å/ps) = 625 ps / 0.001 ps = 625000 steps.
     runs = [c for c in commands if c.startswith("run ")]
     assert runs == ["run 625000"]
