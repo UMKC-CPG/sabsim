@@ -38,6 +38,13 @@ log.cite
 # per-machine settings file is ignored.
 .claude/settings.local.json
 
+# Machine-local deployment rc holding the three root variables
+# (SABSIM_SCRATCH / SABSIM_SHARE / SABSIM_LOCAL, ARCHITECTURE.md §4.1).
+# The installer generates it inside the clone at .sabsim/sabsimrc and the
+# user edits it to match their machine, so it is per-checkout state, not
+# project source — like settings.local.json above.
+.sabsim/
+
 # Raw session transcripts and the helper that reflows them. These are
 # working logs, not project deliverables, so they stay local.
 conversation.txt

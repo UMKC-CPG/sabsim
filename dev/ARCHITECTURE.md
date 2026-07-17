@@ -697,6 +697,38 @@ how a home quota dies, and principle 1 is that "where to run" is
 *stated*, not inferred — so an unset root is an error the caller sees at
 once, never a silent fallback to somewhere plausible.
 
+**The roots are set by a sourced shell rc, upstream of Python.** They
+have to be established before any SABSIM code runs, for two reasons that
+both rule out the deployment config as their home. `SABSIM_SHARE` names
+the *install* itself, so the code that would read a config file cannot
+run until the root that locates it is already known; and the resolution
+rule just below finds that very config *through* the roots, so putting
+the roots inside it is a circular lookup. The mechanism is instead the
+one this group's other codes already use (imago's `imagorc`): a
+machine-local file of plain `export` lines, kept at `.sabsim/sabsimrc`
+inside the user's own clone of the repository, sourced by the same
+activation alias that loads the environment. Living in the clone means
+the rc travels with the checkout and needs no separate bookkeeping;
+being sourced by the alias means all three roots are live in the shell
+before the first `python` starts. The installer *generates* this file
+fully populated, and the user is guided to edit it to match their own
+machine — which keeps faith with "none is defaulted": the values are
+stated in a file the user owns rather than inferred by code, and the
+generator is exactly the "defaults exist only as a generator that emits
+a complete file" escape hatch (`DESIGN.md` §1.4).
+
+**Two install shapes share the one rc mechanism** (a system-wide
+administrator install, serving every user at once, is deferred). For a
+*single user*, the clone, the install, and the rc all sit in that user's
+own space, and `SABSIM_LOCAL` stays inert. For a *group-leader* install,
+the leader installs once into a group-readable location that every
+user's `SABSIM_SHARE` points at, while each user's own rc still names a
+per-user `SABSIM_SCRATCH` — precisely the per-user-write / group-read
+split the three roots were drawn along, and the case where `SABSIM_LOCAL`
+finally earns its keep: a personal potential shadowing the group's copy,
+recorded by the manifest (below) so the override is auditable rather than
+silent.
+
 **Resolution: `SABSIM_LOCAL` first, then `SABSIM_SHARE`.** For any
 shared input — a potential, a reference dataset, the deployment config
 itself — look in the override, fall back to the group copy. This is the
