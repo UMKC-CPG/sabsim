@@ -814,9 +814,18 @@ classical MD, and both are just one setting of the projectile spec below.
 
 This is the correctness core, and the part prior art gets wrong. The
 classical + ZBL potential runs the cascade (STRUCTURAL 1b; §4.6): a
-`hybrid/overlay` splice with ZBL for the short-range collision and the
-config-selected classical generator (BKS or Vashishta for silica,
-Munetoh-Tersoff a fallback; Buckingham for ionic) for the bonding.
+`hybrid/overlay` splice of the config-selected classical generator —
+**Stillinger-Weber for silicon** (the same model the press/pull uses, so
+one silicon model spans the whole pipeline; decided 2026-07-17; BKS or
+Vashishta for silica, Munetoh-Tersoff a fallback; Buckingham for ionic) —
+with **two ZBL hard cores, not one**. The first, longer-range, covers the
+projectile-substrate collisions; the second, with a very short cutoff
+below the bond length, covers every substrate-substrate pair. That second
+core is not optional: the classical generators (Stillinger-Weber, Tersoff)
+have only a FINITE short-range repulsion, so under an energetic cascade
+two substrate atoms can be driven into each other and fuse; the short ZBL
+supplies the missing hard wall while switching off well below the bond, so
+normal bonding is untouched (`PRIOR_ART.md` §1.9).
 
 The **heat-sink and boundary design** must be:
 
@@ -840,12 +849,20 @@ practice and is robust across a *range* of energy and dose, so we design
 the root cause rather than inherit a tuned single point.
 
 **Per-impact cycle:** insert the projectile above the surface with the
-spec'd velocity → NVE cascade (a few ps) → short border-thermostatted
-relaxation → repeat to the target fluence. **Execution uses a persistent
-LAMMPS driver** — the LAMMPS **Python binding**, held in-process across
-every impact (`ARCHITECTURE.md` §4.1), *not* a fresh process plus a
-full-slab disk round-trip per impact as prior art does — at the doses SAB
-needs (thousands of impacts) that overhead is prohibitive.
+spec'd velocity → NVE cascade → short border-thermostatted relaxation →
+repeat to the target fluence. Two details the cascade needs
+(`PRIOR_ART.md` §1.9): the NVE cascade runs with an **adaptive timestep**
+that shrinks so no atom moves more than a fraction of an ångström per step
+— a fast recoil at a fixed step can jump straight THROUGH the steep ZBL
+wall into an overlap — and it is restored to the fixed step for the
+thermostatted relaxation (an adaptive step destabilizes the Nose-Hoover
+thermostat); and the cascade **duration is sized for the impact energy** —
+a higher-energy impact deposits more and takes longer to dissipate — not a
+constant step count that would cut a 500 eV cascade off early. **Execution
+uses a persistent LAMMPS driver** — the LAMMPS **Python binding**, held
+in-process across every impact (`ARCHITECTURE.md` §4.1), *not* a fresh
+process plus a full-slab disk round-trip per impact as prior art does — at
+the doses SAB needs (thousands of impacts) that overhead is prohibitive.
 
 ### 3.4 The MLIP re-anneal (a SABSIM addition)
 
@@ -910,10 +927,12 @@ knob and the ~2–3 nm amorphized skin depth is the measured target** —
 iterate fluence until §3.5's depth profile hits ~2–3 nm; **3
 amorphization seeds** for the ensemble spread (the cheaper rung; more
 seeds tighten the error bar at linear cost). The generator is a
-config-selected classical + ZBL potential (silica per §4 and STRUCTURAL
-1b); the MLIP re-anneal and the validation gate are both mandatory, not
-optional. Energy, angle, and
-seed count are v1 defaults, not freezes — each is a study-input knob.
+config-selected classical + ZBL potential — **Stillinger-Weber + ZBL for
+silicon** (decided 2026-07-17, the same model the press/pull uses), silica
+per §4 and STRUCTURAL 1b, with the two hard cores of §3.3; the MLIP
+re-anneal and the validation gate are both mandatory, not optional.
+Energy, angle, and seed count are v1 defaults, not freezes — each is a
+study-input knob.
 
 ## 4. MLIP backend and bootstrap
 

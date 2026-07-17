@@ -2079,12 +2079,17 @@ function open_cascade_driver(slab, potential, member_specification):
     # antipattern, DESIGN §3.3 — the same one §9.2 refuses). At the doses
     # SAB needs (thousands of impacts) that overhead is prohibitive.
     #
-    # POTENTIAL: hybrid/overlay ZBL + the config-selected CLASSICAL
-    # generator (BKS or Vashishta for silica, Munetoh-Tersoff a fallback;
-    # Buckingham for ionic — DESIGN §3.3, §4.6), NOT the MLIP. ZBL handles
-    # the short-range collision, the classical part the bonding. The ZBL
-    # Z-pair channels are DERIVED from the species set (§10.3), never
-    # hand-enumerated (prior art's argon-only failure).
+    # POTENTIAL: hybrid/overlay of the config-selected CLASSICAL generator
+    # (Stillinger-Weber for SILICON — one model across the whole pipeline,
+    # decided 2026-07-17; BKS or Vashishta for silica, Munetoh-Tersoff a
+    # fallback; Buckingham for ionic — DESIGN §3.3, §4.6) with TWO ZBL hard
+    # cores, NOT the MLIP. The classical part does the bonding; ZBL #1
+    # (longer cutoff) the projectile-substrate collision; ZBL #2 (short
+    # cutoff, below the bond) a hard core on every substrate-substrate
+    # pair, because the classical generators have only FINITE short-range
+    # repulsion and would otherwise let cascade atoms fuse (PRIOR_ART §1.9).
+    # The ZBL Z-pair channels are DERIVED from the species set (§10.3),
+    # never hand-enumerated (prior art's argon-only failure).
     #
     # HEAT SINK AND BOUNDARIES — the root cause prior art tuned around:
     #   frozen_base       -> immobile bottom layer; anchors the slab so it
@@ -2177,8 +2182,14 @@ function run_cascade_to_fluence(driver, spec):
         velocity = sample_impact_velocity(spec.energy, spec.angle, seed)
         insert_projectile(driver, spec.projectile_mass, position, velocity)
 
-        # A few-ps NVE cascade: the collision stays ballistic in the
-        # interior while the Langevin border drains the heat (§10.2).
+        # NVE cascade: the collision stays ballistic in the interior while
+        # the Langevin border drains the heat (§10.2). Run with an ADAPTIVE
+        # timestep — it shrinks so no atom leaps THROUGH the steep ZBL wall
+        # in one step — restored to the fixed step for the relaxation below
+        # (an adaptive step destabilizes Nose-Hoover). `cascade_duration`
+        # is SIZED FOR THE IMPACT ENERGY (a 500 eV cascade needs longer
+        # than a 50 eV one), NOT a constant across energies; v1's single
+        # energy fixes one value (PRIOR_ART §1.9).
         run_nve_cascade(driver, spec.cascade_duration)
 
         # Short border-thermostatted relaxation back toward the target
