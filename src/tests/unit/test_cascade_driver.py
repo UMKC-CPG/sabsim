@@ -17,13 +17,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from sabsim.driver.activation_gate import ActivationVerdict
 from sabsim.driver.cascade import (
     ActivationResult,
     BombardmentSpec,
     CascadeControl,
     activate_surface,
-    activation_disorder_check,
-    coordination_numbers,
     derive_bombardment_spec,
     derive_seeds,
     mlip_reanneal,
@@ -207,7 +206,8 @@ def test_reanneal_strips_projectile_then_relaxes_under_the_mlip():
 
 
 # ---------------------------------------------------------------------
-# The stand-in activation gate (§10.6).
+# A crafted crystal slab, shared by the integration test below. The gate
+# METRICS themselves are unit-tested in test_activation_gate.py.
 # ---------------------------------------------------------------------
 
 def _crystal_slab(spacing=2.5, n_lateral=4, n_layers=8):
@@ -224,48 +224,6 @@ def _crystal_slab(spacing=2.5, n_lateral=4, n_layers=8):
     box = n_lateral * spacing
     cell = np.diag([box, box, (n_layers + 4) * spacing])
     return points, cell
-
-
-def _fake_slab(cell):
-    """A light built-slab stand-in exposing only the cell the gate reads."""
-    return SimpleNamespace(atoms=SimpleNamespace(get_cell=lambda: cell))
-
-
-def test_coordination_counts_neighbours_within_the_shell():
-    """A tiny line of three atoms: ends see one neighbour, middle sees two."""
-    positions = np.array([[0.0, 0.0, 0.0], [2.5, 0.0, 0.0], [5.0, 0.0, 0.0]])
-    cell = np.diag([100.0, 100.0, 100.0])         # large: no wrap
-    counts = coordination_numbers(positions, cell, cutoff=2.9)
-    assert list(counts) == [1, 2, 1]
-
-
-def test_pristine_crystal_reads_no_activation():
-    """A perfect crystal shows only surface under-coordination — no skin."""
-    points, cell = _crystal_slab()
-    engine = MockEngine(positions=[points])
-    verdict = activation_disorder_check(
-        engine, _fake_slab(cell), _template_member())
-    assert not verdict.passed
-    assert verdict.activated_depth <= CascadeControl().disorder_bin_width
-
-
-def test_disordered_top_reads_an_amorphized_skin():
-    """Scrambling the top few Å registers a skin deeper than the surface."""
-    points, cell = _crystal_slab()
-    surface = points[:, 2].max()
-    scrambled = points.copy()
-    top = scrambled[:, 2] > surface - 6.0
-    generator = np.random.default_rng(0)
-    scrambled[top] += generator.uniform(-1.2, 1.2, size=(int(top.sum()), 3))
-
-    engine = MockEngine(positions=[scrambled])
-    verdict = activation_disorder_check(
-        engine, _fake_slab(cell), _template_member())
-    assert verdict.passed
-    # The skin is deeper than one bin but shallower than the whole slab.
-    thickness = surface - points[:, 2].min()
-    assert CascadeControl().disorder_bin_width < verdict.activated_depth
-    assert verdict.activated_depth < thickness
 
 
 # ---------------------------------------------------------------------
@@ -295,11 +253,15 @@ def test_activate_surface_runs_cascade_reanneal_then_gates():
         engine, built, member, mlip, data_file="slab.data", seed=5)
 
     assert isinstance(result, ActivationResult)
-    # It bombarded to the dose, and the gate measured a real skin.
-    assert result.cascade.impacts_run == 500
-    assert result.verdict.passed
-    assert result.verdict.activated_depth > 0.0
-    # The command stream shows all three phases in order.
+    assert result.cascade.impacts_run == 500          # bombarded to the dose
+    # The real §3.5 gate ran against the share/ Si references and produced a
+    # verdict over all four metrics (pass/fail depends on the stand-in
+    # thresholds, which this thin toy slab need not satisfy).
+    assert isinstance(result.verdict, ActivationVerdict)
+    assert set(result.verdict.per_metric) == {
+        "radial_distribution", "coordination", "ring_statistics",
+        "amorphization_depth"}
+    # The command stream shows all three phases.
     stream = engine.received_commands
     assert any(line.startswith("create_atoms 2 single") for line in stream)
     assert "delete_atoms group projectile compress no" in stream

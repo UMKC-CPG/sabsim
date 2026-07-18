@@ -34,6 +34,11 @@ from dataclasses import dataclass
 import numpy as np
 from ase.data import atomic_masses, atomic_numbers
 
+from sabsim.driver.activation_gate import (
+    ActivationVerdict,
+    activation_gate,
+    load_activation_references,
+)
 from sabsim.driver.cascade_potential import resolve_cascade_generator
 from sabsim.driver.commands import (
     CascadeGeometry,
@@ -61,28 +66,18 @@ _AMU_ANGSTROM_PER_PS_SQ_IN_EV = 1.036426965e-4
 
 @dataclass(frozen=True)
 class CascadeControl:
-    """Engineering settings for the whole activation (not physics knobs).
+    """Engineering settings for the cascade loop (not physics knobs).
 
     ``cascade_step_cap`` is a BACKSTOP on the adaptive NVE cascade run: the
     physical-time halt (§10.4) should end each cascade well before this
     many steps, but a finite cap keeps a pathological impact from running
     unbounded. It is not a duration — the duration is the spec's
-    ``cascade_duration``, enforced by the halt.
-
-    The remaining fields configure the STAND-IN activation gate
-    (:func:`activation_disorder_check`), a Phase-1 placeholder for the §3.5
-    metric registry: ``coordination_cutoff`` is the first-shell radius the
-    coordination count uses, ``disorder_bin_width`` the depth-profile bin,
-    and ``disorder_threshold`` the per-bin defect fraction above which a
-    depth bin counts as amorphized. All three are documented stand-ins, not
-    converged criteria — the real gate compares g(r) / ring statistics /
-    coordination against DFT and experimental references (DESIGN §3.5).
+    ``cascade_duration``, enforced by the halt. The activation GATE has its
+    own settings (:class:`~sabsim.driver.activation_gate.GateControl`);
+    this controls only the cascade.
     """
 
     cascade_step_cap: int = 100000
-    coordination_cutoff: float = 2.9      # Å, Si first-shell stand-in
-    disorder_bin_width: float = 2.0       # Å, depth-profile bin
-    disorder_threshold: float = 0.15      # defect fraction marking amorphous
 
 
 @dataclass(frozen=True)
@@ -391,31 +386,12 @@ def mlip_reanneal(
 
 
 # ---------------------------------------------------------------------
-# The activation gate (PSEUDOCODE.md §10.6) — Phase-1 STAND-IN. The real
-# gate is a registry of pluggable metrics (g(r), ring statistics,
-# coordination, a robust depth profile) each compared to a DFT /
-# experimental reference (DESIGN §3.5). Phase 1 stands it in with ONE
-# simple, self-referential measure — a near-surface coordination-defect
-# depth — enough to (a) confirm the cascade amorphized SOMETHING and
-# (b) MEASURE a depth so the pipeline carries a real number, not a stub.
+# The activation gate itself lives in `activation_gate` (PSEUDOCODE §10.6)
+# — the pluggable metric registry (g(r), coordination, ring statistics,
+# depth) that judges the re-annealed structure against the share/
+# references (DESIGN §3.5). activate_surface calls it below, and
+# ActivationVerdict is imported from there.
 # ---------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class ActivationVerdict:
-    """The activation gate result (PSEUDOCODE.md §10.1).
-
-    ``passed`` is the AND over every registered metric (one, in the
-    Phase-1 stand-in); ``activated_depth`` is the MEASURED amorphization
-    depth the structure builder's thickness criterion only estimated
-    a-priori (§2.5, closing that loop) and that labels the activated skin
-    (§10.7); ``per_metric`` records each metric's measurement; ``reason``
-    names the failing metric when the gate does not pass.
-    """
-
-    passed: bool
-    activated_depth: float             # Å, measured amorphized-skin depth
-    per_metric: dict                   # metric name -> measured value
-    reason: str
 
 
 @dataclass(frozen=True)
@@ -424,104 +400,6 @@ class ActivationResult:
 
     verdict: ActivationVerdict
     cascade: CascadeOutcome
-
-
-def coordination_numbers(
-        positions: np.ndarray, cell: np.ndarray, cutoff: float) -> np.ndarray:
-    """Count each atom's neighbours within ``cutoff`` (PSEUDOCODE §10.6).
-
-    Neighbours are counted under the minimum-image convention in the two
-    PERIODIC in-plane directions (the z-boundary is open, ``p p f``). This
-    stand-in assumes an orthogonal in-plane cell (the lateral box vectors
-    lie along x and y); the real gate uses the triclinic minimum-image
-    kernel prior art got right (`PRIOR_ART.md` §1.8). O(N²), fine at the
-    slab sizes activation runs.
-    """
-    positions = np.asarray(positions, float)
-    cell = np.asarray(cell, float)
-    box_x, box_y = float(cell[0][0]), float(cell[1][1])
-    counts = np.zeros(len(positions), int)
-    for index in range(len(positions)):
-        delta = positions - positions[index]
-        if box_x > 0.0:
-            delta[:, 0] -= box_x * np.round(delta[:, 0] / box_x)
-        if box_y > 0.0:
-            delta[:, 1] -= box_y * np.round(delta[:, 1] / box_y)
-        distance = np.linalg.norm(delta, axis=1)
-        counts[index] = int(np.count_nonzero(
-            (distance > 1.0e-6) & (distance <= cutoff)))
-    return counts
-
-
-def activation_disorder_check(
-        engine: Engine,
-        built,
-        member: MemberSpecification,
-        control: CascadeControl = CascadeControl()) -> ActivationVerdict:
-    """The STAND-IN activation gate: coordination-defect depth (§10.6).
-
-    Reads the re-annealed positions, counts coordination, and takes the
-    crystalline reference to be the MODE coordination in the deep third of
-    the slab (self-referential, so it needs no per-material constant — the
-    deep bulk is still crystalline). An atom whose coordination differs
-    from that reference is a defect. The amorphized skin is the CONTIGUOUS
-    defective region measured from the surface DOWN: the scan starts at the
-    top bin and extends the skin while the per-bin defect fraction stays
-    above the threshold, stopping at the first crystalline bin. Scanning
-    from the top (not taking the deepest defective bin anywhere) is
-    deliberate — an activation slab's FROZEN BOTTOM is also a free surface
-    and reads as under-coordinated, so a deepest-bin rule would report the
-    whole slab as amorphized. The documented weakness of the top-contiguous
-    scan is instead the stop-early one prior art also had (a buried
-    recrystallized layer ends the skin early, §3.5); the real gate's robust
-    depth profile replaces it.
-
-    The gate passes when the skin reaches BELOW the immediate surface layer
-    (deeper than one bin) — so mere surface under-coordination on a pristine
-    crystal does not read as activation. This is a lenient stand-in; the
-    real gate tests the depth against the ~2-3 nm target and the structural
-    metrics against DFT / experimental references (DESIGN §3.5).
-    """
-    positions = np.asarray(engine.positions(), float)
-    if positions.shape[0] == 0:
-        return ActivationVerdict(
-            passed=False, activated_depth=0.0, per_metric={},
-            reason="no atoms to judge (stand-in gate)")
-
-    cell = np.asarray(built.atoms.get_cell(), float)
-    counts = coordination_numbers(positions, cell, control.coordination_cutoff)
-    depths = positions[:, 2]
-    base_low, surface_high = float(depths.min()), float(depths.max())
-    thickness = surface_high - base_low
-
-    # Crystalline reference = the most common coordination in the deep third.
-    deep = depths < base_low + thickness / 3.0
-    reference_counts = counts[deep] if deep.any() else counts
-    reference_coordination = int(np.bincount(reference_counts).argmax())
-    is_defect = counts != reference_coordination
-
-    # Contiguous defective skin from the surface down: extend while the bin
-    # is defective, stop at the first crystalline bin (ignores the bottom).
-    bin_width = control.disorder_bin_width
-    edges = np.arange(base_low, surface_high + bin_width, bin_width)
-    activated_depth = 0.0
-    for low, high in reversed(list(zip(edges[:-1], edges[1:]))):
-        in_bin = (depths >= low) & (depths < high)
-        if not in_bin.any():
-            continue
-        if float(is_defect[in_bin].mean()) > control.disorder_threshold:
-            activated_depth = surface_high - low
-        else:
-            break
-
-    passed = activated_depth > bin_width
-    return ActivationVerdict(
-        passed=passed,
-        activated_depth=activated_depth,
-        per_metric={"coordination_defect_depth": activated_depth},
-        reason="" if passed
-               else "no amorphized skin below the surface layer "
-                    "(stand-in gate)")
 
 
 # ---------------------------------------------------------------------
@@ -555,9 +433,9 @@ def activate_surface(
     Resolves the classical + ZBL cascade force model for this slab's
     species (the §4.7 seam — never named here, only asked for), derives the
     impact plan, bombards the surface to the dose, re-anneals the disorder
-    under the MLIP, and judges the re-annealed structure with the stand-in
-    gate. ``built.type_map`` must already declare the projectile so the
-    cascade can create those atoms; ``mlip_force_model`` is the gentle
+    under the MLIP, and judges the re-annealed structure with the §3.5
+    metric gate. ``built.type_map`` must already declare the projectile so
+    the cascade can create those atoms; ``mlip_force_model`` is the gentle
     potential the re-anneal (and the rest of the pipeline) runs under.
     """
     cascade_force_model = resolve_cascade_generator(
@@ -567,7 +445,13 @@ def activate_surface(
         engine, built, member, cascade_force_model, data_file, spec, seed,
         geometry, control)
     mlip_reanneal(engine, member, mlip_force_model, seed)
-    verdict = activation_disorder_check(engine, built, member, control)
+    # Judge the re-annealed surface against the share/ references (§10.6):
+    # the projectile was deleted in the re-anneal, so the activated slab is
+    # substrate-only and the reference is keyed by the substrate species.
+    substrate_species = frozenset(built.type_map) - _projectile_species(member)
+    references = load_activation_references(substrate_species)
+    verdict = activation_gate(
+        engine.positions(), built.atoms.get_cell(), references)
     return ActivationResult(verdict=verdict, cascade=cascade)
 
 

@@ -470,8 +470,9 @@ foundations, interaction rules. -->
       `activation_temperature` spec knob: the cascade border thermostat
       currently reuses `press_temperature` as the shared room-temperature
       setpoint (`DESIGN.md` §3.3), which v1 keeps; a separate knob is a
-      possible future need, not now. (c) Add the `share/` reference-data
-      directory to the `ARCHITECTURE.md` §1 layout when it is built.
+      possible future need, not now. (c) DONE (2026-07-18): the `share/`
+      reference-data directory is built and in the `ARCHITECTURE.md` §1
+      layout; `share/activation/Si.toml` holds the v1 stand-in references.
 - [x] STRUCTURAL 3 DESIGN follow-ons — RESOLVED by `DESIGN.md` §7
       (2026-07-09), except the bare numbers. The diagnostic-label schema
       is §7.8 (verdict / cause / basis / fired / unresolved / power /

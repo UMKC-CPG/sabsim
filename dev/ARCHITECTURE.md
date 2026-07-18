@@ -24,6 +24,7 @@ sabsim/
     PRIOR_ART.md      Existing overlapping work and reusable assets
   src/                Source code (orchestrator, quality gate, glue)
   src/tests/          Test suite
+  share/              Version-controlled reference data (gate criteria)
   CLAUDE.md           AI assistant guidance
 ```
 

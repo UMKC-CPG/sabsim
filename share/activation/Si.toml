@@ -1,0 +1,37 @@
+# Activation-gate reference data for silicon (a-Si), DESIGN §3.5 / §10.6.
+#
+# STAND-INS, not the real anchors: literature-guided placeholders so the
+# gate machinery runs end to end. Replace with a DFT / experimental g(r)
+# and the group's amorphous-silicon continuous-random-network model when
+# they are prepared. This file is exactly what load_activation_references
+# reads, so a real reference of the same shape drops in unchanged. Every
+# number here is a §3.6 / STRUCTURAL-1b DESIGN follow-on to pin.
+real = false
+
+# First minimum of the Si-Si g(r) — the bond cutoff the coordination and
+# ring metrics use (~2.9 A for silicon). Deriving it from the measured
+# g(r) is the follow-on; a stand-in constant is used for now.
+bond_cutoff = 2.9
+
+[gr]
+# a-Si first-neighbour peak; the tolerance is deliberately coarse because
+# g(r) is report-leaning (the curve is recorded for by-hand inspection).
+first_peak = 2.35
+first_peak_tolerance = 0.30
+
+[coordination]
+# a-Si is a continuous random network: still ~4-fold, but with a few
+# percent of 3- and 5-coordinated defects. The band brackets "amorphized"
+# between "barely damaged" and "wholesale destruction".
+defect_fraction_min = 0.05
+defect_fraction_max = 0.60
+
+[rings]
+# Five- and seven-membered rings appear in the amorphous network; require
+# a meaningful non-six-ring share in the skin.
+non_six_fraction_min = 0.15
+
+[depth]
+# The amorphized skin must reach at least this deep (~2 nm); DESIGN §3.6
+# targets a ~2-3 nm skin, iterated by fluence.
+target_angstrom = 20.0
