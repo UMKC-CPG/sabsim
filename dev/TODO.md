@@ -447,6 +447,31 @@ foundations, interaction rules. -->
       §1.9). The generator resolver is called by the §10.2 cascade driver,
       so Phase-1 code routes through it with the silicon entry the only
       one registered.
+- [ ] Activation gate (Phase 2) DESIGN follow-ons (`DESIGN.md` §3.5,
+      `PSEUDOCODE.md` §10.6, written 2026-07-18). The gate design is a
+      metric registry (g(r)/partial g_AB, coordination DISTRIBUTION +
+      defect fraction, ring statistics, robust return-to-baseline depth),
+      each returning a `MetricVerdict`; references/thresholds live OUTSIDE
+      the physics spec in an easily-locatable `share/` dir (real ones later
+      from `SABSIM_SHARE`). Still open: (1) PIN the v1 stand-in reference
+      numbers/curves — a-Si first g(r) peak ~2.35 A, ~4-fold with a few %
+      3/5-coordinated, 5/6/7-ring populations, ~2-3 nm depth target — then
+      the REAL DFT/exp g(r) + the group's a-Si CRN model as drop-in
+      replacements; (2) EVALUATE the Imago `bond_analysis.py` ring tool for
+      narrowness (standing rule) before adopting it behind the `RING_
+      BACKEND` seam — networkx King/shortest-path rings is the v1 backend;
+      (3) build the `share/` reference dir + the `load_activation_
+      references` resolver (repo share first, then SABSIM_SHARE). The Phase-1
+      stand-in `activation_disorder_check` is what this gate replaces.
+- [ ] /refine follow-ons (2026-07-18): (a) §10.7 `label_activated_skin` —
+      record the activated-skin atom SET from the gate's measured depth —
+      is not yet coded (the Phase-1 stand-in returns a verdict only); it
+      lands with the Phase-2 gate / live wiring. (b) A dedicated
+      `activation_temperature` spec knob: the cascade border thermostat
+      currently reuses `press_temperature` as the shared room-temperature
+      setpoint (`DESIGN.md` §3.3), which v1 keeps; a separate knob is a
+      possible future need, not now. (c) Add the `share/` reference-data
+      directory to the `ARCHITECTURE.md` §1 layout when it is built.
 - [x] STRUCTURAL 3 DESIGN follow-ons — RESOLVED by `DESIGN.md` §7
       (2026-07-09), except the bare numbers. The diagnostic-label schema
       is §7.8 (verdict / cause / basis / fired / unresolved / power /

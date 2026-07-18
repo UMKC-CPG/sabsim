@@ -288,9 +288,10 @@ that produced it.
 ### 1.5 Units are carried, and validation happens twice
 
 Every dimensional setting **names its unit**, exactly as §6.6 requires
-of every measure. Fluence is in ions·Å⁻² — cell-size-independent, so the
-impact count follows from the fluence and the surface area rather than
-being specified (§3.2). No reader should have to trust a conversion
+of every measure. The dose's general form is a fluence in ions·Å⁻² —
+cell-size-independent — from which the impact count follows by the surface
+area; §3.2 gives the full rule, including the plain-count shortcut v1 uses
+for its single fixed cell. No reader should have to trust a conversion
 factor typed into a report string.
 
 Validation splits in two, and the split is not arbitrary — it is the
@@ -801,9 +802,17 @@ classical MD, and both are just one setting of the projectile spec below.
   to a single value (the v1 protocol-knob freeze), but the design admits
   **distributions** — an energy spread, an angular spread, randomized
   azimuth — since a real beam is neither monoenergetic nor unidirectional.
-- **Dose as fluence.** Dose is a **fluence** (ions·Å⁻²); the impact count
-  follows from fluence × surface area. This makes activation comparable
-  across cell sizes, which an impact *count* (prior art's knob) is not.
+- **Dose — two forms, one rule.** The general, size-independent form is a
+  **fluence** (ions·Å⁻²): a dose per unit surface area, so the same value
+  means the same damage whatever the cell size, and it matches how a real
+  ion beam is specified. From it the **impact count** follows as fluence ×
+  surface area. A plain impact **count** is also accepted as a convenience
+  for a single fixed cell (prior art's only knob, here first-class rather
+  than the sole option). The rule for which to use: a **fluence** whenever
+  cells differ in size — comparing across box sizes, or across materials
+  (the Si/SiO₂ pair, whose matched cell is a size neither material sets on
+  its own) — and a **count** as a shortcut when the cell is fixed. The
+  driver accepts either and converts a fluence to a count internally.
 - **A recorded master seed** governs impact positions, velocities, and
   the LAMMPS seeds — both for reproducibility (`VISION.md` goal 3) and so
   the bond metric can be **averaged over amorphization realizations** by
@@ -838,7 +847,10 @@ The **heat-sink and boundary design** must be:
   cascade heat at a physical rate, while the interior evolves under
   **NVE** so the collision cascade stays ballistic, not artificially
   quenched;
-- the substrate held at the target temperature between impacts.
+- the substrate held between impacts at the target temperature — the
+  single room-temperature setpoint the whole experiment sits at, which v1
+  reuses from the press hold (`press_temperature`); a dedicated activation
+  temperature is a possible future knob, not a v1 need.
 
 Why this matters, concretely: prior art's whole-slab NVT over-couples to
 the cascade and quenches the damage before it accumulates — its own
@@ -883,25 +895,94 @@ Prior art's `check_amorphous` only *reports*: it prints a g(r) RMSD
 against an optional experimental curve with **no threshold**, its
 partial-g(r) pairs are hardcoded to Si/O, and its depth metric scans
 top-down and stops at the first crystalline-looking layer, so it can
-report 0 Å depth beneath a defective surface. SABSIM makes activation
-validation a **gate** with pluggable metrics and reference data:
+report 0 Å depth beneath a defective surface (`PRIOR_ART.md` §1.8). SABSIM
+makes activation validation a **gate**: a registry of pluggable structural
+metrics, each measuring one property of the re-annealed surface and
+comparing it against a reference with a threshold. Every metric returns a
+small verdict — what it measured, which reference it used, the threshold,
+and whether it passed — and the gate passes only if *every* metric passes,
+naming the first that fails so a halt is diagnosable. The registry is the
+same idiom as the §6 measures and the §8 analyzer: adding a metric, or
+swapping how one is computed, touches nothing else.
 
-- **g(r) and partial g_AB(r)** with pairs *derived from the species
-  present*, using the density-reference normalization prior art got right
-  (the near-surface amorphous region is ~20% less dense than the crystal
-  below, so the reference density must be the local slab's, not the full
-  cell's — a genuinely good kernel to keep, `PRIOR_ART.md` §1.5).
-- **Coordination-number distribution and per-species defect fraction**
-  (generic, not Si-only).
-- **Ring statistics** — absent from prior art — the network-topology check
-  that separates a true amorphous network from a merely defective crystal.
-- **A robust amorphization-depth profile** (disorder vs depth), replacing
-  the fragile top-down scan.
+Judgment is **per realization.** Each metric judges ONE re-annealed slab
+against its reference; the spread over amorphization seeds is taken ABOVE
+this module, by the sequencer's realization ensemble (§10.8, STRUCTURAL
+4), exactly as the bond metric's spread is. So a metric verdict is one
+measurement against one threshold, not an averaged distribution.
 
-Each is compared against DFT and experimental references with thresholds,
-yielding a pass/fail verdict. This is the "did the surface activate, and
-is its structure sane?" check that feeds the potential-quality gate
-(§7; STRUCTURAL 1b).
+The registered metrics, each with what it actually discriminates:
+
+- **g(r) and partial g_AB(r).** The radial pair-correlation function,
+  with the species pairs *derived from the species present* (silicon alone
+  gives just Si-Si; a compound gives every partial), computed with the
+  **density-reference normalization** that is the one genuinely sound
+  kernel in prior art (`PRIOR_ART.md` §1.5, §1.8): the near-surface
+  amorphized region is ~20% less dense than the crystal beneath, so the
+  reference density must be the local slab's, not the whole cell's, or the
+  sputtering losses inflate the peaks. What separates amorphous from
+  crystalline is not the first-neighbor peak (both have one near 2.35 Å
+  for silicon) but the **second-neighbor structure** — sharp and split in
+  the crystal, broadened and merged in the amorphous network — and the
+  depth of the first minimum. Compared against a reference amorphous g(r).
+
+- **Coordination-number distribution and per-species defect fraction.**
+  The subtlety here is why the MEAN coordination is the wrong number:
+  amorphous silicon is a continuous random network that stays very nearly
+  four-fold, so the average barely moves from the crystal. The signal is
+  in the **distribution** — its width, and the fraction of atoms that are
+  three- or five-coordinated "defects" — measured per species and compared
+  against the crystalline slab (a self-reference) plus an amorphous
+  defect-fraction target. This is a real improvement over the Phase-1
+  stand-in, which leaned on the mean, and over prior art, which hardcoded
+  the species.
+
+- **Ring statistics.** The network-topology check that is absent from
+  prior art, and the one metric that separates a *true amorphous network*
+  from a *merely defective crystal*: crystalline silicon is a network of
+  six-membered rings, while the amorphous network carries five- and
+  seven-membered rings. It is computed on the bond graph (bonds taken to
+  the first g(r) minimum) through a **pluggable ring-enumeration backend.**
+  v1 adopts the `networkx` graph library (VISION principle 2), counting
+  King / shortest-path rings — the standard definition for amorphous
+  silicon. The backend is a seam because a purpose-built ring tool — the
+  group's Imago `bond_analysis.py` already has one — may be worth adopting
+  later: being custom-built for ring analysis, it can be extended to ring
+  types a general graph library does not offer readily. Such a tool would
+  be evaluated for narrowness before adoption (the standing rule) and drops
+  in behind this backend seam without disturbing the other metrics.
+
+- **A robust amorphization-depth profile.** Disorder as a function of
+  depth — the coordination-defect fraction (or any registered metric)
+  binned by z — measured as the depth from the free surface at which the
+  disorder **returns to the bulk baseline.** Using the whole profile with
+  a return-to-baseline criterion replaces both prior art's top-down scan
+  that stops at the first crystalline-looking layer (its 0 Å bug) and the
+  Phase-1 stand-in's top-contiguous scan. This metric supplies the
+  MEASURED `activated_depth` that the structure builder's thickness
+  criterion (§2.5) only estimated a-priori, closing that loop, and that
+  labels the activated skin (§10.7).
+
+**Where the references and thresholds live.** They are deliberately NOT
+physics-spec knobs — a threshold is a criterion of the gate, not a choice
+of the experiment (the study template already says the depth target lives
+"with the gate's reference data, not a protocol input"). They live instead
+in an **easily-locatable, version-controlled `share/` directory** in the
+repository — the discoverable-reference-data convention Imago uses — so the
+criteria are auditable and travel with the code. For v1 the references are
+**documented STAND-INS anchored to the literature** (for amorphous
+silicon: a first g(r) peak near 2.35 Å, a nearly four-fold network with a
+few percent three- and five-coordinated defects, a five-/six-/seven-ring
+population, and the ~2-3 nm skin-depth target), each flagged as a stand-in.
+The real anchors — a DFT / experimental g(r), and the group's existing
+amorphous-silicon continuous-random-network model — replace them as they
+are prepared; a large real reference need not bloat the repository, since
+the reference-data resolver can also read it from the deployment
+`SABSIM_SHARE` root (`ARCHITECTURE.md` §4.1). Pinning these numbers and
+curves is a §3.6 / STRUCTURAL-1b DESIGN follow-on.
+
+This is the "did the surface activate, and is its structure sane?" check
+that feeds the potential-quality gate (§7; STRUCTURAL 1b).
 
 ### 3.6 What we keep, what we replace, and v1
 
@@ -923,11 +1004,13 @@ first accommodated co-species); **argon energy 500 eV** (ratified
 across 50–500 eV, and 500 eV amorphizes reliably while keeping the
 cascade box tractable; a user may go **lower, e.g. 50 eV**, for a
 gentler cascade, or higher toward the experimental fast-atom-beam ~1 keV
-at the cost of a bigger box); **normal incidence**; the **fluence is the
+at the cost of a bigger box); **normal incidence**; the **dose is the
 knob and the ~2–3 nm amorphized skin depth is the measured target** —
-iterate fluence until §3.5's depth profile hits ~2–3 nm; **3
-amorphization seeds** for the ensemble spread (the cheaper rung; more
-seeds tighten the error bar at linear cost). The generator is a
+iterate the dose until §3.5's depth profile hits ~2–3 nm; v1 freezes the
+dose as a direct impact **count** for the single fixed Si/Si cell, the
+per-area **fluence** being the general form used once cell sizes differ
+(§3.2); **3 amorphization seeds** for the ensemble spread (the cheaper
+rung; more seeds tighten the error bar at linear cost). The generator is a
 config-selected classical + ZBL potential — **Stillinger-Weber + ZBL for
 silicon** (decided 2026-07-17, the same model the press/pull uses), silica
 per §4 and STRUCTURAL 1b, with the two hard cores of §3.3; the MLIP

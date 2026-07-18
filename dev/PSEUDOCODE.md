@@ -2229,21 +2229,25 @@ function mlip_reanneal(damaged_slab, potential, member_specification):
 ```
 function activation_gate(activated_slab, crystalline_slab,
                          member_specification):
-    # A GATE, not a report (DESIGN §3.5). Prior art's check_amorphous only
-    # PRINTED a g(r) RMSD with NO threshold, hardcoded the pairs to Si/O,
-    # and scanned depth top-down — stopping at the first crystalline-
-    # looking layer, so it could report 0 A of damage beneath a defective
-    # surface. Each metric here is pluggable, species-derived, and
-    # compared to a reference with a real THRESHOLD.
+    # A GATE, not a report (DESIGN §3.5). Judgment is PER REALIZATION: each
+    # metric judges ONE re-annealed slab; the seed-ensemble spread is taken
+    # ABOVE this module (§10.8). Prior art only PRINTED an unthresholded
+    # g(r) RMSD (PRIOR_ART §1.8). Each metric measures ONE property and
+    # compares it to a reference with a real THRESHOLD; the gate is the AND.
+    #
+    # References + thresholds live OUTSIDE the physics spec — a threshold is
+    # a criterion of the GATE, not a knob of the experiment (DESIGN §3.5) —
+    # so they are looked up here, keyed by the species set.
+    references = load_activation_references(
+        species_of(activated_slab), member_specification)
+
     per_metric = empty map
     for each metric in ACTIVATION_METRICS:   # a registry, like §8 measures
         per_metric[metric.name] = metric.evaluate(
-            activated_slab, crystalline_slab, member_specification)
+            activated_slab, crystalline_slab, references)
 
-    # The amorphization DEPTH profile is the AUTHORITATIVE measurement that
-    # build_slab's thickness criterion (§7.4) only ESTIMATED a-priori via
-    # activated_depth_of(material) — closing that loop — and that §10.7
-    # uses to label the activated skin.
+    # The depth metric supplies the MEASURED activated_depth that build_slab
+    # only ESTIMATED a-priori (§7.4) and that §10.7 uses to label the skin.
     activated_depth = per_metric["amorphization_depth"].measured
 
     # PASS iff EVERY metric passes; one failure fails the gate, and the
@@ -2255,21 +2259,98 @@ function activation_gate(activated_slab, crystalline_slab,
         activated_depth: activated_depth, reason: reason }
 ```
 
-The registered metrics (`ACTIVATION_METRICS`, DESIGN §3.5) — each a
-species-derived measurement compared to a DFT/experimental reference:
+```
+function load_activation_references(species, member_specification):
+    # References + thresholds are NOT physics-spec knobs (DESIGN §3.5). Read
+    # them keyed by the species set — so a new material adds a reference
+    # FILE, not code — searching an easily-locatable, version-controlled
+    # `share/` directory FIRST (the small v1 STAND-INS travel with the
+    # code), then the deployment SABSIM_SHARE root (large real references: a
+    # DFT/exp g(r), the group's a-Si continuous-random-network model). A
+    # reference a required metric needs but cannot find leaves that metric
+    # UNRESOLVED, which never passes — a stand-in is explicit, never
+    # silently defaulted (DESIGN §1.4 no-defaults). Each entry is tagged
+    # real | stand-in so a report can say which criteria are provisional.
+    return activation_reference_set   # curves + thresholds, per metric
+```
 
-- **g(r) and partial g_AB(r)**, pairs DERIVED from the species present,
-  using the density-reference normalization prior art got right: the
-  near-surface amorphous region is ~20% less dense than the crystal
-  below, so the reference density must be the LOCAL slab's, not the full
-  cell's (a genuinely good kernel to KEEP, `PRIOR_ART.md` §1.5).
-- **Coordination-number distribution and per-species defect fraction**,
-  generic over species — not the Si-only form prior art hardcoded.
-- **Ring statistics** — absent from prior art — the network-topology
-  check that separates a TRUE amorphous network from a merely defective
-  crystal.
-- **A robust amorphization-depth profile** (disorder vs depth), replacing
-  the fragile top-down scan and yielding the `activated_depth` above.
+The registered metrics (`ACTIVATION_METRICS`, DESIGN §3.5). Each returns
+the `MetricVerdict` of §10.1 (`measured` — a scalar or a curve — plus the
+`reference`, `threshold`, and `passed`). Bonds, where a metric needs them,
+are taken to the first minimum of the relevant partial g(r).
+
+```
+function radial_distribution_metric.evaluate(activated, crystalline, refs):
+    # One partial per species pair DERIVED from the slab (Si-only => Si-Si).
+    # DENSITY-REFERENCE normalization: the reference density is the LOCAL
+    # near-surface slab's, not the whole cell's, or sputtering loss inflates
+    # the peaks (the sound prior-art kernel, PRIOR_ART §1.5).
+    curve = { (A, B): pair_correlation(
+                  activated, A, B, density=local_slab_density(activated))
+              for (A, B) in species_pairs(activated) }
+    # The DISCRIMINATOR is the SECOND-neighbour structure and the first
+    # minimum, NOT the shared first peak. The curve is RECORDED for human
+    # inspection (report-leaning, by-hand comparison); the automated pass is
+    # a COARSE second-shell RMSD, so a wildly-off curve still fails.
+    score = second_shell_rmsd(curve, refs.gr)
+    return MetricVerdict{
+        measured: curve, reference: refs.gr_name,
+        threshold: refs.gr_threshold,
+        passed: refs.has_gr and score <= refs.gr_threshold }
+```
+
+```
+function coordination_metric.evaluate(activated, crystalline, refs):
+    # The MEAN is the wrong number: amorphous silicon stays ~4-fold. Measure
+    # the DISTRIBUTION and the fraction of 3- and 5-coordinated defects, PER
+    # species. The reference coordination is the crystalline slab's (a
+    # self-reference); the target is an amorphous defect-fraction band.
+    defect_fraction = fraction_off_reference_coordination(
+        activated, crystalline)
+    return MetricVerdict{
+        measured: defect_fraction,
+        reference: "crystalline self-reference + a-Si band",
+        threshold: refs.coordination_defect_band,
+        passed: defect_fraction within refs.coordination_defect_band }
+```
+
+```
+function ring_statistics_metric.evaluate(activated, crystalline, refs):
+    # The network-topology discriminator: crystalline silicon is all
+    # SIX-membered rings; the amorphous network carries FIVE- and
+    # SEVEN-membered rings. Build the bond graph and enumerate rings through
+    # a PLUGGABLE BACKEND (DESIGN §3.5): v1 = networkx King / shortest-path
+    # rings; a purpose-built tool (Imago bond_analysis.py) may replace it
+    # behind RING_BACKEND after a narrowness evaluation (standing rule).
+    graph = bond_graph(activated)
+    ring_histogram = RING_BACKEND.ring_size_histogram(graph)
+    non_six_fraction = fraction_of_non_six_rings(ring_histogram)
+    return MetricVerdict{
+        measured: ring_histogram, reference: refs.ring_name,
+        threshold: refs.ring_target,
+        passed: non_six_fraction >= refs.ring_target }
+```
+
+```
+function amorphization_depth_metric.evaluate(activated, crystalline, refs):
+    # Disorder(z): bin a per-atom disorder score (the coordination defect,
+    # or any registered per-atom metric) by depth. The activated depth is
+    # where the profile RETURNS to the bulk baseline — measured deep in the
+    # slab — scanning from the free surface DOWN over the WHOLE profile, NOT
+    # stopping at the first crystalline-looking layer (prior art's 0 A bug,
+    # DESIGN §3.5) nor by the Phase-1 top-contiguous scan.
+    profile  = disorder_versus_depth(activated, crystalline)
+    baseline = bulk_baseline(profile)             # deep, still crystalline
+    depth    = depth_to_return_to_baseline(profile, baseline)
+    return MetricVerdict{
+        measured: depth, reference: refs.depth_name,
+        threshold: refs.depth_target, passed: depth >= refs.depth_target }
+```
+
+`RING_BACKEND` is a pluggable seam (DESIGN §3.5): v1 binds it to a
+`networkx` implementation of `ring_size_histogram(graph) -> {size: count}`;
+the Imago `bond_analysis.py` ring tool is the candidate replacement,
+evaluated for narrowness before adoption. Swapping it changes no metric.
 
 ### 10.7 label_activated_skin — record what the cascade amorphized
 

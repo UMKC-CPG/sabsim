@@ -3,11 +3,11 @@
 > **Document hierarchy:** VISION → **ARCHITECTURE** → DESIGN →
 > PSEUDOCODE → Code. For goals and principles, see `VISION.md`.
 >
-> **Status:** First-pass mapping of the planning notes into the
-> chain. The big architectural decisions are captured here, but the
-> outer-orchestrator choice and several boundaries are still open —
-> see `TODO.md`. Treat this as a baseline to refine, not a settled
-> design.
+> **Status:** The full VISION → ARCHITECTURE → DESIGN → PSEUDOCODE chain
+> is written, and the project is in the CODE phase, building the walking
+> skeleton outward (see `TODO.md`). The big architectural decisions are
+> settled here; a few boundaries — the outer-orchestrator choice among
+> them — remain open and are tracked in `TODO.md`.
 
 ---
 
@@ -18,12 +18,12 @@ sabsim/
   dev/
     VISION.md         Goals and principles
     ARCHITECTURE.md   This document
-    DESIGN.md         Algorithmic design (not yet started)
-    PSEUDOCODE.md     Algorithm specifications (not yet started)
+    DESIGN.md         Algorithmic design
+    PSEUDOCODE.md     Algorithm specifications
     TODO.md           Task list by level
     PRIOR_ART.md      Existing overlapping work and reusable assets
   src/                Source code (orchestrator, quality gate, glue)
-  tests/              Test suite
+  src/tests/          Test suite
   CLAUDE.md           AI assistant guidance
 ```
 
