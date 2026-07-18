@@ -473,6 +473,50 @@ foundations, interaction rules. -->
       possible future need, not now. (c) DONE (2026-07-18): the `share/`
       reference-data directory is built and in the `ARCHITECTURE.md` §1
       layout; `share/activation/Si.toml` holds the v1 stand-in references.
+- [ ] Slab size <-> bombardment energy <-> DFT cost: a THREE-WAY
+      accommodation (`DESIGN.md` §2.5 / §3.2 / §3.6 / §6.4; found live
+      2026-07-18). The slab must be large enough to ABSORB the cascade
+      energy — energy-per-atom sets a thermal spike, and above the
+      vaporization threshold the slab BOILS OFF instead of amorphizing
+      (measured on real LAMMPS: 500 eV into a 288-atom slab -> ~165,000 K,
+      77% sputtered; 100 eV into ~2000 atoms -> ~700 K, clean). So §2.5's
+      thickness criterion (activated_depth + minimum_bulk_thickness) needs
+      a THIRD consideration: enough atoms (thick AND wide) that the impact
+      energy spreads into a survivable spike. BUT the cell must also stay
+      DFT-TRACTABLE — the bootstrap VASP labeling (§4.5) and the
+      all-electron interface subcells (§6.4) scale steeply with atom count
+      — so we CANNOT simply enlarge the slab to absorb a high energy. The
+      resolution (user steer, 2026-07-18): jointly choose the bombardment
+      ENERGY, the slab SIZE, and the amorphized DEPTH to keep the cell
+      DFT-tractable, ACCEPTING A LOWER ENERGY (enough to create SOME
+      amorphous layer) over strict fidelity to the physically-realized
+      ~1 keV fast-atom-beam energies and ~2-3 nm depths. This is consistent
+      with v1's relative-trends / ratio calibration (`DESIGN.md` §7), which
+      already does not demand absolute physical agreement. CONSEQUENCE: the
+      §3.6 frozen 500 eV default and the ~2-3 nm skin-depth target become
+      NEGOTIABLE under the DFT budget — re-pin energy, slab size, and depth
+      TOGETHER, not independently, once the DFT cell-size budget is known.
+- [ ] Run-artifact + reporting layer — BUILD items (`ARCHITECTURE.md`
+      §4.2, `DESIGN.md` §9, designed 2026-07-18; adapt as implementation
+      demands). (1) The run bundle: results land in the SUBMISSION dir
+      `jobs/<study>/<member>/`, per-run subdirs `run-<id>/` + a `latest`
+      symlink, small keepables (report, `summary.json`, manifest) in the
+      job dir and large data on SABSIM_SCRATCH via the `intermediate`
+      symlink with human-readable names; a study roll-up at `jobs/<study>/`.
+      (2) The canonical `summary.json` (§9.1) as the single structured
+      contract (measures, verdicts, provenance: git commit / seeds /
+      potential + reference-data flags / versions / host; pointers +
+      fingerprints to scratch). (3) The swappable report renderer (§9.2):
+      Beamer / Markdown / HTML over the summary + matplotlib plots (g(r),
+      rings, depth profile, force-vs-opening, rate ladder); NO Ovito
+      snapshots in v1; the study roll-up renders the §7 ratio. (4) The
+      visualization dumps (§9.3): add a STRIDED CASCADE TRAJECTORY (only
+      the pull dumps today) and a shared Ovito-ready column set
+      `id type x y z group coordination defect provenance` across cascade
+      and pull; the endpoint frame in the job dir is a secondary
+      convenience. NOTE: §10.7 `label_activated_skin` (deferred in Phase 2)
+      is now LOAD-BEARING — it is the per-atom `activated-skin` group value
+      the dump colours by.
 - [x] STRUCTURAL 3 DESIGN follow-ons — RESOLVED by `DESIGN.md` §7
       (2026-07-09), except the bare numbers. The diagnostic-label schema
       is §7.8 (verdict / cause / basis / fired / unresolved / power /

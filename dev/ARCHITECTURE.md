@@ -903,6 +903,51 @@ Nothing above depends on those specifics: any SLURM-plus-shared-filesystem
 HPC with CPU and GPU partitions instantiates the same three-tier model by
 swapping the deployment config.
 
+### 4.2 Run artifacts, reporting, and provenance
+
+Where a run's outputs land, how they are organized, and how a result is
+made legible — VISION goal 3 (traceability across the six codes) made
+concrete. The intent below is firm; the exact names and sub-layout are
+expected to ADAPT to practical realities met during implementation.
+
+**Runs land in the SUBMISSION directory.** A user works in a per-member
+job directory — `jobs/<study>/<member>/` — and submits from there, so the
+result appears where they already are, not in a separate root. One
+directory holds one member (one material pair + protocol + seed); a study
+of several members is a set of sibling directories under `jobs/<study>/`,
+with a study-level roll-up (below) at that parent.
+
+**Per-run subdirectories, with a `latest` pointer.** Re-running a member
+(a new seed, a tweaked energy) must never silently clobber the previous
+result, so each run writes a timestamped/id'd subdirectory (`run-<id>/`)
+and updates a `latest` symlink to it — "open the latest report" stays one
+step while the history is preserved.
+
+**Small keepable things in the job dir; large raw data on scratch.** The
+report, the canonical structured result, the manifest index, and the
+provenance record are small and are written INTO the run subdirectory. The
+large raw data — the strided trajectories, the LAMMPS logs, the data files
+— stay on `SABSIM_SCRATCH`, reached from the job directory through the
+existing `intermediate` symlink (§4.1) but under clear, human-readable
+names (`<member>_cascade.dump`, `<member>_pull.dump`), so opening one is
+`ovito intermediate/<member>_cascade.dump`. A single endpoint frame may
+also sit directly in the job directory as a cheap convenience, though the
+trajectory is the artifact that conveys the dynamics.
+
+**The manifest is the index, and provenance is first-class.** One manifest
+per run points at every piece — report, structured result, the scratch
+trajectories (by resolved path + fingerprint), logs — so all of a run is
+discoverable from one file. It records what makes the run reproducible
+(VISION goal 3): the git commit of the code, the resolved member spec, the
+master seed and its derivations, the potential and reference data used
+(with their `real`/stand-in flags), the software versions, and the host. A
+study roll-up aggregates the member manifests and their structured results,
+and is where the §7 cross-member comparison (the Si/Si vs Si/SiO2 ratio)
+surfaces.
+
+The algorithmic shape — the canonical result schema, the swappable report
+renderer, and the standard visualization-dump columns — is `DESIGN.md` §9.
+
 ---
 
 ## 5. Development Trajectory and Checkpoints

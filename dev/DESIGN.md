@@ -3006,3 +3006,66 @@ and what §2's coincidence tolerance has to be to keep the subcell
 affordable for v1's pair; and Imago's failure taxonomy — which failures
 are retryable and which are structural, since §8.6's coverage rule needs
 to tell them apart.
+
+## 9. Run artifacts and reporting
+
+This section designs the layer that turns a run into a durable, legible
+result: the canonical structured output every consumer reads, the swappable
+human report, and the visualization dumps. WHERE these land and how they
+are organized is `ARCHITECTURE.md` §4.2; this is their algorithmic and
+data-structure shape. The whole design is meant to ADAPT to practical
+realities met in implementation — the schemas and the dump columns are a
+starting contract, not a frozen one.
+
+### 9.1 The canonical result — one structured summary as the contract
+
+Every downstream consumer — the human report, the study roll-up, a future
+automated step — reads ONE machine-readable summary per run
+(`summary.json`), never the prose report or the raw logs (the §6.6 "a gate
+cannot consume prose" discipline, extended to the whole result). It holds:
+the member identity and resolved spec; the measure vector (§6); the
+activation and gate verdicts with their per-metric detail (§3.5, §7); the
+run's provenance (git commit, seeds, potential and reference data with
+their stand-in flags, software versions, host); and POINTERS (resolved
+path + fingerprint) to the large artifacts on scratch. Because the report
+and the roll-up are renderings OF this summary, the report's format can
+change without touching the run, and the summary is the auditable record
+of what happened.
+
+### 9.2 The report — a swappable renderer over the summary
+
+The human report is generated from the summary and a set of plots, and its
+OUTPUT FORMAT is a swappable backend (Beamer for a presentation, or a
+Markdown / HTML page) — the choice is a rendering decision, not a rerun.
+v1 renders plots only — the g(r) curve, the ring-size histogram, the
+disorder-vs-depth profile, and, for the bond stage, the force-vs-opening
+curve and the rate ladder — with matplotlib; atomistic snapshots rendered
+through Ovito are deliberately DEFERRED (a heavier dependency), while the
+dumps that feed them are kept readily accessible (§9.3) so a viewer can
+open them by hand. The study roll-up is the same idea one level up: it
+renders the cross-member comparison — the §7 Si/Si vs Si/SiO2 ratio and
+its combined uncertainty — from the member summaries.
+
+### 9.3 The visualization dumps — trajectories, well-marked
+
+A single snapshot conveys little, so the primary visualization artifact is
+the strided TRAJECTORY — a viewer watches the surface amorphize impact by
+impact, or the interface press and pull. Each dynamic stage emits one, and
+here the design names a build gap: today only the pull dumps a trajectory,
+so the CASCADE needs a strided trajectory dump added (a frame per impact
+plus the re-anneal). All stages share ONE "Ovito-ready" column set, so any
+dump colors and filters the same way:
+
+```
+id  type  x y z  group  coordination  defect  provenance
+```
+
+where `group` is the LabeledGroup membership (frozen-base / border /
+interior / activated-skin) as an integer to color by; `coordination` and
+`defect` mark the amorphized region; and `provenance` is which slab an atom
+was built in (the interface's two sides). The `activated-skin` value is
+exactly the per-atom set §10.7's `label_activated_skin` records, which is
+why that step — deferred in Phase 2 — becomes load-bearing here: it is the
+field that lights up the amorphized layer. A single endpoint frame may also
+be written into the job directory as a convenience, but it is secondary to
+the trajectory.
