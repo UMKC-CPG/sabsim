@@ -61,6 +61,11 @@ reflow_transcript.py
 onboarding-overview.md
 imago-session-summary.md
 
+# Retired design/planning docs, moved out of the way (the old HANDOFF.md,
+# session transcripts, and reference PDFs). Kept locally for reference but
+# no longer useful enough to track.
+dev/old_docs/
+
 # A student's wafer-bonding pipeline, dropped in for study (two drops:
 # sunita/ and the newer sunita2/ with a built amorphization stage). Not
 # part of the SABSIM source tree; the reusable assets and deficiencies
