@@ -102,7 +102,7 @@ def normal_force_from_pressure(pressure: Quantity, area: float) -> float:
             * _BAR_IN_EV_PER_CUBIC_ANGSTROM * area)
 
 
-def _num(value: float) -> str:
+def _lammps_number(value: float) -> str:
     """Format a number for a LAMMPS command: compact but unambiguous."""
     return f"{value:.6g}"
 
@@ -209,7 +209,7 @@ def preamble_commands(data_file: str, timestep: Quantity) -> list:
         "atom_style atomic",
         "boundary p p f",
         f"read_data {data_file}",
-        f"timestep {_num(to_metal(timestep, 'time'))}",
+        f"timestep {_lammps_number(to_metal(timestep, 'time'))}",
     ]
 
 
@@ -237,17 +237,21 @@ def region_group_commands(built, geometry: RegionGeometry) -> list:
     top_grip_bottom = top_high - grip
     return [
         f"region bottom_grip block INF INF INF INF "
-        f"{_num(base_low)} {_num(bottom_grip_top)} units box",
+        f"{_lammps_number(base_low)} "
+        f"{_lammps_number(bottom_grip_top)} units box",
         "group bottom_grip region bottom_grip",
         f"region top_grip block INF INF INF INF "
-        f"{_num(top_grip_bottom)} {_num(top_high)} units box",
+        f"{_lammps_number(top_grip_bottom)} "
+        f"{_lammps_number(top_high)} units box",
         "group top_grip region top_grip",
         f"region lower_border block INF INF INF INF "
-        f"{_num(bottom_grip_top)} {_num(bottom_grip_top + border)} "
+        f"{_lammps_number(bottom_grip_top)} "
+        f"{_lammps_number(bottom_grip_top + border)} "
         f"units box",
         "group lower_border region lower_border",
         f"region upper_border block INF INF INF INF "
-        f"{_num(top_grip_bottom - border)} {_num(top_grip_bottom)} "
+        f"{_lammps_number(top_grip_bottom - border)} "
+        f"{_lammps_number(top_grip_bottom)} "
         f"units box",
         "group upper_border region upper_border",
         "group grips union bottom_grip top_grip",
@@ -286,8 +290,8 @@ def integrator_commands(member: MemberSpecification, seed: int) -> list:
         "fix nve_interior interior nve",
         "fix nve_border border nve",
         "compute border_temp border temp/com",
-        f"fix langevin_border border langevin {_num(temperature)} "
-        f"{_num(temperature)} {_num(damping)} {seed}",
+        f"fix langevin_border border langevin {_lammps_number(temperature)} "
+        f"{_lammps_number(temperature)} {_lammps_number(damping)} {seed}",
         "fix_modify langevin_border temp border_temp",
     ]
 
@@ -343,7 +347,7 @@ def press_drive_commands(built, member: MemberSpecification) -> list:
         # releases both the integrator and the drive so the reference
         # settles under no load (:func:`press_release_commands`).
         return [
-            f"variable press_fz equal {_num(-force)}*"
+            f"variable press_fz equal {_lammps_number(-force)}*"
             f"((step/{rise_steps})*(step<{rise_steps})"
             f"+(step>={rise_steps}))/count(top_grip)",
             "fix drive_top_nve top_grip nve",
@@ -354,7 +358,7 @@ def press_drive_commands(built, member: MemberSpecification) -> list:
     # companion integrator (contrast the load branch above).
     rate = to_metal(protocol.press_approach_rate, "velocity")
     return [
-        f"fix drive_top top_grip move linear 0.0 0.0 {_num(-rate)} "
+        f"fix drive_top top_grip move linear 0.0 0.0 {_lammps_number(-rate)} "
         f"units box",
     ]
 
@@ -394,7 +398,7 @@ def pull_drive_commands(rate: Quantity) -> list:
     """
     speed = to_metal(rate, "velocity")
     return [
-        f"fix drive_top top_grip move linear 0.0 0.0 {_num(speed)} "
+        f"fix drive_top top_grip move linear 0.0 0.0 {_lammps_number(speed)} "
         f"units box",
     ]
 
@@ -537,4 +541,261 @@ def pull_script(
     speed = to_metal(rate, "velocity")
     commands.append(
         f"run {_steps_for_time(distance / speed, timestep_ps)}")
+    return commands
+
+
+# ---------------------------------------------------------------------
+# The surface-activation cascade command block (PSEUDOCODE.md §10). These
+# generators produce the pure command strings for the step-4 amorphization
+# cascade — the classical + ZBL potential (resolved by cascade_potential.
+# resolve_cascade_generator, DESIGN.md §4.7) driving an energetic-particle
+# bombardment. Like the press/pull block above, nothing here runs a
+# simulator; the per-impact SEQUENCING (insert -> cascade -> relax, with
+# the read-backs that size each run) is the cascade driver's job, one
+# slice up. This block is only the reusable pieces it stitches.
+#
+# The cascade runs on a STANDALONE slab in vacuum (activation is per-wafer,
+# BEFORE the two ever face each other, DESIGN.md §3.1), so its regions are
+# the slab's OWN geometry — a frozen base, a Langevin border just above it,
+# and the NVE interior up to the free top surface being amorphized —
+# DISTINCT from the pair-level grips the press/pull carve.
+# ---------------------------------------------------------------------
+
+# Cascade region thicknesses and projectile-spawn geometry (Å). DOCUMENTED
+# STAND-INS pending the §3.3 heat-sink / §4.7 convergence work, not
+# ratified numbers — the same status as RegionGeometry's press depths.
+@dataclass(frozen=True)
+class CascadeGeometry:
+    """The z-depths that split a standalone activation slab (§10.2).
+
+    The slab is carved by position into a FROZEN BASE (an immobile anchor
+    at the bottom that absorbs recoil so the slab does not drift), a
+    Langevin thermostat BORDER just above it (the heat sink that drains
+    the cascade at a physical rate — the piece prior art's frozen-base-only
+    design lacks, so its shock REFLECTS, `PRIOR_ART.md` §1.9), and the NVE
+    interior that is everything above the border up to the free surface.
+    The projectile is born ``spawn_height`` above the surface, in the open
+    ``p p f`` vacuum, and flies down onto it.
+    """
+
+    frozen_base_thickness: float = 4.0   # Å: immobile bottom anchor depth
+    border_thickness: float = 6.0        # Å: Langevin heat-sink layer depth
+    spawn_height: float = 10.0           # Å: projectile birth above surface
+
+
+# The projectile-spawn region is a thin lateral slab at the birth height;
+# a new atom created anywhere in the cell's plane lands inside it, and the
+# vacuum above the surface is otherwise empty, so grouping by this region
+# catches exactly the atom just created (DESIGN.md §3.2, §10.4).
+_PROJECTILE_SPAWN_HALF_THICKNESS = 1.0   # Å: half-depth of the spawn band
+
+# Adaptive-timestep bounds for the violent NVE cascade (DESIGN §3.3,
+# `PRIOR_ART.md` §1.9). ``fix dt/reset`` shrinks the step so no atom moves
+# more than a small fraction of an ångström per step — a fast recoil at a
+# fixed step can jump straight THROUGH the steep ZBL wall into an overlap.
+# The MAX step is the spec's cascade_timestep; the MIN and the max-move are
+# documented stand-ins, and the fix is REMOVED for the thermostatted
+# relaxation (an adaptive step destabilises Nose-Hoover). Pinning these is
+# a §4.7 follow-on.
+_ADAPTIVE_MIN_TIMESTEP_STANDIN = Quantity(1.0e-5, "ps")   # ~0.01 fs floor
+_ADAPTIVE_MAX_MOVE_STANDIN = 0.1        # Å: cap on per-step atom motion
+_ADAPTIVE_TIMESTEP_CHECK_INTERVAL = 1   # recompute dt every step
+_CASCADE_HALT_CHECK_INTERVAL = 10       # check elapsed cascade time every N
+
+
+def cascade_region_group_commands(
+        base_low: float,
+        surface_high: float,
+        geometry: CascadeGeometry = CascadeGeometry()) -> list:
+    """Carve the standalone slab into base / border / interior (§10.2).
+
+    ``base_low`` is the bottom z of the slab and ``surface_high`` the z of
+    its free (top) surface; the frozen base and Langevin border are stacked
+    up from the bottom, and the interior is left implicit — it is
+    integrated as part of ``all`` (see :func:`cascade_integrator_commands`),
+    so that projectile atoms CREATED mid-run are integrated automatically.
+    This also defines the fixed projectile-spawn region and an initially
+    empty ``projectile`` group that each impact refills (§10.4).
+    """
+    base = geometry.frozen_base_thickness
+    border = geometry.border_thickness
+    base_top = base_low + base
+    border_top = base_top + border
+    spawn_z = surface_high + geometry.spawn_height
+    half = _PROJECTILE_SPAWN_HALF_THICKNESS
+    return [
+        f"region frozen_base block INF INF INF INF "
+        f"{_lammps_number(base_low)} {_lammps_number(base_top)} units box",
+        "group frozen_base region frozen_base",
+        f"region border block INF INF INF INF "
+        f"{_lammps_number(base_top)} {_lammps_number(border_top)} units box",
+        "group border region border",
+        # The fixed spawn band and the (empty for now) projectile group.
+        f"region spawn block INF INF INF INF "
+        f"{_lammps_number(spawn_z - half)} {_lammps_number(spawn_z + half)} "
+        f"units box",
+        "group projectile region spawn",
+    ]
+
+
+def cascade_integrator_commands(
+        member: MemberSpecification, seed: int) -> list:
+    """Integrate ALL atoms; freeze the base; thermostat the border (§10.2).
+
+    Three fixes make the heat sink DESIGN.md §3.3 requires. (1) ``fix nve
+    all`` advances every atom — crucially INCLUDING projectiles created
+    later, since the ``all`` group always contains new atoms, which a
+    static ``interior`` group would miss. (2) The frozen base is held
+    immobile by zeroing its force each step; started at rest (the driver
+    initialises velocities), a zero-force atom does not move, so the base
+    anchors the slab and absorbs recoil without reflecting it as a rigid
+    wall would. (3) The border carries a Langevin thermostat, its
+    center-of-mass drift removed FIRST (``temp/com`` + ``fix_modify``) so
+    directed motion is never counted as heat — the same bias-removal the
+    press border uses. Together the cascade stays BALLISTIC in the interior
+    while the border drains the shock at a physical rate, the fix prior art
+    lacks (`PRIOR_ART.md` §1.9).
+
+    The border/substrate target temperature is the ambient the experiment
+    sits at; v1 reads ``press_temperature`` for it (the room-temperature
+    setpoint the press hold also targets). A dedicated activation
+    temperature knob is a possible spec follow-on (dev/TODO.md).
+    """
+    temperature = to_metal(member.protocol.press_temperature, "temperature")
+    damping = to_metal(member.numerical.langevin_damping, "time")
+    return [
+        "fix nve_all all nve",
+        "fix freeze_base frozen_base setforce 0.0 0.0 0.0",
+        "compute cascade_border_temp border temp/com",
+        f"fix langevin_border border langevin {_lammps_number(temperature)} "
+        f"{_lammps_number(temperature)} {_lammps_number(damping)} {seed}",
+        "fix_modify langevin_border temp cascade_border_temp",
+    ]
+
+
+def cascade_adaptive_timestep_commands(
+        member: MemberSpecification) -> list:
+    """Turn ON the adaptive timestep for the violent NVE cascade (§10.4).
+
+    ``fix dt/reset`` recomputes the step so no atom moves more than
+    :data:`_ADAPTIVE_MAX_MOVE_STANDIN` per step, between a small floor and
+    the spec's ``cascade_timestep`` ceiling. This is what stops a fast
+    recoil from tunnelling through the steep ZBL wall into an overlap
+    (`PRIOR_ART.md` §1.9). It is removed again by
+    :func:`cascade_fixed_timestep_commands` for the thermostatted
+    relaxation, where an adaptive step would destabilise the thermostat.
+    """
+    min_step = to_metal(_ADAPTIVE_MIN_TIMESTEP_STANDIN, "time")
+    max_step = to_metal(member.numerical.cascade_timestep, "time")
+    return [
+        f"fix cascade_dt all dt/reset {_ADAPTIVE_TIMESTEP_CHECK_INTERVAL} "
+        f"{_lammps_number(min_step)} {_lammps_number(max_step)} "
+        f"{_lammps_number(_ADAPTIVE_MAX_MOVE_STANDIN)}",
+    ]
+
+
+def cascade_fixed_timestep_commands(
+        member: MemberSpecification) -> list:
+    """Restore the fixed step for the between-impact relaxation (§10.4).
+
+    Removes the adaptive fix and pins the step back to ``cascade_timestep``
+    — the stable fixed step the border-thermostatted cool-down runs under,
+    so the substrate settles back toward the target temperature before the
+    next impact starts from an equilibrated state, not a hot one.
+    """
+    fixed_step = to_metal(member.numerical.cascade_timestep, "time")
+    return [
+        "unfix cascade_dt",
+        f"timestep {_lammps_number(fixed_step)}",
+    ]
+
+
+def insert_projectile_commands(
+        projectile_type: int,
+        position: tuple,
+        velocity: tuple) -> list:
+    """Create one projectile above the surface and aim it (§10.4).
+
+    ``position`` is the birth point ``(x, y, z)`` in box coordinates (z in
+    the spawn band :func:`cascade_region_group_commands` defined) and
+    ``velocity`` the ``(vx, vy, vz)`` the driver sampled from the impact
+    energy and angle. The ``projectile`` group is CLEARED and refilled from
+    the spawn region so it holds exactly this impact's atom — never a
+    previous, now-embedded projectile — and the velocity is set on that
+    lone atom. The projectile is neutral and interacts only through ZBL
+    (DESIGN.md §3.2), which the resolved force model already arranges.
+    """
+    x, y, z = position
+    vx, vy, vz = velocity
+    return [
+        "group projectile clear",
+        f"create_atoms {projectile_type} single "
+        f"{_lammps_number(x)} {_lammps_number(y)} {_lammps_number(z)} "
+        f"units box",
+        "group projectile region spawn",
+        f"velocity projectile set {_lammps_number(vx)} {_lammps_number(vy)} "
+        f"{_lammps_number(vz)} units box",
+    ]
+
+
+def cascade_halt_commands(duration: float) -> list:
+    """Stop the NVE cascade after a PHYSICAL time has elapsed (§10.4).
+
+    ``duration`` is the per-impact cascade time in ps (the spec's
+    ``cascade_duration``). The halt is kept ENTIRELY inside LAMMPS so the
+    driver needs no clock read-back: the current time is snapshotted into
+    ``cascade_start`` with immediate expansion (``$(time)`` is substituted
+    with the numeric time when the line is read), and ``elapsed_cascade``
+    (defined by :func:`cascade_setup_commands`) is ``time - cascade_start``.
+    ``fix halt`` watches that elapsed time — which accumulates the true
+    simulated time even as the adaptive step changes — and ends the run
+    when it passes ``duration``. Sizing the cascade by TIME, not a constant
+    step count, is what stops a high-energy impact being cut off early: the
+    exact defect of prior art's fixed ``run 5000`` under an adaptive step
+    (`PRIOR_ART.md` §1.9). Re-snapshotting ``cascade_start`` here resets the
+    clock for each impact.
+    """
+    return [
+        "variable cascade_start equal $(time)",
+        f"fix cascade_halt all halt {_CASCADE_HALT_CHECK_INTERVAL} "
+        f"v_elapsed_cascade > {_lammps_number(duration)} error continue",
+    ]
+
+
+def cascade_halt_release_commands() -> list:
+    """Remove the cascade time-halt before the relaxation run (§10.4)."""
+    return ["unfix cascade_halt"]
+
+
+def cascade_setup_commands(
+        member: MemberSpecification,
+        force_model: ForceModel,
+        data_file: str,
+        base_low: float,
+        surface_high: float,
+        seed: int,
+        geometry: CascadeGeometry = CascadeGeometry()) -> list:
+    """The one-time cascade setup, before any impact runs (§10.2).
+
+    Sets the box up (``p p f`` open top so sputtered atoms LEAVE, §3.3),
+    loads the resolved classical + ZBL force model, carves the standalone
+    slab's regions and the projectile-spawn scaffolding, and starts the
+    frozen-base / Langevin-border / NVE-all integrators. It also defines
+    ``elapsed_time`` — the simulated-time variable :func:`cascade_halt_
+    commands` watches. The per-impact loop (insert -> adaptive cascade to a
+    time target -> fixed-step border relaxation) is issued by the cascade
+    driver on top of this, one slice up; this returns only the shared
+    preamble every impact builds on.
+    """
+    commands = []
+    commands += preamble_commands(data_file, member.numerical.cascade_timestep)
+    # The cascade-clock variables the per-impact halt watches: a start
+    # snapshot (re-taken each impact by cascade_halt_commands) and the time
+    # elapsed since it. Defining them here means the halt line stays a
+    # single fix (DESIGN.md §10.4).
+    commands.append("variable cascade_start equal $(time)")
+    commands.append("variable elapsed_cascade equal time-v_cascade_start")
+    commands += force_model_commands(force_model)
+    commands += cascade_region_group_commands(base_low, surface_high, geometry)
+    commands += cascade_integrator_commands(member, seed)
     return commands

@@ -2008,13 +2008,14 @@ record MetricVerdict:
     passed:    boolean
 ```
 
-`[SEAM — flagged, not yet rippled]` this refines §1's step-4 seam the way
-§9.1 refined the press/pull seam. §1 currently unpacks
-`(slab_A, slab_B) = run_to_contract(...)`; the honest form is one
-`ActivatedSlabs` whose `.slab_A` / `.slab_B` feed `assemble_pair` and
-whose `.verdict_A.passed` / `.verdict_B.passed` the contract checks. Left
-as a flagged one-line refinement for the programmer to approve — exactly
-as the `bond_debond_trajectory` ripple was flagged before it was applied.
+`[SEAM — rippled in code, 2026-07-18]` this refines §1's step-4 seam the
+way §9.1 refined the press/pull seam, and the ripple is now APPLIED: the
+sequencer runs `activate_surfaces` to one `ActivatedSlabs`, rebinds
+`slab_A` / `slab_B` from it to feed `assemble_pair`, and the
+`ACTIVATED_SLABS_CONTRACT` gates on `.verdict_A.passed` /
+`.verdict_B.passed` (a failed gate halts the pipeline HERE). So the
+verdict is carried, not merely logged — exactly as the
+`bond_debond_trajectory` ripple was.
 
 ```
 function activate_surfaces(slab_A, slab_B, member_specification,
@@ -2082,7 +2083,7 @@ function open_cascade_driver(slab, potential, member_specification):
     # POTENTIAL: hybrid/overlay of the config-selected CLASSICAL generator
     # (Stillinger-Weber for SILICON — one model across the whole pipeline,
     # decided 2026-07-17; BKS or Vashishta for silica, Munetoh-Tersoff a
-    # fallback; Buckingham for ionic — DESIGN §3.3, §4.6) with TWO ZBL hard
+    # fallback; Buckingham for ionic — DESIGN §3.3, §4.7) with TWO ZBL hard
     # cores, NOT the MLIP. The classical part does the bonding; ZBL #1
     # (longer cutoff) the projectile-substrate collision; ZBL #2 (short
     # cutoff, below the bond) a hard core on every substrate-substrate
@@ -2302,8 +2303,9 @@ threshold.
 schedule. Activation AUTHORED the disorder; §9.7 relaxes it.
 
 `[DELEGATE -> POTENTIAL, DESIGN §4]` the classical generator
-(BKS/Vashishta/Munetoh-Tersoff/Buckingham, config-selected, §4.6) and the
-MLIP committee (step 2) are §4 concerns; this module CONSUMES both, never
+(BKS/Vashishta/Munetoh-Tersoff/Buckingham, config-selected via the §4.7
+generator seam — selection, acceptance, and fallback) and the MLIP
+committee (step 2) are §4 concerns; this module CONSUMES both, never
 authors them.
 
 `[ABOVE this module]` the ensemble (STRUCTURAL 4: averaging the bond

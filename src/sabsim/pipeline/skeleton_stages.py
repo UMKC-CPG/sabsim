@@ -87,9 +87,20 @@ def activate_surfaces(
         potential: Potential) -> ActivatedSlabs:
     """Amorphize each slab's surface and gate it (DESIGN.md §3, §10.1).
 
-    W0 stubs the amorphization and returns PASSING activation verdicts,
-    so the ACTIVATED_SLABS_CONTRACT is satisfied and the pipeline flows.
-    The real cascade + §3.5 gate land in a later wave behind this seam.
+    W0 stubs the amorphization and returns PASSING activation verdicts, so
+    the ACTIVATED_SLABS_CONTRACT is satisfied and the pipeline flows. The
+    REAL body is built and unit-tested in
+    :mod:`sabsim.driver.cascade` (``activate_surfaces`` there runs the
+    classical + ZBL cascade, the MLIP re-anneal, and the activation gate on
+    the ``Engine`` seam). It is not called here yet because it needs a real
+    slab with atoms and a compute-node engine per wafer — the live builder
+    (slice 1b) and the LAMMPS engine — neither of which the W0 skeleton has
+    on the login node. When those wire in, this stub is replaced by a thin
+    adapter that opens an engine per slab, calls the driver, and maps each
+    :class:`~sabsim.driver.cascade.ActivationVerdict` onto the simple
+    :class:`Verdict` the contract reads. The seam itself does not change:
+    the sequencer already carries the :class:`ActivatedSlabs` forward and
+    the contract already gates on both verdicts (§10.1, rippled in code).
     """
     passed = Verdict(passed=True, reason="stubbed activation (wave 0)")
     return ActivatedSlabs(

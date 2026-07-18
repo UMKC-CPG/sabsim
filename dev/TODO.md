@@ -432,6 +432,21 @@ foundations, interaction rules. -->
       composition, the bootstrap ALF convergence threshold, the MLIP
       re-anneal protocol, and the optional MLIP melt-quench upgrade
       (`ARCHITECTURE.md` §2.3 MLIP + potential-gate bullets).
+- [ ] Classical cascade generator DESIGN follow-ons (`DESIGN.md` §4.7,
+      written 2026-07-18, scope (a)): the seam + registry schema are
+      designed and v1 populates SILICON (Stillinger-Weber) only; silica /
+      gallium nitride / lithium niobate are recorded as documented,
+      UNTESTED candidates. Still open: (1) pin the acceptance-check
+      tolerances — the crystal lattice/density band and the probe
+      single-impact stability criterion (§4.7 rungs 2-3); (2) actually
+      validate a non-silicon candidate against the §3.5 gate before
+      trusting it (§4.7 rung 4 is the arbiter); (3) build the Tier-2
+      foundation-MLIP + ZBL fallback and the Tier-3 DFT melt-quench when a
+      material with no acceptable classical form arrives (lithium niobate
+      may be the first, given the Buckingham catastrophe, `PRIOR_ART.md`
+      §1.9). The generator resolver is called by the §10.2 cascade driver,
+      so Phase-1 code routes through it with the silicon entry the only
+      one registered.
 - [x] STRUCTURAL 3 DESIGN follow-ons — RESOLVED by `DESIGN.md` §7
       (2026-07-09), except the bare numbers. The diagnostic-label schema
       is §7.8 (verdict / cause / basis / fired / unresolved / power /

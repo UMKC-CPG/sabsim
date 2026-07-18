@@ -813,8 +813,9 @@ classical MD, and both are just one setting of the projectile spec below.
 ### 3.3 The cascade engine — heat-sink and boundary design
 
 This is the correctness core, and the part prior art gets wrong. The
-classical + ZBL potential runs the cascade (STRUCTURAL 1b; §4.6): a
-`hybrid/overlay` splice of the config-selected classical generator —
+classical + ZBL potential runs the cascade (STRUCTURAL 1b; selected per
+material by the §4.7 generator seam): a `hybrid/overlay` splice of the
+config-selected classical generator —
 **Stillinger-Weber for silicon** (the same model the press/pull uses, so
 one silicon model spans the whole pipeline; decided 2026-07-17; BKS or
 Vashishta for silica, Munetoh-Tersoff a fallback; Buckingham for ionic) —
@@ -1122,6 +1123,125 @@ cascades or Ar.
 - **Sampler thresholds `Escut`, `Fscut`** and the UDD weight
   `E_en_bias_weight` stay tunable knobs; pinning their real values is a
   STRUCTURAL 1b/3 DESIGN follow-on, not fixed here.
+
+### 4.7 The classical cascade generator: selection, acceptance, fallback
+
+Sections §3.3 and §10 run the surface-activation cascade on a *classical*
+potential spliced with ZBL, deliberately not the MLIP (STRUCTURAL 1b: the
+production MLIP must never be trained on cascade-level distortion or on
+the projectile species). That classical potential is the one genuinely
+per-material piece of an otherwise chemistry-agnostic cascade — everything
+else already generalizes across materials without change: the
+species-derived ZBL channels (§3.2), the fluence dose, the
+frozen-base / border / interior heat sink (§3.3), the MLIP re-anneal
+(§3.4), and the species-derived gate metrics (§3.5). This section designs
+how that per-material potential is chosen, what "good enough" means for
+it, and what to do when no acceptable classical potential exists. The
+silicon answer — Stillinger-Weber — is one *instance* of the pattern, not
+the pattern itself: Stillinger-Weber is a tetrahedral-semiconductor form,
+and is simply the wrong functional shape for silica, gallium nitride, or
+lithium niobate.
+
+**The generator is a seam, exactly as activation is a seam (§3.1).** A
+single resolver takes the slab's species set (substrate ∪ projectile) and
+the member specification, and returns a complete cascade potential setup:
+the classical `pair_style` and its parameter file, plus the two ZBL hard
+cores of §3.3 (the longer-range projectile-substrate core and the short
+substrate-substrate core). Whether the classical form underneath is
+Stillinger-Weber, a Tersoff / bond-order form, a Vashishta form, a
+Buckingham form with a repulsive splice, or — the fallback below — a
+foundation MLIP, the caller sees the same setup. The cascade driver
+(§10.2) never names a potential; it asks the resolver. This is the same
+discipline the press/pull force-model resolver already follows, pushed
+down to the cascade so that step 4 is not silently silicon-only.
+
+**A per-material potential registry, with provenance.** The resolver
+reads a registry parallel to the gate's reference-data registry (§3.5).
+Each entry records: the species set it covers, the `pair_style` and
+parameter file, the literature source for those parameters, the
+equilibrium lattice and density that form produces (needed by the
+acceptance check below and by the structure builder's lattice matching,
+§2.2), and a caveat field for per-form hazards. v1 populates exactly one
+entry — silicon, Stillinger-Weber — and leaves the other named materials
+as *documented but untested* entries: a recorded candidate and its
+source, marked not-yet-validated, so the shape is honest and a future
+contributor starts from a pointer rather than a blank page. The documented
+candidates are Vashishta or a Munetoh-style Tersoff for silica; a
+cascade-validated Tersoff / bond-order form for gallium nitride (several
+were parameterized *with* a ZBL splice precisely for radiation damage —
+the ideal kind of source); and, for lithium niobate, a shell-model or
+bond-valence Morse form with reduced charges, because a rigid-ion
+Buckingham runs to −∞ under bombardment (the "Buckingham catastrophe,"
+the exact failure recorded in `PRIOR_ART.md` §1.9). None of these three is
+validated here; they are starting points, not decisions.
+
+**Acceptance: "good enough for a scaffold," certified by the gate.** The
+classical potential is scaffolding, not the product. Its only job is to
+drive the surface into a *reasonable amorphous basin*; the MLIP re-anneal
+(§3.4) then corrects the structure toward MLIP/DFT quality, and the §3.5
+gate judges the result. So "acceptable" is defined cheap-to-expensive,
+and the last rung is the real arbiter:
+
+1. it exists as a LAMMPS `pair_style`, so it can run at all;
+2. it reproduces the crystal's lattice and density within tolerance — a
+   cheap bulk relax; this also bounds the step-zero stress the cascade
+   box would otherwise carry, because the slab is built to the
+   MLIP-relaxed lattice (§2.2) while the cascade runs under this classical
+   form, and a large lattice disagreement is exactly the −30 to −40 GPa
+   artifact prior art hit (`PRIOR_ART.md` §1.6);
+3. it survives a probe single-impact cascade with the two ZBL cores in
+   place — no fusion, no explosion;
+4. its re-annealed surface *passes the §3.5 activation gate* against the
+   DFT / experimental references.
+
+The design point is that rung 4 needs no new machinery: acceptance is
+**emergent from the pipeline we are already building**, not a separate
+a-priori judgment of the classical potential's fidelity. Rungs 1–3 are
+cheap pre-filters that avoid spending a full activation run only to fail
+the gate. This is what "acceptable, not perfect" means concretely — we
+never ask the cascade potential to be *accurate*, only to land the
+surface in a basin the re-anneal and gate accept.
+
+**A fallback ladder when no acceptable classical potential exists.** Some
+materials — lithium niobate may already be one, and arbitrary future
+materials certainly will be — have no classical form that clears the bar.
+The generator seam admits, in order:
+
+- **Tier 1 — a curated classical form + ZBL** (the registry above); the
+  v1 path for materials that have a good one.
+- **Tier 2 — a foundation (universal) MLIP + ZBL** for the violent part.
+  A foundation model covers the periodic table, so it *dissolves* the
+  per-material search entirely, at higher cost; it still needs the ZBL
+  cores, because universal models are not trained deep in the repulsive
+  regime the cascade visits. This is the general answer to "include any
+  alternative material," and — being a different model run only for the
+  cascade — it does not violate the STRUCTURAL 1b separation that keeps
+  the *production* MLIP off cascade distortion.
+- **Tier 3 — a DFT melt-quench** — last resort, expensive, for a material
+  with neither a classical form nor a trustworthy foundation model.
+
+v1 designs this ladder but builds only Tier 1 (silicon); Tiers 2 and 3
+are drop-in generator implementations behind the same resolver seam.
+
+**Two per-form hazards the caveat field must carry.** First, the short
+substrate-substrate ZBL core changes *role* by form: for Stillinger-Weber
+and Tersoff it is *insurance* against a finite short-range repulsion
+letting two atoms fuse, but for a Buckingham form it is *load-bearing* —
+it must actually overpower the `−C/r⁶` attraction that diverges to −∞, not
+merely supplement a finite wall. Second, shell-model forms (a real
+lithium-niobate option) carry massless shells that must be relaxed every
+step, which complicates the persistent-driver and adaptive-timestep design
+of §10.2 and costs extra per-step work. Neither is a showstopper; both
+must be recorded so a future contributor is not surprised.
+
+**Frozen for v1 (scope decision (a), 2026-07-18).** The generator resolver
+and the registry schema are built now; the registry is populated with
+silicon (Stillinger-Weber) only; silica, gallium nitride, and lithium
+niobate are recorded as documented, untested candidates; and the Tier-2 /
+Tier-3 fallbacks are designed here but not implemented. Pinning the
+acceptance-check tolerances (the lattice/density band, the probe-cascade
+stability criterion) and validating any non-silicon candidate are DESIGN
+follow-ons, logged in `TODO.md`.
 
 ## 5. Bond/debond MD protocol
 
