@@ -187,7 +187,7 @@ def test_reanneal_strips_projectile_then_relaxes_under_the_mlip():
     engine = MockEngine()
     member = _template_member()
     mlip = classical_si_stand_in({"Si": 1})
-    mlip_reanneal(engine, member, mlip, seed=3)
+    mlip_reanneal(engine, member, mlip, seed=3, projectile_types=[2])
 
     stream = engine.received_commands
     # The cascade's ballistic integrator and border thermostat are gone;
@@ -195,14 +195,19 @@ def test_reanneal_strips_projectile_then_relaxes_under_the_mlip():
     assert "unfix nve_all" in stream
     assert "unfix langevin_border" in stream
     assert "unfix freeze_base" not in stream
-    # The projectile is stripped before the Si-only MLIP relax.
-    assert "delete_atoms group projectile compress no" in stream
+    # EVERY projectile atom is stripped BY TYPE (not just the last impact's
+    # spawn-group atom) before the Si-only MLIP relax.
+    assert "group cascade_projectiles type 2" in stream
+    assert "delete_atoms group cascade_projectiles compress yes" in stream
     assert "group mobile subtract all frozen_base" in stream
     # A minimize, then a hold and a quench (two nvt setpoints), then release.
     assert "minimize 1e-8 1e-8 1000 10000" in stream
     nvt = [line for line in stream if line.startswith("fix reanneal mobile")]
     assert len(nvt) == 2                          # hold, then quench
     assert "unfix reanneal" in stream
+    # Ids are renumbered consecutively before the gate reads positions
+    # (sputtering + deletion leave gaps that gather_atoms rejects).
+    assert "reset_atoms id" in stream
 
 
 # ---------------------------------------------------------------------
@@ -264,4 +269,4 @@ def test_activate_surface_runs_cascade_reanneal_then_gates():
     # The command stream shows all three phases.
     stream = engine.received_commands
     assert any(line.startswith("create_atoms 2 single") for line in stream)
-    assert "delete_atoms group projectile compress no" in stream
+    assert "delete_atoms group cascade_projectiles compress yes" in stream

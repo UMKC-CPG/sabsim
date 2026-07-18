@@ -781,14 +781,18 @@ def cascade_setup_commands(
     loads the resolved classical + ZBL force model, carves the standalone
     slab's regions and the projectile-spawn scaffolding, and starts the
     frozen-base / Langevin-border / NVE-all integrators. It also defines
-    ``elapsed_time`` — the simulated-time variable :func:`cascade_halt_
-    commands` watches. The per-impact loop (insert -> adaptive cascade to a
-    time target -> fixed-step border relaxation) is issued by the cascade
-    driver on top of this, one slice up; this returns only the shared
-    preamble every impact builds on.
+    ``elapsed_cascade`` — the simulated-time variable :func:`cascade_halt_
+    commands` watches — and allows lost atoms (sputtering). The per-impact
+    loop (insert -> adaptive cascade to a time target -> fixed-step border
+    relaxation) is issued by the cascade driver on top of this, one slice
+    up; this returns only the shared preamble every impact builds on.
     """
     commands = []
     commands += preamble_commands(data_file, member.numerical.cascade_timestep)
+    # Sputtered atoms LEAVE through the open `p p f` top (§10.4), so a
+    # SHRINKING atom count is expected physics, not an error — warn on a
+    # lost atom rather than aborting (LAMMPS aborts by default).
+    commands.append("thermo_modify lost warn")
     # The cascade-clock variables the per-impact halt watches: a start
     # snapshot (re-taken each impact by cascade_halt_commands) and the time
     # elapsed since it. Defining them here means the halt line stays a

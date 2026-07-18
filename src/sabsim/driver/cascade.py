@@ -324,19 +324,25 @@ def mlip_reanneal(
         engine: Engine,
         member: MemberSpecification,
         mlip_force_model: ForceModel,
-        seed: int) -> None:
+        seed: int,
+        projectile_types) -> None:
     """Gently re-equilibrate the amorphized surface under the MLIP (§10.5).
 
     First it tears down the cascade's machinery: the ZBL heat-sink fixes
-    are removed and the projectile atoms deleted, because the projectile is
-    NOT part of the activated surface (embedded or surface-adsorbed argon
-    is stripped, as prior art does with ejecta) and the Si-only MLIP cannot
-    see it. The frozen base is KEPT so the bulk lattice anchors the gentle
-    relaxation. It then loads the MLIP, minimizes, holds the mobile atoms
-    briefly at the anneal temperature, and quenches back to room
-    temperature (the ``reanneal_schedule``). A kinetically trapped glass
-    bounds how far this may go, so it is deliberately mild — "re-annealed"
-    means "as relaxed as this schedule got it" (STRUCTURAL 1b).
+    are removed and EVERY projectile atom deleted, because the projectile
+    is NOT part of the activated surface (embedded or surface-adsorbed
+    argon is stripped, as prior art does with ejecta) and the Si-only MLIP
+    cannot see it. Deletion is BY TYPE (``projectile_types``, the LAMMPS
+    type ids of the projectile species), because the spawn-region
+    ``projectile`` group holds only the LAST impact's atom — it is cleared
+    and refilled each impact — so a group-based delete would leave the
+    earlier embedded projectiles behind. The frozen base is KEPT so the
+    bulk lattice anchors the gentle relaxation. It then loads the MLIP,
+    minimizes, holds the mobile atoms briefly at the anneal temperature,
+    and quenches back to room temperature (the ``reanneal_schedule``). A
+    kinetically trapped glass bounds how far this may go, so it is
+    deliberately mild — "re-annealed" means "as relaxed as this schedule
+    got it" (STRUCTURAL 1b).
 
     The re-anneal runs at the MLIP MD step (``md_timestep``), not the tiny
     cascade step, and the quench span reuses ``hold_duration`` as a
@@ -357,9 +363,17 @@ def mlip_reanneal(
         "unfix nve_all",
         "unfix langevin_border",
         "uncompute cascade_border_temp",
-        # The projectile is not part of the activated surface — strip it,
-        # then re-carve the mobile group without it.
-        "delete_atoms group projectile compress no",
+        # The projectile is not part of the activated surface — strip EVERY
+        # projectile atom (by type, so embedded ones from earlier impacts go
+        # too, not just the last), then re-carve the mobile group without
+        # them.
+        f"group cascade_projectiles type "
+        f"{' '.join(str(type_id) for type_id in sorted(projectile_types))}",
+        # compress yes RENUMBERS the remaining atoms to consecutive ids —
+        # required because the gate reads positions with gather_atoms, which
+        # rejects the id gaps that sputtered (lost) atoms and this deletion
+        # would otherwise leave.
+        "delete_atoms group cascade_projectiles compress yes",
         "group mobile subtract all frozen_base",
     ]
     teardown += force_model_commands(mlip_force_model)
@@ -382,7 +396,14 @@ def mlip_reanneal(
         f"{_lammps_number(room_temperature)} {_lammps_number(damping)}",
         f"run {hold_steps}",
     ])
-    engine.commands(["unfix reanneal"])
+    # Sputtering (during the cascade) and the projectile deletion leave the
+    # atom ids non-consecutive; the gate reads positions with gather_atoms,
+    # which requires consecutive ids, so RENUMBER the survivors here — the
+    # last touch of the atom set before the gate. Losing atoms is EXPECTED
+    # for an open `p p f` surface (§10.4), the OPPOSITE of the pull's
+    # closed-box atom-count gate; this only relabels the survivors 1..N, it
+    # changes no atom and hides no loss.
+    engine.commands(["unfix reanneal", "reset_atoms id"])
 
 
 # ---------------------------------------------------------------------
@@ -444,7 +465,12 @@ def activate_surface(
     cascade = run_cascade_to_fluence(
         engine, built, member, cascade_force_model, data_file, spec, seed,
         geometry, control)
-    mlip_reanneal(engine, member, mlip_force_model, seed)
+    projectile_types = [
+        built.type_map[species]
+        for species in _projectile_species(member)
+        if species in built.type_map]
+    mlip_reanneal(
+        engine, member, mlip_force_model, seed, projectile_types)
     # Judge the re-annealed surface against the share/ references (§10.6):
     # the projectile was deleted in the re-anneal, so the activated slab is
     # substrate-only and the reference is keyed by the substrate species.
