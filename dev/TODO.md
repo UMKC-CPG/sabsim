@@ -517,6 +517,32 @@ foundations, interaction rules. -->
       convenience. NOTE: §10.7 `label_activated_skin` (deferred in Phase 2)
       is now LOAD-BEARING — it is the per-atom `activated-skin` group value
       the dump colours by.
+- [ ] Activation pipeline wiring — run the real activator inside the
+      sequencer (`ARCHITECTURE.md` §4.3, `DESIGN.md` §2.6, `PSEUDOCODE.md`
+      §7.1/§7.5/§10.1; design landed 2026-07-19). The member runs as a
+      chain of file-handoff stages: relax-bulk -> solve-cell ->
+      build-standalone-halves -> [amorphize A | amorphize B] -> assemble ->
+      press/pull, each LAMMPS stage a data-file -> data-file unit that
+      opens and closes its OWN engine (never a live handle across the
+      seam). Approach A (v1): one job runs the chain serially, the two
+      amorphizations x N seeds as a serial loop; the four `# C-EXPANSION`
+      collapse points (serial loop, scratch layout, assemble barrier,
+      engine lifetime) are flagged in code for the later fan-out (Approach
+      C). Sub-slices: (a) the verdict adapter — DONE (2026-07-19),
+      `pipeline/activation_adapter.py` maps `ActivationVerdict` ->
+      contract `Verdict` (depth + named failure in the reason), 7 unit
+      tests, full suite 133 green; (b) use the existing `build_slab` per
+      half (it already cuts in vacuum → a standalone half) and write each
+      half's data file — the crystalline all-in-one `build_facing_pair`
+      becomes the activation-OFF null path; (c) the
+      amorphized `assemble_pair` — read BOTH halves back from their data
+      files, `flip_in_z` the top half so its activated face meets the
+      interface, then the existing §2.6 dividing-surface / ejecta / clash
+      steps; (d) the per-stage engine-provider seam (open a compute-node
+      `LammpsEngine` per half from a data file) so the sequencer's stub
+      `activate_surfaces` is replaced by the live driver call + the adapter.
+      Slices (b)-(d) are compute-node integration (the gate reads real
+      positions, so this cannot run under the login-node `MockEngine`).
 - [x] STRUCTURAL 3 DESIGN follow-ons — RESOLVED by `DESIGN.md` §7
       (2026-07-09), except the bare numbers. The diagnostic-label schema
       is §7.8 (verdict / cause / basis / fired / unresolved / power /

@@ -948,6 +948,109 @@ surfaces.
 The algorithmic shape — the canonical result schema, the swappable report
 renderer, and the standard visualization-dump columns — is `DESIGN.md` §9.
 
+### 4.3 Member execution sequence — file-handoff stages, fan-out seam
+
+A member is not one run; it is a CHAIN of stages, several of which open a
+LAMMPS engine, and the way those stages connect decides whether the
+pipeline can later be parallelized without being rewritten. §4.1 fixed the
+linking rule — steps decouple through file contracts on the shared
+filesystem. This section applies that rule at the altitude of a single
+bonding member: what the stages are, which of them touch a compute node,
+where the independent work is, and how v1's simple serial execution is
+built so the eventual fan-out is a change of wrapper, not of physics.
+
+**Every LAMMPS stage is a self-contained data-file → data-file unit.** A
+stage opens an engine, loads the data file its predecessor wrote, does its
+work, writes a data file (and its trajectory dump, §4.2), and closes. The
+sequencer never holds a live engine across stages; it passes PATHS. This
+is §4.1's file contract made the between-stage currency, and it is what
+lets a stage run wherever its resource class is served (§4.1's per-job
+routing) and lets a native crash be a failed job the sequencer halts on
+cleanly (wall 4). The live in-process read-back §4.1 describes is WITHIN a
+stage (the press's mid-run contact test), never across the seam between
+two.
+
+**The chain for a bonding member.** With activation on, steps 3–5 are not
+one build; they are a chain with one independent pair in the middle:
+
+```
+relax-bulk (per material)      small LAMMPS, once per potential
+        v
+solve-shared-cell              pymatgen, no LAMMPS, once
+        v
+build-standalone-halves        ASE, no LAMMPS, geometry once
+        v
+  +-----+-----+                INDEPENDENT: two halves x N seeds
+  v           v
+amorphize   amorphize          cascade + re-anneal + gate (LAMMPS)
+ half A      half B
+  v           v
+  +-----+-----+                BARRIER: assemble needs both halves
+        v
+   assemble                    read both data files back, flip top
+        v
+  press -> pull -> analyze     LAMMPS, then analysis
+```
+
+Two facts drive everything below. First, **each half is built and
+amorphized ALONE, in vacuum** — the whole point of surface-activated
+bonding is that each surface is prepared before the two ever meet
+(`DESIGN.md` §3.1). So step 3 builds each half ALONE with the existing
+per-half `build_slab` (which already cuts in vacuum) and emits two
+STANDALONE half-cells, not the assembled pair; the cascade stage adds the
+beam species to each half so it can create projectiles. The crystalline
+all-in-one `build_facing_pair` is the activation-OFF null path (Si/Si with
+no cascade), not the bonding path. Second, **the two amorphizations are
+independent** — different materials, separate engines, no shared state
+until `assemble` reads both halves' data files back and stacks them
+(`DESIGN.md` §2.6). Assembly is the BARRIER: the first stage that needs
+both halves at once.
+
+**The realization ensemble is a second independent axis.** The bond metric
+is averaged over amorphization realizations (STRUCTURAL 4), each a
+different master seed. `relax-bulk`, `solve-shared-cell`, AND the half
+GEOMETRY (`build-halves`) are all deterministic and SHARED across
+realizations — computed once; what repeats per realization is
+instantiating a fresh half data file and amorphizing it, then `assemble`
+through `pull`. So the independent work is (2 halves) × (N realizations)
+amorphizations, all fannable, joined per realization at assembly.
+
+**v1 runs this serially in one job (Approach A); the design is built for
+the fan-out (Approach C).** Because the stages hand off through files, the
+two approaches differ only in the SUBMISSION WRAPPER, never in the physics
+stage code:
+
+- **Approach A (v1).** One job per member runs the whole chain top to
+  bottom, the independent amorphizations as a serial loop, into one scratch
+  subtree. Simplest to build, debug, and reason about; a late failure
+  re-runs the member.
+- **Approach C (later).** Plan once, then submit the independent
+  amorphizations as parallel jobs (a SLURM array or a dependency graph),
+  with a barrier before assembly, each half/realization in its own scratch
+  subtree, joined by the manifest (§4.2). Wall-clock scales with the
+  cluster instead of summing the halves.
+
+What A hardcodes and C must generalize is flagged HERE so it is not
+discovered late (and each site is marked `# C-EXPANSION` in the code):
+
+1. **The serial loop over halves and realizations** — v1 iterates; C
+   submits. Keep each loop body a pure function of (which half, which
+   seed) with no cross-iteration state, so the loop is trivially replaced
+   by a fan-out.
+2. **The scratch layout** — v1 may share one subdir; C needs one per
+   independent unit. The §4.2 mirror already keys by member/realization
+   identity, so this is a naming discipline, not a redesign.
+3. **The assemble barrier** — implicit in serial order now; C must express
+   it as an explicit join / job dependency.
+4. **Engine lifetime** — one process opens and closes engines in turn now;
+   C opens them in separate jobs. The data-file handoff already makes this
+   transparent PROVIDED no stage assumes a warm engine left by the one
+   before it.
+
+This is the whole of the "don't build something that must be torn apart"
+discipline: A is C with the fan-out collapsed to a loop, and the four
+points above are exactly the collapse to reverse.
+
 ---
 
 ## 5. Development Trajectory and Checkpoints

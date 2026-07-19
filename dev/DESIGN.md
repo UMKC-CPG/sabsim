@@ -691,6 +691,31 @@ assembly **asserts** commensurability rather than assuming it. Prior
 art's assembler adopts one slab's box outright (`box = sio2["box"]`) and
 never looks at the other's.
 
+**The two halves arrive independently amorphized, read back from disk.**
+Each surface was activated ALONE, in its own vacuum cell, on its own
+engine (§3.1, `ARCHITECTURE.md` §4.3); assembly is the BARRIER stage —
+the first to see both. So it does not receive two live crystalline slabs
+straight from the cutter: it reads each half's amorphized FINAL state
+back from the LAMMPS data file its activation stage wrote (the §4.3 file
+handoff, which is also the run's durable record, §9), and everything
+below — the dividing surface, the ejecta cut, the clash relief — operates
+on those two read-back states. The crystalline all-in-one build (both
+slabs cut and stacked in one step) is the activation-OFF null path, not
+the bonding path.
+
+**The top half is flipped so its activated face meets the interface.**
+Both halves are bombarded on their TOP (+z) face — the cascade box is
+open at the top and the beam comes down (§3.3). Stacked exactly as built,
+the bottom half's activated face already points UP toward the interface,
+but the top half's activated face would point up and AWAY, presenting its
+pristine back to the bond plane. So the top half is mirrored in z before
+placement, turning its activated face down to meet the bottom half's.
+Miss this and you bond an activated surface to an unactivated one — a
+silent error that would pass every downstream gate while measuring the
+wrong interface. (Bombarding the top half from below instead was the
+alternative; flipping a finished slab is far cheaper than a second
+cascade geometry, so v1 flips.)
+
 **Where is the surface?** Not at the highest atom. An activated surface
 is rough, and a single asperity or a still-attached adatom would set the
 gap for the whole interface. SABSIM builds the atomic number-density

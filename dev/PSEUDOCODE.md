@@ -878,7 +878,13 @@ programmer's direction; `run_structure_stage` is retired.
 ```
 function build_slabs(member_specification, potential):
     # Steps up to and including step 3, for BOTH wafers. Stops before
-    # activation, which the sequencer runs next.
+    # activation, which the sequencer runs next. The two results are
+    # STANDALONE half-cells, each in its OWN vacuum box (build_slab adds
+    # the vacuum, §7.4) — NOT the assembled pair. Each is written to a
+    # data file the activation stage loads on its own engine
+    # (ARCHITECTURE §4.3); assemble_pair (§7.5) reads the two AMORPHIZED
+    # halves back only after activation. Building the pair crystalline in
+    # one step is the activation-OFF null path (Si/Si, no cascade).
     material_A, material_B = member_specification.material   # two wafers
     numerical              = member_specification.numerical
 
@@ -1003,12 +1009,23 @@ function build_slab(material, shared, applied_strain, potential,
 
 ```
 function assemble_pair(slab_A, slab_B, shared, member_specification):
-    # Step 5. In the real pipeline both slabs are ACTIVATED by now (the
-    # sequencer ran activation between build_slab and here). Both already
-    # share `shared.lateral_cell` by construction, so ASSERT
-    # commensurability, never assume it (DESIGN §2.6) — prior art adopted
-    # one slab's box and ignored the other's.
+    # Step 5, the BARRIER stage: the first to see BOTH halves. In the real
+    # pipeline each half is AMORPHIZED by now, read back from the data file
+    # its activation stage wrote (ARCHITECTURE §4.3) — assembly receives
+    # two read-back states, not live crystalline slabs. Both already share
+    # `shared.lateral_cell` by construction, so ASSERT commensurability,
+    # never assume it (DESIGN §2.6) — prior art adopted one slab's box and
+    # ignored the other's.
     assert slab_A.lateral_cell == slab_B.lateral_cell
+
+    # FLIP the top half in z so its ACTIVATED face meets the interface.
+    # Both halves were bombarded on their +z top (the open cascade box,
+    # §10.4): stacked as built, A's activated face points UP toward the
+    # interface, but B's would point up and AWAY, facing its pristine back
+    # to the bond plane. Mirroring B turns its activated face down (DESIGN
+    # §2.6). Skipping this bonds an activated face to an unactivated one —
+    # a silent error that passes every downstream gate.
+    slab_B = flip_in_z(slab_B)
 
     # The surface plane is where the number-density profile falls to half
     # its interior value — NOT the highest atom, which a single asperity
@@ -1161,9 +1178,10 @@ from code and need no sub-decomposition: `relaxed_lattice` /
 potential, `DESIGN.md` §2.2); `cleave_and_tile` and `ensure_thickness`'s
 convergence study (`DESIGN.md` §2.5); `select_termination_by_surface_
 energy`; `symmetrize_if_polar`'s four-strategy ladder (a future hook,
-`DESIGN.md` §2.5); and `density_dividing_surface`, `drop_disconnected`,
-`relieve_clash`, `record_zone_geometry` (the z-ranges the driver carves
-zones from — option C, `DESIGN.md` §2.6).
+`DESIGN.md` §2.5); `flip_in_z` (mirror the top half so its activated face
+meets the interface, `DESIGN.md` §2.6); and `density_dividing_surface`,
+`drop_disconnected`, `relieve_clash`, `record_zone_geometry` (the
+z-ranges the driver carves zones from — option C, `DESIGN.md` §2.6).
 
 ---
 
@@ -2022,14 +2040,37 @@ function activate_surfaces(slab_A, slab_B, member_specification,
                            potential):
     # Each surface is activated INDEPENDENTLY (both are still in vacuum,
     # not yet facing). Two calls, never one co-activation; the pair does
-    # not co-exist here. Being independent, the sequencer's ensemble
-    # (§10.8) or a future parallel map may run the two concurrently.
+    # not co-exist here. Each call opens its own engine, loads that half's
+    # data file, and writes the amorphized half back to disk for
+    # assemble_pair (§7.5) to read — the ARCHITECTURE §4.3 file handoff.
+    #
+    # C-EXPANSION (ARCHITECTURE §4.3): these two calls, times the N
+    # realization seeds the ensemble (§10.8) loops above, are the 2 x N
+    # INDEPENDENT units of the fan-out. v1 runs them as this serial pair
+    # inside one job (Approach A); because each is a pure function of (half,
+    # seed) handing off through files, Approach C replaces this loop with a
+    # parallel submission and a barrier at assembly — no change to the
+    # stage bodies. Keep it free of cross-call state.
     activated_A = activate_surface(slab_A, member_specification, potential)
     activated_B = activate_surface(slab_B, member_specification, potential)
     return ActivatedSlabs{
         slab_A:    activated_A.slab,    slab_B:    activated_B.slab,
         verdict_A: activated_A.verdict, verdict_B: activated_B.verdict }
 ```
+
+`[DISTILLATION — in code, 2026-07-19]` the code splits `activate_surfaces`
+across two layers, and the `ActivatedSlabs` shown here is the CONCEPTUAL
+result. The DRIVER (`driver/cascade.py`) returns two `ActivationResult`s
+carrying the RICH `ActivationVerdict` above — every metric, the measured
+depth, the named failure. The PIPELINE stage then maps each rich verdict
+DOWN to the small contract `Verdict` (passed, reason) that
+`ACTIVATED_SLABS_CONTRACT` reads, through the adapter
+(`pipeline/activation_adapter.py`), keeping the measured skin depth and —
+on a failure — the failing metric in the reason string. So the code
+`exec_artifacts.ActivatedSlabs` carries the DISTILLED `Verdict`, not the
+rich one; the gate still HALTS at this seam, because a distilled failure
+is still a failure. The rich per-metric detail survives on the driver
+side for the report (`DESIGN.md` §9), not on the contract.
 
 The mechanism is a SEAM, not a hard-coded procedure (`DESIGN.md` §3.1).
 v1 registers one mechanism — energetic-particle bombardment — but plasma
