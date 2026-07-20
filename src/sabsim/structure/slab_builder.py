@@ -105,6 +105,12 @@ class BuiltPair:
     wafer_b_z_range: tuple[float, float]  # low, high z of wafer B (top)
     type_map: dict                        # species symbol -> LAMMPS type
     match: SurfaceMatch                   # the coincidence provenance
+    # How far the initial gap was BACKED OFF to relieve a cross-slab
+    # clash (Å), recorded rather than aborting the member (DESIGN §2.6).
+    # Zero for the crystalline stack (no amorphous roughness to clash);
+    # the amorphized assembly (:mod:`sabsim.structure.amorphized_assembly`)
+    # sets it to the lift it applied.
+    initial_gap_adjustment: float = 0.0
 
 
 def load_crystal(cif_path) -> Structure:

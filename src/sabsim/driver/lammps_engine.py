@@ -159,6 +159,21 @@ class LammpsEngine(Engine):
         flat_positions = self._lmp.gather_atoms("x", 1, 3)
         return np.array(flat_positions, dtype=float).reshape(-1, 3)
 
+    def types(self) -> np.ndarray:
+        """Return per-atom LAMMPS type ids as an (N,) int array, id-ordered.
+
+        The species half of the same collective read-back as
+        :meth:`positions`: ``gather_atoms("type", ...)`` gathers every
+        atom's integer type across ranks in atom-id order, so type row i
+        and position row i belong to the same atom. The count is 1 int per
+        atom (``dtype=0`` for int, ``count=1``), against ``x``'s 3 doubles.
+        The amorphized-half read-back needs this because sputtering and the
+        projectile deletion change the composition, so the pre-cascade
+        species list no longer describes the survivors (Engine contract).
+        """
+        flat_types = self._lmp.gather_atoms("type", 0, 1)
+        return np.array(flat_types, dtype=int)
+
     def normal_stress(self) -> float:
         """Return the global normal (zz) stress, in metal pressure units.
 

@@ -60,6 +60,20 @@ class Engine(ABC):
         """
 
     @abstractmethod
+    def types(self) -> np.ndarray:
+        """Return the per-atom LAMMPS type ids as an (N,) int array.
+
+        In atom-id order, row-for-row with :meth:`positions`. The
+        amorphized-half read-back (``structure/amorphized_assembly``) needs
+        the SPECIES of each surviving atom, not just its position:
+        sputtering and the projectile deletion change the composition, so
+        the pre-cascade species list no longer matches the survivors.
+        Mapped back to chemical symbols through the half's type map, these
+        ids reconstitute the ASE ``Atoms`` that crosses the build->assemble
+        seam (ARCHITECTURE §4.3).
+        """
+
+    @abstractmethod
     def normal_stress(self) -> float:
         """Return the global normal (zz) stress, in metal pressure units.
 
@@ -140,6 +154,7 @@ class MockEngine(Engine):
             box: np.ndarray | None = None,
             atom_count: int = 0,
             positions=None,
+            types=None,
             normal_stress=None,
             bottom_reaction=None,
             top_reaction=None,
@@ -149,6 +164,7 @@ class MockEngine(Engine):
         self._box = np.eye(3) if box is None else np.asarray(box, float)
         self._atom_count = atom_count
         self._positions = _Script(positions)
+        self._types = _Script(types)
         self._normal_stress = _Script(normal_stress)
         self._bottom_reaction = _Script(bottom_reaction)
         self._top_reaction = _Script(top_reaction)
@@ -173,6 +189,15 @@ class MockEngine(Engine):
     def positions(self) -> np.ndarray:
         """Return the next scripted position frame, else empty."""
         return np.asarray(self._positions.next(np.zeros((0, 3))), float)
+
+    def types(self) -> np.ndarray:
+        """Return the next scripted per-atom type frame, else empty.
+
+        Row-for-row with :meth:`positions`, so a test scripts the two
+        together to play back an amorphized half whose composition the
+        cascade changed (the read-back the assembly consumes).
+        """
+        return np.asarray(self._types.next(np.zeros((0,), int)), int)
 
     def normal_stress(self) -> float:
         """Return the next scripted normal stress, else zero."""
