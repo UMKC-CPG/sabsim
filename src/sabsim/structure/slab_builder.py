@@ -113,6 +113,33 @@ class BuiltPair:
     initial_gap_adjustment: float = 0.0
 
 
+@dataclass
+class StandaloneHalf:
+    """One wafer cut ALONE in vacuum, ready to be bombarded (§4.3, §7.1).
+
+    The chain for a bonding member prepares each surface BY ITSELF before
+    the two ever meet (`ARCHITECTURE.md` §4.3): step 3 emits two standalone
+    half-cells, each in its own vacuum box, and the activation stage loads
+    one onto its own engine to amorphize it. This is that half — the single
+    slab plus the type map the cascade needs — as distinct from the
+    assembled :class:`BuiltPair` (two slabs facing, z-ranges set) the press
+    later runs on.
+
+    ``type_map`` is the one place a half differs from a plain cut slab: it
+    already DECLARES the beam species (and any co-deposit), even though no
+    beam atom exists in ``atoms`` yet. The cascade CREATES those atoms mid-
+    run (``create_atoms`` on the projectile type), and LAMMPS can only make
+    an atom of a type its data file declared — so the beam species must be
+    in the map, and thus in the written data file's atom-type count and
+    ``Masses`` section, from the start (see :func:`write_standalone_half`).
+    """
+
+    atoms: Atoms
+    type_map: dict                 # species symbol -> LAMMPS type id, with
+    #                                the beam species declared (see above)
+    identity: str                  # the material this half is made of
+
+
 def load_crystal(cif_path) -> Structure:
     """Read a wafer's crystal from its CIF (the authoritative structure).
 
@@ -149,6 +176,47 @@ def build_slab(
             f"termination {termination_index} out of range: the "
             f"{miller_face} face has {len(candidates)} termination(s)")
     return AseAtomsAdaptor.get_atoms(candidates[termination_index])
+
+
+def build_standalone_half(
+        crystal: Structure,
+        miller_face: tuple[int, int, int],
+        identity: str,
+        projectile_species,
+        min_slab_thickness: float = 8.0,
+        min_vacuum: float = 10.0,
+        termination_index: int = 0) -> StandaloneHalf:
+    """Cut ONE wafer alone in vacuum, beam species declared (§4.3, §7.1).
+
+    The step-3 builder for a single bonding partner. It cleaves the slab
+    with the existing per-wafer :func:`build_slab` (which already opens the
+    vacuum the cascade's open top needs), then builds the type map the
+    amorphization will run under: the union of the slab's own species and
+    the ``projectile_species`` the beam adds (the activation element, plus
+    a co-deposit if the protocol names one). Declaring the beam here — not
+    at bombardment time — is what lets the written data file carry the beam
+    as an atom type with a mass, so LAMMPS can create projectile atoms
+    against it (:func:`write_standalone_half`).
+
+    ``projectile_species`` is an iterable of chemical symbols; passing it
+    in (rather than reading the member here) keeps this builder decoupled
+    from the protocol record and directly testable. ``identity`` is the
+    material label carried for provenance and the report.
+
+    STAND-IN (retired at wave 3, DESIGN.md §2.4): this cuts each half on
+    the crystal's own lattice and does NOT yet tile it to a shared
+    coincidence cell or apply the split misfit strain — the Si/Si identity
+    case needs neither, and the strained dissimilar assembly lands with the
+    coincidence matcher (§7.6). The seam is the same: a later wave threads
+    the shared cell and strain through here without changing the half's
+    shape.
+    """
+    slab = build_slab(
+        crystal, miller_face, min_slab_thickness, min_vacuum,
+        termination_index)
+    type_map = _type_map_with_species(slab, projectile_species)
+    return StandaloneHalf(
+        atoms=slab, type_map=type_map, identity=identity)
 
 
 def _surface_vectors(slab: Atoms) -> np.ndarray:
@@ -303,24 +371,43 @@ def build_facing_pair(
     return assemble_facing_pair(slab_a, slab_b, match, gap, grip_vacuum)
 
 
-def _type_map_of(atoms: Atoms) -> dict:
-    """Map each element present to a stable 1-based LAMMPS type id.
+def _type_map_with_species(atoms: Atoms, extra_species) -> dict:
+    """Map the present species PLUS extras to stable 1-based type ids.
 
-    Ordered by chemical symbol so the mapping is deterministic and the
-    same species always gets the same type across runs (needed for the
-    potential's type map, STRUCTURAL 1a).
+    The general form: the union of the atoms' own chemical symbols and any
+    ``extra_species`` given (e.g. the beam a standalone half must declare
+    but does not yet contain), ordered by symbol so the mapping is
+    deterministic and a species always gets the same type across runs
+    (needed for the potential's type map, STRUCTURAL 1a). With no extras it
+    is just the present-species map (:func:`_type_map_of`).
     """
-    symbols = sorted(set(atoms.get_chemical_symbols()))
+    symbols = sorted(set(atoms.get_chemical_symbols()) | set(extra_species))
     return {symbol: index for index, symbol in enumerate(symbols, start=1)}
 
 
-def write_lammps_data(built: BuiltPair, path: str) -> None:
-    """Write the facing pair as a LAMMPS data file (the ASE membrane).
+def _type_map_of(atoms: Atoms) -> dict:
+    """Map each element present to a stable 1-based LAMMPS type id.
 
-    Uses ``atom_style atomic`` (no charges — the classical Si potential
-    and the {Si,O} MLIP are both charge-free at this fidelity) and pins
-    the species order to ``built.type_map`` so LAMMPS type ids match the
-    potential's expectation.
+    The common case of :func:`_type_map_with_species` with no extras —
+    every type in the map is a species actually in ``atoms``.
+    """
+    return _type_map_with_species(atoms, ())
+
+
+def _write_atoms_as_lammps_data(
+        atoms: Atoms, type_map: dict, path: str) -> None:
+    """Write atoms as a LAMMPS data file, species order from a type map.
+
+    The shared writer behind :func:`write_lammps_data` (a facing pair) and
+    :func:`write_standalone_half` (one wafer). ``atom_style atomic`` (no
+    charges — the classical Si potential and the {Si,O} MLIP are both
+    charge-free at this fidelity), and the species order is pinned to
+    ``type_map`` so LAMMPS type ids match the potential's expectation.
+    Every type in the map is written, including one the map DECLARES but
+    ``atoms`` does not yet contain (the standalone half's beam species):
+    ASE emits it in the atom-type count and the ``Masses`` section with
+    zero atoms of it, which is exactly what lets the cascade create beam
+    atoms against that type later.
 
     ``masses=True`` is REQUIRED, not cosmetic: ASE omits the ``Masses``
     section by default, and LAMMPS then rejects any run with "Not all
@@ -328,11 +415,28 @@ def write_lammps_data(built: BuiltPair, path: str) -> None:
     self-contained, so no separate ``mass`` command has to be threaded
     through the command generator to make the file loadable.
     """
-    species_order = sorted(
-        built.type_map, key=lambda symbol: built.type_map[symbol])
+    species_order = sorted(type_map, key=lambda symbol: type_map[symbol])
     ase_write(
-        path, built.atoms, format="lammps-data",
+        path, atoms, format="lammps-data",
         atom_style="atomic", specorder=species_order, masses=True)
+
+
+def write_lammps_data(built: BuiltPair, path: str) -> None:
+    """Write the facing pair as a LAMMPS data file (the ASE membrane)."""
+    _write_atoms_as_lammps_data(built.atoms, built.type_map, path)
+
+
+def write_standalone_half(half: StandaloneHalf, path: str) -> None:
+    """Write one standalone half as a LAMMPS data file (§4.3, §7.1).
+
+    The activation stage loads this file onto its own engine to bombard the
+    surface. It declares the BEAM species as an atom type with a mass but
+    zero atoms (the half's ``type_map`` carries it, see
+    :class:`StandaloneHalf`), so LAMMPS can ``create_atoms`` the projectile
+    against that type mid-cascade. Same self-contained ``atomic``-style
+    file as the facing pair, through the shared writer above.
+    """
+    _write_atoms_as_lammps_data(half.atoms, half.type_map, path)
 
 
 def bulk_atoms(crystal: Structure, cells_per_axis: int) -> Atoms:
