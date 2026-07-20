@@ -129,6 +129,30 @@ def test_provenance_stamps_the_fingerprinted_protocol(job_home):
     assert provenance.master_seed == 20260713
 
 
+def test_only_runs_a_subset(job_home):
+    """`only` restricts the run to the named members."""
+    report = exec_full_study(
+        _TEMPLATE_PATH, job_home, only=["si-si-reference"])
+    assert tuple(
+        r.specification.name for r in report.member_results) == (
+            "si-si-reference",)
+
+
+def test_only_relation_over_absent_member_is_unresolved(job_home):
+    """A relation over a member `only` excluded degrades, never crashes."""
+    report = exec_full_study(
+        _TEMPLATE_PATH, job_home, only=["si-si-reference"])
+    ratio = report.relation_outcomes[0]
+    assert ratio.value is None
+    assert "did not run" in ratio.note
+
+
+def test_only_unknown_member_is_an_error(job_home):
+    """`only` naming a member not in the study is an error, not a no-op."""
+    with pytest.raises(ValueError):
+        exec_full_study(_TEMPLATE_PATH, job_home, only=["not-a-member"])
+
+
 def test_fingerprint_is_stable_and_sensitive():
     """The content fingerprint changes iff a knob changes (§1.4)."""
     study = load_and_validate_study(_TEMPLATE_PATH)

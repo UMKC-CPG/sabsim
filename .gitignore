@@ -33,6 +33,11 @@ log.cite
 # the RESOLVED scratch path rather than relying on the link.
 /jobs/
 
+# The `intermediate` scratch symlink is dropped in WHATEVER directory a
+# run is launched from (the run's home is the CWD), so ignore the reserved
+# link name anywhere — including a stray one from running in the repo root.
+intermediate
+
 # Machine-local Claude Code settings (permissions allowlist, etc.).
 # The shared skills under .claude/commands/ ARE tracked; only the
 # per-machine settings file is ignored.

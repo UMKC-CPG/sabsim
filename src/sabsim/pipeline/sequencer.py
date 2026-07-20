@@ -48,7 +48,7 @@ from sabsim.spec.records import MemberSpecification, Relation
 
 def exec_full_study(
         study_specification, job_directory,
-        stage_set=W0_STAGES, comm=None) -> StudyReport:
+        stage_set=W0_STAGES, comm=None, only=None) -> StudyReport:
     """Run a whole study: every member, then the declared relations (§1).
 
     Loads and validates the spec, executes each member independently to
@@ -69,15 +69,32 @@ def exec_full_study(
     LAMMPS); a real run passes ``LIVE_STAGES`` (from
     :mod:`sabsim.pipeline.live_stages`) and the MPI ``comm`` its engines
     use. The control flow and the contracts are identical either way.
+
+    ``only`` restricts the run to a subset of members BY NAME (an iterable
+    of member names, or None for all) — the ``sabsim run --only`` case,
+    for testing or re-running a single member. A name not in the study is
+    an error, never a silent no-op. Relations are still graded over
+    whatever members ran (an unresolved relation is reported, not fatal).
     """
     study = load_and_validate_study(study_specification)
+
+    members = study.members
+    if only is not None:
+        wanted = set(only)
+        present = {member.name for member in members}
+        missing = wanted - present
+        if missing:
+            raise ValueError(
+                f"--only names members not in the study: "
+                f"{sorted(missing)}; the study has {sorted(present)}")
+        members = tuple(m for m in members if m.name in wanted)
 
     member_results = tuple(
         exec_one_member(
             member,
             member_scratch(job_directory, study.name, member.name),
             stage_set, comm)
-        for member in study.members)
+        for member in members)
 
     # Relations are an OPTIONAL comparison layer graded only after every
     # member has produced its measure vector (DESIGN.md §1.1).
@@ -229,8 +246,17 @@ def _evaluate_one_relation(
     measure_name = relation.measures[0]
     values = []
     trusted = True
+    missing = []
     for member_name in relation.members:
-        result = results_by_name[member_name]
+        result = results_by_name.get(member_name)
+        if result is None:
+            # A related member did not run — e.g. `--only` excluded it, or
+            # a subset run. The relation is UNRESOLVED and reported, never
+            # an exception (DESIGN.md §1.1, report never restrict).
+            missing.append(member_name)
+            values.append(None)
+            trusted = False
+            continue
         trusted = trusted and result.trusted
         measure = result.measures.by_name(measure_name)
         if (measure is None or measure.status != MeasureStatus.OK
@@ -244,6 +270,12 @@ def _evaluate_one_relation(
             kind=relation.kind, members=relation.members,
             value=None, unit="dimensionless", trusted=trusted,
             note=f"kind '{relation.kind}' not evaluated in v1")
+
+    if missing:
+        return RelationOutcome(
+            kind=relation.kind, members=relation.members,
+            value=None, unit="dimensionless", trusted=False,
+            note=f"unresolved: related member(s) did not run: {missing}")
 
     numerator, denominator = values
     if numerator is None or denominator is None or denominator == 0.0:

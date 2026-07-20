@@ -1,0 +1,23 @@
+# Minimal packaging: enough to register the `sabsim` console command and
+# make the src/ layout importable. Dependencies are DELIBERATELY omitted —
+# the environment (conda 3.11 + venv + ALF, see the deployment notes) is
+# built separately and pinned there, so install with `pip install -e .
+# --no-deps` to add the command WITHOUT letting pip re-resolve numpy / ase
+# / pymatgen / mpi4py / the LAMMPS binding out from under that env.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sabsim"
+version = "0.1.0"
+description = "Surface-activated-bonding multi-code simulation pipeline"
+requires-python = ">=3.11"
+
+# The front door (ARCHITECTURE.md §4): `sabsim run [spec] [--dry-run]
+# [--only MEMBER]`. `python -m sabsim ...` works with no install.
+[project.scripts]
+sabsim = "sabsim.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
