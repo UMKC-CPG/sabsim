@@ -47,16 +47,26 @@ and no internal comparison, and the human who runs it is free to compare
 that report against anything else, outside the program.
 
 ```
-function exec_full_study(study_specification):
+function exec_full_study(study_specification, job_directory):
     # Entry point. A study is members + relations (DESIGN §1.1). Each
     # member is executed independently; the relations (e.g. the Si/SiO2-
-    # to-Si/Si ratio) are graded only after every member has produced
-    # its measure vector.
+    # to-Si/Si ratio) are graded only after every member has produced its
+    # measure vector. job_directory is the run's home on the shared
+    # filesystem (ARCHITECTURE §4.1); the stages' bulky intermediates go in
+    # its scratch mirror, threaded EXPLICITLY from here so every written
+    # byte stays traceable to its inputs (VISION goal 3).
     validated_study = load_and_validate_study(study_specification)
 
     member_results = empty_list
     for each member_specification in validated_study.members:
-        member_results.append(exec_one_member(member_specification))
+        # Each member owns a scratch subtree keyed by study + member
+        # identity (the ARCHITECTURE §4.2 mirror); the file-writing stages
+        # RECEIVE it, never rebuild it from identity themselves.
+        member_scratch_dir = member_scratch(
+            job_directory, validated_study.name,
+            member_specification.name)
+        member_results.append(
+            exec_one_member(member_specification, member_scratch_dir))
 
     # Relations are an OPTIONAL comparison layer, graded at the study
     # level (there may be none). A relation compares a subset of the
@@ -71,9 +81,11 @@ function exec_full_study(study_specification):
 ```
 
 ```
-function exec_one_member(member_specification):
-    # The eight-step pipeline for ONE member. In v1 the quality-gate loop
-    # executes its body ONCE and reports (VISION principle 5); the
+function exec_one_member(member_specification, scratch_directory):
+    # The eight-step pipeline for ONE member; its file-writing stages
+    # (build_slabs first, §7.1) get scratch_directory threaded in
+    # explicitly (ARCHITECTURE §4.3, VISION goal 3). In v1 the quality-gate
+    # loop executes its body ONCE and reports (VISION principle 5); the
     # enclosing while-loop is the future automated target, shown so the
     # seam for it exists, but not iterated in v1.
     #
@@ -117,21 +129,26 @@ function exec_one_member(member_specification):
     # physically sensible order for v1) is build -> activate -> assemble;
     # a general reorder engine is [DEPTH-FIRST] for this sequencer.
 
-    # Step 3 — build both slabs to the shared coincidence cell (§7).
-    (slab_A, slab_B, shared) = run_to_contract(
-        () -> build_slabs(member_specification, potential),
+    # Step 3 — build both slabs to the shared coincidence cell (§7). Each
+    # is written to a data file under scratch_directory and returned as a
+    # HALF-HANDLE (§7.1); build_slabs is the first stage to write files.
+    (handle_A, handle_B, shared) = run_to_contract(
+        () -> build_slabs(member_specification, potential,
+                          scratch_directory),
         SLABS_CONTRACT)
 
     # Step 4 — activate (amorphize) each slab's surface. A SEPARATE
     # module (DESIGN §3) with its own pass/fail gate (§3.5); in the
     # skeleton it is stubbed. It does NOT assume it ran before assembly
-    # (§5.3). The stage returns ONE ActivatedSlabs (§10.1): both activated
+    # (§5.3). Each call takes a HalfHandle, RE-READS the pristine half from
+    # its data file, amorphizes it, and writes the amorphized half back
+    # (§10.1). The stage returns ONE ActivatedSlabs (§10.1): both activated
     # slabs AND both gate verdicts. The contract checks verdict_A.passed
     # and verdict_B.passed, so a FAILED activation gate is contract-invalid
     # and halts HERE (§10.1) — the gate is enforced at this seam, not
     # buried in the module.
     activated = run_to_contract(
-        () -> activate_surfaces(slab_A, slab_B, member_specification,
+        () -> activate_surfaces(handle_A, handle_B, member_specification,
                                 potential),
         ACTIVATED_SLABS_CONTRACT)
     slab_A = activated.slab_A   # rebind to the activated slabs; the
@@ -809,10 +826,10 @@ exists so every seam is exercised under real data flow.
 ```
 # exec_one_member, each stage resolved to its walking-skeleton stand-in:
     potential  = classical_pair_style(...)      # steps 1-2 SKIPPED
-    (slab_A, slab_B, shared) = build_slabs(...)  # step 3, real
-    activated  = stub_activate(slab_A, slab_B)   # step 4, STUB: returns
-    slab_A     = activated.slab_A                # an ActivatedSlabs
-    slab_B     = activated.slab_B                # (§10.1), verdicts PASS
+    (handle_A, handle_B, shared) = build_slabs(...)  # step 3, real
+    activated  = stub_activate(handle_A, handle_B)   # step 4, STUB:
+    slab_A     = activated.slab_A               # returns an ActivatedSlabs
+    slab_B     = activated.slab_B               # (§10.1), verdicts PASS
     structure  = assemble_pair(slab_A, slab_B,   # step 5, trivial (Si/Si)
                                shared)
     bond_debond_trajectory = press_then_pull(structure)   # steps 6-7,
@@ -876,15 +893,19 @@ programmer's direction; `run_structure_stage` is retired.
 ### 7.1 The module's top-level shape
 
 ```
-function build_slabs(member_specification, potential):
+function build_slabs(member_specification, potential, scratch_directory):
     # Steps up to and including step 3, for BOTH wafers. Stops before
     # activation, which the sequencer runs next. The two results are
     # STANDALONE half-cells, each in its OWN vacuum box (build_slab adds
-    # the vacuum, §7.4) — NOT the assembled pair. Each is written to a
-    # data file the activation stage loads on its own engine
-    # (ARCHITECTURE §4.3); assemble_pair (§7.5) reads the two AMORPHIZED
-    # halves back only after activation. Building the pair crystalline in
-    # one step is the activation-OFF null path (Si/Si, no cascade).
+    # the vacuum, §7.4) — NOT the assembled pair. Each is WRITTEN to a data
+    # file under scratch_directory and returned as a HALF-HANDLE the
+    # activation stage loads on its own engine (ARCHITECTURE §4.3).
+    # build_slabs is the FIRST stage to write real files, so the sequencer
+    # threads it the run's scratch directory EXPLICITLY (traceable, never
+    # rebuilt from identity — VISION goal 3). assemble_pair (§7.5) reads
+    # the two AMORPHIZED halves back only after activation. Building the
+    # pair crystalline in one step is the activation-OFF null path (Si/Si,
+    # no cascade).
     material_A, material_B = member_specification.material   # two wafers
     numerical              = member_specification.numerical
 
@@ -899,11 +920,25 @@ function build_slabs(member_specification, potential):
     strain_A, strain_B = split_strain(shared, material_A, material_B,
                                       potential)
 
-    slab_A = build_slab(material_A, shared, strain_A, potential,
-                        member_specification)
-    slab_B = build_slab(material_B, shared, strain_B, potential,
-                        member_specification)
-    return (slab_A, slab_B, shared)
+    # Each half DECLARES the beam species (the activation projectile plus
+    # any co-deposit) in its type map though it contains none yet: the
+    # cascade CREATES those atoms, and the simulator can only make an atom
+    # of a type its data file already declared (§10.3). Wafer A is built as
+    # the bottom half, B as the top — the assembly invariant (DESIGN §2.6).
+    beam = projectile_species(member_specification)          # §10.3
+    # write_standalone_half writes the data file and stamps the HANDLE:
+    # WHICH wafer a half plays (bottom A / top B) is an assembly-ROLE fact,
+    # not a geometry fact, so it lives on the handle, not on the slab —
+    # build_standalone_half stays wafer-agnostic.
+    handle_A = write_standalone_half(
+        build_standalone_half(material_A, shared, strain_A, beam,
+                              potential, member_specification),
+        WAFER_A, scratch_directory)
+    handle_B = write_standalone_half(
+        build_standalone_half(material_B, shared, strain_B, beam,
+                              potential, member_specification),
+        WAFER_B, scratch_directory)
+    return (handle_A, handle_B, shared)
 ```
 
 ```
@@ -913,10 +948,25 @@ record SharedCell:
     tiling_B:        2x2 integer matrix    # whole-number tiles of B
     twist:           angle                 # relative in-plane rotation
     residual_strain: StrainTensor          # misfit left after the match
+
+record HalfHandle:
+    # What build_slabs hands the activation stage for ONE half: everything
+    # needed to amorphize it, and NOTHING about the other half, so each is
+    # a self-contained fan-out unit (the # C-EXPANSION unit, §4.3). The
+    # activation stage RE-READS the slab geometry from data_file, never a
+    # warm in-memory object, so the unit is restartable after a crash and
+    # identical whether it runs in the member's own job or a separate one.
+    data_file: path       # the pristine standalone half on disk
+    type_map:  map        # species -> type id, WITH the beam declared
+    identity:  string     # the material (report + reference lookup)
+    wafer:     tag        # WAFER_A (bottom) or WAFER_B (top)
 ```
 
 A `Slab` is just a `Structure` (§3) for one material — one provenance
-label, and `grips` not yet set (assembly sets them, §7.5).
+label, and `grips` not yet set (assembly sets them, §7.5). Across the
+build→amorphize seam a half travels as a `HalfHandle` — its file plus the
+few facts the cascade needs — never as a live object (`ARCHITECTURE.md`
+§4.3 file handoff).
 
 ### 7.2 solve_shared_cell — lattices from the potential, then the match
 
@@ -2036,23 +2086,29 @@ verdict is carried, not merely logged — exactly as the
 `bond_debond_trajectory` ripple was.
 
 ```
-function activate_surfaces(slab_A, slab_B, member_specification,
+function activate_surfaces(handle_A, handle_B, member_specification,
                            potential):
     # Each surface is activated INDEPENDENTLY (both are still in vacuum,
     # not yet facing). Two calls, never one co-activation; the pair does
-    # not co-exist here. Each call opens its own engine, loads that half's
-    # data file, and writes the amorphized half back to disk for
-    # assemble_pair (§7.5) to read — the ARCHITECTURE §4.3 file handoff.
+    # not co-exist here. Each call takes a HalfHandle (§7.1): it opens its
+    # own engine, RE-READS the pristine half from handle.data_file (never a
+    # warm object from build_slabs), amorphizes it, and writes the
+    # amorphized half back to disk for assemble_pair (§7.5) to read — the
+    # ARCHITECTURE §4.3 file handoff.
     #
-    # C-EXPANSION (ARCHITECTURE §4.3): these two calls, times the N
-    # realization seeds the ensemble (§10.8) loops above, are the 2 x N
-    # INDEPENDENT units of the fan-out. v1 runs them as this serial pair
-    # inside one job (Approach A); because each is a pure function of (half,
-    # seed) handing off through files, Approach C replaces this loop with a
-    # parallel submission and a barrier at assembly — no change to the
-    # stage bodies. Keep it free of cross-call state.
-    activated_A = activate_surface(slab_A, member_specification, potential)
-    activated_B = activate_surface(slab_B, member_specification, potential)
+    # v1 runs the two as this SERIAL pair inside one job (Approach A), each
+    # bombardment on the job's FULL core allocation (ARCHITECTURE §4.3 —
+    # serial slabs, not two-at-once in one job). These two calls, times the
+    # N realization seeds the ensemble (§10.8) loops above, are the 2 x N
+    # independent units; the separate-job fan-out (Approach C) stays
+    # AVAILABLE through the files but is not the plan. Because each call is
+    # a pure function of (half, seed) handing off through files, that
+    # fan-out is a change of submission wrapper, not of stage code — so keep
+    # it free of cross-call state (# C-EXPANSION, ARCHITECTURE §4.3).
+    activated_A = activate_surface(handle_A, member_specification,
+                                   potential)
+    activated_B = activate_surface(handle_B, member_specification,
+                                   potential)
     return ActivatedSlabs{
         slab_A:    activated_A.slab,    slab_B:    activated_B.slab,
         verdict_A: activated_A.verdict, verdict_B: activated_B.verdict }
@@ -2080,7 +2136,14 @@ classical MD, so both are just one setting of the projectile spec (§10.3),
 not separate mechanisms.
 
 ```
-function activate_surface(slab, member_specification, potential):
+function activate_surface(handle, member_specification, potential):
+    # RE-READ the pristine half from disk into a slab — the standalone
+    # geometry plus the beam-declaring type map the handle carries (§7.1),
+    # never a warm object from build_slabs (ARCHITECTURE §4.3). From here
+    # DOWN the slab is in-memory WITHIN this one engine/stage, which is
+    # exactly what the file discipline allows; it forbids only carrying a
+    # live object ACROSS the seam between two stages.
+    slab = read_standalone_half(handle)          # geometry + type_map
     # Dispatch on the configured mechanism (DESIGN §3.1) — the same
     # registry idiom as the §8 measures and the §9 press-control switch.
     # v1 registers exactly one; the seam is what makes a plasma or
@@ -2577,8 +2640,10 @@ function generate_hard_configs(committee, pair_specification):
     # always runs on the classical+ZBL potential (§10.2), in production and
     # here alike; the committee enters only via the gentle re-anneal
     # (§10.5). So the MLIP is never asked to reproduce a cascade (§3.3).
-    (slab_A, slab_B, shared) = build_slabs(pair_specification, committee)
-    activated = activate_surfaces(slab_A, slab_B, pair_specification,
+    (handle_A, handle_B, shared) = build_slabs(pair_specification,
+                                               committee,
+                                               scratch_directory)
+    activated = activate_surfaces(handle_A, handle_B, pair_specification,
                                   committee)                        # §10
     candidates.extend(harvest_frames(activated))
 

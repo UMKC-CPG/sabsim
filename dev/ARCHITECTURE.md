@@ -948,27 +948,37 @@ surfaces.
 The algorithmic shape — the canonical result schema, the swappable report
 renderer, and the standard visualization-dump columns — is `DESIGN.md` §9.
 
-### 4.3 Member execution sequence — file-handoff stages, fan-out seam
+### 4.3 Member execution sequence — file-handoff stages, serial slabs
 
 A member is not one run; it is a CHAIN of stages, several of which open a
-LAMMPS engine, and the way those stages connect decides whether the
-pipeline can later be parallelized without being rewritten. §4.1 fixed the
-linking rule — steps decouple through file contracts on the shared
+LAMMPS engine and hand their result to the next through a FILE. §4.1 fixed
+the linking rule — steps decouple through file contracts on the shared
 filesystem. This section applies that rule at the altitude of a single
 bonding member: what the stages are, which of them touch a compute node,
-where the independent work is, and how v1's simple serial execution is
-built so the eventual fan-out is a change of wrapper, not of physics.
+and why the file handoff holds even though a member runs its stages
+SERIALLY. The file handoff is NOT a concession to a parallel future: it is
+how the simulator takes its input, how each result becomes a durable
+record, and how a crash mid-chain keeps the finished stages. Parallelism
+is a bonus the files happen to also enable (below), never their reason.
 
 **Every LAMMPS stage is a self-contained data-file → data-file unit.** A
 stage opens an engine, loads the data file its predecessor wrote, does its
 work, writes a data file (and its trajectory dump, §4.2), and closes. The
-sequencer never holds a live engine across stages; it passes PATHS. This
-is §4.1's file contract made the between-stage currency, and it is what
-lets a stage run wherever its resource class is served (§4.1's per-job
-routing) and lets a native crash be a failed job the sequencer halts on
-cleanly (wall 4). The live in-process read-back §4.1 describes is WITHIN a
-stage (the press's mid-run contact test), never across the seam between
-two.
+sequencer never holds a live engine across stages; it passes PATHS. Three
+reasons make the file the currency, NONE about parallelism. First, it is
+how the simulator takes input at all — LAMMPS loads a slab by `read_data`
+on a file, not from an in-memory object, so the structure builder writes a
+file before any bombardment can read it (the ASE membrane, `VISION.md`
+principle 4). Second, the file each stage writes IS the run's durable
+record (§4.2, §9): the amorphized half on disk is at once the assembly's
+input and the archived artifact. Third, a stage that writes its result
+before the next begins survives a crash — the finished stages stay
+finished, and a native crash is a failed job the sequencer halts on
+cleanly (wall 4). The file ALSO lets a stage run wherever its resource
+class is served (§4.1's per-job routing), which is the bonus the optional
+fan-out (below) trades on. The live in-process read-back §4.1 describes is
+WITHIN a stage (the press's mid-run contact test), never across the seam
+between two.
 
 **The chain for a bonding member.** With activation on, steps 3–5 are not
 one build; they are a chain with one independent pair in the middle:
@@ -980,7 +990,7 @@ solve-shared-cell              pymatgen, no LAMMPS, once
         v
 build-standalone-halves        ASE, no LAMMPS, geometry once
         v
-  +-----+-----+                INDEPENDENT: two halves x N seeds
+  +-----+-----+                SERIAL: one half, then the other (§4.3)
   v           v
 amorphize   amorphize          cascade + re-anneal + gate (LAMMPS)
  half A      half B
@@ -1006,50 +1016,62 @@ until `assemble` reads both halves' data files back and stacks them
 (`DESIGN.md` §2.6). Assembly is the BARRIER: the first stage that needs
 both halves at once.
 
-**The realization ensemble is a second independent axis.** The bond metric
-is averaged over amorphization realizations (STRUCTURAL 4), each a
-different master seed. `relax-bulk`, `solve-shared-cell`, AND the half
-GEOMETRY (`build-halves`) are all deterministic and SHARED across
-realizations — computed once; what repeats per realization is
-instantiating a fresh half data file and amorphizing it, then `assemble`
-through `pull`. So the independent work is (2 halves) × (N realizations)
-amorphizations, all fannable, joined per realization at assembly.
+**The units are independent, but v1 runs them SERIALLY (Approach A).** In
+principle the two halves — and, above them, the N amorphization
+realizations the bond metric averages over (STRUCTURAL 4), each a
+different master seed — are independent and could run at once.
+`relax-bulk`, `solve-shared-cell`, and the half GEOMETRY (`build-halves`)
+are deterministic and SHARED across realizations, computed once; what
+repeats per realization is writing a fresh half data file and amorphizing
+it, then `assemble` through `pull`. But v1 does NOT fan those units out. A
+member runs its whole chain in ONE job (Approach A), the two halves
+bombarded one after the other, each bombardment using the job's FULL core
+allocation.
 
-**v1 runs this serially in one job (Approach A); the design is built for
-the fan-out (Approach C).** Because the stages hand off through files, the
-two approaches differ only in the SUBMISSION WRAPPER, never in the physics
-stage code:
+**Why serial slabs, not two-at-once inside one job.** Running the two
+halves concurrently in a single job would mean SPLITTING that job's cores
+between them — and for a fixed core count that is no faster than running
+them in turn on all the cores, while being markedly more code to steer two
+core-groups through different work. The one case where fewer-cores-per-
+slab genuinely wins — a slab too small to use the whole allocation
+efficiently — is captured BETTER by submitting each slab as its own
+smaller job and letting the scheduler run them together, never by
+splitting cores in-process. So in-process cross-slab concurrency is a
+DOMINATED option and is not built. The parallelism v1 relies on is the two
+levels it already has: whole MEMBERS run as separate jobs, and each single
+bombardment is itself a multi-core (MPI) simulator run.
 
-- **Approach A (v1).** One job per member runs the whole chain top to
-  bottom, the independent amorphizations as a serial loop, into one scratch
-  subtree. Simplest to build, debug, and reason about; a late failure
-  re-runs the member.
-- **Approach C (later).** Plan once, then submit the independent
-  amorphizations as parallel jobs (a SLURM array or a dependency graph),
-  with a barrier before assembly, each half/realization in its own scratch
-  subtree, joined by the manifest (§4.2). Wall-clock scales with the
-  cluster instead of summing the halves.
+**The separate-job fan-out stays available, for free, through the files
+(Approach C).** Should the small-slab efficiency win ever be wanted, the
+file handoff already allows it: submit the independent half/realization
+amorphizations as separate jobs (a SLURM array or a dependency graph),
+each in its own scratch subtree, with a barrier before assembly, joined by
+the manifest (§4.2) — a change of SUBMISSION WRAPPER, never of stage code.
+To keep that option open (and to keep the serial loop clean and
+restartable), each amorphization is written as a pure function of (which
+half, which seed) with NO cross-iteration state, and the sites where the
+serial loop would become separate jobs are marked `# C-EXPANSION` in the
+code. They are available extension points, not planned work: the loop
+over (half, seed), the per-unit scratch subtree, the assemble barrier, and
+the engine lifetime.
 
-What A hardcodes and C must generalize is flagged HERE so it is not
-discovered late (and each site is marked `# C-EXPANSION` in the code):
+**The build → amorphize handoff: a per-half handle.** `build-halves` writes
+the two pristine standalone slabs to files and hands the amorphization a
+small HANDLE per half — the file path, the species→type numbering (with
+the beam declared), the material identity, and which wafer it is (bottom A
+/ top B). The amorphization RE-READS the slab geometry from the file
+rather than leaning on an in-memory object, so it stays a self-contained
+"read a file, do the work, write a file" unit: restartable after a crash,
+and identical whether it runs in the member's own job or, later, a
+separate one. `build-halves` is the FIRST stage to write real files, so
+the sequencer threads it the run's scratch directory EXPLICITLY (the
+traceable form, not a path the stage rebuilds from identity), keeping every
+written byte traceable to its inputs (`VISION.md` goal 3).
 
-1. **The serial loop over halves and realizations** — v1 iterates; C
-   submits. Keep each loop body a pure function of (which half, which
-   seed) with no cross-iteration state, so the loop is trivially replaced
-   by a fan-out.
-2. **The scratch layout** — v1 may share one subdir; C needs one per
-   independent unit. The §4.2 mirror already keys by member/realization
-   identity, so this is a naming discipline, not a redesign.
-3. **The assemble barrier** — implicit in serial order now; C must express
-   it as an explicit join / job dependency.
-4. **Engine lifetime** — one process opens and closes engines in turn now;
-   C opens them in separate jobs. The data-file handoff already makes this
-   transparent PROVIDED no stage assumes a warm engine left by the one
-   before it.
-
-This is the whole of the "don't build something that must be torn apart"
-discipline: A is C with the fan-out collapsed to a loop, and the four
-points above are exactly the collapse to reverse.
+This keeps the "don't build something that must be torn apart" discipline
+without paying for concurrency the plan does not need: the serial member
+chain and the optional separate-job fan-out share the same stage code and
+the same files — only the submission wrapper differs.
 
 ---
 

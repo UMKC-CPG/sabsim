@@ -528,21 +528,30 @@ foundations, interaction rules. -->
       amorphizations x N seeds as a serial loop; the four `# C-EXPANSION`
       collapse points (serial loop, scratch layout, assemble barrier,
       engine lifetime) are flagged in code for the later fan-out (Approach
-      C). Sub-slices: (a) the verdict adapter — DONE (2026-07-19),
-      `pipeline/activation_adapter.py` maps `ActivationVerdict` ->
-      contract `Verdict` (depth + named failure in the reason), 7 unit
-      tests, full suite 133 green; (b) use the existing `build_slab` per
-      half (it already cuts in vacuum → a standalone half) and write each
-      half's data file — the crystalline all-in-one `build_facing_pair`
-      becomes the activation-OFF null path; (c) the
-      amorphized `assemble_pair` — read BOTH halves back from their data
-      files, `flip_in_z` the top half so its activated face meets the
-      interface, then the existing §2.6 dividing-surface / ejecta / clash
-      steps; (d) the per-stage engine-provider seam (open a compute-node
-      `LammpsEngine` per half from a data file) so the sequencer's stub
-      `activate_surfaces` is replaced by the live driver call + the adapter.
-      Slices (b)-(d) are compute-node integration (the gate reads real
-      positions, so this cannot run under the login-node `MockEngine`).
+      C). The build→amorphize seam is a per-half `HalfHandle` (file path +
+      beam-declaring type map + identity + wafer role); the amorphization
+      RE-READS geometry from the file, never a warm object; `build_slabs`
+      is threaded the run's scratch directory EXPLICITLY (handle + scratch
+      design landed 2026-07-20, `ARCHITECTURE.md` §4.3, `PSEUDOCODE.md`
+      §1/§7.1/§10.1). Sub-slices: (a) the verdict adapter — DONE
+      (2026-07-19), `pipeline/activation_adapter.py` maps `ActivationVerdict`
+      -> contract `Verdict` (depth + named failure in the reason); (b) the
+      standalone half builder + writer — DONE (2026-07-20),
+      `structure/slab_builder.py` `build_standalone_half` /
+      `write_standalone_half` (beam declared as a zero-atom type so the
+      cascade can create it); the pipeline STAGE that writes both halves to
+      scratch and returns the two handles is still PENDING; (c) the
+      amorphized `assemble_pair` — DONE (2026-07-20),
+      `structure/amorphized_assembly.py` (`snapshot_amorphized_half`,
+      `flip_in_z`, `drop_disconnected`, `assemble_amorphized_pair`),
+      login-node-tested via `MockEngine`; (d) the per-stage engine-provider
+      seam (open a compute-node `LammpsEngine` per half from a data file,
+      `read_standalone_half`, snapshot→write the amorphized half) so the
+      sequencer's stub `activate_surfaces` is replaced by the live driver
+      call + the adapter — PENDING. The remaining pipeline wiring — the
+      build-halves stage, the run-context threading, and (d) — is
+      compute-node integration (the gate reads real positions, so it cannot
+      run under the login-node `MockEngine`). Full suite 147 green.
 - [x] STRUCTURAL 3 DESIGN follow-ons — RESOLVED by `DESIGN.md` §7
       (2026-07-09), except the bare numbers. The diagnostic-label schema
       is §7.8 (verdict / cause / basis / fired / unresolved / power /
