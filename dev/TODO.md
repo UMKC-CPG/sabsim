@@ -517,41 +517,71 @@ foundations, interaction rules. -->
       convenience. NOTE: §10.7 `label_activated_skin` (deferred in Phase 2)
       is now LOAD-BEARING — it is the per-atom `activated-skin` group value
       the dump colours by.
-- [ ] Activation pipeline wiring — run the real activator inside the
-      sequencer (`ARCHITECTURE.md` §4.3, `DESIGN.md` §2.6, `PSEUDOCODE.md`
-      §7.1/§7.5/§10.1; design landed 2026-07-19). The member runs as a
-      chain of file-handoff stages: relax-bulk -> solve-cell ->
-      build-standalone-halves -> [amorphize A | amorphize B] -> assemble ->
-      press/pull, each LAMMPS stage a data-file -> data-file unit that
-      opens and closes its OWN engine (never a live handle across the
-      seam). Approach A (v1): one job runs the chain serially, the two
-      amorphizations x N seeds as a serial loop; the four `# C-EXPANSION`
-      collapse points (serial loop, scratch layout, assemble barrier,
-      engine lifetime) are flagged in code for the later fan-out (Approach
-      C). The build→amorphize seam is a per-half `HalfHandle` (file path +
-      beam-declaring type map + identity + wafer role); the amorphization
-      RE-READS geometry from the file, never a warm object; `build_slabs`
-      is threaded the run's scratch directory EXPLICITLY (handle + scratch
-      design landed 2026-07-20, `ARCHITECTURE.md` §4.3, `PSEUDOCODE.md`
-      §1/§7.1/§10.1). Sub-slices: (a) the verdict adapter — DONE
-      (2026-07-19), `pipeline/activation_adapter.py` maps `ActivationVerdict`
-      -> contract `Verdict` (depth + named failure in the reason); (b) the
-      standalone half builder + writer — DONE (2026-07-20),
-      `structure/slab_builder.py` `build_standalone_half` /
-      `write_standalone_half` (beam declared as a zero-atom type so the
-      cascade can create it); the pipeline STAGE that writes both halves to
-      scratch and returns the two handles is still PENDING; (c) the
-      amorphized `assemble_pair` — DONE (2026-07-20),
-      `structure/amorphized_assembly.py` (`snapshot_amorphized_half`,
-      `flip_in_z`, `drop_disconnected`, `assemble_amorphized_pair`),
-      login-node-tested via `MockEngine`; (d) the per-stage engine-provider
-      seam (open a compute-node `LammpsEngine` per half from a data file,
-      `read_standalone_half`, snapshot→write the amorphized half) so the
-      sequencer's stub `activate_surfaces` is replaced by the live driver
-      call + the adapter — PENDING. The remaining pipeline wiring — the
-      build-halves stage, the run-context threading, and (d) — is
-      compute-node integration (the gate reads real positions, so it cannot
-      run under the login-node `MockEngine`). Full suite 147 green.
+- [x] Activation pipeline wiring — the build->amorphize->assemble chain
+      runs inside the pipeline, node-validated (2026-07-20, `4f6f689`;
+      `ARCHITECTURE.md` §4.3, `PSEUDOCODE.md` §1/§7.1/§10.1). The member
+      chain is file-handoff stages — build-standalone-halves ->
+      [amorphize A | amorphize B] -> assemble — each opening its OWN engine
+      from a data file (never a live handle across the seam), the two
+      amorphizations serial in one job (Approach A; the four `# C-EXPANSION`
+      points flagged for the later fan-out). Built: `HalfHandle` (file +
+      beam-declaring type map + identity + wafer role) as the
+      build->amorphize handoff; `SLABS_CONTRACT` checks the handles; the
+      sequencer threads the run's scratch dir explicitly
+      (`exec_full_study(study, job_directory)` -> `member_scratch` ->
+      `exec_one_member`); `slab_builder` gained `orthogonalize_in_plane` +
+      `read_standalone_half`; NEW `pipeline/live_stages.py` holds the REAL
+      stages `build_halves` / `activate_surfaces_live` / `assemble_pair_live`
+      speaking the SAME contracts as the W0 stubs (which now also speak the
+      handle seam, so W0 stays login-node-runnable — `test_sequencer` gains
+      a `job_home` fixture). Sub-slices (a) verdict adapter, (b) standalone
+      half builder+writer, (c) amorphized assemble, (d) engine-provider —
+      all DONE. Node run (jobid 15021434): chain ran build -> activate BOTH
+      halves -> gate; the gate CORRECTLY HALTED at `ACTIVATED_SLABS_CONTRACT`
+      (gate-not-warn) on the gentle smoke dose (216-atom slab over-sputters
+      at 100 eV); `assemble_pair_live` then exercised on the real amorphized
+      halves (63+109 survivors -> facing pair, 1.49 Å clash relief). 150
+      unit tests green.
+- [ ] Run ONE Si/Si member end to end FOR REAL — the four steps left after
+      the wiring landed (verified against code 2026-07-20):
+      (1) PIN the slab-size/dose so a real amorphized layer forms and the
+      gate PASSES — the one genuine physics item (the open §3.6 three-way
+      slab<->energy<->DFT-cost accommodation; the node run's 216-atom slab
+      over-sputters at 100 eV; `_LATERAL_REPEAT` / `_MIN_SLAB_THICKNESS` in
+      `live_stages` are stand-in constants — bigger slab or gentler energy).
+      (2) CONNECT the press/pull + analyzer PIPELINE STAGES to their real
+      code: the press/pull DRIVER (`driver/press_pull.py`) already EXISTS
+      and was validated on real LAMMPS (stage 5) — only the pipeline stages
+      `run_bond_debond_md` + `run_analyzer` (`skeleton_stages`) are still
+      placeholders; each needs a thin connector, NOT new physics.
+      (3) SELECT real-vs-stub stages in the sequencer: it is hardwired to
+      the `skeleton_stages` stubs (so it runs login-node with no LAMMPS); it
+      needs a way to pick the `live_stages` set for a real run while keeping
+      the stubs for quick login-node checks.
+      (4) BUILD the reporting layer (`ARCHITECTURE.md` §4.2 / `DESIGN.md` §9:
+      summary.json, swappable report, cascade trajectory dump + column set,
+      §10.7 skin-label) — designed, NOT yet coded.
+      Independent follow-ons (none block the four above): Si/SiO2 dissimilar
+      — the surface-lattice matcher (`match_surfaces`, ZSL) EXISTS and is
+      used by `build_facing_pair`; missing is wiring it INTO `build_halves`
+      (today each half is cut on its own lattice, so the si-sio2 halves are
+      not commensurate and assembly refuses) AND the strained assembly of a
+      real mismatch (`assemble_facing_pair` raises `NotImplementedError` for
+      non-identity); the SiO2 cascade potential is REGISTERED
+      (`SiO2.vashishta`) but `validated=False`. Real refs: the
+      `share/activation/Si.toml` thresholds are literature stand-ins
+      (real=false) — replace with DFT/exp + the a-Si CRN model (user HAS
+      one). Reuse the STORED bond cutoff: the gate already reads a
+      `bond_cutoff` from the reference; the assembly's `_BOND_CUTOFF=2.8 Å`
+      (`live_stages`) could read that instead of hardcoding (§6.3). Triclinic
+      min-image: the gate's g(r)/coordination kernels assume an ORTHOGONAL
+      in-plane cell, and `orthogonalize_in_plane` only removes a REMOVABLE
+      tilt — it lands Si(100) on an orthogonal cell (that cell is orthogonal
+      under a pymatgen tilt artifact) but does NOT orthogonalize a genuinely
+      oblique cell (a hexagonal or triclinic face stays oblique), so the
+      triclinic kernel is still needed for those materials, just not for the
+      current Si(100) path. `activation_temperature` spec knob — noted, not
+      built. Evaluate the Imago ring tool (door-open swap).
 - [x] STRUCTURAL 3 DESIGN follow-ons — RESOLVED by `DESIGN.md` §7
       (2026-07-09), except the bare numbers. The diagnostic-label schema
       is §7.8 (verdict / cause / basis / fired / unresolved / power /
