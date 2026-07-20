@@ -35,28 +35,44 @@ _TEMPLATE_PATH = os.path.abspath(os.path.join(
     "..", "..", "..", "dev", "templates", "study_spec.toml"))
 
 
+@pytest.fixture
+def job_home(tmp_path, monkeypatch):
+    """A throwaway run home: SABSIM_SCRATCH set + an existing job dir.
+
+    The sequencer now writes each member's intermediates under a scratch
+    subtree (ARCHITECTURE.md §4.3), so ``exec_full_study`` needs a job
+    directory and ``SABSIM_SCRATCH``. A tmp home keeps the W0 control-flow
+    tests login-node-runnable and self-contained (the W0 stubs write no
+    files, but the sequencer still derives each member's scratch path).
+    """
+    monkeypatch.setenv("SABSIM_SCRATCH", str(tmp_path / "scratch"))
+    job_directory = tmp_path / "jobs" / "study"
+    job_directory.mkdir(parents=True)
+    return str(job_directory)
+
+
 # ---------------------------------------------------------------------
 # The pipeline runs end to end and produces a well-formed, untrusted
 # study report.
 # ---------------------------------------------------------------------
 
-def test_exec_full_study_runs_every_member():
+def test_exec_full_study_runs_every_member(job_home):
     """Both template members run to a self-standing report."""
-    report = exec_full_study(_TEMPLATE_PATH)
+    report = exec_full_study(_TEMPLATE_PATH, job_home)
     assert report.study_name == "sio2-si-sab-v1"
     assert tuple(r.specification.name for r in report.member_results) == (
         "si-sio2", "si-si-reference")
 
 
-def test_every_skeleton_member_is_untrusted():
+def test_every_skeleton_member_is_untrusted(job_home):
     """A wave-0 member's number is plumbing, not physics (§5.3)."""
-    report = exec_full_study(_TEMPLATE_PATH)
+    report = exec_full_study(_TEMPLATE_PATH, job_home)
     assert all(not r.trusted for r in report.member_results)
 
 
-def test_mechanical_measure_travels_the_pipeline():
+def test_mechanical_measure_travels_the_pipeline(job_home):
     """The one real measure is present and OK; the rest unresolved."""
-    report = exec_full_study(_TEMPLATE_PATH)
+    report = exec_full_study(_TEMPLATE_PATH, job_home)
     measures = report.member_results[0].measures
 
     mechanical = measures.by_name("mechanical_work_of_separation")
@@ -69,17 +85,17 @@ def test_mechanical_measure_travels_the_pipeline():
             MeasureStatus.UNRESOLVED)
 
 
-def test_gate_reports_but_does_not_act():
+def test_gate_reports_but_does_not_act(job_home):
     """v1's gate is a reporter; it never acts (VISION principle 5)."""
-    report = exec_full_study(_TEMPLATE_PATH)
+    report = exec_full_study(_TEMPLATE_PATH, job_home)
     gate = report.member_results[0].gate
     assert gate.acted is False
     assert "mechanical_work_of_separation" in gate.measures_seen
 
 
-def test_ratio_relation_is_graded_and_reported():
+def test_ratio_relation_is_graded_and_reported(job_home):
     """The declared ratio relation produces a (untrusted) outcome."""
-    report = exec_full_study(_TEMPLATE_PATH)
+    report = exec_full_study(_TEMPLATE_PATH, job_home)
     assert len(report.relation_outcomes) == 1
 
     ratio = report.relation_outcomes[0]
@@ -94,9 +110,9 @@ def test_ratio_relation_is_graded_and_reported():
 # The run's output is machine-readable, and provenance is stamped.
 # ---------------------------------------------------------------------
 
-def test_study_record_is_json_serializable():
+def test_study_record_is_json_serializable(job_home):
     """to_record emits a plain, JSON-serializable view (§6.6)."""
-    report = exec_full_study(_TEMPLATE_PATH)
+    report = exec_full_study(_TEMPLATE_PATH, job_home)
     record = to_record(report)
     # Round-trips through JSON without custom encoders.
     restored = json.loads(json.dumps(record))
@@ -104,9 +120,9 @@ def test_study_record_is_json_serializable():
     assert len(restored["members"]) == 2
 
 
-def test_provenance_stamps_the_fingerprinted_protocol():
+def test_provenance_stamps_the_fingerprinted_protocol(job_home):
     """Every member result carries a protocol fingerprint (§1.6)."""
-    report = exec_full_study(_TEMPLATE_PATH)
+    report = exec_full_study(_TEMPLATE_PATH, job_home)
     provenance = report.member_results[0].potential
     assert provenance.protocol_fingerprint
     assert provenance.potential_kind == "classical-stand-in"

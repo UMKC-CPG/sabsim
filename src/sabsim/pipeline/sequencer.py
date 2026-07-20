@@ -49,22 +49,34 @@ from sabsim.pipeline.skeleton_stages import (
     run_bond_debond_md,
     run_characterization,
 )
+from sabsim.deploy.scratch import member_scratch
 from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import MemberSpecification, Relation
 
 
-def exec_full_study(study_specification) -> StudyReport:
+def exec_full_study(study_specification, job_directory) -> StudyReport:
     """Run a whole study: every member, then the declared relations (§1).
 
     Loads and validates the spec, executes each member independently to
     a self-standing report, then grades the optional relations at the
     study level (there may be none). Returns the :class:`StudyReport`;
     also emits the machine-readable record (DESIGN.md §6.6).
+
+    ``job_directory`` is the run's home on the shared filesystem
+    (ARCHITECTURE.md §4.1); each member's bulky intermediates go in its
+    scratch subtree, keyed by study + member identity (§4.2 mirror) and
+    threaded EXPLICITLY into the stages that write files, so every written
+    byte stays traceable to its inputs (VISION.md goal 3). It is a required
+    argument — there is no default run home (DESIGN.md §1.4, no hidden
+    defaults).
     """
     study = load_and_validate_study(study_specification)
 
     member_results = tuple(
-        exec_one_member(member) for member in study.members)
+        exec_one_member(
+            member,
+            member_scratch(job_directory, study.name, member.name))
+        for member in study.members)
 
     # Relations are an OPTIONAL comparison layer graded only after every
     # member has produced its measure vector (DESIGN.md §1.1).
@@ -80,7 +92,8 @@ def exec_full_study(study_specification) -> StudyReport:
 
 
 def exec_one_member(
-        member: MemberSpecification) -> MemberResult:
+        member: MemberSpecification,
+        scratch_directory) -> MemberResult:
     """Run the eight-step pipeline for ONE member (PSEUDOCODE.md §1).
 
     Each stage is wrapped in ``run_to_contract``: the stage runs, then
@@ -88,6 +101,11 @@ def exec_one_member(
     NEXT stage depends on. In v1 the quality-gate loop executes its body
     ONCE and reports (VISION principle 5); the closed loop is a future
     target, so it is not iterated here.
+
+    ``scratch_directory`` is this member's own scratch subtree (threaded in
+    by :func:`exec_full_study`); the file-writing stages — ``build_slabs``
+    first — receive it explicitly rather than rebuild it from identity
+    (ARCHITECTURE.md §4.3).
     """
     # The potential is a CONTRACT, not a fixed implementation. The
     # skeleton satisfies it with a classical stand-in; the bootstrap
@@ -99,15 +117,18 @@ def exec_one_member(
     # Steps 3-4-5. Their order is a setting (the builder and activator
     # are order-agnostic behind their contracts, DESIGN.md §5.3); v1
     # uses the only physically sensible order, build -> activate ->
-    # assemble.
-    slab_a, slab_b, shared = run_to_contract(
-        lambda: build_slabs(member, potential),
+    # assemble. build_slabs writes each standalone half under the member's
+    # scratch and returns the two HANDLES (§7.1, the build->amorphize seam).
+    handle_a, handle_b, shared = run_to_contract(
+        lambda: build_slabs(member, potential, scratch_directory),
         SLABS_CONTRACT)
 
     # A FAILED activation gate is contract-invalid and halts HERE: the
-    # ACTIVATED_SLABS_CONTRACT checks both verdicts passed (§10.1).
+    # ACTIVATED_SLABS_CONTRACT checks both verdicts passed (§10.1). Each
+    # call re-reads its half from the handle's data file, amorphizes it,
+    # and writes the amorphized half back for assembly to read.
     activated = run_to_contract(
-        lambda: activate_surfaces(slab_a, slab_b, member, potential),
+        lambda: activate_surfaces(handle_a, handle_b, member, potential),
         ACTIVATED_SLABS_CONTRACT)
     slab_a = activated.slab_a      # rebind to the activated slabs; the
     slab_b = activated.slab_b      # verdicts rode the contract check

@@ -15,6 +15,7 @@ from __future__ import annotations
 from sabsim.pipeline.exec_artifacts import (
     ActivatedSlabs,
     BondDebondResult,
+    HalfHandle,
     Potential,
     PressOutcome,
     PullOutcome,
@@ -23,6 +24,13 @@ from sabsim.pipeline.exec_artifacts import (
     Structure,
     Verdict,
 )
+
+# Wafer provenance tags — bottom A / top B (the assembly invariant, DESIGN
+# §2.6). The authoritative constants live in structure.slab_builder
+# (WAFER_A_TAG / WAFER_B_TAG); they are inlined here so the W0 stub stays
+# free of that module's heavy pymatgen import.
+_WAFER_A_TAG = 1
+_WAFER_B_TAG = 2
 from sabsim.pipeline.measures import (
     Measure,
     MeasureStatus,
@@ -61,48 +69,67 @@ def resolve_potential(member: MemberSpecification) -> Potential:
     )
 
 
+def _placeholder_handle(
+        wafer, beam: str, scratch_directory: str,
+        wafer_tag: int) -> HalfHandle:
+    """A W0 half-handle: the seam's shape, without writing a file.
+
+    Names a data-file path under ``scratch_directory`` (never written in
+    W0) and a minimal beam-declaring type map, enough to satisfy the
+    SLABS_CONTRACT and exercise the handle seam; the real
+    :func:`sabsim.pipeline.live_stages.build_halves` writes the file.
+    """
+    role = "a" if wafer_tag == _WAFER_A_TAG else "b"
+    type_map = {wafer.identity: 1, beam: 2}     # substrate + beam declared
+    return HalfHandle(
+        data_file=f"{scratch_directory}/half_{role}.data",
+        type_map=type_map, identity=wafer.identity, wafer_tag=wafer_tag)
+
+
 def build_slabs(
         member: MemberSpecification,
-        potential: Potential) -> tuple[Slab, Slab, SharedCell]:
-    """Build both wafers' slabs to a shared cell (DESIGN.md §2, §7).
+        potential: Potential,
+        scratch_directory: str) -> tuple[HalfHandle, HalfHandle, SharedCell]:
+    """Build both wafers as standalone half-handles (DESIGN.md §2, §7.1).
 
-    W0 returns placeholder slabs and a trivial shared cell — a Si/Si
-    pair has no lattice mismatch, so the coincidence matcher stays
-    dormant until the Si/SiO2 milestone (ARCHITECTURE.md §5, wave 3).
+    W0 returns PLACEHOLDER handles — no data file is written, and the
+    coincidence matcher stays dormant (a Si/Si pair has no lattice
+    mismatch, wave 3) — so the pipeline's control flow and the
+    build->amorphize handle seam are exercised without a compute node. The
+    real :func:`sabsim.pipeline.live_stages.build_halves` writes two
+    standalone slab files under ``scratch_directory`` and returns real
+    handles through this same contract.
     """
-    slab_a = Slab(
-        identity=member.material.wafer_a.identity,
-        note="placeholder slab (wave 0)")
-    slab_b = Slab(
-        identity=member.material.wafer_b.identity,
-        note="placeholder slab (wave 0)")
+    beam = member.protocol.activation_species
+    handle_a = _placeholder_handle(
+        member.material.wafer_a, beam, scratch_directory, _WAFER_A_TAG)
+    handle_b = _placeholder_handle(
+        member.material.wafer_b, beam, scratch_directory, _WAFER_B_TAG)
     shared = SharedCell(note="trivial shared cell (Si/Si, no mismatch)")
-    return slab_a, slab_b, shared
+    return handle_a, handle_b, shared
 
 
 def activate_surfaces(
-        slab_a: Slab,
-        slab_b: Slab,
+        handle_a: HalfHandle,
+        handle_b: HalfHandle,
         member: MemberSpecification,
         potential: Potential) -> ActivatedSlabs:
-    """Amorphize each slab's surface and gate it (DESIGN.md §3, §10.1).
+    """Amorphize each half's surface and gate it (DESIGN.md §3, §10.1).
 
     W0 stubs the amorphization and returns PASSING activation verdicts, so
     the ACTIVATED_SLABS_CONTRACT is satisfied and the pipeline flows. The
-    REAL body is built and unit-tested in
-    :mod:`sabsim.driver.cascade` (``activate_surfaces`` there runs the
-    classical + ZBL cascade, the MLIP re-anneal, and the activation gate on
-    the ``Engine`` seam). It is not called here yet because it needs a real
-    slab with atoms and a compute-node engine per wafer — the live builder
-    (slice 1b) and the LAMMPS engine — neither of which the W0 skeleton has
-    on the login node. When those wire in, this stub is replaced by a thin
-    adapter that opens an engine per slab, calls the driver, and maps each
-    :class:`~sabsim.driver.cascade.ActivationVerdict` onto the simple
-    :class:`Verdict` the contract reads. The seam itself does not change:
-    the sequencer already carries the :class:`ActivatedSlabs` forward and
-    the contract already gates on both verdicts (§10.1, rippled in code).
+    REAL body is :func:`sabsim.pipeline.live_stages.activate_surfaces_live`:
+    it opens a ``LammpsEngine`` per half, re-reads the pristine half from
+    its handle's data file, runs the driver (:mod:`sabsim.driver.cascade` —
+    the classical + ZBL cascade, the MLIP re-anneal, the §3.5 gate), and
+    writes the amorphized half back. It is not called here because it needs
+    a compute-node engine the W0 login-node skeleton has no access to. The
+    seam does not change: the sequencer carries the :class:`ActivatedSlabs`
+    forward and the contract gates on both verdicts (§10.1).
     """
     passed = Verdict(passed=True, reason="stubbed activation (wave 0)")
+    slab_a = Slab(identity=handle_a.identity, note="placeholder (wave 0)")
+    slab_b = Slab(identity=handle_b.identity, note="placeholder (wave 0)")
     return ActivatedSlabs(
         slab_a=slab_a, slab_b=slab_b,
         verdict_a=passed, verdict_b=passed)

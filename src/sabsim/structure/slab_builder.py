@@ -40,6 +40,8 @@ from dataclasses import dataclass
 
 import numpy as np
 from ase import Atoms
+from ase.data import atomic_numbers
+from ase.io import read as ase_read
 from ase.io import write as ase_write
 from pymatgen.analysis.interfaces.zsl import ZSLGenerator
 from pymatgen.core import Structure
@@ -178,6 +180,27 @@ def build_slab(
     return AseAtomsAdaptor.get_atoms(candidates[termination_index])
 
 
+def orthogonalize_in_plane(slab: Atoms) -> Atoms:
+    """Drive the surface cell's xy tilt to zero, preserving the lattice.
+
+    A pymatgen-cut surface cell often carries an in-plane tilt (for the
+    Si(100) cell the second vector's x-component is ``-a_x``). LAMMPS
+    rejects a box whose tilt exceeds half the box length, AND the cascade
+    gate's in-plane minimum-image math assumes an ORTHOGONAL cell — so the
+    tilt must go. Replacing the second vector ``b`` with ``b -
+    round(b_x / a_x) * a`` is a valid LATTICE operation (``b`` stays a
+    lattice vector, the crystal is unchanged) that reduces the tilt into
+    bounds; for the Si(100) cell it drives it to exactly zero. Atoms are
+    re-wrapped into the reduced cell. Returns the same object, modified.
+    """
+    cell = np.array(slab.get_cell())
+    if abs(cell[0][0]) > 0.0:
+        cell[1] = cell[1] - round(cell[1][0] / cell[0][0]) * cell[0]
+    slab.set_cell(cell, scale_atoms=False)
+    slab.wrap()
+    return slab
+
+
 def build_standalone_half(
         crystal: Structure,
         miller_face: tuple[int, int, int],
@@ -185,18 +208,23 @@ def build_standalone_half(
         projectile_species,
         min_slab_thickness: float = 8.0,
         min_vacuum: float = 10.0,
+        lateral_repeat: int = 1,
         termination_index: int = 0) -> StandaloneHalf:
     """Cut ONE wafer alone in vacuum, beam species declared (§4.3, §7.1).
 
     The step-3 builder for a single bonding partner. It cleaves the slab
     with the existing per-wafer :func:`build_slab` (which already opens the
-    vacuum the cascade's open top needs), then builds the type map the
-    amorphization will run under: the union of the slab's own species and
-    the ``projectile_species`` the beam adds (the activation element, plus
-    a co-deposit if the protocol names one). Declaring the beam here — not
-    at bombardment time — is what lets the written data file carry the beam
-    as an atom type with a mass, so LAMMPS can create projectile atoms
-    against it (:func:`write_standalone_half`).
+    vacuum the cascade's open top needs), tiles it ``lateral_repeat`` times
+    in the plane (a bigger surface spreads the dose so a single impact does
+    not dominate — a §3.6 sizing knob, not physics), removes the surface
+    cell's in-plane tilt (:func:`orthogonalize_in_plane`, required for
+    LAMMPS and the gate), and builds the type map the amorphization runs
+    under: the union of the slab's own species and the ``projectile_
+    species`` the beam adds (the activation element, plus a co-deposit if
+    the protocol names one). Declaring the beam here — not at bombardment
+    time — is what lets the written data file carry the beam as an atom
+    type with a mass, so LAMMPS can create projectile atoms against it
+    (:func:`write_standalone_half`).
 
     ``projectile_species`` is an iterable of chemical symbols; passing it
     in (rather than reading the member here) keeps this builder decoupled
@@ -214,6 +242,9 @@ def build_standalone_half(
     slab = build_slab(
         crystal, miller_face, min_slab_thickness, min_vacuum,
         termination_index)
+    if lateral_repeat > 1:
+        slab = slab.repeat((lateral_repeat, lateral_repeat, 1))
+    slab = orthogonalize_in_plane(slab)
     type_map = _type_map_with_species(slab, projectile_species)
     return StandaloneHalf(
         atoms=slab, type_map=type_map, identity=identity)
@@ -437,6 +468,32 @@ def write_standalone_half(half: StandaloneHalf, path: str) -> None:
     file as the facing pair, through the shared writer above.
     """
     _write_atoms_as_lammps_data(half.atoms, half.type_map, path)
+
+
+def read_standalone_half(
+        data_file: str, type_map: dict, identity: str) -> StandaloneHalf:
+    """Re-read a standalone half from its data file (§4.3, §10.1).
+
+    The inverse of :func:`write_standalone_half`, and the read-back the
+    amorphization stage uses: it opens a fresh engine per half and re-reads
+    the pristine geometry FROM DISK rather than leaning on a warm in-memory
+    object (ARCHITECTURE.md §4.3), so each unit is restartable and
+    job-boundary-safe. ASE reads the LAMMPS data file's positions and box;
+    the species behind each type id are supplied from ``type_map`` (the
+    same map the file was written under), because a LAMMPS ``atomic`` data
+    file records species only by mass, not symbol. The beam type carries no
+    atoms in a pristine half, so the read-back is substrate-only; the full
+    ``type_map`` (beam included) rides along for the cascade to create
+    projectiles against.
+    """
+    atomic_number_of_type = {
+        type_id: atomic_numbers[symbol]
+        for symbol, type_id in type_map.items()}
+    atoms = ase_read(
+        data_file, format="lammps-data", atom_style="atomic",
+        Z_of_type=atomic_number_of_type)
+    return StandaloneHalf(
+        atoms=atoms, type_map=dict(type_map), identity=identity)
 
 
 def bulk_atoms(crystal: Structure, cells_per_axis: int) -> Atoms:

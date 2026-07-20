@@ -101,10 +101,37 @@ class SharedCell:
 
 @dataclass(frozen=True)
 class Slab:
-    """One wafer's slab, built to the shared cell (DESIGN §2)."""
+    """One wafer's slab, built to the shared cell (DESIGN §2).
+
+    ``data_file`` is set once the slab has a durable on-disk form the next
+    stage reads (the amorphized half the assembly loads, ARCHITECTURE
+    §4.3); it stays None for the W0 placeholder that writes no file.
+    """
 
     identity: str                  # the material this slab is made of
     note: str                      # a placeholder description in W0
+    data_file: str | None = None   # the slab's file on disk, if written
+
+
+@dataclass(frozen=True)
+class HalfHandle:
+    """One pristine standalone half on disk, ready to be amorphized (§7.1).
+
+    What ``build_halves`` hands the activation stage for ONE wafer:
+    everything needed to amorphize it, and NOTHING about the other half,
+    so each is a self-contained unit (the fan-out unit, ARCHITECTURE §4.3).
+    The activation stage RE-READS the slab geometry from ``data_file``
+    (never a warm in-memory object), so the unit is restartable and
+    identical whether it runs in the member's own job or a separate one.
+    ``type_map`` declares the beam species (a zero-atom type) so the
+    cascade can create projectiles against it; ``wafer_tag`` records which
+    wafer this is — bottom A or top B (the assembly invariant, DESIGN §2.6).
+    """
+
+    data_file: str                 # the pristine standalone half on disk
+    type_map: dict                 # species symbol -> type id, beam declared
+    identity: str                  # the material (report + reference lookup)
+    wafer_tag: int                 # WAFER_A_TAG (bottom) / WAFER_B_TAG (top)
 
 
 @dataclass(frozen=True)
@@ -136,11 +163,13 @@ class Structure:
 
     Carries the labeled groups (frozen base, thermostat border, NVE
     interior, activated skin, grips) that cross the build->press->pull
-    seam. Placeholder contents in W0.
+    seam. ``data_file`` is the assembled pair on disk the press loads (set
+    by the real assembly stage, None for the W0 placeholder).
     """
 
     note: str
     labeled_groups: tuple[str, ...]
+    data_file: str | None = None   # the assembled pair's file, if written
 
 
 @dataclass(frozen=True)

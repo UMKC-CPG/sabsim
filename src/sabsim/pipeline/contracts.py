@@ -23,8 +23,8 @@ from dataclasses import dataclass
 from sabsim.pipeline.exec_artifacts import (
     ActivatedSlabs,
     BondDebondResult,
+    HalfHandle,
     Potential,
-    Slab,
     SharedCell,
     Structure,
 )
@@ -91,12 +91,23 @@ def _validate_potential(artifact: object) -> str | None:
 
 
 def _validate_slabs(artifact: object) -> str | None:
-    """Two built slabs plus their shared cell (SLABS_CONTRACT, §7.1)."""
+    """Two half-handles plus their shared cell (SLABS_CONTRACT, §7.1).
+
+    build_halves emits two STANDALONE halves on disk as HalfHandles (the
+    build->amorphize file handoff, ARCHITECTURE §4.3), not the assembled
+    pair; each handle must name a data file and declare the beam species in
+    its type map, so the activation stage can create projectiles against it.
+    """
     if not (isinstance(artifact, tuple) and len(artifact) == 3):
-        return "expected (slab_a, slab_b, shared_cell)"
-    slab_a, slab_b, shared = artifact
-    if not (isinstance(slab_a, Slab) and isinstance(slab_b, Slab)):
-        return "both slabs must be Slab artifacts"
+        return "expected (handle_a, handle_b, shared_cell)"
+    handle_a, handle_b, shared = artifact
+    for label, handle in (("A", handle_a), ("B", handle_b)):
+        if not isinstance(handle, HalfHandle):
+            return f"half {label} must be a HalfHandle artifact"
+        if not handle.data_file:
+            return f"half {label} names no data file on disk"
+        if not handle.type_map:
+            return f"half {label} declares no species type map"
     if not isinstance(shared, SharedCell):
         return "missing the shared coincidence cell"
     return None
