@@ -225,7 +225,7 @@ def activate_surfaces_live(
         handle_b: HalfHandle,
         member: MemberSpecification,
         potential,
-        output_directory: str,
+        scratch_directory: str,
         comm=None):
     """Amorphize BOTH halves independently, gate each (step 4, §10.1).
 
@@ -240,9 +240,9 @@ def activate_surfaces_live(
     """
     half_seeds = derive_seeds(member.ensemble.master_seed, 2)
     result_a, amorphized_a = activate_one_half(
-        handle_a, member, half_seeds[0], output_directory, comm)
+        handle_a, member, half_seeds[0], scratch_directory, comm)
     result_b, amorphized_b = activate_one_half(
-        handle_b, member, half_seeds[1], output_directory, comm)
+        handle_b, member, half_seeds[1], scratch_directory, comm)
 
     slab_a = Slab(
         identity=handle_a.identity, note="amorphized half A (bottom)",
@@ -260,9 +260,9 @@ def activate_surfaces_live(
 
 def assemble_pair_live(
         activated,
-        member: MemberSpecification,
         shared: SharedCell,
-        output_directory: str) -> Structure:
+        member: MemberSpecification,
+        scratch_directory: str) -> Structure:
     """Assemble the two amorphized halves into a facing pair (step 5, §2.6).
 
     The BARRIER stage: it reads BOTH amorphized halves back from the files
@@ -290,7 +290,7 @@ def assemble_pair_live(
         initial_gap=to_metal(member.protocol.initial_gap, "distance"),
         clash_floor=to_metal(member.numerical.clash_floor, "distance"))
 
-    pair_file = os.path.join(output_directory, "assembled_pair.data")
+    pair_file = os.path.join(scratch_directory, "assembled_pair.data")
     write_lammps_data(built, pair_file)
     return Structure(
         note=(f"assembled amorphized pair "
@@ -299,4 +299,210 @@ def assemble_pair_live(
         labeled_groups=(
             "wafer_a_z_range", "wafer_b_z_range", "interface_z",
             "activated_skin"),
-        data_file=pair_file)
+        data_file=pair_file,
+        built=built)
+
+
+# ---------------------------------------------------------------------
+# Steps 6-7 — the press/pull bond-debond stage (COMPUTE NODE). Sequences
+# the driver's three phases (press -> settle -> pull ladder) into one
+# BondDebondResult, a fresh engine per pull rung (PSEUDOCODE.md §9.1).
+# ---------------------------------------------------------------------
+
+def _bonded_force_model(type_map: dict) -> ForceModel:
+    """The potential the bonded pair presses and pulls under (§4.5).
+
+    v1's 'MLIP' is the classical Stillinger-Weber stand-in, and the
+    assembled pair is substrate-only (the beam was deleted during
+    activation), so for the Si/Si pair this is plain ``sw`` mapping every
+    type to Si. STAND-IN: silicon-specific (``sw Si.sw``); the trained MLIP
+    drops in behind this same ``pair_style`` seam at wave 2 (DESIGN.md §4.5).
+    """
+    order = sorted(type_map, key=lambda symbol: type_map[symbol])
+    labels = " ".join("Si" for _ in order)
+    return ForceModel(
+        pair_style="sw", pair_coeff=(f"* * Si.sw {labels}",))
+
+
+def run_bond_debond_md_live(
+        structure: Structure,
+        potential,
+        member: MemberSpecification,
+        scratch_directory: str,
+        comm=None):
+    """Press the pair, settle a reference, pull it apart per rate (§9.1).
+
+    Sequences the three driver phases (:mod:`sabsim.driver.press_pull`) into
+    one :class:`~sabsim.pipeline.exec_artifacts.BondDebondResult`. The press
+    and the settle share ONE engine (the settle re-reads no file); each pull
+    rung then opens its OWN fresh engine reading the settled reference the
+    settle wrote (a per-rung restore, §9.6). The assembled pair's live
+    builder object (``structure.built``) supplies the per-wafer geometry the
+    driver carves zones from. If the press never reaches contact, the ladder
+    is reported as un-pulled (a first-class "did not bond" outcome, §5.2),
+    never faked. Compute-node work: the ``LammpsEngine`` import is lazy.
+    """
+    from sabsim.driver.lammps_engine import LammpsEngine
+    from sabsim.driver.press_pull import (
+        press_and_bond,
+        pull_at_rate,
+        settle_reference,
+    )
+    from sabsim.pipeline.exec_artifacts import (
+        BondDebondResult,
+        PressOutcome,
+        PullOutcome,
+    )
+
+    built = structure.built
+    force_model = _bonded_force_model(built.type_map)
+    seed = member.ensemble.master_seed
+    reference_file = os.path.join(scratch_directory, "settled_reference.data")
+
+    # Press + settle on one shared engine.
+    press_engine = LammpsEngine(
+        command_line_args=[
+            "-screen", "none",
+            "-log", os.path.join(scratch_directory, "log.press")],
+        comm=comm)
+    press = press_and_bond(
+        press_engine, built, member, force_model, structure.data_file, seed)
+    reference = None
+    if press.contact_reached:
+        reference = settle_reference(
+            press_engine, member, reference_data_file=reference_file)
+    press_engine.close()
+
+    ladder = member.numerical.pull_rate_ladder
+    if not press.contact_reached or reference is None:
+        pulls = tuple(
+            PullOutcome(
+                rate_value=rate.value, rate_unit=rate.unit,
+                note="no contact under the press — not pulled (§5.2)")
+            for rate in ladder)
+        return BondDebondResult(
+            press=PressOutcome(bonded=False, note=press.note),
+            reference_ok=False, pulls=pulls)
+
+    # One fresh engine per pull rung, each restoring the settled reference.
+    pulls = []
+    for index, rate in enumerate(ladder):
+        pull_engine = LammpsEngine(
+            command_line_args=[
+                "-screen", "none",
+                "-log", os.path.join(
+                    scratch_directory, f"log.pull_{index}")],
+            comm=comm)
+        result = pull_at_rate(
+            pull_engine, built, member, force_model, reference_file, rate,
+            seed, output_directory=scratch_directory)
+        pull_engine.close()
+        pulls.append(PullOutcome(
+            rate_value=rate.value, rate_unit=rate.unit,
+            note=("separated" if result.complete
+                  else "did not fully separate within the pull budget"),
+            complete=result.complete,
+            separation_index=result.separation_index,
+            grip_displacement=tuple(result.grip_displacement),
+            force_vs_grip=tuple(result.force_vs_grip)))
+
+    return BondDebondResult(
+        press=PressOutcome(
+            bonded=True, note="contact reached and held (§9.3)"),
+        reference_ok=reference.settled,
+        pulls=tuple(pulls))
+
+
+# ---------------------------------------------------------------------
+# The bond-outcome analyzer (DESIGN.md §6, §8). Turns the reduced pull
+# curves into the measure vector — the mechanical work of separation (M1)
+# is the one measure real here; the higher-fidelity ones stay unresolved.
+# ---------------------------------------------------------------------
+
+def run_analyzer_live(
+        structure: Structure,
+        bond_debond,
+        member: MemberSpecification):
+    """Reduce the bond-debond result to a measure vector (§6, §8.4).
+
+    Computes the mechanical work of separation (M1) — the area under each
+    pull's resisting-force curve up to complete separation, per unit
+    interface area (:func:`sabsim.driver.analysis.work_of_separation`). The
+    SLOWEST rate that fully separated is reported as the headline value (it
+    is the closest to the quasi-static work, §5.4); if no rung separated the
+    measure is honestly UNRESOLVED. The higher-fidelity (MLIP / all-electron)
+    measures stay unresolved here — they are the wave-2 / wave-4 work. The
+    press bond decision rides the vector's verdicts (§4).
+    """
+    from sabsim.driver.analysis import work_of_separation
+    from sabsim.pipeline.measures import (
+        Measure,
+        MeasureStatus,
+        MeasureVector,
+        Verdicts,
+    )
+
+    cell = np.asarray(structure.built.atoms.get_cell())
+    interface_area = float(np.linalg.norm(np.cross(cell[0], cell[1])))
+    seeds = member.ensemble.amorphization_count
+
+    # Slowest-rate rung that fully separated (rungs are in ladder order;
+    # the smallest rate is the most quasi-static, §5.4).
+    works = []
+    for pull in bond_debond.pulls:
+        if pull.complete and pull.separation_index is not None:
+            work = work_of_separation(
+                pull.grip_displacement, pull.force_vs_grip,
+                pull.separation_index, interface_area)
+            if work is not None:
+                works.append((pull.rate_value, work))
+    works.sort(key=lambda rate_work: rate_work[0])   # ascending rate
+
+    if works:
+        value = works[0][1]                          # slowest rung
+        status = MeasureStatus.OK
+        method = "MD work integral, slowest separated rung (§8.4)"
+    else:
+        value = None
+        status = MeasureStatus.UNRESOLVED
+        method = "no pull rung fully separated (§9.6)"
+
+    mechanical = Measure(
+        name="mechanical_work_of_separation",
+        value=value, uncertainty=0.0, realization_count=seeds,
+        unit_native="eV/angstrom^2", unit_si="J/m^2",
+        fidelity="classical-stand-in", method=method, status=status)
+    thermodynamic = Measure(
+        name="work_of_adhesion_mlip",
+        value=None, uncertainty=None, realization_count=seeds,
+        unit_native="eV/angstrom^2", unit_si="J/m^2",
+        fidelity="mlip", method="not computed in v1 (wave 2)",
+        status=MeasureStatus.UNRESOLVED)
+    return MeasureVector(
+        measures=(mechanical, thermodynamic),
+        verdicts=Verdicts(
+            bonded=bond_debond.press.bonded, contact_quality=None))
+
+
+# ---------------------------------------------------------------------
+# The live stage set (ARCHITECTURE.md §5.1). The real bodies for the steps
+# that have them, reusing the W0 stubs where no live body exists yet: the
+# potential is still the classical stand-in (resolve_potential), and step-8
+# characterization is still mocked (run_characterization). The sequencer
+# runs this set on a compute node; W0_STAGES on the login node.
+# ---------------------------------------------------------------------
+
+from sabsim.pipeline.skeleton_stages import (        # noqa: E402
+    StageSet,
+    resolve_potential,
+    run_characterization,
+)
+
+LIVE_STAGES = StageSet(
+    resolve_potential=resolve_potential,
+    build=build_halves,
+    activate=activate_surfaces_live,
+    assemble=assemble_pair_live,
+    bond_debond=run_bond_debond_md_live,
+    analyze=run_analyzer_live,
+    characterize=run_characterization)

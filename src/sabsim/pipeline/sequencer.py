@@ -40,21 +40,15 @@ from sabsim.pipeline.measures import (
     MeasureVector,
     merge_measures,
 )
-from sabsim.pipeline.skeleton_stages import (
-    activate_surfaces,
-    assemble_pair,
-    build_slabs,
-    resolve_potential,
-    run_analyzer,
-    run_bond_debond_md,
-    run_characterization,
-)
+from sabsim.pipeline.skeleton_stages import W0_STAGES
 from sabsim.deploy.scratch import member_scratch
 from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import MemberSpecification, Relation
 
 
-def exec_full_study(study_specification, job_directory) -> StudyReport:
+def exec_full_study(
+        study_specification, job_directory,
+        stage_set=W0_STAGES, comm=None) -> StudyReport:
     """Run a whole study: every member, then the declared relations (§1).
 
     Loads and validates the spec, executes each member independently to
@@ -69,13 +63,20 @@ def exec_full_study(study_specification, job_directory) -> StudyReport:
     byte stays traceable to its inputs (VISION.md goal 3). It is a required
     argument — there is no default run home (DESIGN.md §1.4, no hidden
     defaults).
+
+    ``stage_set`` chooses WHICH bodies run at each seam (ARCHITECTURE.md
+    §5.1): the default ``W0_STAGES`` is the login-node walking skeleton (no
+    LAMMPS); a real run passes ``LIVE_STAGES`` (from
+    :mod:`sabsim.pipeline.live_stages`) and the MPI ``comm`` its engines
+    use. The control flow and the contracts are identical either way.
     """
     study = load_and_validate_study(study_specification)
 
     member_results = tuple(
         exec_one_member(
             member,
-            member_scratch(job_directory, study.name, member.name))
+            member_scratch(job_directory, study.name, member.name),
+            stage_set, comm)
         for member in study.members)
 
     # Relations are an OPTIONAL comparison layer graded only after every
@@ -93,7 +94,9 @@ def exec_full_study(study_specification, job_directory) -> StudyReport:
 
 def exec_one_member(
         member: MemberSpecification,
-        scratch_directory) -> MemberResult:
+        scratch_directory,
+        stage_set=W0_STAGES,
+        comm=None) -> MemberResult:
     """Run the eight-step pipeline for ONE member (PSEUDOCODE.md §1).
 
     Each stage is wrapped in ``run_to_contract``: the stage runs, then
@@ -103,24 +106,26 @@ def exec_one_member(
     target, so it is not iterated here.
 
     ``scratch_directory`` is this member's own scratch subtree (threaded in
-    by :func:`exec_full_study`); the file-writing stages — ``build_slabs``
-    first — receive it explicitly rather than rebuild it from identity
-    (ARCHITECTURE.md §4.3).
+    by :func:`exec_full_study`); the file-writing stages — ``build`` first —
+    receive it explicitly rather than rebuild it from identity
+    (ARCHITECTURE.md §4.3). ``stage_set`` selects the stub or live body at
+    each seam, and ``comm`` is the MPI communicator its engines use (unused
+    by the stubs). The control flow below is identical for either set.
     """
     # The potential is a CONTRACT, not a fixed implementation. The
     # skeleton satisfies it with a classical stand-in; the bootstrap
     # wave later satisfies it with the trained MLIP through this seam.
     potential = run_to_contract(
-        lambda: resolve_potential(member),
+        lambda: stage_set.resolve_potential(member),
         POTENTIAL_CONTRACT)
 
     # Steps 3-4-5. Their order is a setting (the builder and activator
     # are order-agnostic behind their contracts, DESIGN.md §5.3); v1
     # uses the only physically sensible order, build -> activate ->
-    # assemble. build_slabs writes each standalone half under the member's
+    # assemble. build writes each standalone half under the member's
     # scratch and returns the two HANDLES (§7.1, the build->amorphize seam).
     handle_a, handle_b, shared = run_to_contract(
-        lambda: build_slabs(member, potential, scratch_directory),
+        lambda: stage_set.build(member, potential, scratch_directory),
         SLABS_CONTRACT)
 
     # A FAILED activation gate is contract-invalid and halts HERE: the
@@ -128,31 +133,35 @@ def exec_one_member(
     # call re-reads its half from the handle's data file, amorphizes it,
     # and writes the amorphized half back for assembly to read.
     activated = run_to_contract(
-        lambda: activate_surfaces(handle_a, handle_b, member, potential),
+        lambda: stage_set.activate(
+            handle_a, handle_b, member, potential, scratch_directory, comm),
         ACTIVATED_SLABS_CONTRACT)
-    slab_a = activated.slab_a      # rebind to the activated slabs; the
-    slab_b = activated.slab_b      # verdicts rode the contract check
 
+    # Assembly reads both amorphized halves back and stacks them; it
+    # consumes the ActivatedSlabs directly (the verdicts rode the contract
+    # check above).
     structure = run_to_contract(
-        lambda: assemble_pair(slab_a, slab_b, shared, member),
+        lambda: stage_set.assemble(
+            activated, shared, member, scratch_directory),
         STRUCTURE_CONTRACT)
 
     # Steps 6-7: press then pull, over the rate ladder. The result is a
     # BondDebondResult (§9.1), not a bare trajectory.
     bond_debond = run_to_contract(
-        lambda: run_bond_debond_md(structure, potential, member),
+        lambda: stage_set.bond_debond(
+            structure, potential, member, scratch_directory, comm),
         BOND_DEBOND_CONTRACT)
 
     # The analyzer turns that into a measure vector (DESIGN.md §6); in
     # the skeleton only the mechanical measure is present, the rest
     # report `unresolved`.
     measures = run_to_contract(
-        lambda: run_analyzer(structure, bond_debond, member),
+        lambda: stage_set.analyze(structure, bond_debond, member),
         MEASURE_VECTOR_CONTRACT)
 
     # Step 8 characterization (DESIGN.md §8), MOCKED in the skeleton.
     characterization = run_to_contract(
-        lambda: run_characterization(structure, bond_debond, member),
+        lambda: stage_set.characterize(structure, bond_debond, member),
         MEASURE_VECTOR_CONTRACT)
     measures = merge_measures(measures, characterization)
 

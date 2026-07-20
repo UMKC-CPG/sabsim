@@ -167,3 +167,35 @@ def test_atom_count_conservation_is_a_gate():
     """A changed atom count voids the run (an escaped atom, §5.6)."""
     assert atom_count_conserved(128, 128)
     assert not atom_count_conserved(128, 127)
+
+
+# ---------------------------------------------------------------------
+# The mechanical work of separation (§8.4): integrate the resisting force
+# over grip displacement up to complete separation, per unit area.
+# ---------------------------------------------------------------------
+
+from sabsim.driver.analysis import work_of_separation
+
+
+def test_work_of_separation_integrates_the_curve_to_area():
+    """Trapezoidal area under force-vs-displacement, divided by area."""
+    # Triangular resisting force 0 -> 1 -> 0.5 -> 0 over unit steps.
+    displacement = [0.0, 1.0, 2.0, 3.0]
+    force = [0.0, 1.0, 0.5, 0.0]
+    # Trapezoids: 0.5 + 0.75 + 0.25 = 1.5 eV; over area 2 Å² = 0.75 eV/Å².
+    work = work_of_separation(displacement, force, 3, interface_area=2.0)
+    assert work == pytest.approx(0.75)
+
+
+def test_work_of_separation_stops_at_separation_not_the_tail():
+    """The integral ends at separation; a noisy tail is NOT counted."""
+    displacement = [0.0, 1.0, 2.0, 3.0, 4.0]
+    force = [0.0, 1.0, 0.0, 5.0, 5.0]     # spurious tail past index 2
+    # Up to index 2 only: 0.5 + 0.5 = 1.0 eV; /area 1 = 1.0 eV/Å².
+    work = work_of_separation(displacement, force, 2, interface_area=1.0)
+    assert work == pytest.approx(1.0)
+
+
+def test_work_of_separation_is_none_when_never_separated():
+    """A pull that never fully separated has no work to report."""
+    assert work_of_separation([0.0, 1.0], [0.0, 1.0], None, 1.0) is None

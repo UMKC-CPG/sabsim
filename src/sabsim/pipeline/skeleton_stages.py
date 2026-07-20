@@ -12,6 +12,9 @@ are the permanent part.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 from sabsim.pipeline.exec_artifacts import (
     ActivatedSlabs,
     BondDebondResult,
@@ -113,8 +116,15 @@ def activate_surfaces(
         handle_a: HalfHandle,
         handle_b: HalfHandle,
         member: MemberSpecification,
-        potential: Potential) -> ActivatedSlabs:
+        potential: Potential,
+        scratch_directory: str | None = None,
+        comm=None) -> ActivatedSlabs:
     """Amorphize each half's surface and gate it (DESIGN.md §3, §10.1).
+
+    (``scratch_directory`` and ``comm`` are accepted so this stub shares
+    the uniform stage signature the real
+    :func:`sabsim.pipeline.live_stages.activate_surfaces_live` uses; W0
+    writes nothing and opens no engine, so it ignores them.)
 
     W0 stubs the amorphization and returns PASSING activation verdicts, so
     the ACTIVATED_SLABS_CONTRACT is satisfied and the pipeline flows. The
@@ -136,26 +146,37 @@ def activate_surfaces(
 
 
 def assemble_pair(
-        slab_a: Slab,
-        slab_b: Slab,
+        activated: ActivatedSlabs,
         shared: SharedCell,
-        member: MemberSpecification) -> Structure:
-    """Assemble the facing pair from the activated slabs (DESIGN.md §7)."""
+        member: MemberSpecification,
+        scratch_directory: str | None = None) -> Structure:
+    """Assemble the facing pair from the activated slabs (DESIGN.md §7).
+
+    W0 returns a placeholder pair (no file written); the real
+    :func:`sabsim.pipeline.live_stages.assemble_pair_live` reads both
+    amorphized halves back and stacks them. Both take the same arguments.
+    """
     return Structure(
-        note=f"placeholder pair: {slab_a.identity}/{slab_b.identity}",
+        note=(f"placeholder pair: {activated.slab_a.identity}/"
+              f"{activated.slab_b.identity}"),
         labeled_groups=_LABELED_GROUPS)
 
 
 def run_bond_debond_md(
         structure: Structure,
         potential: Potential,
-        member: MemberSpecification) -> BondDebondResult:
+        member: MemberSpecification,
+        scratch_directory: str | None = None,
+        comm=None) -> BondDebondResult:
     """Press then pull, over the rate ladder (DESIGN.md §5, §9.1).
 
     W0 returns a placeholder press outcome and one placeholder pull per
     rung of the spec's ladder, so the BOND_DEBOND_CONTRACT is satisfied.
-    The real classical-LAMMPS press/pull is the very next wave-0 slice,
-    dropping in behind this same contract.
+    The real press/pull is
+    :func:`sabsim.pipeline.live_stages.run_bond_debond_md_live`, which
+    sequences the validated driver phases behind this same contract.
+    (``scratch_directory`` and ``comm`` are accepted for the uniform stage
+    signature; the stub ignores them.)
     """
     pulls = tuple(
         PullOutcome(
@@ -241,3 +262,45 @@ def run_characterization(
         fidelity="all-electron",
         method="mocked in wave 0", status=MeasureStatus.UNRESOLVED)
     return MeasureVector(measures=(all_electron, descriptors))
+
+
+# ---------------------------------------------------------------------
+# The stage set — which body runs at each seam. The sequencer takes a
+# StageSet and calls its members, so the SAME control flow runs either the
+# W0 stubs (login node, no LAMMPS) or the real live_stages (compute node)
+# behind the same contracts (ARCHITECTURE.md §5.1). This is the switch:
+# W0_STAGES here; LIVE_STAGES in sabsim.pipeline.live_stages.
+# ---------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class StageSet:
+    """The seven stage bodies the sequencer calls, as one swappable set.
+
+    Every stage in a set shares a uniform signature so the sequencer's call
+    sites do not change between the stub and the live set: ``build`` and
+    ``activate`` and ``assemble`` and ``bond_debond`` take the member's
+    scratch directory (and, where an engine runs, the MPI communicator); a
+    stub simply ignores what it does not use. Swapping the set is the ONLY
+    difference between a login-node control-flow run and a real compute-node
+    run.
+    """
+
+    resolve_potential: Callable
+    build: Callable                # (member, potential, scratch) -> handles
+    activate: Callable             # (h_a, h_b, member, pot, scratch, comm)
+    assemble: Callable             # (activated, shared, member, scratch)
+    bond_debond: Callable          # (structure, pot, member, scratch, comm)
+    analyze: Callable              # (structure, bond_debond, member)
+    characterize: Callable         # (structure, bond_debond, member)
+
+
+# The walking-skeleton set: every stage a login-node stub (no LAMMPS), the
+# sequencer's default so W0 control-flow tests need no compute node.
+W0_STAGES = StageSet(
+    resolve_potential=resolve_potential,
+    build=build_slabs,
+    activate=activate_surfaces,
+    assemble=assemble_pair,
+    bond_debond=run_bond_debond_md,
+    analyze=run_analyzer,
+    characterize=run_characterization)

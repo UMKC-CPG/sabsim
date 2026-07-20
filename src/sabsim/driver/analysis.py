@@ -307,3 +307,43 @@ def atom_count_conserved(initial_count: int, final_count: int) -> bool:
     between a measurement and a fiction.
     """
     return initial_count == final_count
+
+
+# eV/Å² expressed in J/m² — the SI face of the mechanical work of
+# separation. 1 eV = 1.602176634e-19 J, 1 Å² = 1e-20 m², so the ratio is
+# 1.602176634e-19 / 1e-20 = 16.02176634 J/m² per eV/Å².
+EV_PER_ANGSTROM_SQ_IN_SI = 16.02176634
+
+
+def work_of_separation(
+        displacement,
+        force,
+        separation_index: int | None,
+        interface_area: float) -> float | None:
+    """The mechanical work of separation per unit area (DESIGN.md §8.4).
+
+    The headline mechanical measure (M1): the work the grip does pulling
+    the interface apart, per unit interface area. It is the area under the
+    resisting-force curve — force (tension-positive, eV/Å) versus grip
+    displacement (Å) — integrated from the start of the pull up to COMPLETE
+    separation (``separation_index`` from :func:`separation_point`), then
+    divided by the lateral ``interface_area`` (Å²). The result is in eV/Å²
+    (multiply by :data:`EV_PER_ANGSTROM_SQ_IN_SI` for J/m²).
+
+    Two prior-art errors it refuses: integrating the whole noisy tail past
+    separation (the cut at ``separation_index`` stops there, §9.6), and
+    anchoring on the averaging fix's spurious leading zero (the curve
+    handed in already had it dropped, §9.5). Returns ``None`` when the pull
+    never fully separated — there is no work of separation to report for a
+    pull that did not finish, and a partial integral would understate it.
+    """
+    if separation_index is None:
+        return None
+    grip = np.asarray(displacement, dtype=float)[:separation_index + 1]
+    resisting = np.asarray(force, dtype=float)[:separation_index + 1]
+    if len(grip) < 2:
+        return 0.0
+    # Trapezoidal integral, written out so it is version-independent and
+    # readable: sum of trapezoids (mean height x width) across the curve.
+    segment_work = 0.5 * (resisting[1:] + resisting[:-1]) * np.diff(grip)
+    return float(np.sum(segment_work) / interface_area)

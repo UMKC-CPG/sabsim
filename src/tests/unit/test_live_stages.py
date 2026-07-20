@@ -86,3 +86,70 @@ def test_read_standalone_half_round_trips_species(tmp_path):
     assert len(half.atoms) == len(reference)
     assert len(half.atoms) > 0
     assert half.identity == "Si"
+
+
+# ---------------------------------------------------------------------
+# The live analyzer (§8.4): reduce the pull curves to the mechanical work
+# of separation. Pure math on a synthetic bond-debond result.
+# ---------------------------------------------------------------------
+
+import numpy as np
+from types import SimpleNamespace
+
+import pytest
+
+from sabsim.pipeline.exec_artifacts import (
+    BondDebondResult,
+    PressOutcome,
+    PullOutcome,
+    Structure,
+)
+from sabsim.pipeline.measures import MeasureStatus
+from sabsim.pipeline.live_stages import run_analyzer_live
+
+
+def _structure_with_area():
+    """A Structure whose assembled pair has a 100 Å² lateral cell."""
+    built = SimpleNamespace(
+        atoms=SimpleNamespace(get_cell=lambda: np.diag([10.0, 10.0, 40.0])))
+    return Structure(note="test", labeled_groups=(), built=built)
+
+
+def test_analyzer_reports_the_slowest_separated_rung():
+    """M1 is the slowest rate's work per area; the bond verdict rides along."""
+    member = _si_si_member()
+    # Two rungs; the SLOW one (rate 1) is the quasi-static estimate.
+    fast = PullOutcome(
+        rate_value=10.0, rate_unit="m/s", note="", complete=True,
+        separation_index=2, grip_displacement=(0.0, 1.0, 2.0),
+        force_vs_grip=(0.0, 2.0, 0.0))
+    slow = PullOutcome(
+        rate_value=1.0, rate_unit="m/s", note="", complete=True,
+        separation_index=2, grip_displacement=(0.0, 1.0, 2.0),
+        force_vs_grip=(0.0, 1.0, 0.0))
+    bond = BondDebondResult(
+        press=PressOutcome(bonded=True, note=""), reference_ok=True,
+        pulls=(fast, slow))
+
+    measures = run_analyzer_live(_structure_with_area(), bond, member)
+    mechanical = measures.by_name("mechanical_work_of_separation")
+    # Slow rung: trapezoid([0,1,0] over [0,1,2]) = 1.0 eV; /area 100 = 0.01.
+    assert mechanical.status is MeasureStatus.OK
+    assert mechanical.value == pytest.approx(0.01)
+    assert measures.verdicts.bonded is True
+
+
+def test_analyzer_unresolved_when_no_rung_separates():
+    """No complete separation -> the mechanical measure is unresolved."""
+    member = _si_si_member()
+    incomplete = PullOutcome(
+        rate_value=1.0, rate_unit="m/s", note="", complete=False)
+    bond = BondDebondResult(
+        press=PressOutcome(bonded=False, note="no contact"),
+        reference_ok=False, pulls=(incomplete,))
+
+    measures = run_analyzer_live(_structure_with_area(), bond, member)
+    mechanical = measures.by_name("mechanical_work_of_separation")
+    assert mechanical.status is MeasureStatus.UNRESOLVED
+    assert mechanical.value is None
+    assert measures.verdicts.bonded is False

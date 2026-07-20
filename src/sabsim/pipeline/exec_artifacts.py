@@ -170,6 +170,12 @@ class Structure:
     note: str
     labeled_groups: tuple[str, ...]
     data_file: str | None = None   # the assembled pair's file, if written
+    # The assembled pair as a live builder object (atoms + tags + z-ranges
+    # + type map), carried in-memory for the press/pull driver, which needs
+    # the per-wafer geometry a plain data file does not record. None for the
+    # W0 placeholder; a # C-EXPANSION point (Approach C would re-read it from
+    # the file in the press job, ARCHITECTURE.md §4.3).
+    built: object = None
 
 
 @dataclass(frozen=True)
@@ -182,11 +188,23 @@ class PressOutcome:
 
 @dataclass(frozen=True)
 class PullOutcome:
-    """One rung of the pull-rate ladder: the rate and its note (§5.4)."""
+    """One rung of the pull-rate ladder: the rate and its curve (§5.4, §9.6).
+
+    Beyond the rate and a note, a real pull carries the REDUCED force curve
+    the analyzer integrates into the work of separation (§8.4): the grip
+    displacements, the tension-positive resisting force at each, and the
+    frame of complete separation the integral stops at. ``complete`` is
+    False (and the curves empty) for a pull that never separated, or for
+    the W0 placeholder.
+    """
 
     rate_value: float
     rate_unit: str
     note: str
+    complete: bool = False
+    separation_index: int | None = None
+    grip_displacement: tuple = ()      # Å, per recorded frame
+    force_vs_grip: tuple = ()          # eV/Å, tension-positive, per frame
 
 
 @dataclass(frozen=True)
