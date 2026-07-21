@@ -199,3 +199,22 @@ def test_work_of_separation_stops_at_separation_not_the_tail():
 def test_work_of_separation_is_none_when_never_separated():
     """A pull that never fully separated has no work to report."""
     assert work_of_separation([0.0, 1.0], [0.0, 1.0], None, 1.0) is None
+
+
+def test_averaging_a_record_shorter_than_the_window_keeps_the_samples():
+    """A record shorter than the window degrades, it does not vanish.
+
+    Dropping the warm-up when NOTHING has a full window behind it erases
+    the whole curve -- the failure that made a genuine separation report
+    as unresolved. The trim must be skipped in that case, not applied to
+    extinction.
+    """
+    import numpy as np
+    from sabsim.driver.analysis import averaged_force_curve
+    # Five samples spanning 0.4 A, a 0.5 A window: none is a full window
+    # deep, so the old code returned an empty selection.
+    disp = [0.1, 0.2, 0.3, 0.4, 0.5]
+    force = [0.3, 0.25, 0.2, 0.1, 0.02]
+    kept_disp, kept_force = averaged_force_curve(disp, force, window=0.5)
+    assert len(kept_disp) == len(disp), "no sample may be discarded"
+    assert len(kept_force) == len(disp)

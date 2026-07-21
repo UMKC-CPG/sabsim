@@ -313,10 +313,17 @@ def pull_at_rate(
     rate_metal = to_metal(rate, "velocity")
     noise_floor = to_metal(numerical.noise_floor, "force")
 
+    window = to_metal(numerical.force_average_window, "distance")
+    # How far the grip travels per chunk, hence how many further chunks
+    # are needed to lay down one full averaging window of record.
+    per_chunk = rate_metal * control.chunk_steps * timestep
+    confirmation_chunks = (
+        int(np.ceil(window / per_chunk)) + 1 if per_chunk else 1)
+
     displacement: list = []
     force: list = []
     opening: list = []
-    separated = False
+    remaining_tail = None
     for chunk in range(control.max_chunks):
         engine.commands([f"run {control.chunk_steps}"])
         elapsed = (chunk + 1) * control.chunk_steps * timestep
@@ -325,21 +332,38 @@ def pull_at_rate(
         opening.append(interface_opening(
             z_lower, z_upper, control.density_bin_width))
         force.append(engine.grip_reaction("top"))
-        if (opening[-1] > control.separation_cutoff
-                and abs(force[-1]) <= noise_floor):
-            separated = True
-            break
 
-    window = to_metal(numerical.force_average_window, "distance")
+        # The raw test is a STOPPING heuristic, not the verdict. It says
+        # "there is probably nothing more to learn here", and the run
+        # then continues for one more averaging window so the REDUCED
+        # curve extends past the separation instead of ending exactly at
+        # it. Without that tail the two tests disagree in both
+        # directions: a rung that stopped at 0.49 A left too short a
+        # record to average at all, while a fast rung stopped just as
+        # its raw force dipped, denying the averaged force the samples
+        # it needed to settle. The verdict is taken ONCE, below, from
+        # the same curves the work integral is computed over.
+        if remaining_tail is None:
+            if (opening[-1] > control.separation_cutoff
+                    and abs(force[-1]) <= noise_floor):
+                remaining_tail = confirmation_chunks
+        else:
+            remaining_tail -= 1
+            if remaining_tail <= 0:
+                break
+
     grip_curve, averaged = averaged_force_curve(displacement, force, window)
     opening_curve, _ = reexpress_versus_opening(
         grip_curve, averaged, displacement, opening)
     separation_index = separation_point(
         opening_curve, averaged, control.separation_cutoff, noise_floor)
+    # ONE definition of "separated": the reduced curves are authoritative,
+    # because they are what the §8.4 work integral is taken over. A pull
+    # is complete exactly when that integral has an endpoint to stop at.
     return PullResult(
         grip_displacement=grip_curve,
         force_vs_grip=averaged,
         interface_opening=opening_curve,
         force_vs_opening=averaged,
         separation_index=separation_index,
-        complete=separated)
+        complete=separation_index is not None)

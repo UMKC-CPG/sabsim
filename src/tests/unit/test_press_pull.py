@@ -173,3 +173,48 @@ def test_pull_reports_incomplete_when_it_never_separates(tmp_path):
         control=RunControl(max_chunks=3),
         output_directory=str(tmp_path))
     assert not result.complete
+
+
+def test_a_short_pull_that_separates_still_yields_a_curve(tmp_path):
+    """A rung that separates within one averaging window is not lost.
+
+    The regression: the first full end-to-end run's slowest rung
+    separated after 0.49 A of travel against a 0.5 A force-average
+    window. The averaged curve came back EMPTY, so the separation search
+    found nothing and a pull that DID separate was reported unresolved.
+    The reduction must degrade to a coarse curve, never to no curve.
+    """
+    # Open immediately (opening ~7 > 6 cutoff) at the noise floor, so the
+    # raw stop fires on the very first chunk -- the shortest record.
+    engine = MockEngine(
+        positions=[_frame(20.0)], top_reaction=[0.01])
+    result = pull_at_rate(
+        engine, _fake_built(), _member(), _MODEL, "ref.data",
+        rate=Quantity(1.0, "m/s"), seed=1,
+        control=RunControl(max_chunks=6),
+        output_directory=str(tmp_path))
+
+    assert result.complete, "an immediate clean separation must resolve"
+    assert result.grip_displacement.size > 0, "the curve must not vanish"
+    assert result.separation_index is not None
+
+
+def test_pull_completeness_agrees_with_the_reduced_separation(tmp_path):
+    """`complete` is true iff the reduced curve has a separation point.
+
+    The two used to be decided by different tests on different data --
+    the live loop on raw samples, the analyzer on the smoothed curve --
+    so they could disagree. They are now one decision, taken from the
+    curves the work integral is computed over.
+    """
+    # Never opens past the cutoff: no separation on either reading.
+    engine = MockEngine(
+        positions=[_frame(12.0)], top_reaction=[1.0])
+    result = pull_at_rate(
+        engine, _fake_built(), _member(), _MODEL, "ref.data",
+        rate=Quantity(3.2, "m/s"), seed=1,
+        control=RunControl(max_chunks=4),
+        output_directory=str(tmp_path))
+
+    assert result.complete == (result.separation_index is not None)
+    assert not result.complete

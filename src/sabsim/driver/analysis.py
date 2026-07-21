@@ -252,8 +252,23 @@ def averaged_force_curve(
         in_window = (disp <= center) & (disp >= center - window)
         averaged[index] = forces[in_window].mean()
         window_full[index] = (center - disp[0]) >= window
-    if drop_leading_zero:
+    if drop_leading_zero and window_full.any():
         return disp[window_full], averaged[window_full]
+    if drop_leading_zero:
+        # NOTHING accumulated a full window: the whole record is shorter
+        # than the averaging length. Returning the empty selection here
+        # is what a caller cannot recover from — the curve vanishes, the
+        # separation search finds nothing, and a pull that DID separate
+        # is reported as "unresolved", which reads as "we could not
+        # tell" rather than "the answer was discarded". That is exactly
+        # how the first full end-to-end run lost its number: the slowest
+        # rung separated after 0.49 Å against a 0.5 Å window.
+        #
+        # So the warm-up trim is skipped rather than applied to
+        # extinction. The samples are still averaged over whatever span
+        # existed, which is the most the data supports; a short record
+        # is a coarse measurement, not an absent one.
+        return disp, averaged
     return disp, averaged
 
 
