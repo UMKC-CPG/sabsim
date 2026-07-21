@@ -175,3 +175,56 @@ def test_unresolved_metric_never_passes():
     verdict = activation_gate(scrambled, cell, references)
     assert not verdict.passed
     assert verdict.per_metric["coordination"].reference == "UNRESOLVED"
+
+
+# ---------------------------------------------------------------------
+# Depth-profile robustness (the regression that halted the first
+# end-to-end run, 2026-07-21).
+# ---------------------------------------------------------------------
+
+def test_one_stray_atom_above_the_surface_cannot_zero_the_depth():
+    """A speck in the topmost bin must not erase a real skin.
+
+    The depth walk starts at the surface and stops at the first bin that
+    has returned to the bulk baseline. A cascade routinely ejects an atom
+    that lands hovering alone above the surface, and a bin holding ONE
+    atom has a defect fraction that is pure noise — it can only be 0.0 or
+    1.0. When it came up 0.0 the walk stopped before it started and the
+    gate reported a 0.0 Å skin for a slab carrying a good one, which is
+    exactly how the first full run halted with one half passing and its
+    identical twin failing.
+    """
+    points, cell = _crystal_slab(n_layers=12)
+    scrambled = _scramble_top(points, skin=6.0, seed=3)
+    references = _lenient_references(depth_target=0.0)
+
+    honest = activation_gate(scrambled, cell, references)
+    assert honest.activated_depth > 0.0, "the crafted skin must register"
+
+    # One atom, placed well above the surface in a bin of its own, and
+    # deliberately given NO neighbours-worth of company.
+    surface = scrambled[:, 2].max()
+    speck = np.vstack([scrambled, [[0.0, 0.0, surface + 3.0]]])
+
+    with_speck = activation_gate(speck, cell, references)
+    assert with_speck.activated_depth == pytest.approx(
+        honest.activated_depth, abs=1e-9), (
+        "a single hovering atom changed the measured skin depth from "
+        f"{honest.activated_depth} to {with_speck.activated_depth}")
+
+
+def test_a_populated_bin_at_baseline_still_stops_the_walk():
+    """Skipping sparse bins must not make the scan run away downward.
+
+    The counterpart to the test above: the fix must ignore only bins too
+    sparse to judge, never a well-populated one that has genuinely
+    returned to the crystalline baseline — otherwise the measurement
+    would happily report the whole slab as amorphized.
+    """
+    points, cell = _crystal_slab(n_layers=12)
+    scrambled = _scramble_top(points, skin=6.0, seed=3)
+    verdict = activation_gate(scrambled, cell, _lenient_references())
+
+    slab_thickness = float(points[:, 2].max() - points[:, 2].min())
+    assert verdict.activated_depth < slab_thickness, (
+        "the skin must stop at the crystalline bulk, not swallow the slab")

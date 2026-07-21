@@ -94,24 +94,96 @@ _MIN_VACUUM = 30.0             # Å: room above the surface for the beam spawn
 _LATERAL_REPEAT = 10           # tile n x n so one impact does not dominate
 
 
-def _resolve_cif(cif_source: str) -> str:
-    """Resolve a wafer's CIF path (spec paths are repo-root relative).
+def _publish_file(comm, write_action) -> None:
+    """Write a handoff file on ONE rank, then publish it to the others.
 
-    A member's ``cif_source`` is written relative to the repo root (e.g.
-    ``src/sabsim/structure/data/si_diamond.cif``), the directory runs are
-    launched from (VISION.md principle 1 — where to run is stated). An
-    absolute path is used as-is; a relative one resolves against the
-    current working directory.
+    Every stage that hands a file to the next stage faces the same
+    situation under MPI: all ranks hold the same data and would all
+    happily write it, but they would be writing the SAME path at the
+    same moment and would corrupt each other's output. So exactly one
+    rank writes.
+
+    The barrier afterwards is not decoration. Without it the other ranks
+    race ahead and may try to read a file that rank 0 has not finished —
+    or not started — writing, which is how a stage ends up parsing a
+    half-written structure. Blocking here means that when this function
+    returns, the file is on disk and every rank may read it.
+
+    ``write_action`` is a no-argument callable performing the write, so
+    each caller keeps its own writer and format while the rank
+    discipline lives in exactly one place.
+    """
+    rank = comm.Get_rank() if comm is not None else 0
+    if rank == 0:
+        write_action()
+    if comm is not None:
+        comm.Barrier()
+
+
+def _resolve_cif(cif_source: str) -> str:
+    """Resolve a wafer's CIF path, searching the places it may live.
+
+    A relative ``cif_source`` used to be resolved against the working
+    directory alone, on the assumption that runs are launched from the
+    repo root. ``sabsim run`` broke that assumption on purpose: a run's
+    home is the JOB directory the user is standing in, which is normally
+    nowhere near the repo — so the shipped example path
+    ``src/sabsim/structure/data/si_diamond.cif`` pointed at a file that
+    did not exist there, and the run halted.
+
+    Both readings are legitimate, so both are tried, in the order of
+    least surprise:
+
+    1. An ABSOLUTE path is taken as given.
+    2. Relative to the WORKING directory — a user who drops their own
+       CIF beside the spec they are running means that one.
+    3. Relative to the REPO ROOT — how the shipped example specs are
+       written, and what a spec copied out of ``dev/templates`` says.
+    4. Relative to the installed PACKAGE — the same shipped file, found
+       by its path within the package, so an installed (non-source)
+       SABSIM resolves the example specs too.
+
+    The first candidate that EXISTS wins. If none do, the error names
+    every location searched: a bare "no such file" for a path the user
+    never typed is a puzzle, while the list shows immediately whether
+    the spec is wrong or the file is simply missing.
     """
     path = Path(cif_source)
-    return str(path if path.is_absolute() else Path.cwd() / path)
+    if path.is_absolute():
+        return str(path)
+
+    # .../src/sabsim/pipeline/live_stages.py -> parents[1] is the package
+    # directory, parents[3] the repo root of a source checkout.
+    package_directory = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[3]
+    # Strip a leading "src/sabsim/" so a repo-root-relative spec path can
+    # also be found inside an installed package.
+    within_package = Path(*path.parts[2:]) if path.parts[:2] == (
+        "src", "sabsim") else path
+
+    candidates = [
+        Path.cwd() / path,
+        repo_root / path,
+        package_directory / within_package,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    searched = "\n  ".join(str(c) for c in candidates)
+    raise FileNotFoundError(
+        f"crystal file {cif_source!r} was not found. Looked in:\n"
+        f"  {searched}\n"
+        f"Give an absolute path, or place the file relative to the "
+        f"directory the run was launched from.")
 
 
 def _build_one_half(
         wafer,
         member: MemberSpecification,
         scratch_directory: str,
-        wafer_tag: int) -> HalfHandle:
+        wafer_tag: int,
+        comm=None) -> HalfHandle:
     """Cut ONE wafer alone, write its data file, return its handle (§7.1).
 
     Loads the wafer's crystal, builds a standalone half in vacuum with the
@@ -129,7 +201,9 @@ def _build_one_half(
     role = "a" if wafer_tag == WAFER_A_TAG else "b"
     data_file = os.path.join(
         str(scratch_directory), f"half_{role}_{wafer.identity}.data")
-    write_standalone_half(half, data_file)
+    # Every rank cut an identical slab (the build is deterministic), so
+    # only one of them may write it — see _publish_file.
+    _publish_file(comm, lambda: write_standalone_half(half, data_file))
     return HalfHandle(
         data_file=data_file, type_map=half.type_map,
         identity=wafer.identity, wafer_tag=wafer_tag)
@@ -138,7 +212,8 @@ def _build_one_half(
 def build_halves(
         member: MemberSpecification,
         potential,
-        scratch_directory: str) -> tuple[HalfHandle, HalfHandle, SharedCell]:
+        scratch_directory: str,
+        comm=None) -> tuple[HalfHandle, HalfHandle, SharedCell]:
     """Build both wafers as standalone half files (step 3, §4.3, §7.1).
 
     The real build stage: each wafer is cut ALONE in vacuum and written to
@@ -155,9 +230,11 @@ def build_halves(
     commensurability assert correctly REFUSES until the matcher lands.
     """
     handle_a = _build_one_half(
-        member.material.wafer_a, member, scratch_directory, WAFER_A_TAG)
+        member.material.wafer_a, member, scratch_directory, WAFER_A_TAG,
+        comm)
     handle_b = _build_one_half(
-        member.material.wafer_b, member, scratch_directory, WAFER_B_TAG)
+        member.material.wafer_b, member, scratch_directory, WAFER_B_TAG,
+        comm)
     shared = SharedCell(
         note="Si/Si identity shared cell (wave-3 matcher dormant, §7.6)")
     return handle_a, handle_b, shared
@@ -290,7 +367,8 @@ def assemble_pair_live(
         activated,
         shared: SharedCell,
         member: MemberSpecification,
-        scratch_directory: str) -> Structure:
+        scratch_directory: str,
+        comm=None) -> Structure:
     """Assemble the two amorphized halves into a facing pair (step 5, §2.6).
 
     The BARRIER stage: it reads BOTH amorphized halves back from the files
@@ -324,7 +402,9 @@ def assemble_pair_live(
         clash_floor=to_metal(member.numerical.clash_floor, "distance"))
 
     pair_file = os.path.join(scratch_directory, "assembled_pair.data")
-    write_lammps_data(built, pair_file)
+    # The assembly is deterministic, so every rank built the same pair;
+    # one rank writes it and the barrier publishes it to the press.
+    _publish_file(comm, lambda: write_lammps_data(built, pair_file))
     return Structure(
         note=(f"assembled amorphized pair "
               f"{activated.slab_a.identity}/{activated.slab_b.identity}; "

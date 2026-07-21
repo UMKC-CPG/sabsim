@@ -80,11 +80,12 @@ def _run(args: argparse.Namespace) -> int:
         from mpi4py import MPI
         from sabsim.pipeline.live_stages import LIVE_STAGES
         comm = MPI.COMM_WORLD
-        if comm.Get_size() > 1:
-            print("sabsim: multi-rank runs are not supported yet (the "
-                  "stages do not coordinate file writes across ranks); "
-                  "launch with 'srun -n 1'.", file=sys.stderr)
-            return 2
+        # Multi-rank IS supported (enabled 2026-07-21). Every stage that
+        # hands a file to the next one now writes it on a single rank and
+        # publishes it with a barrier, and every library file call is
+        # pinned to serial mode so no library turns a read into a hidden
+        # collective (ARCHITECTURE.md §4.1, second discipline). LAMMPS
+        # itself domain-decomposes across whatever ranks it is given.
         stage_set = LIVE_STAGES
 
     try:
@@ -101,19 +102,42 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _refuse_live_off_allocation() -> int | None:
-    """Refuse a real run that is not inside an ``srun`` step.
+# Environment variables that mean "this process was started BY a parallel
+# launcher", each set by a different one. Being launched by any of them is
+# what distinguishes a compute-node task from a shell on the login node.
+# SLURM_PROCID alone is NOT enough: it is set by `srun`, but the supported
+# launcher here is `mpirun` (plain srun starts independent single-rank
+# copies on this cluster, ARCHITECTURE.md §4.1), and OpenMPI starts ranks
+# through its own daemons, which do not hand down SLURM_PROCID.
+_LAUNCHER_RANK_VARIABLES = (
+    "SLURM_PROCID",           # srun job step
+    "OMPI_COMM_WORLD_RANK",   # OpenMPI mpirun — the launcher used here
+    "PMI_RANK",               # MPICH / Intel MPI
+    "PMIX_RANK",              # PMIx-based launchers
+)
 
-    A real run opens LAMMPS, which MUST NOT be spawned from the login node.
-    ``srun`` sets ``SLURM_PROCID`` for each task, so its absence means we
-    are not inside a job step; refuse and point at ``--dry-run``. Returns
-    an exit code to stop on, or None to proceed.
+
+def _refuse_live_off_allocation() -> int | None:
+    """Refuse a real run that is not inside a job step on a compute node.
+
+    A real run opens LAMMPS, which MUST NOT be spawned on the login node.
+    The test is whether a parallel launcher started this process: every
+    launcher advertises the rank in its own variable, so any of them
+    means we are a task inside an allocation rather than a shell.
+
+    Deliberately NOT keyed on ``SLURM_JOB_ID``: that is set in an
+    ``salloc`` shell too, and on this cluster such a shell still sits on
+    the login node — so it would wave through exactly the case this
+    guard exists to stop. Returns an exit code to stop on, or None.
     """
-    if os.environ.get("SLURM_PROCID") is None:
+    launched_by = [name for name in _LAUNCHER_RANK_VARIABLES
+                   if os.environ.get(name) is not None]
+    if not launched_by:
         print("sabsim: a real run must be launched inside an allocation "
-              "via srun (LAMMPS must not run on the login node). Use "
-              "'srun --jobid=<ID> -n 1 ... run', or '--dry-run' for a "
-              "login-node control-flow check.", file=sys.stderr)
+              "by a parallel launcher (LAMMPS must not run on the login "
+              "node). Use 'mpirun -np <N> python -m sabsim run ...' from "
+              "inside a job, or '--dry-run' for a login-node "
+              "control-flow check.", file=sys.stderr)
         return 2
     return None
 

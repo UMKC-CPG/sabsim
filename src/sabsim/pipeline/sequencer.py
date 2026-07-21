@@ -142,7 +142,7 @@ def exec_one_member(
     # assemble. build writes each standalone half under the member's
     # scratch and returns the two HANDLES (§7.1, the build->amorphize seam).
     handle_a, handle_b, shared = run_to_contract(
-        lambda: stage_set.build(member, potential, scratch_directory),
+        lambda: stage_set.build(member, potential, scratch_directory, comm),
         SLABS_CONTRACT)
 
     # A FAILED activation gate is contract-invalid and halts HERE: the
@@ -159,7 +159,7 @@ def exec_one_member(
     # check above).
     structure = run_to_contract(
         lambda: stage_set.assemble(
-            activated, shared, member, scratch_directory),
+            activated, shared, member, scratch_directory, comm),
         STRUCTURE_CONTRACT)
 
     # Steps 6-7: press then pull, over the rate ladder. The result is a

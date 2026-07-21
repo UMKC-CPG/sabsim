@@ -92,7 +92,8 @@ def _placeholder_handle(
 def build_slabs(
         member: MemberSpecification,
         potential: Potential,
-        scratch_directory: str) -> tuple[HalfHandle, HalfHandle, SharedCell]:
+        scratch_directory: str,
+        comm=None) -> tuple[HalfHandle, HalfHandle, SharedCell]:
     """Build both wafers as standalone half-handles (DESIGN.md §2, §7.1).
 
     W0 returns PLACEHOLDER handles — no data file is written, and the
@@ -149,7 +150,8 @@ def assemble_pair(
         activated: ActivatedSlabs,
         shared: SharedCell,
         member: MemberSpecification,
-        scratch_directory: str | None = None) -> Structure:
+        scratch_directory: str | None = None,
+        comm=None) -> Structure:
     """Assemble the facing pair from the activated slabs (DESIGN.md §7).
 
     W0 returns a placeholder pair (no file written); the real

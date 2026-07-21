@@ -338,10 +338,18 @@ class GateControl:
     signal and the ring search stays small); ``depth_bin_width`` bins the
     depth profile; the ``gr_*`` settings size the g(r) histogram; and
     ``max_ring_size`` caps the ring search.
+
+    ``min_bin_atoms`` is the smallest population a depth bin may have and
+    still be JUDGED. A bin holding one or two atoms has a defect fraction
+    that is pure coin-flip noise — it can only be 0.0 or 1.0 — and the
+    cascade routinely leaves a stray atom or two hovering above the
+    surface in a bin of their own. Ten is comfortably below a normal
+    bin's population here (~150 atoms) while excluding those specks.
     """
 
     near_surface_window: float = 15.0     # Å, the skin region
     depth_bin_width: float = 2.0          # Å, depth-profile bin
+    min_bin_atoms: int = 10               # ignore statistically empty bins
     gr_r_max: float = 6.0                 # Å, g(r) range
     gr_bin_width: float = 0.05            # Å, g(r) bin
     max_ring_size: int = 9                # cap on the ring search
@@ -493,28 +501,57 @@ class AmorphizationDepthMetric:
         baseline — using the whole profile and ignoring the frozen BOTTOM
         surface (also under-coordinated), the robust replacement for prior
         art's stop-at-first-crystalline scan (DESIGN §3.5).
+
+        SPARSE BINS ARE SKIPPED, NOT OBEYED. A cascade routinely leaves a
+        stray atom or two hovering above the surface, alone in the topmost
+        bin. Such a bin's defect fraction is noise, but the walk below
+        starts at the top, so treating it as a real reading let ONE atom
+        end the scan before it began and report a 0.0 Å skin for a slab
+        carrying a perfectly good 10 Å one. (That is not hypothetical: it
+        halted the first end-to-end run, 2026-07-21.) A bin too sparse to
+        judge therefore neither confirms the skin nor terminates it — the
+        walk passes straight through it — and only a POPULATED bin that
+        has returned to baseline stops the scan.
+
+        The surface is likewise taken as the top of the highest populated
+        bin rather than the highest atom, so a floating speck cannot
+        inflate the depth it is not part of.
         """
         z = context.positions[:, 2]
         low, high = float(z.min()), float(z.max())
         width = control.depth_bin_width
         edges = np.arange(low, high + width, width)
 
-        def bin_fraction(mask):
-            return float(context.is_defect[mask].mean()) if mask.any() else 0.0
-
-        fractions = []
+        # (lower edge, population, defect fraction) per bin.
+        profile = []
         for lower, upper in zip(edges[:-1], edges[1:]):
             in_bin = (z >= lower) & (z < upper)
-            fractions.append((lower, bin_fraction(in_bin)))
+            count = int(in_bin.sum())
+            fraction = float(context.is_defect[in_bin].mean()) if count else 0.0
+            profile.append((lower, count, fraction))
+
+        populated = [entry for entry in profile
+                     if entry[1] >= control.min_bin_atoms]
+        if not populated:
+            return 0.0
+
+        # The free surface: the top of the highest bin holding real
+        # material, not the z of the highest stray atom.
+        surface = min(populated[-1][0] + width, high)
 
         deep_cut = low + (high - low) / 3.0
-        deep = [frac for lower, frac in fractions if lower < deep_cut]
+        deep = [fraction for lower, _count, fraction in populated
+                if lower < deep_cut]
         baseline = (float(np.mean(deep)) if deep else 0.0) + 0.05
 
         depth = 0.0
-        for lower, fraction in reversed(fractions):        # surface downward
+        for lower, count, fraction in reversed(profile):   # surface downward
+            if lower >= surface:
+                continue                      # above the material
+            if count < control.min_bin_atoms:
+                continue                      # too sparse to mean anything
             if fraction > baseline:
-                depth = high - lower
+                depth = surface - lower
             else:
                 break
         return depth

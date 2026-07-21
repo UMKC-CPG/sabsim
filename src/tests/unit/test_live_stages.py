@@ -9,9 +9,16 @@ data files with no LAMMPS — so it is unit-tested here, together with the
 
 from __future__ import annotations
 
+import os
+
+import pytest
 from ase.io import read as ase_read
 
-from sabsim.pipeline.live_stages import build_halves
+from sabsim.pipeline.live_stages import (
+    _publish_file,
+    _resolve_cif,
+    build_halves,
+)
 from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import Quantity
 from sabsim.structure.slab_builder import (
@@ -153,3 +160,94 @@ def test_analyzer_unresolved_when_no_rung_separates():
     assert mechanical.status is MeasureStatus.UNRESOLVED
     assert mechanical.value is None
     assert measures.verdicts.bonded is False
+
+
+# ---------------------------------------------------------------------
+# The multi-rank file-handoff discipline (ARCHITECTURE.md §4.1).
+# ---------------------------------------------------------------------
+
+class _FakeCommunicator:
+    """A stand-in MPI communicator that records what was asked of it.
+
+    Real multi-rank behaviour cannot be exercised in a unit test — there
+    is one process — so this fakes the two calls the discipline uses and
+    records them, which is enough to prove that exactly one rank writes
+    and that everyone waits afterwards.
+    """
+
+    def __init__(self, rank: int):
+        self._rank = rank
+        self.barriers = 0
+
+    def Get_rank(self) -> int:
+        return self._rank
+
+    def Barrier(self) -> None:
+        self.barriers += 1
+
+
+def test_only_rank_zero_writes_a_handoff_file():
+    """Rank 0 performs the write; every other rank must not."""
+    writes = []
+
+    writer = _FakeCommunicator(rank=0)
+    _publish_file(writer, lambda: writes.append("wrote"))
+    assert writes == ["wrote"]
+    assert writer.barriers == 1, "the write must be published to peers"
+
+    # A non-zero rank must NOT touch the file: several ranks writing the
+    # same path at once is exactly the corruption this prevents.
+    bystander = _FakeCommunicator(rank=3)
+    _publish_file(bystander, lambda: writes.append("should not happen"))
+    assert writes == ["wrote"]
+    assert bystander.barriers == 1, (
+        "a non-writing rank must still reach the barrier, or the ranks "
+        "deadlock waiting for each other")
+
+
+def test_serial_run_writes_without_a_communicator():
+    """With no MPI at all the write still happens, and nothing blocks."""
+    writes = []
+    _publish_file(None, lambda: writes.append("wrote"))
+    assert writes == ["wrote"]
+
+
+# ---------------------------------------------------------------------
+# Locating a member's crystal file (the CLI runs from the JOB dir).
+# ---------------------------------------------------------------------
+
+def test_shipped_cif_resolves_from_an_unrelated_directory(
+        monkeypatch, tmp_path):
+    """A repo-root-relative CIF is found from any working directory.
+
+    The regression this guards actually happened: `sabsim run` makes the
+    run's home the JOB directory, so the shipped example path
+    'src/sabsim/structure/data/si_diamond.cif' was resolved against a
+    directory nowhere near the repo and the run halted on a missing file
+    before any physics started.
+    """
+    monkeypatch.chdir(tmp_path)
+    resolved = _resolve_cif("src/sabsim/structure/data/si_diamond.cif")
+    assert os.path.isfile(resolved)
+
+
+def test_cif_beside_the_run_wins_over_the_shipped_copy(
+        monkeypatch, tmp_path):
+    """A CIF in the working directory is preferred (a user's own file)."""
+    own = tmp_path / "src" / "sabsim" / "structure" / "data"
+    own.mkdir(parents=True)
+    (own / "si_diamond.cif").write_text("# the user's own crystal\n")
+    monkeypatch.chdir(tmp_path)
+
+    resolved = _resolve_cif("src/sabsim/structure/data/si_diamond.cif")
+    assert resolved == str(own / "si_diamond.cif")
+
+
+def test_missing_cif_names_every_place_it_looked(monkeypatch, tmp_path):
+    """A file that is nowhere fails with the search path, not ENOENT."""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(FileNotFoundError) as caught:
+        _resolve_cif("no/such/crystal.cif")
+    message = str(caught.value)
+    assert "Looked in" in message
+    assert str(tmp_path) in message, "the working directory must be listed"
