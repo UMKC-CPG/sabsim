@@ -549,6 +549,34 @@ foundations, interaction rules. -->
       slab<->energy<->DFT-cost accommodation; the node run's 216-atom slab
       over-sputters at 100 eV; `_LATERAL_REPEAT` / `_MIN_SLAB_THICKNESS` in
       `live_stages` are stand-in constants — bigger slab or gentler energy).
+      MEASURED (2026-07-21, sweep v3, jobid 15124543 — 20 points, 1h39m,
+      every point clean): on a 4400-atom slab 38.4 Å wide x 55 Å thick,
+      energy {40,50,62,75} eV x dose {0.010...0.030}/Å², **ZERO SPUTTERING
+      AT ALL 20 POINTS** (4400 survivors everywhere) — the drop to 40-75 eV
+      fully solved the over-sputtering. Skin depth spans only 3.95-10.26 Å
+      and SATURATES in both knobs: 75 eV runs 5.97/8.27/8.56/10.25/10.26
+      across the dose row (flat past 0.025), while down the dose-0.030
+      column energy gives 6.57/8.34/8.53/10.26. So ENERGY sets the
+      REACHABLE DEPTH (it is the ion range) and DOSE fills in DISORDER
+      (coordination 0.086->0.219, rings 0.199->0.465, both rising with
+      either knob). CONSEQUENCE — the blocker is no longer the dose but the
+      THRESHOLD: nothing in the clean zero-sputter regime reaches the 20 Å
+      `share/activation/Si.toml` depth stand-in (max 10.26 Å), and the
+      energies that would reach it reintroduce the sputtering just escaped.
+      All 20 points PASS coordination, rings, and RDF and fail ONLY on
+      depth. So step (1) now resolves by LOWERING the threshold to measured
+      physics (the skin-thickness item in the DESIGN section above), NOT by
+      pushing the dose — and the accessible 4-10 Å window BRACKETS the
+      5-10 Å floor that item predicted for Si/Si on registry-decoupling
+      grounds. Candidates: e075_f025 (10.25 Å, coord 0.198, rings 0.455)
+      for the deepest clean skin, e050_f020 (5.95 Å) for a thin one. USER
+      STEERS the number. CAVEATS: ONE seed per point and the noise is real
+      (the 40 eV row ran 3.95->4.36->3.98->8.31->6.57), so treat any
+      single-cell difference as noise and trust only row/column trends; and
+      `radial_distribution` reads exactly 2.375 at ALL 20 points — it is the
+      g(r) first-peak POSITION (Si-Si ~2.35 Å), not a disorder measure, so
+      its >=0.3 threshold passes trivially and contributes nothing to the
+      gate. Worth revisiting when the thresholds are retuned.
       (2) CONNECT the press/pull + analyzer PIPELINE STAGES to their real
       code: the press/pull DRIVER (`driver/press_pull.py`) already EXISTS
       and was validated on real LAMMPS (stage 5) — only the pipeline stages
@@ -695,6 +723,67 @@ foundations, interaction rules. -->
       companion to the energy sweep is a DOSE sweep measuring W_sep. Ties
       `DESIGN.md` §2.5 (thickness criterion), §3.5/§3.6 (depth/dose), §8
       (bond metric).
+- [ ] DEFERRED (raised 2026-07-21, no action for now) — MODEST BOMBARDMENT
+      PARALLELISM: fire n Ar SIMULTANEOUSLY per round instead of strictly
+      one at a time (`DESIGN.md` §3.2/§3.3; would add a §10.3 knob and
+      change the §10.4 loop). Today `run_cascade_to_fluence`
+      (`driver/cascade.py:290`) is a strict serial loop — insert ONE
+      projectile, run the halted NVE cascade, relax, repeat — and the
+      16-way parallelism is LAMMPS spatial decomposition WITHIN a single
+      impact. Cost is linear in impact count at ~10.0 s/impact with a
+      ~zero intercept (measured across sweep 15124543), so n-at-a-time
+      would cut a dose point's wall clock by roughly n.
+      THIS IS A MODEL CHANGE, NOT A SCHEDULING CHANGE — it must be
+      VALIDATED, never assumed. Two conditions must both hold:
+      (a) SPATIAL — the cascades must not overlap. Best min-image
+          separation for n sites on the 38.4 Å square torus is 27.2 Å
+          (n=2, L/sqrt(2)), 23.8 Å (n=3, 0.620 L), 19.2 Å (n=4, L/2). At
+          40-75 eV the measured skin is only 4-8 Å deep and the lateral
+          damage radius is comparable (~10 Å, ~15 Å counting elastic
+          disturbance), so n=2-3 has real margin while n=4 is the first
+          that is genuinely tight.
+      (b) THERMAL — with no sputtering essentially the WHOLE ion energy
+          thermalizes into the slab: one 50 eV impact raises all 4400
+          atoms by ~88 K, four at once by ~350 K in one pulse. Since
+          amorphization here IS a thermal-spike-and-quench process, a 4x
+          larger global pulse may over-anneal the damage the quench is
+          meant to freeze in. Langevin cooling is exponential, so
+          draining 4x the energy costs an extra ~tau*ln(4) (a few tenths
+          of a ps), which trims the speedup to ~3x rather than defeating
+          it — the relax duration must grow with n, not stay fixed.
+      FIRST STEP, BEFORE ANYTHING ELSE — MEASURE THE CASCADE FOOTPRINT:
+      run a SINGLE impact and record the lateral radius of atoms
+      displaced past a threshold. That replaces the ~10 Å estimate above
+      with a measured number, and the separation rule then follows from
+      DATA rather than from argument. Costs ~10 s of compute.
+      THEN validate equivalence: the same (energy, dose) at n = 1 / 2 / 4,
+      comparing skin depth, coordination, and ring statistics. Needs >= 3
+      SEEDS per condition — the sweep's 40 eV row ran 3.95 -> 4.36 ->
+      3.98 -> 8.31 -> 6.57 Å, so a single-seed comparison would "confirm"
+      whatever it happened to draw.
+      DESIGN RULE if it is ever built: n must SCALE WITH AREA, never be a
+      fixed count. Expose an area-per-simultaneous-impact knob (about
+      (2 x footprint radius)^2) and DERIVE n from it, or the physics
+      changes silently the moment someone widens the cell (`VISION.md`
+      principle 1). At ~625 Å²/ion today's cell supports n=2; a 76.8 Å
+      cell would support ~9.
+      IMPLEMENTATION (modest, all local to `driver/cascade.py`): group
+      `impact_seeds` into rounds of n; sample the n sites per round under
+      a min-image minimum-separation rejection test (deterministic from
+      the seeds that already exist); insert all n projectiles before the
+      single `run`. The physical-time halt and the fire-and-forget
+      structure work unchanged, since the halt keys on elapsed time and
+      not on a projectile count. RECORD n IN THE MANIFEST — a run at n=4
+      is NOT trajectory-comparable to one at n=1 even given identical
+      seeds.
+      NOT NEEDED FOR SWEEPS, which is why this is deferred: fanning grid
+      points out as separate jobs buys the same wall clock at ZERO physics
+      risk (`ARCHITECTURE.md` §4.3, the C-EXPANSION fan-out). The payoff
+      case is the single large PRODUCTION run at a realistic 2-3 nm skin,
+      where one member carries hundreds of impacts and cannot be split
+      across jobs — and where the wider cell makes the separation
+      comfortable anyway. Ties the skin-thickness item above (both are
+      dose-physics questions on the same cascade).
 - [ ] STRUCTURAL 2 / §5 follow-ons opened by `DESIGN.md` §5
       (2026-07-09): the target bonding pressure and hold duration; the
       noise-floor thresholds for the zero-load reference state, for
