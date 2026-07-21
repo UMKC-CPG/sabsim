@@ -10,6 +10,7 @@ fixed-step relax). No mid-run read-back is asserted because a cascade
 impact has none — the physical-time halt ends it from inside LAMMPS.
 """
 
+import dataclasses
 import math
 import os
 from types import SimpleNamespace
@@ -83,11 +84,14 @@ def test_spec_reads_species_mass_energy_and_count():
     assert spec.projectile_type == 2
     # Argon's mass (~39.95 amu), from the periodic table, not hand-set.
     assert spec.projectile_mass == pytest.approx(39.95, abs=0.05)
-    assert spec.impact_energy == 500.0          # eV
+    assert spec.impact_energy == 75.0           # eV, the pinned energy
     assert spec.impact_angle == 0.0             # normal incidence (0 deg)
-    # The template freezes the dose as 500 impacts (unit "impacts").
-    assert spec.impact_count == 500
-    assert len(spec.impact_seeds) == 500
+    # The template now states the dose as an AREAL fluence, so the count
+    # is DERIVED from the cell: 0.025 ions/Å² over this toy 10 x 10 Å
+    # cell is 2.5 impacts, which rounds to 2. This exercises the general
+    # size-independent path rather than the fixed-count shortcut.
+    assert spec.impact_count == 2
+    assert len(spec.impact_seeds) == 2
 
 
 # ---------------------------------------------------------------------
@@ -95,8 +99,18 @@ def test_spec_reads_species_mass_energy_and_count():
 # ---------------------------------------------------------------------
 
 def test_normal_incidence_aims_straight_down_at_the_right_speed():
-    """A 500 eV Ar impact at normal incidence is (0, 0, -v)."""
-    spec = derive_bombardment_spec(_cascade_built(), _template_member())
+    """A 500 eV Ar impact at normal incidence is (0, 0, -v).
+
+    The energy is pinned HERE rather than taken from the template on
+    purpose. This is a check of the energy-to-speed physics, and 500 eV
+    Ar = 491.5 Å/ps is the independently-known pair that makes it a real
+    check; tying it to whatever energy the protocol currently specifies
+    would break this test every time that engineering choice is retuned,
+    for no gain in what it verifies.
+    """
+    spec = dataclasses.replace(
+        derive_bombardment_spec(_cascade_built(), _template_member()),
+        impact_energy=500.0)
     vx, vy, vz = sample_impact_velocity(spec, seed=123)
     assert vx == pytest.approx(0.0, abs=1e-9)
     assert vy == pytest.approx(0.0, abs=1e-9)
@@ -258,7 +272,9 @@ def test_activate_surface_runs_cascade_reanneal_then_gates():
         engine, built, member, mlip, data_file="slab.data", seed=5)
 
     assert isinstance(result, ActivationResult)
-    assert result.cascade.impacts_run == 500          # bombarded to the dose
+    # Bombarded to the dose: the areal fluence over this toy cell's small
+    # lateral area works out to 2 impacts (see the spec test above).
+    assert result.cascade.impacts_run == 2
     # The real §3.5 gate ran against the share/ Si references and produced a
     # verdict over all four metrics (pass/fail depends on the stand-in
     # thresholds, which this thin toy slab need not satisfy).

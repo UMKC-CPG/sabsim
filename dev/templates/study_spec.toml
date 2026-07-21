@@ -121,33 +121,52 @@ species   = "Ar"
 # co-species, deferred to the outer-loop sweep (§1.8) — none here.
 cospecies          = "none"
 cospecies_fraction = 0.0
-# v1 default 500 eV (ratified). Validated MD band is 50-500 eV: go lower
-# (e.g. 50 eV) for a gentler cascade, or higher toward the ~1 keV
-# fast-atom-beam at a larger-box cost.
-energy = { value = 500.0, unit = "eV" }
+# 75 eV, PINNED from the 2026-07-21 energy x dose sweep (DESIGN §3.6).
+# The old 500 eV default OVER-SPUTTERS — it vaporized a small slab — and
+# the sweep found 40-75 eV amorphizes cleanly with ZERO sputtered atoms
+# at every dose tried, while 100 eV and up strip the surface and then
+# fail the gate outright. Within that clean band ENERGY is what sets the
+# REACHABLE skin depth (it is the ion range), so 75 eV is chosen as the
+# top of it: the setting with the most margin over the 7 A threshold.
+energy = { value = 75.0, unit = "eV" }
 angle  = { value = 0.0,   unit = "deg" }      # from the surface normal
 # Dose is the KNOB (§3.6). The amorphized skin DEPTH is NOT set here; it
 # is measured by the §3.5 gate — iterate this dose until the gate's depth
-# profile reaches the ~2-3 nm target (a §3.5 acceptance criterion living
+# profile clears the 7 A threshold (a §3.5 acceptance criterion living
 # with the gate's reference data, not a protocol input — §1.3). TWO FORMS
 # are accepted (§3.2): a per-area FLUENCE (unit "ions/angstrom^2"), the
 # general size-independent form, or a plain impact COUNT (unit "impacts"),
-# a shortcut for a single fixed cell. v1's Si/Si cell is fixed, so a count
-# is used here.
-fluence = { value = 500.0, unit = "impacts" }        # count, fixed cell
+# a shortcut for a single fixed cell. The AREAL form is used now that the
+# cell size is pinned in `live_stages`: the count follows from the area
+# (0.025 x ~1474 A^2 = 37 impacts), so widening the slab later keeps the
+# same PHYSICAL dose instead of silently thinning it.
+# 0.025 PINNED from the sweep — paired with 75 eV it measured 10.25 A of
+# skin, a 3.25 A margin over the threshold, the largest on the grid.
+# Raising it to 0.030 buys nothing (depth saturates at 10.26 A) while
+# costing ~20% more impacts, and each impact is ~10 s of wall clock.
+fluence = { value = 0.025, unit = "ions/angstrom^2" }
 # Per-impact cascade timing lives in PROTOCOL, not numerical (§2): these
-# are physical durations of the amorphization process, converged as a
-# band in V1_VALUES (~5-10 ps each).
-cascade_duration          = { value = 7.0, unit = "ps" }   # NVE cascade
-between_impact_relaxation = { value = 7.0, unit = "ps" }   # border cool
+# are physical durations of the amorphization process. PINNED at 0.5 ps
+# each from the sweep, which produced 20 clean activation points on them.
+# The old ~5-10 ps band was sized for a ~500 eV cascade; a 75 eV cascade
+# is a far smaller, shorter event, and the border thermostat drains it
+# correspondingly fast. These remain STAND-INS in the sense that no
+# convergence check has been run ON the durations themselves — that is a
+# §3.6 follow-on, cheap to do by re-running one point at 1 and 2 ps.
+cascade_duration          = { value = 0.5, unit = "ps" }   # NVE cascade
+between_impact_relaxation = { value = 0.5, unit = "ps" }   # border cool
 
 [protocol.reanneal]
 # The MLIP re-anneal (§3.4, §10.5) as a PSEUDOCODE §2 AnnealSchedule:
 # relax, hold briefly, quench back to 300 K. Deliberately gentle — a
 # kinetically trapped glass bounds how far it may go, so it must NOT
 # un-trap the frozen amorphous skin.
+# The hold is PINNED at 2 ps from the sweep (was 30 ps): the re-anneal
+# only has to relieve the cascade's leftover strain in a ~10 A skin, not
+# re-equilibrate a thick damaged layer, and a longer gentle hold risks
+# un-trapping the very disorder the quench froze in.
 hold_temperature = { value = 500.0, unit = "K" }   # top of ~300-500 K
-hold_duration    = { value = 30.0,  unit = "ps" }  # tens of ps
+hold_duration    = { value = 2.0,   unit = "ps" }  # sweep-pinned
 ensemble         = "nvt"                            # constant-volume hold
 
 [protocol.assembly]

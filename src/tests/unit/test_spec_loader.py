@@ -10,6 +10,7 @@ evolves.
 """
 
 import os
+import re
 
 import pytest
 
@@ -66,8 +67,10 @@ def test_template_values_map_to_the_schema_fields():
     study = load_and_validate_study(_TEMPLATE_PATH)
     member = study.members[0]
 
-    # A physical knob keeps its unit (§1.5).
-    assert member.protocol.activation_energy.value == 500.0
+    # A physical knob keeps its unit (§1.5). The value tracks whatever
+    # the template currently pins (75 eV since 2026-07-21); what is being
+    # checked is that it lands on the right field WITH its unit.
+    assert member.protocol.activation_energy.value == 75.0
     assert member.protocol.activation_energy.unit == "eV"
     # The force-average window is a DISPLACEMENT, per the §5.4 fix.
     assert member.numerical.force_average_window.unit == "angstrom"
@@ -112,10 +115,23 @@ def test_missing_required_key_is_rejected(tmp_path):
 
 
 def test_bare_number_without_unit_is_rejected(tmp_path):
-    """A physical knob given as a bare number fails the units rule."""
-    text = _template_text().replace(
-        'energy = { value = 500.0, unit = "eV" }',
-        "energy = 500.0")
+    """A physical knob given as a bare number fails the units rule.
+
+    The energy line is matched by PATTERN, not by its literal text. An
+    exact-text match silently stops rewriting anything the day the pinned
+    energy changes — which is precisely what happened when 500 eV became
+    75 eV — leaving a test that constructs a perfectly VALID spec and
+    then reports success for a rejection that never occurred. The
+    assertion below that the text actually changed is what keeps this
+    test honest about having done its own setup.
+    """
+    original = _template_text()
+    text, substitutions = re.subn(
+        r'energy = \{ value = ([0-9.]+), unit = "eV" \}',
+        r"energy = \1", original)
+    assert substitutions == 1, (
+        "the energy knob was not rewritten as a bare number, so this "
+        "test would prove nothing — has the template's spelling changed?")
     spec_path = _write_spec(tmp_path, text)
 
     with pytest.raises(SpecificationError) as caught:

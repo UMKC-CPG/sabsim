@@ -76,11 +76,22 @@ _GEOMETRY = CascadeGeometry()           # 4 Å base + 6 Å border + 10 Å spawn
 _CONTROL = CascadeControl(cascade_step_cap=20000)   # halt backstop
 _BOND_CUTOFF = 2.8   # Å: Si first-g(r)-minimum stand-in (§6.3, TODO)
 
-# Sizing stand-ins (DESIGN.md §3.6; see the module docstring). A workable
-# Si smoke cell, NOT pinned physical values.
-_MIN_SLAB_THICKNESS = 30.0     # Å: frozen base + border + undamaged bulk
+# Sizing PINNED from the 2026-07-21 energy x dose sweep (DESIGN.md §3.6),
+# no longer smoke-test stand-ins. This is the cell that produced 20 clean
+# activation points — zero sputtered atoms at every energy and dose tried
+# — so it is the geometry the measured 7 Å depth threshold refers to, and
+# changing any of the three invalidates that threshold.
+#
+# WIDTH is the one that bit us: a narrow cell concentrates a given AREAL
+# dose onto few impacts, over-deepening the skin and making the result an
+# artifact of the box rather than of the beam. Ten tiles (~38 Å) spreads
+# the dose the way a broad beam does. THICKNESS must hold the frozen base
+# and the thermostatted border AND still leave undamaged bulk beneath the
+# skin (the §2.5 criterion, depth + bulk); 55 Å leaves ~45 Å of bulk under
+# a 10 Å skin. VACUUM only has to clear the spawn height for the beam.
+_MIN_SLAB_THICKNESS = 55.0     # Å: frozen base + border + undamaged bulk
 _MIN_VACUUM = 30.0             # Å: room above the surface for the beam spawn
-_LATERAL_REPEAT = 3            # tile n x n so one impact does not dominate
+_LATERAL_REPEAT = 10           # tile n x n so one impact does not dominate
 
 
 def _resolve_cif(cif_source: str) -> str:

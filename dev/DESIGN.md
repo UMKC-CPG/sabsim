@@ -1012,8 +1012,11 @@ repository — the discoverable-reference-data convention Imago uses — so the
 criteria are auditable and travel with the code. For v1 the references are
 **documented STAND-INS anchored to the literature** (for amorphous
 silicon: a first g(r) peak near 2.35 Å, a nearly four-fold network with a
-few percent three- and five-coordinated defects, a five-/six-/seven-ring
-population, and the ~2-3 nm skin-depth target), each flagged as a stand-in.
+few percent three- and five-coordinated defects, and a five-/six-/seven-
+ring population), each flagged as a stand-in. The depth threshold is the
+ONE exception: it is no longer a literature stand-in but a **measured**
+7 Å, re-pinned in §3.6 from this pipeline's own sweep, pending the
+work-of-separation study that will derive it from the bond instead.
 The real anchors — a DFT / experimental g(r), and the group's existing
 amorphous-silicon continuous-random-network model — replace them as they
 are prepared; a large real reference need not bloat the repository, since
@@ -1045,8 +1048,32 @@ across 50–500 eV, and 500 eV amorphizes reliably while keeping the
 cascade box tractable; a user may go **lower, e.g. 50 eV**, for a
 gentler cascade, or higher toward the experimental fast-atom-beam ~1 keV
 at the cost of a bigger box); **normal incidence**; the **dose is the
-knob and the ~2–3 nm amorphized skin depth is the measured target** —
-iterate the dose until §3.5's depth profile hits ~2–3 nm; v1 freezes the
+knob and the amorphized skin depth is the measured target**.
+
+**RE-PINNED to 7 Å (2026-07-21), replacing the original ~2–3 nm
+target, on measurement.** A 20-point energy × dose sweep on a
+4400-atom slab (38.4 Å wide × 55 Å thick; 40–75 eV × 0.010–0.030
+ions/Å²) found the skin depth spans only **3.95–10.26 Å and saturates
+in BOTH knobs**: energy sets the reachable depth, because it sets the
+ion range, while dose only fills in disorder once that range is
+saturated. Every one of the 20 points sputtered NOTHING, and every one
+passed the g(r), coordination, and ring criteria — failing only the
+old 20 Å depth threshold, which nothing in that clean regime can
+reach. The energies that WOULD reach 2–3 nm are exactly the ones
+(100 eV and up) that over-sputter the slab and paradoxically fail the
+gate outright. So 2–3 nm was not a dose that had gone unfound; it was
+unreachable at any energy this cell tolerates. This is the §3.6
+three-way slab ↔ energy ↔ DFT-cost accommodation resolving in favour
+of the tractable cell, which the user already steered toward when the
+500 eV default proved to vaporize small slabs. 7 Å sits mid-window,
+comfortably above the ~5 Å floor below which the skin degrades into a
+rough crystalline surface (mechanical interlock — a DIFFERENT regime,
+not the SAB one modelled here). It remains a MEASUREMENT-ANCHORED
+OPERATING THRESHOLD, not yet a physics-derived one: the work-of-
+separation convergence study (`dev/TODO.md`, the skin-thickness item)
+is what will replace it with the thinnest skin that still gives the
+converged bond. Iterate the dose until §3.5's depth profile clears it;
+v1 freezes the
 dose as a direct impact **count** for the single fixed Si/Si cell, the
 per-area **fluence** being the general form used once cell sizes differ
 (§3.2); **3 amorphization seeds** for the ensemble spread (the cheaper
