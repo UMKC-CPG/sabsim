@@ -44,6 +44,22 @@ from ase.data import atomic_numbers
 from ase.io import read as ase_read
 from ase.io import write as ase_write
 from pymatgen.analysis.interfaces.zsl import ZSLGenerator
+
+# EVERY ASE read and write in SABSIM passes ``parallel=False``. That is
+# not a speed setting; omitting it is a correctness bug, and it cost one
+# eight-hour cluster job to find. When several processes are running
+# under MPI, ASE silently promotes its file reads and writes into
+# COLLECTIVE operations: process zero alone touches the disk and then
+# broadcasts the result to every other process, so all of them must take
+# part or none may continue. SABSIM runs its own message passing and
+# already decides for itself which process writes a file, so a hidden
+# broadcast inside a read leaves the two schemes talking past each
+# other. One process waits inside ASE's broadcast while its peers wait
+# at a barrier of ours, and the run either deadlocks outright or — the
+# nastier failure — hands those peers an empty result, which ASE's
+# reader reports as a file containing no structures at all. Reading
+# serially costs nothing at these file sizes: every process simply
+# parses the same few hundred kilobytes for itself.
 from pymatgen.core import Structure
 from pymatgen.core.surface import SlabGenerator
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -447,8 +463,10 @@ def _write_atoms_as_lammps_data(
     through the command generator to make the file loadable.
     """
     species_order = sorted(type_map, key=lambda symbol: type_map[symbol])
+    # parallel=False: this write must NOT become an MPI collective, since
+    # its callers already guard it to one process (see the imports note).
     ase_write(
-        path, atoms, format="lammps-data",
+        path, atoms, format="lammps-data", parallel=False,
         atom_style="atomic", specorder=species_order, masses=True)
 
 
@@ -489,9 +507,12 @@ def read_standalone_half(
     atomic_number_of_type = {
         type_id: atomic_numbers[symbol]
         for symbol, type_id in type_map.items()}
+    # parallel=False: every process reads the file for itself. Letting
+    # ASE broadcast it instead deadlocks against SABSIM's own message
+    # passing (see the note beside the imports).
     atoms = ase_read(
         data_file, format="lammps-data", atom_style="atomic",
-        Z_of_type=atomic_number_of_type)
+        parallel=False, Z_of_type=atomic_number_of_type)
     return StandaloneHalf(
         atoms=atoms, type_map=dict(type_map), identity=identity)
 
@@ -525,7 +546,8 @@ def write_bulk_data(
     type_map = _type_map_of(atoms)
     species_order = sorted(
         type_map, key=lambda symbol: type_map[symbol])
+    # parallel=False for the same reason as every other ASE call here.
     ase_write(
-        path, atoms, format="lammps-data",
+        path, atoms, format="lammps-data", parallel=False,
         atom_style="atomic", specorder=species_order, masses=True)
     return type_map

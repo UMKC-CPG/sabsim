@@ -956,6 +956,12 @@ record HalfHandle:
     # activation stage RE-READS the slab geometry from data_file, never a
     # warm in-memory object, so the unit is restartable after a crash and
     # identical whether it runs in the member's own job or a separate one.
+    #
+    # [SERIAL I/O] Under MPI the write above happens on ONE rank, then a
+    # barrier, and each reader below re-reads the file for ITSELF. Every
+    # library file call is pinned to serial mode so the library cannot
+    # turn a read into a collective behind the guard (DESIGN §2.6,
+    # ARCHITECTURE §4.1 second discipline).
     data_file: path       # the pristine standalone half on disk
     type_map:  map        # species -> type id, WITH the beam declared
     identity:  string     # the material (report + reference lookup)
@@ -2094,7 +2100,10 @@ function activate_surfaces(handle_A, handle_B, member_specification,
     # own engine, RE-READS the pristine half from handle.data_file (never a
     # warm object from build_slabs), amorphizes it, and writes the
     # amorphized half back to disk for assemble_pair (§7.5) to read — the
-    # ARCHITECTURE §4.3 file handoff.
+    # ARCHITECTURE §4.3 file handoff. [SERIAL I/O] The snapshot taken out
+    # of the engine is collective (every rank holds the full atom set),
+    # but ONE rank writes it and a barrier publishes it, so assemble_pair
+    # finds it on whichever rank reads it back (§7.1).
     #
     # v1 runs the two as this SERIAL pair inside one job (Approach A), each
     # bombardment on the job's FULL core allocation (ARCHITECTURE §4.3 —
@@ -2143,6 +2152,8 @@ function activate_surface(handle, member_specification, potential):
     # DOWN the slab is in-memory WITHIN this one engine/stage, which is
     # exactly what the file discipline allows; it forbids only carrying a
     # live object ACROSS the seam between two stages.
+    # [SERIAL I/O] Every rank performs this read for itself (§7.1); it is
+    # a local act, NOT a collective, and must never become one.
     slab = read_standalone_half(handle)          # geometry + type_map
     # Dispatch on the configured mechanism (DESIGN §3.1) — the same
     # registry idiom as the §8 measures and the §9 press-control switch.

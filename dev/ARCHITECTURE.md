@@ -809,12 +809,33 @@ stand-in and the trained MLIP swap behind.
 **Parallelism comes from running the binding under
 MPI** — `mpirun -np N python driver.py`, each rank building a `lammps`
 instance over `MPI_COMM_WORLD`, so LAMMPS domain-decomposes and scales
-exactly as `lmp_mpi` does; the binding is not single-core. The one
+exactly as `lmp_mpi` does; the binding is not single-core. The FIRST
 discipline this imposes: control decisions key on GLOBAL, collective
 quantities (a thermo `pzz`, a summed grip force) so every rank decides
 identically and stays in lockstep, or are computed on rank 0 and
-broadcast — never on rank-local data, which would desync the ranks. The
-standalone `lmp_mpi` executable is kept as a hand-rerunnable reproducer
+broadcast — never on rank-local data, which would desync the ranks.
+
+**The SECOND discipline: SABSIM owns the communicator, and no library
+may post a collective on it unasked.** Scientific Python libraries
+commonly notice that MPI is active and quietly make their own file
+access collective — rank 0 alone reads the file and broadcasts the
+result to every other rank, which must all take part or none may
+proceed. ASE does exactly this to `read` and `write`. That convenience
+is incompatible with a pipeline that already decides for itself which
+rank writes a file: a read issued inside a `rank == 0` guard becomes a
+broadcast waiting on peers that never call it, and two DIFFERENT
+collectives posted on one communicator is undefined behavior rather than
+an error anyone reports — it surfaces as a deadlock, or as peers handed
+an empty result they cannot distinguish from an empty file. So every
+third-party file operation is placed in EXPLICITLY SERIAL mode (for ASE,
+`parallel=False`), which leaves one rule in force: only SABSIM's own
+code posts collectives on `MPI_COMM_WORLD`. Reads then run per-rank and
+writes stay guarded to one rank — exactly the arrangement §4.3's file
+handoff already assumes. This is the same "the contract is the unit of
+stability" instinct as the driver seam: a library may cross our
+boundary with data, never with control over our ranks.
+
+The standalone `lmp_mpi` executable is kept as a hand-rerunnable reproducer
 (the driver can dump the exact script) and a fallback, NOT as the source
 of parallelism. The whole `mpirun` invocation is the submitted `bond-md`
 job, so a native crash is a failed job the sequencer halts on cleanly

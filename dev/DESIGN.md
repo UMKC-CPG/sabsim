@@ -703,6 +703,21 @@ on those two read-back states. The crystalline all-in-one build (both
 slabs cut and stacked in one step) is the activation-OFF null path, not
 the bonding path.
 
+**Each crossing of that seam is explicitly serial I/O.** A stage runs on
+many MPI ranks at once, so "write the half, then read it back" has to say
+WHICH rank does what. The rule is the same at every crossing: ONE rank
+writes the file, a barrier makes it visible to the rest, and then EVERY
+rank reads it independently for itself. Reading per-rank rather than
+having one rank read and broadcast is both simpler and measurably faster
+here (a few hundred kilobytes parsed from the node's page cache beats
+serializing the same structure and shipping it), and it keeps the read a
+pure local act with no hidden synchronization inside it. The one thing
+this forbids is letting a library supply its own parallel behavior:
+ASE will make `read` and `write` collective the moment it detects MPI,
+which silently breaks the guard above, so all such calls are pinned to
+serial mode (`ARCHITECTURE.md` §4.1, second discipline). Nothing about
+the geometry below depends on the rank count.
+
 **The top half is flipped so its activated face meets the interface.**
 Both halves are bombarded on their TOP (+z) face — the cascade box is
 open at the top and the beam comes down (§3.3). Stacked exactly as built,
@@ -1369,9 +1384,13 @@ persistent driver that reads forces and stresses back without a disk
 round-trip. This is the same driver §3.3 adopts for the step-4 cascade,
 here settled on the Python binding and carried across the entire
 press/pull; `ARCHITECTURE.md` §4.1 gives the execution and parallelism
-model — the binding runs under MPI (`srun -n N python`), so every control
-decision above keys on **global, collective** quantities (a thermo `pzz`,
-a summed grip force) and stays identical across ranks. The LAMMPS dump
+model — the binding runs under MPI (`mpirun -np N python`; on this
+cluster a plain `srun -n N python` does NOT work, since it launches N
+independent copies that each believe they are alone), so every control
+decision above keys on **global, collective** quantities (a thermo
+`pzz`, a summed grip force) and stays identical across ranks, and every
+library file operation is held to explicitly serial mode so nothing but
+our own code posts a collective (§4.1's second discipline). The LAMMPS dump
 stays the durable trajectory artifact the analyzer consumes and
 `run_to_contract` guards; the live read-back serves only the control
 decisions, never replaces the on-disk record.

@@ -671,6 +671,30 @@ foundations, interaction rules. -->
       `slab_thickness >= activated_depth + minimum_bulk_thickness`,
       where `activated_depth` is measured by the §3.5 depth profile.
       Pin `minimum_bulk_thickness` and run the convergence study.
+- [ ] Minimum amorphous-skin thickness — a work-of-separation convergence
+      (design discussion 2026-07-20; the user wants the skin as THIN as the
+      physics allows, for a cheaper DFT cell). The bond is an INTERFACE
+      property — the cross-interface bond density at the contact plane — so
+      the skin's DEPTH matters only through its two other jobs, both a
+      BUFFER role, not a strength role: (a) decoupling the two crystal
+      REGISTRIES (the reason activated bonding joins dissimilar materials),
+      and (b) absorbing the lattice MISFIT. So thinner should not weaken the
+      bond down to a floor: ~5-10 Å for Si/Si (no misfit; it just needs a
+      genuine registry-free amorphous contact), a bit more for Si/SiO2 (to
+      buffer the misfit); below ~5 Å it degrades into a rough crystalline
+      surface — mechanical INTERLOCK, a DIFFERENT regime, not the SAB one we
+      model. VERIFY empirically, do not argue it: assemble pairs at several
+      skin thicknesses (thinned by LOWERING THE DOSE, more than the energy),
+      run the full press/pull, and plot W_sep vs skin thickness; the
+      plateau's THINNEST skin is the operating point. This lands the §3.5
+      gate depth threshold on PHYSICS — retiring the 20 Å `share/activation/
+      Si.toml` stand-in (the sweep's tiny 11 Å skin already passed 3/4
+      metrics, failing only that threshold) — and is the cheapest cell that
+      still gives the converged bond (the §3.6 three-way slab<->energy<->DFT
+      accommodation). Enabled by the end-to-end press/pull; the natural
+      companion to the energy sweep is a DOSE sweep measuring W_sep. Ties
+      `DESIGN.md` §2.5 (thickness criterion), §3.5/§3.6 (depth/dose), §8
+      (bond metric).
 - [ ] STRUCTURAL 2 / §5 follow-ons opened by `DESIGN.md` §5
       (2026-07-09): the target bonding pressure and hold duration; the
       noise-floor thresholds for the zero-load reference state, for
@@ -1188,6 +1212,39 @@ foundations, interaction rules. -->
       as informational provenance a user MAY read. We deliberately do
       NOT build the caveat-surfacing / verdict-withholding machinery once
       planned here, so this effort never competes with core capability.
+- [x] SERIAL FILE I/O under MPI — root-caused and fixed (2026-07-21).
+      SYMPTOM: the 16-rank energy sweep (job 15040489) died on its FIRST
+      grid point, then hung until the 8 h wall clock killed it; 15 of 16
+      ranks raised `StopIteration` out of `read_standalone_half`, meaning
+      ASE parsed ZERO structures from a slab file that was complete and
+      well formed on disk. CAUSE: ASE's `read`/`write` become MPI
+      COLLECTIVES whenever it detects mpi4py — rank 0 does the I/O and
+      broadcasts to all ranks — so our `if rank == 0:` guards posted an
+      ASE broadcast from one rank while the other 15 posted our own
+      `Barrier()` on the SAME communicator. Mismatched collectives on one
+      communicator is undefined behavior, and in ASE's
+      `parallel_generator` a non-root rank handed the resulting `None`
+      yields nothing, so `next()` raises exactly that `StopIteration`.
+      EVIDENCE (probe jobs 15118944 / 15122599, `jobs/bulk_si/
+      probe_readback.py`): 16 ranks reading a SETTLED file all succeed;
+      the freshly written file was byte-identical (same MD5) and read
+      serially in 0.07 s; `AveCPU` 3:43:49 over 15:05 x 16 ranks = 15
+      ranks spinning + 1 blocked; and a `faulthandler` watchdog dumped
+      the stack `ase/parallel.py:180 broadcast <- ase/io/formats.py:821
+      read`. FIX: `parallel=False` on all six package ASE calls plus the
+      sweep's, and `MPI.COMM_WORLD.Abort` in the sweep so a dead rank
+      ends the job instead of renting a node for 8 h. NOT a slowdown —
+      per-rank reads measured 0.02 s vs 0.27 s for the broadcast path.
+      PROPAGATED UP THE CHAIN: `ARCHITECTURE.md` §4.1 gains a SECOND
+      discipline (SABSIM owns the communicator; no library may post a
+      collective on it unasked), `DESIGN.md` §2.6 gains the seam rule
+      (one rank writes, barrier, every rank reads for itself) and its
+      §5 launcher fact was corrected (`srun -n N python` -> `mpirun -np
+      N python`), and `PSEUDOCODE.md` §7.1/§11 carry `[SERIAL I/O]`
+      notes. GUARDED: `test_serial_io_invariant.py` walks the shipped
+      source with `ast` and fails any ASE call lacking `parallel=False`,
+      which is what protects call sites nobody has written yet — the
+      real risk, since this bug is INVISIBLE to single-process tests.
 
 ---
 

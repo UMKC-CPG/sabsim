@@ -214,9 +214,26 @@ def activate_one_half(
         engine, handle.type_map, handle.wafer_tag)
     engine.close()
 
+    # The snapshot above is COLLECTIVE — under multiple MPI ranks every
+    # rank holds the full atom set — but only ONE rank may write the file,
+    # or the ranks race on it. Rank 0 writes; the barrier makes the file
+    # visible to every rank before any returns (so a caller that reads it
+    # back on any rank finds it there).
     amorphized_file = os.path.join(
         output_directory, f"amorphized_{role}.extxyz")
-    ase_write(amorphized_file, amorphized_atoms, format="extxyz")
+    rank = comm.Get_rank() if comm is not None else 0
+    if rank == 0:
+        # parallel=False is REQUIRED here, not optional. Under MPI, ASE
+        # turns a write into a collective in which process zero writes
+        # and then broadcasts to its peers — but this call sits inside a
+        # guard that only process zero enters, so that broadcast would
+        # wait forever on peers that are sitting at the barrier just
+        # below. See the note beside the ASE imports in
+        # sabsim.structure.slab_builder for the whole story.
+        ase_write(amorphized_file, amorphized_atoms,
+                  format="extxyz", parallel=False)
+    if comm is not None:
+        comm.Barrier()
     return result, amorphized_file
 
 
@@ -275,8 +292,13 @@ def assemble_pair_live(
     plane travel forward as the Structure's labeled-group geometry
     (option C, DESIGN.md §2.6).
     """
-    half_a = ase_read(activated.slab_a.data_file, format="extxyz")
-    half_b = ase_read(activated.slab_b.data_file, format="extxyz")
+    # parallel=False on both: each process reads the halves for itself
+    # rather than letting ASE broadcast them, which would collide with
+    # SABSIM's own message passing (slab_builder's ASE imports note).
+    half_a = ase_read(
+        activated.slab_a.data_file, format="extxyz", parallel=False)
+    half_b = ase_read(
+        activated.slab_b.data_file, format="extxyz", parallel=False)
 
     lateral_cell = np.asarray(half_a.get_cell())
     match_area = float(np.linalg.norm(
