@@ -46,6 +46,7 @@ from sabsim.driver.commands import (
     press_drive_commands,
     press_release_commands,
     pull_drive_commands,
+    pull_headroom_commands,
     pull_dump_file,
     recording_commands,
     region_group_commands,
@@ -256,10 +257,16 @@ def settle_reference(
 
 def _pull_setup(
         built, member, force_model, data_file, rate, seed, geometry,
-        output_directory) -> list:
-    """The pull command block WITHOUT the run (the loop issues that)."""
+        output_directory, travel_time: float) -> list:
+    """The pull command block WITHOUT the run (the loop issues that).
+
+    ``travel_time`` is how long this rung may pull for, which sizes the
+    box headroom so the separation cannot carry atoms out through the
+    top (see :func:`pull_headroom_commands`).
+    """
     return (
         preamble_commands(data_file, member.numerical.md_timestep)
+        + pull_headroom_commands(rate, travel_time)
         + force_model_commands(force_model)
         + region_group_commands(built, geometry)
         + integrator_commands(member, seed)
@@ -294,12 +301,15 @@ def pull_at_rate(
     output goes, never the current working directory).
     """
     numerical = member.numerical
+    timestep = to_metal(numerical.md_timestep, "time")
+    # The whole budget this rung may spend, which is also the furthest
+    # the grip can travel — what the box must be tall enough to allow.
+    travel_time = control.max_chunks * control.chunk_steps * timestep
     engine.commands(_pull_setup(
         built, member, force_model, data_file, rate, seed, geometry,
-        output_directory))
+        output_directory, travel_time))
 
     tags = np.asarray(built.atoms.get_tags())
-    timestep = to_metal(numerical.md_timestep, "time")
     rate_metal = to_metal(rate, "velocity")
     noise_floor = to_metal(numerical.noise_floor, "force")
 

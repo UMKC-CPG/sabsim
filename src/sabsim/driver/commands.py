@@ -403,6 +403,39 @@ def pull_drive_commands(rate: Quantity) -> list:
     ]
 
 
+def pull_headroom_commands(
+        rate: Quantity, travel_time: float, margin: float = 10.0) -> list:
+    """Grow the box upward so the pull cannot drag atoms out of it (§9.5).
+
+    The assembled pair is boxed for CONTACT — it carries only the vacuum
+    the two halves were built with. The pull then drives the top grip
+    steadily upward, and with a fixed (non-periodic) z boundary any atom
+    carried past the top of the box is simply DELETED, which LAMMPS
+    reports as "Lost atoms" and treats as a fatal error.
+
+    That is not hypothetical: the first full end-to-end run died exactly
+    here. The pair left 12.75 Å of headroom, the 3.2 m/s rung travels
+    16 Å within its step budget, and the run lost 100 atoms the moment
+    the grip had moved 12.75 Å. The slowest rung had survived only
+    because its budget (5 Å) happened to fit.
+
+    So before pulling, the box is extended by the FULL travel this rung
+    can demand — its speed times the whole chunk budget — plus a margin
+    for the thermal excursion of the freed surface. The box is grown
+    rather than the pair re-boxed, so nothing moves and the geometry the
+    regions were carved from is untouched; the extra space is vacuum
+    above a free surface, which costs only some empty domain.
+
+    ``travel_time`` is the pull's total available time (ps).
+    """
+    speed = to_metal(rate, "velocity")           # Å/ps
+    headroom = speed * travel_time + margin
+    return [
+        f"change_box all z final $(zlo) $(zhi+{_lammps_number(headroom)}) "
+        f"units box",
+    ]
+
+
 def press_release_commands(member: MemberSpecification) -> list:
     """Release the press drive so the reference settles under NO load (§9.4).
 

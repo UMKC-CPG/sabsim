@@ -262,3 +262,29 @@ def test_pull_script_records_and_runs_the_distance(tmp_path):
     # 20 Å at 3.2 m/s (0.032 Å/ps) = 625 ps / 0.001 ps = 625000 steps.
     runs = [c for c in commands if c.startswith("run ")]
     assert runs == ["run 625000"]
+
+
+def test_pull_grows_the_box_to_fit_its_own_travel():
+    """The box must clear the furthest the grip can be driven (§9.5).
+
+    The regression: the assembled pair is boxed for CONTACT and left only
+    12.75 A of headroom, while the 3.2 m/s rung travels 16 A within its
+    step budget. With a fixed z boundary the overrun DELETED atoms, and
+    the first full end-to-end run died on "Lost atoms: 8799 -> 8699"
+    precisely when the grip had moved that 12.75 A.
+    """
+    from sabsim.driver.commands import pull_headroom_commands
+
+    # 500 ps of budget: 3.2 m/s = 0.032 A/ps travels 16 A.
+    commands = pull_headroom_commands(Quantity(3.2, "m/s"), 500.0)
+    assert len(commands) == 1
+    command = commands[0]
+    assert command.startswith("change_box all z final")
+    assert "units box" in command
+    # 16 A of travel plus the default 10 A margin.
+    assert "zhi+26" in command, command
+
+    # A faster rung must ask for proportionally more room, or it would
+    # overrun exactly the way the failing one did.
+    faster = pull_headroom_commands(Quantity(10.0, "m/s"), 500.0)[0]
+    assert "zhi+60" in faster, faster
