@@ -380,10 +380,35 @@ def assemble_pair_live(
     data file the press will load, and the per-wafer z-ranges + interface
     plane travel forward as the Structure's labeled-group geometry
     (option C, DESIGN.md §2.6).
+
+    RUNS ON ONE RANK, AND THAT IS NOT AN OPTIMISATION. Unlike the stages
+    on either side of it, this one is pure geometry: no LAMMPS, nothing
+    domain-decomposed, so every rank would compute the IDENTICAL answer.
+    That is merely wasteful in time — but it is fatal in memory, because
+    the clash check compares every A atom with every B atom and so holds
+    matrices of N_A x N_B doubles (~1 GB for two 4400-atom halves). One
+    copy is fine; thirty-two copies of it on one node is 32 GB, and the
+    first full run was OUT-OF-MEMORY killed here. So rank 0 does the work
+    and broadcasts the result, which doubles as the synchronisation that
+    publishes the written file to every rank.
     """
-    # parallel=False on both: each process reads the halves for itself
-    # rather than letting ASE broadcast them, which would collide with
-    # SABSIM's own message passing (slab_builder's ASE imports note).
+    rank = comm.Get_rank() if comm is not None else 0
+    structure = (_assemble_on_one_rank(activated, member, scratch_directory)
+                 if rank == 0 else None)
+    if comm is not None:
+        structure = comm.bcast(structure, root=0)
+    return structure
+
+
+def _assemble_on_one_rank(
+        activated,
+        member: MemberSpecification,
+        scratch_directory: str) -> Structure:
+    """The assembly itself, executed by a single rank (see above)."""
+    # parallel=False on both: this rank reads the halves itself rather
+    # than letting ASE broadcast them, which would collide with SABSIM's
+    # own message passing (slab_builder's ASE imports note) — and here
+    # the peers are not even in this function to take part.
     half_a = ase_read(
         activated.slab_a.data_file, format="extxyz", parallel=False)
     half_b = ase_read(
@@ -402,9 +427,9 @@ def assemble_pair_live(
         clash_floor=to_metal(member.numerical.clash_floor, "distance"))
 
     pair_file = os.path.join(scratch_directory, "assembled_pair.data")
-    # The assembly is deterministic, so every rank built the same pair;
-    # one rank writes it and the barrier publishes it to the press.
-    _publish_file(comm, lambda: write_lammps_data(built, pair_file))
+    # Already on the single assembling rank, so this is a plain write;
+    # the caller's broadcast is what publishes it to the other ranks.
+    write_lammps_data(built, pair_file)
     return Structure(
         note=(f"assembled amorphized pair "
               f"{activated.slab_a.identity}/{activated.slab_b.identity}; "
