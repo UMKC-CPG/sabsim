@@ -1648,9 +1648,35 @@ therefore emits **two curves**:
 
 **Complete separation** is declared when the interface opening exceeds
 the potential's cutoff (6.0 Å for `se_e2_a`, §4.6) *and* the averaged
-force has returned to zero within the noise floor. The mechanical work
-integral runs from the §5.3 reference state to that point and stops;
-prior art integrates the entire record, noise tail included.
+force has returned to zero. The mechanical work integral runs from the
+§5.3 reference state to that point and stops; prior art integrates the
+entire record, noise tail included.
+
+**"Returned to zero" is a STATISTICAL statement, not a threshold.** The
+grip reaction is a sum over every atom in the grip, and at 300 K that
+sum fluctuates hard: measured on a fully separated Si/Si pair — the two
+slabs 40 Å apart with nothing whatever between them — it swings across
+±20 eV/Å with a standard deviation near 7 eV/Å. Testing such a quantity
+against a small fixed constant asks the wrong question. The first full
+end-to-end run compared it against a 0.05 eV/Å floor, roughly a
+hundredth of the noise, and so reported that a pair which had visibly
+come apart had never separated, at every rate in the sweep.
+
+The right question is whether the force is DISTINGUISHABLE from zero
+given its own scatter. So the test is on the mean and its uncertainty:
+the averaged force counts as returned to zero when its magnitude falls
+within a small number of standard errors of zero (v1: two). On the same
+separated pair the windowed mean is +0.54 eV/Å against a standard error
+of 0.50 — about one standard error out, comfortably zero — while the
+still-bonded state earlier in the same pull sits at −1.62 eV/Å and is
+not. The criterion therefore calibrates itself to the noise the system
+actually has, instead of to a constant that has to be re-guessed for
+every grip size, temperature, and interface area.
+
+The configured `noise_floor` stays as a FLOOR beneath that test, for the
+degenerate case of a noiseless or near-noiseless record (a quasi-static
+mock, a zero-temperature run) where the standard error collapses toward
+zero and would otherwise demand impossible exactness.
 
 **The dissipation identity is a sign check.** Step 7 also records the
 potential energy of the bonded relaxed state and of the fully separated,

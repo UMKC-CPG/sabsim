@@ -218,3 +218,66 @@ def test_averaging_a_record_shorter_than_the_window_keeps_the_samples():
     kept_disp, kept_force = averaged_force_curve(disp, force, window=0.5)
     assert len(kept_disp) == len(disp), "no sample may be discarded"
     assert len(kept_force) == len(disp)
+
+
+# ---------------------------------------------------------------------
+# Complete separation is a STATISTICAL test (DESIGN.md §5.5 / §9.6).
+# ---------------------------------------------------------------------
+
+def test_a_thermally_noisy_but_zero_force_counts_as_separated():
+    """A force indistinguishable from zero must resolve as separated.
+
+    Calibrated on the real measurement that exposed this: a fully
+    separated Si/Si pair, the slabs 40 A apart with nothing between
+    them, still showed a grip reaction with a standard deviation near
+    7 eV/A and a windowed mean of +0.54 eV/A -- about one standard error
+    from zero. Against the configured 0.05 eV/A floor that reads as
+    "still bonded" forever, which is exactly what the first end-to-end
+    run reported at every rate it pulled.
+    """
+    import numpy as np
+    from sabsim.driver.analysis import separation_point
+
+    opening = [2.0, 4.0, 8.0, 12.0]        # opens past the 6 A cutoff
+    force = [-1.62, -1.20, 0.54, 0.51]     # settles to ~zero, noisily
+    scatter = [0.50, 0.50, 0.50, 0.50]     # standard error of each mean
+
+    index = separation_point(
+        opening, force, cutoff=6.0, noise_floor=0.05,
+        force_scatter=scatter, sigmas=2.0)
+    assert index == 2, (
+        "a mean of 0.54 with a standard error of 0.50 is ~1 sigma from "
+        "zero and must count as separated")
+
+    # Without the scatter the old absolute test still governs, and this
+    # same record never resolves -- the regression in one assertion.
+    assert separation_point(
+        opening, force, cutoff=6.0, noise_floor=0.05) is None
+
+
+def test_a_real_load_is_not_mistaken_for_zero():
+    """A force well outside its own scatter is NOT separated.
+
+    The counterpart: making the test statistical must not make it
+    permissive. A still-bonded interface carries a mean many standard
+    errors from zero and has to stay unresolved.
+    """
+    from sabsim.driver.analysis import separation_point
+    opening = [8.0, 9.0, 10.0]
+    force = [-1.62, -1.55, -1.60]          # a real, sustained load
+    scatter = [0.10, 0.10, 0.10]           # tight: 16 sigma from zero
+    assert separation_point(
+        opening, force, cutoff=6.0, noise_floor=0.05,
+        force_scatter=scatter, sigmas=2.0) is None
+
+
+def test_scatter_curve_matches_the_averaged_curve_length():
+    """The scatter must align sample-for-sample with the means."""
+    from sabsim.driver.analysis import (averaged_force_curve,
+                                        force_scatter_curve)
+    disp = [0.1 * (i + 1) for i in range(30)]
+    force = [0.3, 0.1] * 15
+    _, averaged = averaged_force_curve(disp, force, window=0.5)
+    scatter = force_scatter_curve(disp, force, window=0.5)
+    assert len(scatter) == len(averaged)
+    assert (scatter > 0).any(), "an alternating force has real scatter"

@@ -272,6 +272,43 @@ def averaged_force_curve(
     return disp, averaged
 
 
+def force_scatter_curve(
+        displacement,
+        force,
+        window: float,
+        drop_leading_zero: bool = True) -> np.ndarray:
+    """The STANDARD ERROR of the mean in each averaging window (§5.5).
+
+    The companion to :func:`averaged_force_curve`, computed over exactly
+    the same windows, so entry *i* is the uncertainty on that function's
+    entry *i*. It exists because "the force has returned to zero" is a
+    statistical claim: the grip reaction is a sum over every grip atom
+    and at 300 K it swings across tens of eV/Å even when the slabs are
+    far apart and nothing connects them. What settles is the MEAN, not
+    the instantaneous value, and a mean is only as meaningful as its
+    scatter — so the separation test needs both.
+
+    A window holding a single sample has no scatter to speak of; its
+    standard error is reported as zero, which leaves the configured
+    noise floor as the only bar (see :func:`separation_point`).
+    """
+    disp = np.asarray(displacement, dtype=float)
+    forces = np.asarray(force, dtype=float)
+    scatter = np.zeros(len(disp))
+    window_full = np.empty(len(disp), dtype=bool)
+    for index, center in enumerate(disp):
+        in_window = (disp <= center) & (disp >= center - window)
+        sample = forces[in_window]
+        if sample.size > 1:
+            # Standard error of the mean: the spread of the samples
+            # divided by the root of how many there are.
+            scatter[index] = float(sample.std(ddof=1) / np.sqrt(sample.size))
+        window_full[index] = (center - disp[0]) >= window
+    if drop_leading_zero and window_full.any():
+        return scatter[window_full]
+    return scatter
+
+
 def reexpress_versus_opening(
         curve_displacement,
         curve_force,
@@ -296,20 +333,41 @@ def separation_point(
         opening,
         averaged_force,
         cutoff: float,
-        noise_floor: float) -> int | None:
+        noise_floor: float,
+        force_scatter=None,
+        sigmas: float = 2.0) -> int | None:
     """First frame of COMPLETE separation, or None if never reached (§9.6).
 
     Complete separation is the first sample where the interface opening
     exceeds the potential cutoff AND the averaged force has returned to
-    zero within the noise floor. The M1 work integral stops HERE, not at
-    the record's end (prior art integrated the whole noise tail). None
-    means the pull never fully separated within the record.
+    zero. The M1 work integral stops HERE, not at the record's end (prior
+    art integrated the whole noise tail). None means the pull never fully
+    separated within the record.
+
+    "Returned to zero" is decided STATISTICALLY when ``force_scatter``
+    (the per-window standard error from :func:`force_scatter_curve`) is
+    supplied: the force counts as zero when its magnitude falls within
+    ``sigmas`` standard errors of it. That is the only test that can work
+    on this quantity — a fully separated Si/Si pair still shows a grip
+    reaction with a standard deviation near 7 eV/Å, so comparing it to a
+    small fixed constant declares "still bonded" forever, which is
+    exactly what the first end-to-end run did at every rate it tried.
+
+    ``noise_floor`` remains as a FLOOR under that test, so a noiseless
+    record (a quasi-static mock, a zero-temperature run) whose standard
+    error collapses toward zero is not asked for impossible exactness.
+    With no scatter supplied the floor alone applies, preserving the
+    original behaviour for callers that have only a mean.
     """
     openings = np.asarray(opening, dtype=float)
     forces = np.asarray(averaged_force, dtype=float)
+    scatter = (np.zeros(len(forces)) if force_scatter is None
+               else np.asarray(force_scatter, dtype=float))
     for index in range(len(openings)):
-        if (openings[index] > cutoff
-                and abs(forces[index]) <= noise_floor):
+        allowed = noise_floor
+        if index < len(scatter):
+            allowed = max(noise_floor, sigmas * float(scatter[index]))
+        if openings[index] > cutoff and abs(forces[index]) <= allowed:
             return index
     return None
 

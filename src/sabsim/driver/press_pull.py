@@ -28,6 +28,7 @@ import numpy as np
 from sabsim.driver.analysis import (
     averaged_force_curve,
     contact_reached,
+    force_scatter_curve,
     interface_opening,
     net_grip_force,
     potential_energy_drift,
@@ -46,8 +47,8 @@ from sabsim.driver.commands import (
     press_drive_commands,
     press_release_commands,
     pull_drive_commands,
-    pull_headroom_commands,
     pull_dump_file,
+    pull_headroom_commands,
     recording_commands,
     region_group_commands,
     to_metal,
@@ -273,7 +274,7 @@ def _pull_setup(
         + grip_hold_and_readback_commands()
         + pull_drive_commands(rate)
         + recording_commands(
-            member, pull_dump_file(output_directory, member)))
+            member, pull_dump_file(output_directory, member, rate)))
 
 
 def pull_at_rate(
@@ -353,10 +354,15 @@ def pull_at_rate(
                 break
 
     grip_curve, averaged = averaged_force_curve(displacement, force, window)
+    # The scatter on each windowed mean, over the SAME windows, so the
+    # separation test can ask whether the force is distinguishable from
+    # zero rather than compare a thermally noisy sum to a constant.
+    scatter = force_scatter_curve(displacement, force, window)
     opening_curve, _ = reexpress_versus_opening(
         grip_curve, averaged, displacement, opening)
     separation_index = separation_point(
-        opening_curve, averaged, control.separation_cutoff, noise_floor)
+        opening_curve, averaged, control.separation_cutoff, noise_floor,
+        force_scatter=scatter)
     # ONE definition of "separated": the reduced curves are authoritative,
     # because they are what the §8.4 work integral is taken over. A pull
     # is complete exactly when that integral has an endpoint to stop at.

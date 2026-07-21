@@ -472,8 +472,17 @@ def recording_commands(
     ]
 
 
+def _rate_slug(rate: Quantity) -> str:
+    """A filesystem-safe tag for one pull rate, e.g. 3.2 m/s -> 3p2mps."""
+    # "/" is not filesystem-friendly and dropping it turns m/s into
+    # "ms", which reads as milliseconds; "p" for "per" keeps it legible.
+    return f"{rate.value:g}".replace(".", "p") + rate.unit.replace("/", "p")
+
+
 def pull_dump_file(
-        output_directory: str, member: MemberSpecification) -> str:
+        output_directory: str,
+        member: MemberSpecification,
+        rate: Quantity | None = None) -> str:
     """Where a pull's trajectory dump is written (ARCHITECTURE.md §4.1).
 
     Run output belongs under the run's OWN directory — the scratch job
@@ -484,7 +493,10 @@ def pull_dump_file(
     NAME, because the §8 snapshot selector reads the dump back by that
     name, so it is part of the contract rather than a caller's choice.
     """
-    return os.path.join(output_directory, f"{member.name}_pull.dump")
+    if rate is None:
+        return os.path.join(output_directory, f"{member.name}_pull.dump")
+    return os.path.join(
+        output_directory, f"{member.name}_pull_{_rate_slug(rate)}.dump")
 
 
 # ---------------------------------------------------------------------
