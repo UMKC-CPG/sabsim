@@ -205,6 +205,10 @@ class PullOutcome:
     separation_index: int | None = None
     grip_displacement: tuple = ()      # Å, per recorded frame
     force_vs_grip: tuple = ()          # eV/Å, tension-positive, per frame
+    # False when the run lost an atom out of the open-z box (§9.6). The
+    # curve is then void: the analyzer must refuse it rather than
+    # integrate a system whose atom count changed underneath it.
+    atoms_conserved: bool = True
 
 
 @dataclass(frozen=True)

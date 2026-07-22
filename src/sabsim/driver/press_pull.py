@@ -26,6 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from sabsim.driver.analysis import (
+    atom_count_conserved,
     averaged_force_curve,
     contact_reached,
     force_scatter_curve,
@@ -114,6 +115,9 @@ class PullResult:
     force_vs_opening: np.ndarray
     separation_index: int | None
     complete: bool
+    # False when the box silently ate an atom (§9.6): the curve above is
+    # then a fiction, not a measurement, and must not be integrated.
+    atoms_conserved: bool = True
 
 
 def _wafer_z(positions: np.ndarray, tags: np.ndarray) -> tuple:
@@ -311,6 +315,11 @@ def pull_at_rate(
         output_directory, travel_time))
 
     tags = np.asarray(built.atoms.get_tags())
+    # The atom count as the pull STARTS, to be compared with the count it
+    # ends on. A non-periodic z boundary deletes anything driven out of
+    # the box without stopping the run, so this is the only thing that
+    # tells a measurement from a fiction (§9.6, §5.6).
+    initial_atom_count = int(np.asarray(engine.positions()).shape[0])
     rate_metal = to_metal(rate, "velocity")
     noise_floor = to_metal(numerical.noise_floor, "force")
 
@@ -353,6 +362,9 @@ def pull_at_rate(
             if remaining_tail <= 0:
                 break
 
+    final_atom_count = int(np.asarray(engine.positions()).shape[0])
+    conserved = atom_count_conserved(initial_atom_count, final_atom_count)
+
     grip_curve, averaged = averaged_force_curve(displacement, force, window)
     # The scatter on each windowed mean, over the SAME windows, so the
     # separation test can ask whether the force is distinguishable from
@@ -372,4 +384,5 @@ def pull_at_rate(
         interface_opening=opening_curve,
         force_vs_opening=averaged,
         separation_index=separation_index,
-        complete=separation_index is not None)
+        complete=separation_index is not None,
+        atoms_conserved=conserved)

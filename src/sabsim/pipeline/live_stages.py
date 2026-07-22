@@ -538,11 +538,14 @@ def run_bond_debond_md_live(
         pulls.append(PullOutcome(
             rate_value=rate.value, rate_unit=rate.unit,
             note=("separated" if result.complete
+                  else "LOST ATOMS — result void (§9.6)"
+                  if not result.atoms_conserved
                   else "did not fully separate within the pull budget"),
             complete=result.complete,
             separation_index=result.separation_index,
             grip_displacement=tuple(result.grip_displacement),
-            force_vs_grip=tuple(result.force_vs_grip)))
+            force_vs_grip=tuple(result.force_vs_grip),
+            atoms_conserved=result.atoms_conserved))
 
     return BondDebondResult(
         press=PressOutcome(
@@ -588,7 +591,12 @@ def run_analyzer_live(
     # the smallest rate is the most quasi-static, §5.4).
     works = []
     for pull in bond_debond.pulls:
-        if pull.complete and pull.separation_index is not None:
+        # A pull that lost atoms is VOID, not merely incomplete: the box
+        # deleted material midway, so the force curve describes a system
+        # that no longer exists. It is refused before it can be
+        # integrated (§9.6) rather than quietly averaged in.
+        if (pull.complete and pull.separation_index is not None
+                and pull.atoms_conserved):
             work = work_of_separation(
                 pull.grip_displacement, pull.force_vs_grip,
                 pull.separation_index, interface_area)
