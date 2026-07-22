@@ -152,15 +152,25 @@ def test_reexpress_versus_opening_interpolates_the_opening():
     assert list(forces) == [1.0, 2.0, 3.0]
 
 
-def test_separation_point_finds_open_and_force_free_frame():
-    """Separation is the first frame past the cutoff at the noise floor."""
-    opening = [1.0, 2.0, 5.0, 7.0, 9.0]
-    force = [5.0, 3.0, 0.5, 0.02, 0.01]
-    index = separation_point(opening, force, cutoff=6.0, noise_floor=0.05)
-    assert index == 3
-    # Never separated within the record -> None.
+def test_separation_point_needs_open_AND_unbridged():
+    """Separation is the first frame past the cutoff with nothing joined.
+
+    Both conditions are required. An interface can be geometrically wide
+    open while strands still span it — which is exactly the case that
+    made the old force-based rule keep integrating — so a wide opening
+    alone must not count as separated.
+    """
+    opening = [1.0, 2.0, 5.0, 7.0, 9.0, 11.0]
+    bridges = [420, 260, 55, 12, 3, 0]
+    assert separation_point(opening, bridges, cutoff=6.0) == 5
+
+    # Wide open the whole way, but still joined -> never separated.
+    always_bridged = [9.0, 11.0, 13.0]
     assert separation_point(
-        opening, force, cutoff=100.0, noise_floor=0.05) is None
+        always_bridged, [7, 4, 2], cutoff=6.0) is None
+
+    # Unbridged but not yet open -> not separated either.
+    assert separation_point([1.0, 2.0], [0, 0], cutoff=6.0) is None
 
 
 def test_atom_count_conservation_is_a_gate():
@@ -221,73 +231,55 @@ def test_averaging_a_record_shorter_than_the_window_keeps_the_samples():
 
 
 # ---------------------------------------------------------------------
-# Complete separation is a STATISTICAL test (DESIGN.md §5.5 / §9.6).
+# Complete separation is decided by BRIDGING (DESIGN.md §5.5).
 # ---------------------------------------------------------------------
 
-def test_a_thermally_noisy_but_zero_force_counts_as_separated():
-    """A force indistinguishable from zero must resolve as separated.
 
-    Calibrated on the real measurement that exposed this: a fully
-    separated Si/Si pair, the slabs 40 A apart with nothing between
-    them, still showed a grip reaction with a standard deviation near
-    7 eV/A and a windowed mean of +0.54 eV/A -- about one standard error
-    from zero. Against the configured 0.05 eV/A floor that reads as
-    "still bonded" forever, which is exactly what the first end-to-end
-    run reported at every rate it pulled.
+def test_bridges_counted_across_the_periodic_boundary():
+    """Bonds joined around the lateral edge still count as joining.
+
+    The cell repeats sideways, so an atom near one edge is a genuine
+    neighbour of one near the opposite edge. Missing that would report
+    an interface as parted while it is still held together.
     """
     import numpy as np
-    from sabsim.driver.analysis import separation_point
+    from sabsim.driver.analysis import cross_interface_bridges
+    cell = np.diag([10.0, 10.0, 60.0])
+    # Two atoms straddling z=20, 9.5 A apart the long way round in x but
+    # only 0.5 A apart across the periodic boundary.
+    atoms = np.array([[0.25, 5.0, 19.5], [9.75, 5.0, 20.5]])
+    assert cross_interface_bridges(
+        atoms, cell, plane_z=20.0, bond_cutoff=2.8) == 1
 
-    opening = [2.0, 4.0, 8.0, 12.0]        # opens past the 6 A cutoff
-    force = [-1.62, -1.20, 0.54, 0.51]     # settles to ~zero, noisily
-    scatter = [0.50, 0.50, 0.50, 0.50]     # standard error of each mean
-
-    index = separation_point(
-        opening, force, cutoff=6.0, noise_floor=0.05,
-        force_scatter=scatter, sigmas=2.0)
-    assert index == 2, (
-        "a mean of 0.54 with a standard error of 0.50 is ~1 sigma from "
-        "zero and must count as separated")
-
-    # Without the scatter the old absolute test still governs, and this
-    # same record never resolves -- the regression in one assertion.
-    assert separation_point(
-        opening, force, cutoff=6.0, noise_floor=0.05) is None
+    # The same two atoms far apart in z: nothing crosses.
+    far = np.array([[0.25, 5.0, 5.0], [9.75, 5.0, 40.0]])
+    assert cross_interface_bridges(
+        far, cell, plane_z=20.0, bond_cutoff=2.8) == 0
 
 
-def test_a_real_load_is_not_mistaken_for_zero():
-    """A force well outside its own scatter is NOT separated.
+def test_bridging_ignores_which_wafer_an_atom_came_from():
+    """Bridging is geometric; a TRANSFERRED atom is not a bridge.
 
-    The counterpart: making the test statistical must not make it
-    permissive. A still-bonded interface carries a mean many standard
-    errors from zero and has to stay unresolved.
+    The regression this guards actually happened. The first version
+    counted atoms of wafer A within a bond of wafer B, using the labels
+    recording which half each atom was BUILT in. Pulling transfers a few
+    dozen atoms permanently into the opposite block, and each then sits
+    surrounded by neighbours of the other label — so the count never
+    fell below about 130 even with the slabs 53 A apart, and the pull
+    could never stop. Only position may decide.
     """
-    from sabsim.driver.analysis import separation_point
-    opening = [8.0, 9.0, 10.0]
-    force = [-1.62, -1.55, -1.60]          # a real, sustained load
-    scatter = [0.10, 0.10, 0.10]           # tight: 16 sigma from zero
-    assert separation_point(
-        opening, force, cutoff=6.0, noise_floor=0.05,
-        force_scatter=scatter, sigmas=2.0) is None
-
-
-def test_scatter_curve_matches_the_averaged_curve_length():
-    """The scatter must align sample-for-sample with the means."""
-    from sabsim.driver.analysis import (averaged_force_curve,
-                                        force_scatter_curve)
-    disp = [0.1 * (i + 1) for i in range(30)]
-    force = [0.3, 0.1] * 15
-    _, averaged = averaged_force_curve(disp, force, window=0.5)
-    scatter = force_scatter_curve(disp, force, window=0.5)
-    assert len(scatter) == len(averaged)
-    assert (scatter > 0).any(), "an alternating force has real scatter"
-
-
-# ---------------------------------------------------------------------
-# Dividing-surface robustness (the defect that flickered a bonded
-# interface between 1.4 A and 11 A, 2026-07-21).
-# ---------------------------------------------------------------------
-
+    import numpy as np
+    from sabsim.driver.analysis import cross_interface_bridges
+    cell = np.diag([20.0, 20.0, 200.0])
+    # Two well-separated blocks. Whatever their provenance, no bond
+    # crosses the plane between them.
+    lower = np.column_stack([
+        np.full(50, 5.0), np.full(50, 5.0), np.linspace(10.0, 30.0, 50)])
+    upper = np.column_stack([
+        np.full(50, 5.0), np.full(50, 5.0), np.linspace(80.0, 100.0, 50)])
+    atoms = np.vstack([lower, upper])
+    assert cross_interface_bridges(
+        atoms, cell, plane_z=55.0, bond_cutoff=2.8) == 0
 def test_a_bin_exactly_on_the_threshold_is_a_crossing():
     """An exact threshold hit must not be read as "no crossing".
 
@@ -340,3 +332,25 @@ def test_layered_crystal_does_not_scatter_the_surface():
     assert smoothed >= 36.0, (
         f"a combed profile put the surface at {smoothed}, well inside "
         f"a slab that runs to ~39 A")
+
+
+def test_a_flickering_last_bond_does_not_end_the_pull():
+    """A momentary zero is not separation; the count must stay down.
+
+    Observed on the real trajectory: one surviving bond carried in and
+    out of range by thermal motion, intermittently present from 32 A of
+    pulling to 42 A. Stopping at the first zero sets the endpoint of the
+    work integral by a single lucky jiggle.
+    """
+    from sabsim.driver.analysis import separation_point
+    opening = [8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0]
+    #                    v flicker      v flicker    v truly gone
+    bridges = [4, 2, 0, 1, 0, 0, 0, 0]
+    index = separation_point(opening, bridges, cutoff=6.0,
+                             sustained_frames=3)
+    assert index == 4, (
+        f"expected the first zero that STAYS zero (index 4), got {index}")
+
+    # With no sustain requirement the flicker at index 2 would win.
+    assert separation_point(opening, bridges, cutoff=6.0,
+                            sustained_frames=1) == 2

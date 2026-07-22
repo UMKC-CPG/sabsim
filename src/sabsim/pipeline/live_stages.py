@@ -545,7 +545,8 @@ def run_bond_debond_md_live(
             separation_index=result.separation_index,
             grip_displacement=tuple(result.grip_displacement),
             force_vs_grip=tuple(result.force_vs_grip),
-            atoms_conserved=result.atoms_conserved))
+            atoms_conserved=result.atoms_conserved,
+            bridges_at_separation=result.bridges_at_separation))
 
     return BondDebondResult(
         press=PressOutcome(

@@ -1647,12 +1647,50 @@ therefore emits **two curves**:
   interface actually is.
 
 **Complete separation** is declared when the interface opening exceeds
-the potential's cutoff (6.0 Å for `se_e2_a`, §4.6) *and* the averaged
-force has returned to zero. The mechanical work integral runs from the
+the potential's cutoff (6.0 Å for `se_e2_a`, §4.6) *and* NO ATOM STILL
+BRIDGES THE TWO WAFERS — no atom of one wafer lies within a bond length
+of any atom of the other. The mechanical work integral runs from the
 §5.3 reference state to that point and stops; prior art integrates the
 entire record, noise tail included.
 
-**"Returned to zero" is a STATISTICAL statement, not a threshold.** The
+**Why bridging and not "the force has fallen to zero".** The obvious
+test — keep integrating until the pulling force dies away — was tried
+first, and it measures the wrong thing. Two rough surfaces do not let
+go everywhere at once. In scattered places atoms stay attached to both
+sides, and as the wafers move apart those places draw out into thin
+STRANDS of silicon spanning the gap. A strand transmits force long
+after the faces themselves are beyond each other's reach, so waiting
+for zero force means waiting for the last strand to snap.
+
+Measured on the v1 Si/Si pair, that is not a small correction. The two
+faces passed out of range of one another after 10 Å of pulling; the
+force did not go quiet until 25 Å; and **half of the total reported
+work accrued in between**, carried by about ONE PERCENT of the atoms
+(roughly 80 of 8799). Dividing that by the full nominal contact area
+reports a few accidental filaments as though the whole interface had
+done the work.
+
+Three things make that unacceptable rather than merely imprecise. The
+number stops being a property of the INTERFACE and becomes a property
+of where a few dozen atoms happened to be standing. It is not
+reproducible, since a different thermal seed draws a different web —
+so a large part of the answer is a dice roll reported with the same
+confidence as the rest. And it is the regime our potentials describe
+WORST: a stretched, low-coordination chain is the furthest thing from
+the four-coordinated bulk silicon a classical model is fitted to, and
+this family of model is independently known to draw silicon out where
+the real material would snap.
+
+Bridging asks the question the measure actually means: has the
+interface come apart? It is also the quantity §8 already uses to define
+bonding (cross-interface bond density), so the pull stops on the same
+notion of "joined" that the bond metric is built from. The bridging
+count is REPORTED alongside the work, so a result that stopped with
+material still spanning the gap declares itself instead of hiding.
+
+**A NOTE ON THE FORCE, kept because it was learned the hard way.** The
+force is no longer part of the separation criterion, but anyone who
+reintroduces a force test needs this. The
 grip reaction is a sum over every atom in the grip, and at 300 K that
 sum fluctuates hard: measured on a fully separated Si/Si pair — the two
 slabs 40 Å apart with nothing whatever between them — it swings across

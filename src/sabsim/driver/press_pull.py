@@ -29,8 +29,9 @@ from sabsim.driver.analysis import (
     atom_count_conserved,
     averaged_force_curve,
     contact_reached,
-    force_scatter_curve,
+    cross_interface_bridges,
     interface_opening,
+    interface_plane,
     net_grip_force,
     potential_energy_drift,
     reexpress_versus_opening,
@@ -78,6 +79,11 @@ class RunControl:
     equilibrate_chunks: int = 20
     separation_cutoff: float = 6.0     # Å, the §4.6 potential cutoff
     density_bin_width: float = 1.0     # Å, dividing-surface profile bin
+    # The distance within which two atoms count as still JOINED, which
+    # is what "the interface has come apart" is measured against (§5.5).
+    # STAND-IN matching live_stages' _BOND_CUTOFF; the §3.5 reference
+    # data carries a bond_cutoff that both should eventually read.
+    bond_cutoff: float = 2.8           # Å, Si first g(r) minimum
 
 
 @dataclass(frozen=True)
@@ -118,6 +124,12 @@ class PullResult:
     # False when the box silently ate an atom (§9.6): the curve above is
     # then a fiction, not a measurement, and must not be integrated.
     atoms_conserved: bool = True
+    # Atom pairs still spanning the interface, per recorded frame, and
+    # the count at the moment the pull stopped. Reported so a result
+    # that stopped with material still joining the wafers declares
+    # itself rather than hiding inside the number (§5.5).
+    bridges: np.ndarray | None = None
+    bridges_at_separation: int | None = None
 
 
 def _wafer_z(positions: np.ndarray, tags: np.ndarray) -> tuple:
@@ -330,18 +342,28 @@ def pull_at_rate(
     confirmation_chunks = (
         int(np.ceil(window / per_chunk)) + 1 if per_chunk else 1)
 
+    lateral_cell = np.asarray(built.atoms.get_cell())
     displacement: list = []
     force: list = []
     opening: list = []
+    bridges: list = []
     remaining_tail = None
     for chunk in range(control.max_chunks):
         engine.commands([f"run {control.chunk_steps}"])
         elapsed = (chunk + 1) * control.chunk_steps * timestep
         displacement.append(rate_metal * elapsed)
-        z_lower, z_upper = _wafer_z(np.asarray(engine.positions()), tags)
+        frame = np.asarray(engine.positions())
+        z_lower, z_upper = _wafer_z(frame, tags)
         opening.append(interface_opening(
             z_lower, z_upper, control.density_bin_width))
         force.append(engine.grip_reaction("top"))
+        # Bonds crossing the interface plane, counted over ALL atoms
+        # regardless of which wafer they were built in — a transferred
+        # atom belongs to whichever body it now sits in.
+        bridges.append(cross_interface_bridges(
+            frame, lateral_cell,
+            interface_plane(z_lower, z_upper, control.density_bin_width),
+            control.bond_cutoff))
 
         # The raw test is a STOPPING heuristic, not the verdict. It says
         # "there is probably nothing more to learn here", and the run
@@ -355,7 +377,7 @@ def pull_at_rate(
         # the same curves the work integral is computed over.
         if remaining_tail is None:
             if (opening[-1] > control.separation_cutoff
-                    and abs(force[-1]) <= noise_floor):
+                    and bridges[-1] == 0):
                 remaining_tail = confirmation_chunks
         else:
             remaining_tail -= 1
@@ -366,15 +388,14 @@ def pull_at_rate(
     conserved = atom_count_conserved(initial_atom_count, final_atom_count)
 
     grip_curve, averaged = averaged_force_curve(displacement, force, window)
-    # The scatter on each windowed mean, over the SAME windows, so the
-    # separation test can ask whether the force is distinguishable from
-    # zero rather than compare a thermally noisy sum to a constant.
-    scatter = force_scatter_curve(displacement, force, window)
     opening_curve, _ = reexpress_versus_opening(
         grip_curve, averaged, displacement, opening)
+    # The bridge count carried onto the same samples as the curve, so
+    # the stop is decided on the record the work integral runs over.
+    bridge_curve, _ = reexpress_versus_opening(
+        grip_curve, averaged, displacement, bridges)
     separation_index = separation_point(
-        opening_curve, averaged, control.separation_cutoff, noise_floor,
-        force_scatter=scatter)
+        opening_curve, bridge_curve, control.separation_cutoff)
     # ONE definition of "separated": the reduced curves are authoritative,
     # because they are what the §8.4 work integral is taken over. A pull
     # is complete exactly when that integral has an endpoint to stop at.
@@ -385,4 +406,8 @@ def pull_at_rate(
         force_vs_opening=averaged,
         separation_index=separation_index,
         complete=separation_index is not None,
-        atoms_conserved=conserved)
+        atoms_conserved=conserved,
+        bridges=np.asarray(bridge_curve, dtype=float),
+        bridges_at_separation=(
+            int(round(float(bridge_curve[separation_index])))
+            if separation_index is not None and len(bridge_curve) else None))

@@ -158,6 +158,80 @@ def interface_opening(
     return upper_bottom - lower_top
 
 
+def interface_plane(
+        z_lower_slab,
+        z_upper_slab,
+        bin_width: float) -> float:
+    """The z midway between the two slabs' facing dividing surfaces.
+
+    Where the interface IS, as a single plane: halfway between the lower
+    slab's top surface and the upper slab's bottom one (§2.6). Bonds
+    that straddle this plane are what still joins the two bodies.
+    """
+    lower_top = dividing_surface(z_lower_slab, "top", bin_width)
+    upper_bottom = dividing_surface(z_upper_slab, "bottom", bin_width)
+    return 0.5 * (lower_top + upper_bottom)
+
+
+def cross_interface_bridges(
+        positions,
+        lateral_cell,
+        plane_z: float,
+        bond_cutoff: float) -> int:
+    """Bonded atom PAIRS that straddle the interface plane (§5.5, §8).
+
+    A pair counts when two atoms lie within ``bond_cutoff`` of each other
+    — nearest periodic image in the plane, since the cell repeats
+    sideways — AND sit on OPPOSITE sides of ``plane_z``. That is the
+    quantity which says whether the two bodies are still joined, and it
+    is what the pull stops on: force can persist on a few drawn-out
+    strands long after the faces are beyond each other's reach, but no
+    bond crossing the plane means nothing connects them.
+
+    DELIBERATELY GEOMETRIC, NOT BY PROVENANCE. The obvious version of
+    this — count atoms of wafer A within a bond of wafer B — was written
+    first and is WRONG, as the trajectory showed immediately: it never
+    fell below about 130 even with the slabs 53 Å apart. Those wafer
+    labels record which half an atom was BUILT in, not where it now is,
+    and pulling transfers a few dozen atoms permanently into the
+    opposite block. Every transferred atom then sits surrounded by
+    neighbours of the other label and counts as a bridge forever, so the
+    measure could never reach zero and the pull could never stop.
+
+    Only atoms within a bond of the plane can straddle it, so the search
+    is restricted to that band. That keeps this cheap enough to evaluate
+    after every chunk of a running pull.
+    """
+    atoms = np.asarray(positions, dtype=float)
+    if atoms.shape[0] == 0:
+        return 0
+    z = atoms[:, 2]
+    near = np.abs(z - plane_z) <= bond_cutoff
+    if not near.any():
+        return 0
+
+    band = atoms[near]
+    below = band[band[:, 2] < plane_z]
+    above = band[band[:, 2] >= plane_z]
+    if below.shape[0] == 0 or above.shape[0] == 0:
+        return 0
+
+    cell = np.asarray(lateral_cell, dtype=float)
+    period_x = float(cell[0][0])
+    period_y = float(cell[1][1])
+
+    delta_x = above[:, 0][:, None] - below[:, 0][None, :]
+    delta_y = above[:, 1][:, None] - below[:, 1][None, :]
+    delta_z = above[:, 2][:, None] - below[:, 2][None, :]
+    if period_x > 0.0:
+        delta_x -= period_x * np.round(delta_x / period_x)
+    if period_y > 0.0:
+        delta_y -= period_y * np.round(delta_y / period_y)
+
+    squared = delta_x ** 2 + delta_y ** 2 + delta_z ** 2
+    return int((squared < bond_cutoff ** 2).sum())
+
+
 # ---------------------------------------------------------------------
 # Press control — the no-impact gate and the dual contact criterion
 # (PSEUDOCODE.md §9.3, DESIGN.md §5.2).
@@ -328,43 +402,6 @@ def averaged_force_curve(
     return disp, averaged
 
 
-def force_scatter_curve(
-        displacement,
-        force,
-        window: float,
-        drop_leading_zero: bool = True) -> np.ndarray:
-    """The STANDARD ERROR of the mean in each averaging window (§5.5).
-
-    The companion to :func:`averaged_force_curve`, computed over exactly
-    the same windows, so entry *i* is the uncertainty on that function's
-    entry *i*. It exists because "the force has returned to zero" is a
-    statistical claim: the grip reaction is a sum over every grip atom
-    and at 300 K it swings across tens of eV/Å even when the slabs are
-    far apart and nothing connects them. What settles is the MEAN, not
-    the instantaneous value, and a mean is only as meaningful as its
-    scatter — so the separation test needs both.
-
-    A window holding a single sample has no scatter to speak of; its
-    standard error is reported as zero, which leaves the configured
-    noise floor as the only bar (see :func:`separation_point`).
-    """
-    disp = np.asarray(displacement, dtype=float)
-    forces = np.asarray(force, dtype=float)
-    scatter = np.zeros(len(disp))
-    window_full = np.empty(len(disp), dtype=bool)
-    for index, center in enumerate(disp):
-        in_window = (disp <= center) & (disp >= center - window)
-        sample = forces[in_window]
-        if sample.size > 1:
-            # Standard error of the mean: the spread of the samples
-            # divided by the root of how many there are.
-            scatter[index] = float(sample.std(ddof=1) / np.sqrt(sample.size))
-        window_full[index] = (center - disp[0]) >= window
-    if drop_leading_zero and window_full.any():
-        return scatter[window_full]
-    return scatter
-
-
 def reexpress_versus_opening(
         curve_displacement,
         curve_force,
@@ -387,43 +424,48 @@ def reexpress_versus_opening(
 
 def separation_point(
         opening,
-        averaged_force,
+        bridges,
         cutoff: float,
-        noise_floor: float,
-        force_scatter=None,
-        sigmas: float = 2.0) -> int | None:
-    """First frame of COMPLETE separation, or None if never reached (§9.6).
+        sustained_frames: int = 3) -> int | None:
+    """First frame of COMPLETE separation, or None if never reached (§5.5).
 
     Complete separation is the first sample where the interface opening
-    exceeds the potential cutoff AND the averaged force has returned to
-    zero. The M1 work integral stops HERE, not at the record's end (prior
-    art integrated the whole noise tail). None means the pull never fully
-    separated within the record.
+    exceeds the potential cutoff AND nothing bridges the two wafers any
+    more — no atom of one lies within a bond of the other
+    (:func:`cross_interface_bridges`). The M1 work integral stops HERE,
+    not at the record's end (prior art integrated the whole noise tail).
+    None means the pull never fully separated within the record.
 
-    "Returned to zero" is decided STATISTICALLY when ``force_scatter``
-    (the per-window standard error from :func:`force_scatter_curve`) is
-    supplied: the force counts as zero when its magnitude falls within
-    ``sigmas`` standard errors of it. That is the only test that can work
-    on this quantity — a fully separated Si/Si pair still shows a grip
-    reaction with a standard deviation near 7 eV/Å, so comparing it to a
-    small fixed constant declares "still bonded" forever, which is
-    exactly what the first end-to-end run did at every rate it tried.
-
-    ``noise_floor`` remains as a FLOOR under that test, so a noiseless
-    record (a quasi-static mock, a zero-temperature run) whose standard
-    error collapses toward zero is not asked for impossible exactness.
-    With no scatter supplied the floor alone applies, preserving the
-    original behaviour for callers that have only a mean.
+    The obvious alternative — integrate until the pulling FORCE dies
+    away — was tried and measures the wrong thing. Rough surfaces do not
+    let go all at once: in scattered places atoms stay attached to both
+    sides and draw out into thin strands, which carry force long after
+    the faces are beyond each other's reach. Waiting for zero force
+    means waiting for the last strand to snap. On the v1 Si/Si pair that
+    put HALF the reported work after the faces could no longer touch,
+    carried by about one percent of the atoms — a few filaments credited
+    to the whole contact area. Bridging asks the question the measure
+    actually means: has the interface come apart?
     """
     openings = np.asarray(opening, dtype=float)
-    forces = np.asarray(averaged_force, dtype=float)
-    scatter = (np.zeros(len(forces)) if force_scatter is None
-               else np.asarray(force_scatter, dtype=float))
-    for index in range(len(openings)):
-        allowed = noise_floor
-        if index < len(scatter):
-            allowed = max(noise_floor, sigmas * float(scatter[index]))
-        if openings[index] > cutoff and abs(forces[index]) <= allowed:
+    bridge_counts = np.asarray(bridges, dtype=float)
+    span = min(len(openings), len(bridge_counts))
+    for index in range(span):
+        if openings[index] <= cutoff:
+            continue
+        # The LAST strand flickers. Thermal motion carries a single
+        # surviving bond in and out of range from one frame to the next,
+        # so a momentary zero is not separation: on the v1 Si/Si pair one
+        # bond persisted, intermittently, from 32 Å of pulling to 42 Å,
+        # and stopping at the first zero would have set the endpoint by a
+        # single lucky jiggle. The count must stay down.
+        window = bridge_counts[index:index + sustained_frames]
+        if len(window) < min(sustained_frames, span - index):
+            break
+        # Below one whole pair: interpolation onto the reduced curve's
+        # samples can land between frames, and "less than one bond" is
+        # the honest reading of no connection.
+        if np.all(window < 1.0):
             return index
     return None
 

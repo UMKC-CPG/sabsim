@@ -209,6 +209,11 @@ class PullOutcome:
     # curve is then void: the analyzer must refuse it rather than
     # integrate a system whose atom count changed underneath it.
     atoms_conserved: bool = True
+    # Atom pairs still spanning the interface when the pull stopped.
+    # Zero is what complete separation MEANS (§5.5); reporting it makes
+    # a result that stopped with material still joining the two wafers
+    # visible instead of buried in the number.
+    bridges_at_separation: int | None = None
 
 
 @dataclass(frozen=True)
