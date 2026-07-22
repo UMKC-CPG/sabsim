@@ -723,6 +723,53 @@ foundations, interaction rules. -->
       companion to the energy sweep is a DOSE sweep measuring W_sep. Ties
       `DESIGN.md` §2.5 (thickness criterion), §3.5/§3.6 (depth/dose), §8
       (bond metric).
+- [ ] **RESUME HERE (2026-07-21). ONE DECISION IS OPEN AND IT IS THE
+      USER'S: where the work-of-separation integral STOPS.** The whole
+      chain now runs end to end and produces a number, so this is the
+      question standing between us and a defensible one.
+      WHAT WE FOUND. Ovito showed a WEB OF STRINGS bridging the two
+      wafers during separation (user's observation, frames 60-80 of
+      `ovito_pull_10mps.dump`). Quantified: the two faces pass out of
+      each other's reach after 10 Å of pulling, but bonds still cross
+      the interface until ~44 Å, and HALF the reported work accrues in
+      between — carried by about ONE PERCENT of the atoms (~80 of
+      8799), then divided by the full contact area. Bonds crossing the
+      plane decay 149 -> 118 -> 45 -> 23 -> 11 -> 5 -> 1 -> 0; the last
+      strand FLICKERS in and out from 32 Å to 42 Å.
+      THE CHOICE, and it spans a factor of two:
+      (a) AS COMMITTED (`653204c`): stop when NOTHING crosses the plane.
+          The rigorous reading of "the interface has parted" — and it
+          INCLUDES all the strand-drawing work. Gives ~10.0 J/m².
+          Note this is BIGGER than the old force rule's 9.4, not
+          smaller: waiting for the last strand integrates FURTHER than
+          waiting for the force to go quiet. (I had predicted the
+          opposite; the data corrected it.)
+      (b) Stop when the faces pass out of range (~10 Å of pulling).
+          Excludes the strand work. Gives ~5.0 J/m².
+      (c) Stop when bridging falls below a fraction of its start value.
+          Intermediate; needs the fraction chosen.
+      MY READING: (a) is the right DEFINITION, and its answer being
+      strand-dominated is a real finding about the POTENTIAL rather
+      than something to define away — a stretched low-coordination
+      silicon chain is the regime a classical Si model describes worst,
+      and this family is known to draw silicon out where the real
+      material snaps. The fix for that is the trained potential, not
+      the stopping rule. But the call is the user's.
+      TO RESUME: pick a rule, then `sbatch jobs/si_si_e2e/slurm_back`
+      (reuses the amorphized halves, ~21 min, no re-bombardment). The
+      criterion in code today is (a) and has NOT yet been run.
+- [ ] Pull-rate sweep is mis-scaled against the chunk budget: separation
+      needs ~25-44 Å of grip travel, but `max_chunks=500` allows only
+      5 Å at 1.0 m/s and 16 Å at 3.2 m/s, so ONLY the fastest rate can
+      reach separation — the opposite of what the sweep exists for (it
+      should report the SLOWEST rate that separates). Raise `max_chunks`
+      (~800-1000 lets 3.2 m/s finish; 1.0 m/s needs ~3000) and compare
+      the work across rates. Costs disk: each rate already writes a
+      1.3 GB trajectory.
+- [ ] Trajectory dumps are 1.3 GB per rate, ~3.9 GB per member per run,
+      and will multiply by the 3 amorphization seeds once the ensemble
+      loop lands. Revisit `frame_stride` (currently 100) with the
+      reporting layer.
 - [ ] DEFERRED (raised 2026-07-21, no action for now) — MODEST BOMBARDMENT
       PARALLELISM: fire n Ar SIMULTANEOUSLY per round instead of strictly
       one at a time (`DESIGN.md` §3.2/§3.3; would add a §10.3 knob and
