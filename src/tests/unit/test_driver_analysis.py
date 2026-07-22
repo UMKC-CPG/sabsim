@@ -281,3 +281,62 @@ def test_scatter_curve_matches_the_averaged_curve_length():
     scatter = force_scatter_curve(disp, force, window=0.5)
     assert len(scatter) == len(averaged)
     assert (scatter > 0).any(), "an alternating force has real scatter"
+
+
+# ---------------------------------------------------------------------
+# Dividing-surface robustness (the defect that flickered a bonded
+# interface between 1.4 A and 11 A, 2026-07-21).
+# ---------------------------------------------------------------------
+
+def test_a_bin_exactly_on_the_threshold_is_a_crossing():
+    """An exact threshold hit must not be read as "no crossing".
+
+    Bin counts are INTEGERS and the threshold is half the peak, so a bin
+    landing exactly on it is ordinary: a peak of 100 puts the threshold
+    at 50, and any bin holding exactly 50 atoms sits on it. The strict
+    sign-change test scored that as no crossing (the product is zero,
+    not negative). The real surface was then skipped and the extreme
+    crossing fell back to an interior one about 10 A inside the slab --
+    which is how a bonded interface reported an 11 A gap that was never
+    there, tripping the pull's stopping rule.
+    """
+    import numpy as np
+    from sabsim.driver.analysis import dividing_surface
+    # A dense core, then a bin sitting EXACTLY on the half-of-peak
+    # threshold, then a LONG sparse tail. The tail matters: when the
+    # exact hit is missed there is no crossing at all and the function
+    # falls back to the far box edge, so a fixture whose edge sits close
+    # to the true surface would pass for the wrong reason.
+    z = np.concatenate([
+        np.full(100, 10.5), np.full(100, 11.5), np.full(100, 12.5),
+        np.full(50, 13.5),                      # exactly half of 100
+        np.concatenate([np.full(1, edge + 0.5)
+                        for edge in range(14, 30)])])
+    surface = dividing_surface(z, "top", bin_width=1.0,
+                               smoothing_length=0.0)
+    assert surface <= 16.0, (
+        f"the surface must sit at the density edge near 13-14 A, got "
+        f"{surface} — the far box edge (~29 A) means the exact-threshold "
+        f"crossing was missed entirely")
+
+
+def test_layered_crystal_does_not_scatter_the_surface():
+    """A combed (crystalline) profile still yields a stable surface.
+
+    A crystal's layers sit a fixed distance apart, so a histogram binned
+    finer than that spacing alternates full and near-empty bins. Every
+    trough that dips past the threshold offers a spurious crossing deep
+    inside the material; smoothing over a few interatomic spacings must
+    leave the surface set by the density ENVELOPE instead.
+    """
+    import numpy as np
+    from sabsim.driver.analysis import dividing_surface
+    # Layers every 1.36 A (Si(100) spacing) through a 30 A slab.
+    layers = [np.full(80, z) for z in np.arange(10.0, 40.0, 1.36)]
+    z = np.concatenate(layers)
+    smoothed = dividing_surface(z, "top", bin_width=1.0,
+                                smoothing_length=3.0)
+    # The surface belongs at the last layer, not somewhere in the bulk.
+    assert smoothed >= 36.0, (
+        f"a combed profile put the surface at {smoothed}, well inside "
+        f"a slab that runs to ~39 A")

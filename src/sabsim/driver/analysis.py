@@ -52,11 +52,30 @@ def density_profile(
     return centers, counts.astype(float)
 
 
+def _smooth_profile(density: np.ndarray, window_bins: int) -> np.ndarray:
+    """Moving-average a density profile over ``window_bins`` bins.
+
+    Edges are handled by averaging over whatever bins exist, so the
+    profile keeps its length and its ends are not dragged toward zero —
+    which would invent a surface where the slab simply stops.
+    """
+    if window_bins <= 1 or density.size == 0:
+        return density
+    half = window_bins // 2
+    smoothed = np.empty_like(density, dtype=float)
+    for index in range(density.size):
+        low = max(0, index - half)
+        high = min(density.size, index + half + 1)
+        smoothed[index] = density[low:high].mean()
+    return smoothed
+
+
 def dividing_surface(
         z_positions,
         side: str,
         bin_width: float,
-        interior_fraction: float = 0.5) -> float:
+        interior_fraction: float = 0.5,
+        smoothing_length: float = 3.0) -> float:
     """Locate a slab surface where density falls to half its interior.
 
     ``side`` is ``"top"`` for the upper surface of the lower slab or
@@ -67,17 +86,54 @@ def dividing_surface(
     apart by side, and a single stray adatom never sets the plane
     (DESIGN.md §2.6, the same half-bulk rule §3.5 uses for the cascade
     depth).
+
+    THE PROFILE IS SMOOTHED FIRST, and that is load-bearing rather than
+    cosmetic. A crystalline slab's density is a COMB: its atomic layers
+    sit a fixed distance apart (a/4 = 1.36 Å for Si(100)), so a histogram
+    binned finer than that lands alternately on a layer and between two,
+    and the raw counts swing between roughly a third and full bulk. The
+    half-bulk threshold falls INSIDE that swing, so every trough deep in
+    the crystal manufactures a spurious crossing, and taking the extreme
+    crossing then picks whichever interior trough happens to reach
+    furthest out this frame. Thermal motion re-rolls that dice each time
+    the profile is measured.
+
+    That defect was not hypothetical: it made the measured interface
+    opening of a bonded pair flicker between 1.4 Å and 11 Å from one
+    frame to the next, tripping the pull's stopping rule on a gap that
+    was never there and truncating the slowest, most physically valuable
+    rate of the pull sweep.
+
+    Averaging over ``smoothing_length`` (Å, a few interatomic spacings)
+    erases the layering while leaving the surface RAMP — which is many
+    ångströms wide — untouched, so the crossing is set by the envelope of
+    the material, which is what a dividing surface means.
     """
     centers, density = density_profile(z_positions, bin_width)
+    window_bins = max(1, int(round(smoothing_length / bin_width)))
+    if window_bins % 2 == 0:            # keep the window centred
+        window_bins += 1
+    density = _smooth_profile(np.asarray(density, dtype=float), window_bins)
     threshold = interior_fraction * density.max()
+    # A bin sitting EXACTLY on the threshold is a crossing too. The
+    # strict sign-change test below reads such a bin as no crossing at
+    # all — the product is zero, not negative — and the function then
+    # falls back to the box edge and silently reports a surface tens of
+    # ångströms from the material. Rare on raw counts, but smoothing
+    # makes exact hits ordinary, so it is handled explicitly.
     crossings = []
     for index in range(len(density) - 1):
         here, ahead = density[index], density[index + 1]
+        if here == threshold:
+            crossings.append(float(centers[index]))
+            continue
         if (here - threshold) * (ahead - threshold) < 0.0:  # sign change
             fraction = (threshold - here) / (ahead - here)
             crossings.append(
                 centers[index]
                 + fraction * (centers[index + 1] - centers[index]))
+    if len(density) and density[-1] == threshold:
+        crossings.append(float(centers[-1]))
     if not crossings:
         # A profile with no crossing (uniform or single-bin) has no
         # resolvable surface here; fall back to the relevant extreme edge.
