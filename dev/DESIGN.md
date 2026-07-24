@@ -285,7 +285,7 @@ down in one place, not absent.** Prior art froze its protocol by
 hardcoding it, which is why no result it produced can name the protocol
 that produced it.
 
-### 1.5 Units are carried, and validation happens twice
+### 1.5 Units are carried, and validation happens in three phases
 
 Every dimensional setting **names its unit**, exactly as §6.6 requires
 of every measure. The dose's general form is a fluence in ions·Å⁻² —
@@ -294,8 +294,11 @@ area; §3.2 gives the full rule, including the plain-count shortcut v1 uses
 for its single fixed cell. No reader should have to trust a conversion
 factor typed into a report string.
 
-Validation splits in two, and the split is not arbitrary — it is the
-same shape as §7.2's two-phase potential gate, and for the same reason.
+Validation splits by WHAT EACH CHECK NEEDS, and the split is not
+arbitrary — it is the same shape as §7.2's two-phase potential gate, and
+for the same reason. The static pass needs only the file; the resolution
+pass needs the environment; the deferred pass needs a measurement the
+pipeline must first produce.
 
 - **Static validation, at load.** Types, units, ranges, completeness,
   and the consistency requirements that need nothing from a running
@@ -303,6 +306,25 @@ same shape as §7.2's two-phase potential gate, and for the same reason.
   must equal the potential's global type map** (§4.3), which is
   STRUCTURAL 1a enforced at the earliest possible moment rather than
   discovered at an intermixed interface.
+- **Reference resolution, before the first engine opens** (added
+  2026-07-24). A specification can be well-formed and executable in
+  principle while POINTING AT things that are not there: a crystal file
+  at a path nobody created, a `material_domain` (§4.8) no registry entry
+  covers. These are not type errors, so the static pass admits them; and
+  they are not measured quantities, so the deferred pass never looks.
+  They surface instead partway through a run, after the node-hours that
+  reached them were spent. This phase is separated from the static one
+  by a single property: it needs the ENVIRONMENT — a filesystem, the
+  registry — rather than the file's text. Keeping it out of the loader
+  leaves parsing pure and testable from anywhere, and puts the check at
+  the last moment before compute is committed. It reports EVERY
+  unresolved reference at once rather than the first, because these
+  failures cluster — a moved data directory breaks every crystal path
+  together — and fixing a specification one error per run is a bad
+  afternoon. What it cannot yet check it NAMES rather than skips:
+  `potential_ref` points at a manufactured force model, and the
+  bootstrap that produces one is not built, so there is nothing to
+  resolve it against. When that store exists, its lookup belongs here.
 - **Deferred validation, at the point of use.** Some requirements
   reference quantities that do not exist until the pipeline has run.
   §2.5's criterion — `slab_thickness >= activated_depth +
@@ -463,6 +485,11 @@ steps 4, 6 and 7. Two consequences follow:
   potential-quality gate (§7) alongside stiffness and surface energy. A
   potential whose lattice constant is off is a potential that will build
   the wrong box; that belongs in the gate, not in a silent relaxation.
+  That VASP reference inherits the **production settings block of the
+  force model's own recipe** (§4.8) — the same settings that produced
+  its training labels — so the disagreement reads as the potential's
+  learning error and not partly as a settings mismatch between the two
+  sides of the comparison.
 
 **Cold start.** At the very beginning there is no production potential to
 relax under — the bootstrap (§4.5) has not yet trained one. So "the
@@ -1259,6 +1286,28 @@ the violent cascade, the committee owns only the gentle stages, so the
 species map stays {O, Si} and the model is never asked to reproduce
 cascades or Ar.
 
+**What fills the committee's slot in v1 (2026-07-22).** The loop above
+is the design; today no committee is trained, so every stage the design
+hands to the MLIP — the gentle re-anneal of §3.4 and the press, settle
+and pull of §5 — runs instead on a CLASSICAL potential resolved per
+material from the SAME registry the cascade generator reads (§4.7;
+`driver/cascade_potential.classical_force_model`). That is a deliberate
+stand-in rather than a second design: it wears the same `ForceModel` /
+`pair_style` seam the trained committee will, which is precisely what
+lets the swap be deferred without disturbing anything upstream of it.
+Two consequences are worth stating plainly. First, a material is now
+described in exactly ONE place: the re-anneal and the press/pull each
+used to hard-code `sw Si.sw`, and one of the three copies mapped EVERY
+declared type to silicon — the truth for the Si/Si null test, and wrong
+for any other pair — so bringing up a new material is now a registry
+row instead of a code edit. Second, the two resolvers differ only by
+ZBL: the cascade splices in the hard cores of §3.3 because it drives
+atoms together at keV energies, while the quiet stages, which never
+approach that regime, take the classical form alone. The consumer-side
+work that finally replaces this stand-in with a trained committee is
+tracked as its own item in `TODO.md`; until it lands, "the MLIP is
+designed" must not be read as "the MLIP runs."
+
 ### 4.6 Decisions frozen for v1
 
 - **Descriptor `se_e2_a`, r_cut 6.0 Å** (short-range) — consistent with
@@ -1301,9 +1350,11 @@ substrate-substrate core). Whether the classical form underneath is
 Stillinger-Weber, a Tersoff / bond-order form, a Vashishta form, a
 Buckingham form with a repulsive splice, or — the fallback below — a
 foundation MLIP, the caller sees the same setup. The cascade driver
-(§10.2) never names a potential; it asks the resolver. This is the same
-discipline the press/pull force-model resolver already follows, pushed
-down to the cascade so that step 4 is not silently silicon-only.
+(§10.2) never names a potential; it asks the resolver. That same
+registry now also serves the QUIET stages, which ask it for the bare
+classical form with no ZBL cores spliced in (§4.5) — so one entry
+describes a material everywhere that material is simulated, and step 4
+is not silently silicon-only.
 
 **A per-material potential registry, with provenance.** The resolver
 reads a registry parallel to the gate's reference-data registry (§3.5).
@@ -1352,6 +1403,23 @@ the gate. This is what "acceptable, not perfect" means concretely — we
 never ask the cascade potential to be *accurate*, only to land the
 surface in a basin the re-anneal and gate accept.
 
+**The refusal is the default; the opt-in is per-run and visible.** An
+entry that has not cleared the last acceptance rung above — nobody has
+yet run this material through a full activation and watched the §3.5
+gate accept the result — is marked unvalidated, and both the cascade
+and quiet resolvers REFUSE it, raising rather than quietly running a
+form whose
+fidelity nobody yet has evidence for. But a material's FIRST activation
+run is precisely what produces that evidence, so the refusal cannot be
+absolute or no new material could ever be brought up. The escape hatch
+is an environment variable, `SABSIM_ALLOW_UNVALIDATED_POTENTIAL`, read
+once per run (`pipeline/live_stages.py`) and passed down as an explicit
+argument. It lives outside the code deliberately, for two reasons: no
+one is tempted to flip `validated=True` in the registry before the
+evidence exists, and because it must be set in the job script the choice
+stays in the run's own permanent record. Anything produced under it is
+EXPLORATORY, and both the run and any report drawn from it must say so.
+
 **A fallback ladder when no acceptable classical potential exists.** Some
 materials — lithium niobate may already be one, and arbitrary future
 materials certainly will be — have no classical form that clears the bar.
@@ -1393,12 +1461,223 @@ acceptance-check tolerances (the lattice/density band, the probe-cascade
 stability criterion) and validating any non-silicon candidate are DESIGN
 follow-ons, logged in `TODO.md`.
 
+### 4.8 The force-model recipe, and the settings it fixes once
+
+§4.5 designs the bootstrap LOOP; this section designs the INPUT that
+loop consumes. `PSEUDOCODE.md` §11 threads an object it calls the
+`pair_specification` through twelve call sites — it seeds the first
+committee, drives config generation, chooses what gets labelled, and
+decides when to stop — and that object is defined nowhere in the chain.
+The study specification, by contrast, gets the whole of §1: five groups
+of knobs, every value carrying its unit, nothing defaulting silently,
+validation in three phases, the file itself serving as the provenance
+record. The most expensive artifact in the project deserves the same
+treatment. This section gives it one.
+
+**Why the force model needs a file of its own.** Three inputs change on
+three different clocks. The study specification says WHAT to simulate,
+and a researcher edits it constantly. The deployment configuration says
+WHERE to run, and changes when the machine does. The force model is the
+third: manufactured once, costing weeks of machine time, then consumed
+UNCHANGED by many members. It cannot live inside a member's file,
+because it is shared by all of them — whichever member held the recipe
+would become a hidden master copy the others drift away from silently,
+which is the same failure §1.6 avoids by making the specification the
+provenance record rather than one member's private state.
+
+**What the recipe is keyed by, and why the species union is not
+enough.** STRUCTURAL 1a fixes ONE model over the union of the pair's
+species, and §4.3's global type map makes that concrete. But the species
+union states only what the model can REPRESENT; it says nothing about
+what the model has been TAUGHT. Those are different claims, and
+conflating them is a real hazard: carbon spans diamond and graphite,
+boron several allotropes, and silica itself runs from alpha-quartz
+through cristobalite to a fully amorphous network. Same composition,
+genuinely different chemistry. A model trained on one phase is not
+merely untested on another — it is confidently wrong there, which is
+the failure mode committee spread is worst at catching. And training a
+single model across two distant bonding regimes is not free: the
+descriptor must resolve both at once, and data from one regime can
+actively degrade the other.
+
+So a recipe is keyed by **the species union TOGETHER WITH a declared
+domain** — a named structural and chemical regime the model claims to
+cover. This is not a new hazard discovered here; it has already bitten
+the code. §4.7's registry keys on the species set alone, needed TWO
+entries for {Si, O} — a bond-order form that spans the Si/SiO₂
+interface and a Vashishta form better for amorphous silica but unable
+to describe elemental silicon at all — and disambiguated them by
+smuggling a marker string `_silica_only` into a set that is otherwise
+chemical elements. That marker was this section's missing concept,
+patched in at the point of pain. §4.7's registry key has since been
+lifted to the same (species, domain) shape and the marker retired
+(2026-07-24, `driver/cascade_potential.py`): each entry now declares its
+domain, the two {Si, O} forms sit under `silicon-and-silica` and
+`silica-only`, and a resolve that names no domain for a species set
+carrying several REFUSES rather than picking one — because those two
+forms disagree about whether elemental silicon can exist, so choosing
+between them by luck would be a silent physics decision. Where exactly
+ONE domain is registered, omitting it resolves to that one: nothing is
+being guessed, because there is nothing to choose between.
+
+**The domain is declared, and the declaration is checked cheaply.** The
+domain carries a short human-readable label, but the label is a handle,
+not the truth — the truth is the enumerated starting collection of part
+2 below, which states exactly which phases were taught. Two consequences
+follow, and they are deliberately at opposite ends of the cost scale. A
+member whose structures fall outside the declared domain is refused at
+LOAD time, in §1.5's second validation phase, before a single node-hour
+is spent. And the committee spread of §4.4 remains the RUNTIME backstop
+for the case where the declaration itself was too generous. The cheap
+check catches the obvious mistake; the expensive signal catches the
+subtle one. Neither replaces the other.
+
+**The eight parts of a recipe.** Each is stated plainly enough that a
+student can read the file and know what was manufactured.
+
+1. **Species union and domain.** The elements the single shared model
+   must handle, fixing the type-map ordering every downstream simulation
+   inherits (§4.3), together with the declared domain above. This is the
+   key a member's `potential_ref` ultimately resolves against.
+2. **The starting collection.** The calm, near-equilibrium structures
+   computed accurately before anything else: the perfect crystals of
+   every phase in the declared domain, their clean surfaces, the
+   STRUCTURAL-4 strained substrates, moderate-temperature rattled
+   snapshots, and — new here — uniformly stretched, compressed and
+   sheared cells of each bulk phase at several magnitudes, carried PAST
+   the reversible range into the regime where bonds begin to fail. Two
+   reasons the strained entries are load-bearing rather than optional.
+   The potential-quality gate (§7.2) already checks elastic stiffness
+   against references, so a model taught only relaxed and rattled cells
+   would be gated on a property it was never shown — an inconsistency
+   this closes. And the protocol IS a deformation experiment: the press
+   is compression, the pull is tension, a mismatched interface under
+   load carries shear, and a pull that fails through the crystal rather
+   than along the interface is an outcome §6 must tell apart from the
+   other. For each family the recipe states how many and how produced.
+   The purpose is stated out loud, because it is easy to over-invest:
+   this collection exists so the seed committee does not fly apart, not
+   to make it accurate.
+3. **The production reference settings.** The block below.
+4. **The accuracy audit.** The block below.
+5. **How the hard configurations are manufactured.** Which protocol
+   stages run purely to harvest frames, and on WHICH force model each
+   runs — the violent cascade on the classical + ZBL form of §4.7, the
+   press and pull on whatever committee currently exists (§4.5 step 2) —
+   how many, and under what conditions.
+6. **How a subset is chosen for labelling.** The accurate calculations
+   are the cost bottleneck, so the recipe states the budget and the
+   selection rule: favour the interface region, prefer configurations
+   the committee is least certain about, skip near-duplicates of what
+   the store already holds, and frame interface configurations as the
+   subcells of §6.4 rather than whole production cells.
+7. **The learning-loop settings.** Committee size; the descriptor form
+   and its cutoff; training length; how the loss balances energies
+   against forces; the two capture thresholds `Escut` and `Fscut`; and
+   the UDD bias weight (§4.4, §4.6).
+8. **The stopping rule and the resulting name.** The two convergence
+   tests of `PSEUDOCODE.md` §11.6 WITH numbers attached — a stopping
+   rule phrased as "below threshold" with no threshold is not a stopping
+   rule — and the content-derived fingerprint computed from everything
+   above, so a changed recipe cannot pass itself off as the model that
+   was validated last month.
+
+**Two settings blocks, because a comparison hides two errors.** Parts 3
+and 4 are one decision, taken deliberately (2026-07-24). Three of the
+five consumers of an accurate calculation are DIFFERENCES against the
+model: the relaxed lattice of §2.2, the stiffness and surface energies
+of §7.2, and the `interface_fidelity` of §6.4. Each such difference
+stacks two errors that mean different things. **Learning error** is how
+faithfully the fit absorbed the reference method it was trained on.
+**Method error** is how far that reference method itself sits from
+physical reality — an error no additional training data can remove,
+since more data only teaches the wrong surface more faithfully.
+
+Inherit the training settings everywhere and every difference reads
+learning error cleanly and is BLIND to method error: a model trained on
+under-resolved labels sails through every gate, graded against the same
+under-resolved standard that taught it. Use tighter settings for the
+references than for the labels and every difference reads the two mixed
+together, blaming the model for a discrepancy baked into its data before
+it saw a configuration. Neither is wrong; they answer different
+questions, and the mistake is believing either answered both.
+
+So the recipe declares BOTH. The **production block** — the basis
+cutoff, the reciprocal-space sampling, the exchange-correlation
+treatment, the occupancy smearing, and the electronic and geometric
+convergence tolerances — is used for the labels AND for every reference
+that gets differenced against the model. The **audit block** is a
+tightened set run ONCE per recipe, on a handful of small cells, at
+recipe-creation time; the recipe records how far the production block
+sits from it. The gate then reports learning error, the recipe reports
+method error, and a reader can add them. The audit is a few small
+calculations against a budget of thousands of labels, so it is a
+rounding error in cost and the only thing standing between us and a
+gate that cannot see its own foundation.
+
+**The sampling entry is a RULE, not a grid.** Reciprocal-space sampling
+is stated as a spacing, so a few-atom bulk cell and a large amorphous
+slab each receive a mesh appropriate to their size. Stated as a fixed
+grid it is wasteful on the large cell and wrong on the small one — and
+since the subcell of §6.4 is far larger than a typical training
+configuration, a fixed grid is exactly what would make one settings
+block unable to serve both. This is what makes the inheritance rule
+implementable at all.
+
+**The inheritance rule, and the three kinds of reference.** One
+production block per recipe, established once and reused unchanged by
+every consumer that computes an accurate number for comparison. But the
+rule binds only the references we COMPUTE, and the design must not
+overstate it. §7.2 speaks of checking "against VASP and experiment" as
+though those were one category; they are not, and §3.5's shipped
+reference file proves it — every number there is a literature-guided
+placeholder flagged `real = false`, except the amorphization depth,
+which is neither literature nor DFT but a value MEASURED by this
+pipeline's own sweep. So there are three kinds of reference: values we
+compute accurately, values taken from published experiment, and values
+measured by our own simulations. Only the first inherits. The other two
+carry their own provenance and are compared to as they stand.
+
+**The audited flag, reusing an idiom the project already has twice.**
+§4.7's registry marks each entry `validated` and refuses an unvalidated
+one absent a deliberate, externally-visible opt-in; §3.5's reference
+file marks itself `real`. Both say: this exists, and nobody has yet
+earned the right to trust it. The production settings block carries the
+same flag — has the audit actually been run against these values, or
+are they a plausible guess? A recipe whose settings are unaudited still
+manufactures a model, because that is how the first one for any material
+must come about, but the model is EXPLORATORY and its record says so,
+exactly as a run under `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` does.
+
+**The recipe POINTS AT the reference data; it does not contain it.**
+`PSEUDOCODE.md` §11's `bootstrap_potential(pair_specification,
+reference_data)` already takes the two as separate objects, and that
+separation is right: the reference set includes laboratory measurements
+no recipe should pretend to own, and one reference set may serve several
+recipes. What the recipe DOES record is which reference set it was
+judged against, so the pairing is recoverable from the product afterward
+rather than reconstructed by memory.
+
+**Frozen for v1 (2026-07-24).** This section defines what a recipe must
+state and why; every NUMBER in it — cutoffs, spacings, tolerances,
+committee thresholds, strain magnitudes, labelling budgets — is a
+placeholder resolved by the values file, and several cannot honestly be
+chosen until the audit of part 4 has been run for the first time. The
+(species, domain) key is BUILT — §4.7's registry carries it and the
+marker is gone. What remains are follow-ons logged in `TODO.md`: the
+record definition `PSEUDOCODE.md` §11's twelve call sites already assume,
+carrying a chosen domain on the member specification so the resolvers can
+be handed one instead of relying on the single-domain shortcut, and the
+load-time check that refuses a member whose structures fall outside it.
+
 ## 5. Bond/debond MD protocol
 
 This section designs steps 6 and 7 — pressing the two activated surfaces
 together, letting them bond, and pulling them apart while recording the
 force that resists. It runs on LAMMPS under the MLIP (`pair_style
-deepmd`, GPU; `ARCHITECTURE.md` §4.1).
+deepmd`, GPU; `ARCHITECTURE.md` §4.1) — that is the DESTINATION; until a
+committee is trained these stages run on the classical registry stand-in
+behind the identical seam, for the reasons §4.5 gives.
 
 **The whole press/pull runs on one persistent in-process driver.** It is
 a single stateful, multi-phase run whose transitions are decided mid-run:
@@ -2019,7 +2298,16 @@ difference produced it. So the analyzer forms **two** differences:
 - **`interface_fidelity`** — M4 minus M2 recomputed on the **same
   subcell**. Two methods, one system. This is STRUCTURAL 3's signal, the
   one that catches a potential which is confidently wrong exactly where
-  the bond number is read.
+  the bond number is read. Its all-electron side inherits the **recipe's
+  production settings block** (§4.8), the very settings that produced the
+  training labels, so what the difference reports is the potential's
+  learning error and nothing else. This is the comparison the inheritance
+  rule matters most for: it is a difference of two methods by
+  construction, so a settings mismatch would masquerade as physics
+  without ever failing visibly. Note that the subcell is much larger
+  than a typical training configuration, which is exactly why §4.8
+  requires the reciprocal-space entry to be a spacing rule rather than a
+  fixed mesh — a fixed mesh could not serve both cell sizes honestly.
 - **`subcell_truncation_error`** — M2 on the full cell minus M2 on the
   subcell. One method, two systems. This is what the truncation cost us,
   and it is **cheap**: both terms come from the potential, so no
@@ -2326,6 +2614,22 @@ matches the two surface lattices on them and records the residual strain
 from them. A potential with a wrong lattice therefore builds a wrong
 box, and everything downstream measures the wrong system. This half
 gates the build, at the step 2/3 boundary.
+
+**"Against VASP and experiment" is two categories, not one, and only one
+of them inherits.** The references this half compares against arrive by
+three different routes, and §4.8's inheritance rule binds exactly one.
+The lattice constants, stiffnesses and surface energies are **computed by
+us**, so they inherit the recipe's production settings block unchanged —
+that is what makes each comparison a clean reading of the potential's
+learning error rather than a mix of that and a settings mismatch. The
+g(r), coordination and ring targets of §3.5 are **taken from published
+experiment or literature**, and inherit nothing: they carry their own
+provenance and the `real` flag recording whether the shipped value is yet
+the true anchor or still a stand-in. The amorphization-depth threshold is
+a third thing again — **measured by this pipeline's own sweep** (§3.6) —
+so it inherits nothing either, and its provenance is one of our own runs.
+A rule stated as "every reference inherits" would be false of two of the
+three, which is why §4.8 states it only of the computed kind.
 
 Its **interface half** cannot run there at all, because the interface
 does not yet exist. The interface-fidelity check of §7.3 needs a

@@ -15,7 +15,8 @@ import pytest
 
 from sabsim.driver.cascade_potential import (
     CASCADE_GENERATOR_REGISTRY,
-    registered_substrate_sets,
+    domains_for_species,
+    registered_material_domains,
     resolve_cascade_generator,
 )
 
@@ -79,29 +80,107 @@ def test_untested_candidate_refuses_loudly():
     """A documented-but-untested entry refuses rather than running (§4.7)."""
     with pytest.raises(NotImplementedError) as caught:
         resolve_cascade_generator(
-            {"Si": 1, "O": 2, "Ar": 3}, projectile_species={"Ar"})
+            {"Si": 1, "O": 2, "Ar": 3}, projectile_species={"Ar"},
+            domain="silicon-and-silica")
     message = str(caught.value)
     # It carries the entry's own caveat so the reason is diagnosable.
     assert "UNTESTED" in message
     assert "§3.5" in message
+    # And it names the domain, so which of the two {Si, O} forms was
+    # asked for is recoverable from the message alone.
+    assert "silicon-and-silica" in message
+
+
+def test_ambiguous_species_refuse_without_a_domain():
+    """{Si, O} carries two entries, so the species alone cannot decide.
+
+    This is the refusal that replaces the old ``_silica_only`` marker
+    (DESIGN §4.8). The two forms disagree about whether elemental silicon
+    can exist at all, so guessing between them would be a silent physics
+    decision made on the caller's behalf.
+    """
+    with pytest.raises(KeyError) as caught:
+        resolve_cascade_generator(
+            {"Si": 1, "O": 2, "Ar": 3}, projectile_species={"Ar"})
+    message = str(caught.value)
+    assert "more than one" in message
+    # Both candidates are named, so the caller can pick without reading
+    # the registry source.
+    assert "silica-only" in message
+    assert "silicon-and-silica" in message
+
+
+def test_naming_the_domain_selects_between_two_same_species_forms():
+    """The domain picks the form; the species set alone never could."""
+    interface_form = resolve_cascade_generator(
+        {"Si": 1, "O": 2, "Ar": 3}, projectile_species={"Ar"},
+        domain="silicon-and-silica", allow_unvalidated=True)
+    silica_form = resolve_cascade_generator(
+        {"Si": 1, "O": 2, "Ar": 3}, projectile_species={"Ar"},
+        domain="silica-only", allow_unvalidated=True)
+
+    # Same species, same projectile, genuinely different physics.
+    assert "tersoff" in interface_form.pair_style
+    assert "vashishta" in silica_form.pair_style
+
+
+def test_unknown_domain_names_the_ones_that_exist():
+    """A misspelled domain lists the real ones rather than falling back."""
+    with pytest.raises(KeyError) as caught:
+        resolve_cascade_generator(
+            {"Si": 1, "O": 2, "Ar": 3}, projectile_species={"Ar"},
+            domain="cristobalite")
+    message = str(caught.value)
+    assert "cristobalite" in message
+    assert "silica-only" in message
+
+
+def test_no_marker_species_survives_in_any_key():
+    """The ``_silica_only`` fake element is gone from the registry.
+
+    It was a non-element string smuggled into a set of chemical symbols
+    to keep two {Si, O} entries apart. Every key component must now be a
+    real element symbol (DESIGN §4.8).
+    """
+    for species, _domain in CASCADE_GENERATOR_REGISTRY:
+        for symbol in species:
+            assert not symbol.startswith("_")
+            assert symbol.isalpha()
 
 
 def test_only_silicon_is_validated_in_v1():
     """v1 populates the registry but validates silicon alone (scope a)."""
     validated = {
-        frozenset(entry.substrate_species)
+        (frozenset(entry.substrate_species), entry.domain)
         for entry in CASCADE_GENERATOR_REGISTRY.values()
         if entry.validated}
-    assert validated == {frozenset({"Si"})}
+    assert validated == {(frozenset({"Si"}), "diamond-cubic")}
 
 
-def test_registered_substrate_sets_lists_all_four():
-    """The four named materials are all present as registry entries."""
-    listed = registered_substrate_sets()
-    assert "{Si}" in listed
-    assert "{O, Si}" in listed
-    assert "{Ga, N}" in listed
-    assert "{Li, Nb, O}" in listed
+def test_registered_material_domains_lists_every_entry():
+    """All five registry rows are listed with species AND domain."""
+    listed = registered_material_domains()
+    assert "{Si} [diamond-cubic]" in listed
+    assert "{O, Si} [silicon-and-silica]" in listed
+    assert "{O, Si} [silica-only]" in listed
+    assert "{Ga, N} [wurtzite]" in listed
+    assert "{Li, Nb, O} [trigonal-ferroelectric]" in listed
+
+
+def test_domains_for_species_reports_the_ambiguity():
+    """One species set, two domains — the fact the resolver acts on."""
+    assert domains_for_species({"Si"}) == ["diamond-cubic"]
+    assert domains_for_species({"Si", "O"}) == [
+        "silica-only", "silicon-and-silica"]
+    # An unregistered set reports nothing rather than raising.
+    assert domains_for_species({"Ge"}) == []
+
+
+def test_every_entry_domain_matches_its_key():
+    """The entry's own domain field agrees with the key it sits under."""
+    for (species, domain), entry in CASCADE_GENERATOR_REGISTRY.items():
+        assert entry.domain == domain
+        assert frozenset(entry.substrate_species) == species
 
 
 def test_custom_core_cutoffs_flow_into_the_style():

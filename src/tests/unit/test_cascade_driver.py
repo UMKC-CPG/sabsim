@@ -43,8 +43,18 @@ _TEMPLATE_PATH = os.path.abspath(os.path.join(
 
 
 def _template_member():
-    """The first template member — a real MemberSpecification."""
-    return load_and_validate_study(_TEMPLATE_PATH).members[0]
+    """The template's SILICON member — a real MemberSpecification.
+
+    Deliberately the si-si-reference member rather than the first one:
+    every cell fixture in this file is a silicon slab, and a member
+    declares the structural/chemical domain its force model must cover
+    (DESIGN.md §4.8). Pairing a silicon-only cell with the Si/SiO2
+    member would ask the registry for silicon in the silicon-and-silica
+    domain, which is correctly not a registered combination. The
+    protocol, numerical and ensemble knobs these tests assert on are
+    shared across all members, so nothing else changes.
+    """
+    return load_and_validate_study(_TEMPLATE_PATH).members[1]
 
 
 def _cascade_built():

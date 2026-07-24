@@ -47,7 +47,14 @@ from sabsim.driver.cascade import (
     activate_surface,
     derive_seeds,
 )
-from sabsim.driver.commands import CascadeGeometry, ForceModel, to_metal
+from sabsim.driver.cascade_potential import classical_force_model
+from sabsim.driver.commands import (
+    CascadeGeometry,
+    ForceModel,
+    _rate_slug,
+    stage_dump_file,
+    to_metal,
+)
 from sabsim.pipeline.activation_adapter import activated_slabs_from_results
 from sabsim.pipeline.exec_artifacts import (
     HalfHandle,
@@ -55,6 +62,8 @@ from sabsim.pipeline.exec_artifacts import (
     Slab,
     Structure,
 )
+from sabsim.pipeline.run_options import trajectory_options
+from sabsim.spec.references import resolve_crystal_file
 from sabsim.spec.records import MemberSpecification
 from sabsim.structure.amorphized_assembly import (
     assemble_amorphized_pair,
@@ -121,61 +130,46 @@ def _publish_file(comm, write_action) -> None:
 
 
 def _resolve_cif(cif_source: str) -> str:
-    """Resolve a wafer's CIF path, searching the places it may live.
+    """Find a wafer's crystal file (delegates to the shared resolver).
 
-    A relative ``cif_source`` used to be resolved against the working
-    directory alone, on the assumption that runs are launched from the
-    repo root. ``sabsim run`` broke that assumption on purpose: a run's
-    home is the JOB directory the user is standing in, which is normally
-    nowhere near the repo — so the shipped example path
-    ``src/sabsim/structure/data/si_diamond.cif`` pointed at a file that
-    did not exist there, and the run halted.
-
-    Both readings are legitimate, so both are tried, in the order of
-    least surprise:
-
-    1. An ABSOLUTE path is taken as given.
-    2. Relative to the WORKING directory — a user who drops their own
-       CIF beside the spec they are running means that one.
-    3. Relative to the REPO ROOT — how the shipped example specs are
-       written, and what a spec copied out of ``dev/templates`` says.
-    4. Relative to the installed PACKAGE — the same shipped file, found
-       by its path within the package, so an installed (non-source)
-       SABSIM resolves the example specs too.
-
-    The first candidate that EXISTS wins. If none do, the error names
-    every location searched: a bare "no such file" for a path the user
-    never typed is a puzzle, while the list shows immediately whether
-    the spec is wrong or the file is simply missing.
+    The search rules live in :mod:`sabsim.spec.references` so that
+    phase-three validation and the stages that actually open the file
+    look in exactly the same places. A checker searching different
+    locations than the loader would either pass runs that then fail, or
+    fail runs that would have worked.
     """
-    path = Path(cif_source)
-    if path.is_absolute():
-        return str(path)
+    return resolve_crystal_file(cif_source)
 
-    # .../src/sabsim/pipeline/live_stages.py -> parents[1] is the package
-    # directory, parents[3] the repo root of a source checkout.
-    package_directory = Path(__file__).resolve().parents[1]
-    repo_root = Path(__file__).resolve().parents[3]
-    # Strip a leading "src/sabsim/" so a repo-root-relative spec path can
-    # also be found inside an installed package.
-    within_package = Path(*path.parts[2:]) if path.parts[:2] == (
-        "src", "sabsim") else path
 
-    candidates = [
-        Path.cwd() / path,
-        repo_root / path,
-        package_directory / within_package,
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
+def _member_species_union(member: MemberSpecification) -> frozenset:
+    """Every element either wafer contributes, read from the crystals.
 
-    searched = "\n  ".join(str(c) for c in candidates)
-    raise FileNotFoundError(
-        f"crystal file {cif_source!r} was not found. Looked in:\n"
-        f"  {searched}\n"
-        f"Give an absolute path, or place the file relative to the "
-        f"directory the run was launched from.")
+    STRUCTURAL 1a puts ONE potential over the union of the pair's species,
+    and DESIGN.md §4.3 makes that concrete as a single global type map
+    shared by every member "so type index k means the same element
+    everywhere". A half cut ALONE would otherwise declare only its own
+    elements — a silicon half in a Si/SiO2 member would carry no oxygen
+    type — and two consequences follow that this function exists to
+    prevent. The force-model lookup is keyed on (species, domain)
+    (§4.8), so a silicon-only half could not resolve the member's
+    declared silicon-and-silica domain at all. And the assembly would
+    have to reconcile two different type maps rather than one.
+
+    The union is read from the CRYSTALS rather than parsed out of the
+    material labels, because the CIF is the authoritative structure
+    (§1.2) and a label like "SiO2" is a human name we have promised not
+    to treat as a source of truth.
+    """
+    symbols = set()
+    for wafer in (member.material.wafer_a, member.material.wafer_b):
+        crystal = load_crystal(_resolve_cif(wafer.cif_source))
+        # A pymatgen Structure, so the elements come off its composition
+        # rather than an ASE-style symbol list. ``load_crystal`` already
+        # stripped any oxidation states, so these are bare symbols;
+        # ``.symbol`` is belt-and-braces and costs nothing.
+        symbols.update(
+            element.symbol for element in crystal.composition.elements)
+    return frozenset(symbols)
 
 
 def _build_one_half(
@@ -183,6 +177,7 @@ def _build_one_half(
         member: MemberSpecification,
         scratch_directory: str,
         wafer_tag: int,
+        declared_species: frozenset,
         comm=None) -> HalfHandle:
     """Cut ONE wafer alone, write its data file, return its handle (§7.1).
 
@@ -191,11 +186,17 @@ def _build_one_half(
     member's scratch, and hands back the :class:`HalfHandle` the
     amorphization stage re-reads it from. ``wafer_tag`` fixes the assembly
     role (bottom A / top B) that rides on the handle.
+
+    ``declared_species`` are the elements this half must DECLARE whether
+    or not it contains any — the beam, plus every element the other wafer
+    contributes (:func:`_member_species_union`). Declaring a type with no
+    atoms is the mechanism already used for the beam, which the half also
+    never contains at build time.
     """
     crystal = load_crystal(_resolve_cif(wafer.cif_source))
     half = build_standalone_half(
         crystal, wafer.surface_face, wafer.identity,
-        _projectile_species(member),
+        declared_species,
         min_slab_thickness=_MIN_SLAB_THICKNESS,
         min_vacuum=_MIN_VACUUM, lateral_repeat=_LATERAL_REPEAT)
     role = "a" if wafer_tag == WAFER_A_TAG else "b"
@@ -229,12 +230,18 @@ def build_halves(
     a genuine mismatch (Si/SiO2) would produce two halves the assembly's
     commensurability assert correctly REFUSES until the matcher lands.
     """
+    # Both halves declare the SAME types: the beam, plus every element
+    # either wafer contributes (§4.3's one global type map). A half whose
+    # own crystal lacks one of them still declares it, with no atoms of
+    # that type — exactly how the beam is already carried.
+    declared_species = frozenset(
+        _projectile_species(member)) | _member_species_union(member)
     handle_a = _build_one_half(
         member.material.wafer_a, member, scratch_directory, WAFER_A_TAG,
-        comm)
+        declared_species, comm)
     handle_b = _build_one_half(
         member.material.wafer_b, member, scratch_directory, WAFER_B_TAG,
-        comm)
+        declared_species, comm)
     shared = SharedCell(
         note="Si/Si identity shared cell (wave-3 matcher dormant, §7.6)")
     return handle_a, handle_b, shared
@@ -246,23 +253,70 @@ def build_halves(
 # cascade -> re-anneal -> gate, and writes the amorphized half back.
 # ---------------------------------------------------------------------
 
-def _reanneal_force_model(type_map: dict, substrate: set) -> ForceModel:
+# Bringing up a NEW material means running a potential that has not yet
+# cleared the §3.5 activation gate — the run is what PRODUCES the evidence
+# the gate would judge. The registry refuses such a form by default. This
+# environment variable is the deliberate, per-run override: it lives
+# outside the code so nobody is tempted to flip ``validated=True`` in the
+# registry before the evidence exists, and because it must be set in the
+# job script it stays visible in the run's own record. Anything produced
+# under it is PROVISIONAL and must be reported that way.
+_UNVALIDATED_POTENTIAL_VARIABLE = "SABSIM_ALLOW_UNVALIDATED_POTENTIAL"
+
+
+def _unvalidated_potentials_allowed() -> bool:
+    """Whether this run may use a not-yet-gate-cleared potential."""
+    setting = os.environ.get(_UNVALIDATED_POTENTIAL_VARIABLE, "")
+    return setting.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _stage_trajectory(
+        output_directory: str,
+        member: MemberSpecification,
+        stage: str) -> tuple:
+    """Where this stage records frames, and how densely — or nowhere.
+
+    Returns ``(path, stride)`` when this invocation asked for visual
+    output, and ``(None, stride)`` otherwise, so a caller can pass both
+    straight through to a driver that treats ``None`` as "do not record".
+    Centralised here so every dynamic stage names its file the same way
+    and honours the one switch (:mod:`sabsim.pipeline.run_options`).
+    """
+    options = trajectory_options()
+    stride = options.stride_or(member.numerical.frame_stride)
+    if not options.enabled:
+        return None, stride
+    return stage_dump_file(output_directory, member.name, stage), stride
+
+
+def _reanneal_force_model(
+        type_map: dict,
+        substrate: set,
+        domain: str,
+        allow_unvalidated: bool = False) -> ForceModel:
     """The gentle re-anneal potential, NULLing the deleted beam type.
 
-    v1's 'MLIP' is the classical Stillinger-Weber stand-in (DESIGN.md §4.5).
+    v1's 'MLIP' is a classical stand-in (DESIGN.md §4.5), resolved from
+    the material's registry entry rather than hard-coded — silicon gets
+    Stillinger-Weber, silicon+oxygen gets the Munetoh Tersoff, and a new
+    material needs a registry row rather than a code change.
+
     After the cascade deletes the beam atoms the beam TYPE is still
-    declared, so ``sw`` maps it to NULL — but LAMMPS then needs every
-    declared type pair SET even with zero beam atoms, so a no-op ``zero``
-    pair style is overlaid to set those dead pairs while ``sw`` does the
-    real Si-Si physics. (The trained MLIP would take the same zero overlay.)
-    STAND-IN: silicon-specific (``sw Si.sw``); a general re-anneal potential
-    is resolved from the material at wave 2 (DESIGN.md §4.5).
+    declared, so the classical form maps it to NULL and a no-op ``zero``
+    pair style is overlaid to satisfy those dead type pairs. That
+    bookkeeping now lives in
+    :func:`~sabsim.driver.cascade_potential.classical_force_model`, which
+    the press/pull stages share, so both describe a material identically.
+
+    ``domain`` comes from the member specification (DESIGN.md §4.8) and
+    selects among forms registered for the same species. It is passed
+    rather than inferred because the cell cannot reveal it: a silica
+    wafer and a silicon wafer facing a silica wafer present the same
+    species set and want different forms.
     """
-    order = sorted(type_map, key=lambda symbol: type_map[symbol])
-    labels = " ".join(s if s in substrate else "NULL" for s in order)
-    return ForceModel(
-        pair_style="hybrid/overlay sw zero 1.0",
-        pair_coeff=(f"* * sw Si.sw {labels}", "* * zero"))
+    return classical_force_model(
+        type_map, substrate, allow_unvalidated=allow_unvalidated,
+        domain=domain)
 
 
 def activate_one_half(
@@ -288,15 +342,21 @@ def activate_one_half(
     built = read_standalone_half(
         handle.data_file, handle.type_map, handle.identity)
     substrate = frozenset(handle.type_map) - _projectile_species(member)
-    mlip = _reanneal_force_model(handle.type_map, substrate)
+    mlip = _reanneal_force_model(
+        handle.type_map, substrate, member.material_domain,
+        allow_unvalidated=_unvalidated_potentials_allowed())
 
     role = "a" if handle.wafer_tag == WAFER_A_TAG else "b"
     log_file = os.path.join(output_directory, f"log.activation_{role}")
     engine = LammpsEngine(
         command_line_args=["-screen", "none", "-log", log_file], comm=comm)
+    trajectory_file, stride = _stage_trajectory(
+        output_directory, member, f"activation_{role}")
     result = activate_surface(
         engine, built, member, mlip, handle.data_file, seed,
-        _GEOMETRY, _CONTROL)
+        _GEOMETRY, _CONTROL,
+        allow_unvalidated_potential=_unvalidated_potentials_allowed(),
+        trajectory_file=trajectory_file, trajectory_stride=stride)
     # Snapshot BEFORE closing: the re-annealed state is still live here.
     amorphized_atoms = snapshot_amorphized_half(
         engine, handle.type_map, handle.wafer_tag)
@@ -447,19 +507,31 @@ def _assemble_on_one_rank(
 # BondDebondResult, a fresh engine per pull rung (PSEUDOCODE.md §9.1).
 # ---------------------------------------------------------------------
 
-def _bonded_force_model(type_map: dict) -> ForceModel:
+def _bonded_force_model(
+        type_map: dict,
+        substrate,
+        domain: str,
+        allow_unvalidated: bool = False) -> ForceModel:
     """The potential the bonded pair presses and pulls under (§4.5).
 
-    v1's 'MLIP' is the classical Stillinger-Weber stand-in, and the
-    assembled pair is substrate-only (the beam was deleted during
-    activation), so for the Si/Si pair this is plain ``sw`` mapping every
-    type to Si. STAND-IN: silicon-specific (``sw Si.sw``); the trained MLIP
-    drops in behind this same ``pair_style`` seam at wave 2 (DESIGN.md §4.5).
+    Resolved from the material's registry entry, the same way the
+    re-anneal is, so the pair is pressed and pulled under exactly the
+    potential its surfaces were annealed under.
+
+    This previously mapped EVERY declared type to ``Si`` — harmless for
+    the Si/Si null test, where that is the truth, but wrong for any other
+    material: it would have described a silica wafer as though every
+    oxygen were a silicon. Each type now carries its own element, and a
+    projectile type still declared with no atoms left becomes ``NULL``.
+    The trained MLIP drops in behind this same ``pair_style`` seam.
+
+    ``domain`` is the member's declared regime (DESIGN.md §4.8), and
+    passing the SAME one the re-anneal used is what makes the promise
+    above literal — anneal and press resolve to one registry entry.
     """
-    order = sorted(type_map, key=lambda symbol: type_map[symbol])
-    labels = " ".join("Si" for _ in order)
-    return ForceModel(
-        pair_style="sw", pair_coeff=(f"* * Si.sw {labels}",))
+    return classical_force_model(
+        type_map, substrate, allow_unvalidated=allow_unvalidated,
+        domain=domain)
 
 
 def run_bond_debond_md_live(
@@ -493,7 +565,11 @@ def run_bond_debond_md_live(
     )
 
     built = structure.built
-    force_model = _bonded_force_model(built.type_map)
+    force_model = _bonded_force_model(
+        built.type_map,
+        frozenset(built.type_map) - _projectile_species(member),
+        member.material_domain,
+        allow_unvalidated=_unvalidated_potentials_allowed())
     seed = member.ensemble.master_seed
     reference_file = os.path.join(scratch_directory, "settled_reference.data")
 
@@ -503,8 +579,14 @@ def run_bond_debond_md_live(
             "-screen", "none",
             "-log", os.path.join(scratch_directory, "log.press")],
         comm=comm)
+    # The press dump stays open through the settle on this same engine,
+    # so the two record as one movie of contact and relaxation.
+    press_trajectory, press_stride = _stage_trajectory(
+        scratch_directory, member, "press")
     press = press_and_bond(
-        press_engine, built, member, force_model, structure.data_file, seed)
+        press_engine, built, member, force_model, structure.data_file, seed,
+        trajectory_file=press_trajectory,
+        trajectory_stride=press_stride)
     reference = None
     if press.contact_reached:
         reference = settle_reference(
@@ -531,9 +613,13 @@ def run_bond_debond_md_live(
                 "-log", os.path.join(
                     scratch_directory, f"log.pull_{index}")],
             comm=comm)
+        pull_trajectory, pull_stride = _stage_trajectory(
+            scratch_directory, member, f"pull_{_rate_slug(rate)}")
         result = pull_at_rate(
             pull_engine, built, member, force_model, reference_file, rate,
-            seed, output_directory=scratch_directory)
+            seed, output_directory=scratch_directory,
+            trajectory_file=pull_trajectory,
+            trajectory_stride=pull_stride)
         pull_engine.close()
         pulls.append(PullOutcome(
             rate_value=rate.value, rate_unit=rate.unit,

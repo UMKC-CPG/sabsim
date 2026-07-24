@@ -165,8 +165,34 @@ def load_crystal(cif_path) -> Structure:
     (DESIGN.md §1.2). Its cell SCALE is only a starting geometry — the
     working lattice constant is derived by relaxation (§2.2) — so nothing
     here treats the file's lattice constant as final.
+
+    **Oxidation states are stripped here, and this is the only place it
+    happens.** Many published CIFs label sites by ION rather than by
+    element — the shipped alpha-quartz file writes ``O2-`` and ``Si4+``.
+    Read literally, a site's species then stringifies to ``"O2-"``, which
+    is not a chemical symbol: it matches no entry in the §4.7 potential
+    registry, no key in a LAMMPS type map, and no reference-data filename
+    (§3.5). Every one of those lookups is keyed on the bare element.
+
+    Stripping at LOAD rather than at each point of use is deliberate. The
+    alternative — every consumer remembering to ask for ``.symbol`` — is
+    a rule that must be re-obeyed by code nobody has written yet, and the
+    failure it prevents is quiet: a species set that silently matches
+    nothing, surfacing much later as a puzzling registry miss. One
+    conversion at the boundary makes the whole pipeline downstream of it
+    unable to see a charge label at all.
+
+    Charge is not information we lose. SABSIM's data files are written
+    ``atom_style atomic`` and are charge-free at this fidelity (§2.6),
+    and the classical form chosen for silica in v1 is deliberately
+    charge-free too (§4.7). A form that DOES carry charges assigns them
+    from its own parameterization, never from a structure file's labels.
     """
-    return Structure.from_file(str(cif_path))
+    crystal = Structure.from_file(str(cif_path))
+    # In-place on the pymatgen object; older releases return None, so the
+    # structure is returned explicitly rather than through the call.
+    crystal.remove_oxidation_states()
+    return crystal
 
 
 def build_slab(

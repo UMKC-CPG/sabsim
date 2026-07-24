@@ -134,6 +134,17 @@ so they are not discovered late (two touch non-negotiable goals). -->
       convergence threshold, the re-anneal protocol, and the optional
       melt-quench upgrade. (`ARCHITECTURE.md` §2.1 steps 1-2, §2.3;
       `VISION.md` goal 1 and principle 5.)
+      **STATUS (2026-07-22): design RESOLVED, prototype DONE, integration
+      NOT STARTED.** This item is resolved as a DECISION only. The
+      bootstrap strategy above is settled and the ALF/DeePMD backend is
+      prototyped and unit-tested (`prototypes/alf_deepmd/`), but NOTHING
+      is wired into the running pipeline — no committee is ever trained or
+      loaded, `resolve_potential` returns a classical stand-in, every
+      "runs on the MLIP" stage runs on the classical registry, and the
+      reported `uncertainty` is hard-coded 0.0. So "the MLIP is designed"
+      must not be read as "the MLIP runs." The consumer-side wiring that
+      closes this gap is tracked as its own first-class CODE item below
+      (the MLIP-integration checklist + status table).
 - [ ] Long-range electrostatics for ionic / polar pairs — RESIDUAL from
       STRUCTURAL 1a (2026-07-08), deferred with v1's covalent Si/SiO2
       scope. A short-range MLIP (DeePMD `se_e2_a`) is defensible for
@@ -316,6 +327,112 @@ foundations, interaction rules. -->
       UDD bias math. `ARCHITECTURE.md` §2.3 forward-references both as
       "DESIGN-level detail" but no DESIGN section covers them yet
       (`ARCHITECTURE.md` §2.3, step 2).
+- [ ] **§4.8 follow-ons — the force-model recipe** (opened 2026-07-24,
+      when §4.8 was written). The section defines what a recipe must
+      state; these four discharge it. (a) **Pin the numbers.** Every
+      value in §4.8 is a placeholder resolved by the values file:
+      production basis cutoff, reciprocal-space spacing,
+      exchange-correlation treatment, smearing, electronic and geometric
+      tolerances; the tightened audit block; strain magnitudes and how
+      far past the reversible range they run; the labelling budget; and
+      the two stopping thresholds. Several cannot honestly be chosen
+      until the part-4 audit has been run once. (b) **Run the accuracy
+      audit for {Si, O}** and record how far the production block sits
+      from it — until then the block is unaudited and anything built on
+      it is EXPLORATORY, the same discipline as
+      `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` (§4.7). (c) **Define the
+      record** that `PSEUDOCODE.md` §11's twelve `pair_specification`
+      call sites already assume, plus the load-time domain check that
+      refuses a member whose structures fall outside the declared domain
+      — DONE 2026-07-24 for the member side: `material_domain` is a
+      required field on `MemberSpecification`, threaded to both force-model
+      resolvers, and phase-three validation checks (species union, domain)
+      against the registry before any engine opens. What REMAINS is the
+      recipe side: once `ForceModelRecipe` exists, a member's domain must
+      be checked to lie INSIDE the recipe's — containment, not equality,
+      since a silicon-and-silica recipe legitimately covers a silica-only
+      member. (d) **Lift §4.7's registry key to (species, domain)** —
+      DONE 2026-07-24, see the item below.
+- [x] **Define the recipe record `PSEUDOCODE.md` §11 threaded but never
+      declared** — DONE 2026-07-24. `ForceModelRecipe` and its two
+      sub-records (`ReferenceSettings`, `StartingCollection`) are written
+      into §11.1, covering all eight parts of DESIGN §4.8 plus the
+      validation rules. The twelve call sites were renamed from
+      `pair_specification`, which was wrong twice: the key is a species
+      UNION and a DOMAIN rather than a pair, and the object is a
+      manufacturing recipe rather than a description. Not yet code — the
+      record is a pseudocode declaration, and the Python dataclass lands
+      when the bootstrap is built.
+- [x] **Phase-three validation: do the referenced artifacts exist?** —
+      DONE 2026-07-24 (this was gap G4 from the 2026-07-23 audit). New
+      `spec/references.py` holds the crystal-path resolver (moved out of
+      `live_stages` so the checker and the stages search the SAME places
+      — one that looked elsewhere would either pass runs that then fail
+      or fail runs that would work) and `check_study_references`, called
+      by `exec_full_study` before any engine opens. It checks every
+      wafer's CIF resolves and that (species union, material_domain) is
+      a real registry key, reports EVERY problem in one pass rather than
+      the first, and NAMES what it cannot yet check (`potential_ref` has
+      no store to resolve against until the bootstrap exists). DESIGN
+      §1.5 is now three phases, split by what each check needs: the file,
+      the environment, or a measurement the pipeline must first produce.
+      It immediately found a real defect — see the cristobalite item.
+- [ ] **Restore beta-cristobalite as the Si/SiO₂ counterface** (surfaced
+      2026-07-24 by phase-three validation, which refused the shipped
+      template). The `si-sio2` member named
+      `sio2_beta_cristobalite.cif`, a file that has never existed —
+      cubic, and so the closest lattice match to Si(100), which is why it
+      was chosen. The template and the e2e job now point at the
+      alpha-quartz CIF that does ship, with the intent recorded in a
+      comment, so the spec loads. Create the cristobalite CIF with the
+      compound build and swap it back. Nothing is lost meanwhile: the
+      assembly cannot run a genuine lattice mismatch until the wave-3
+      coincidence matcher lands either (§2.3).
+      **Why cristobalite and not quartz, recorded so the swap-back is not
+      re-litigated.** Real fab silica is AMORPHOUS — thermal or deposited
+      oxide — so neither crystal is what sits on a wafer, and the choice
+      is about which starting crystal survives contact with this
+      pipeline. Two criteria pick cristobalite for the DISSIMILAR member.
+      It is cubic, so it can share a cell with Si(100); alpha-quartz is
+      trigonal and would fight the coincidence matcher. And its density
+      (~2.2 g/cm³) is essentially that of amorphous silica, where quartz
+      sits at ~2.65 — which matters because §3.5's gate normalizes g(r)
+      to the LOCAL density and already contends with the amorphized skin
+      running ~20% lighter than the crystal beneath; starting from quartz
+      widens that gap rather than narrowing it. Alpha-quartz stays right
+      for the SILICA NULL test, where there is no silicon to match and
+      the best-characterized crystal is the better reference — which is
+      what the template already does. TWO CAVEATS for whoever makes the
+      CIF: beta-cristobalite is only stable above ~1470 °C (the RT
+      cristobalite polymorph is alpha, tetragonal), so the cubic
+      structure is a modelling idealization; and the idealized Fd-3m form
+      carries 180° Si-O-Si bridges against a real ~144°, which a
+      classical form may react badly to. Decide between the idealized
+      cell and a distorted lower-symmetry variant, and expect the §2.2
+      bulk relax to move it.
+- [x] **Retire the `_silica_only` marker in the cascade registry** —
+      DONE 2026-07-24 (surfaced the same day by §4.8's domain analysis).
+      The registry keyed on a frozen set of SPECIES, but two entries
+      legitimately cover {Si, O} — the Munetoh Tersoff that spans the
+      Si/SiO₂ interface, and the Vashishta form better for amorphous
+      silica but unable to describe elemental silicon at all. They had
+      been disambiguated by smuggling a non-element marker string into
+      the key, which no real cell could produce, so the silica form was
+      unreachable — a safety property by accident rather than design.
+      The key is now `(species, domain)`: `CascadeGeneratorEntry` carries
+      a `domain` field, the five rows declare `diamond-cubic`,
+      `silicon-and-silica`, `silica-only`, `wurtzite` and
+      `trigonal-ferroelectric`, and both resolvers take an optional
+      `domain`. A species set with several registered domains and no
+      domain named REFUSES, listing the candidates; a set with exactly
+      one resolves without naming it, since there is nothing to choose
+      between. The duplicated refusal blocks in the two resolvers were
+      factored into one `_resolve_registry_entry`, and
+      `registered_substrate_sets` became `registered_material_domains`
+      (species AND domain in every message). Six new tests, 199 green.
+      What is NOT done and stays with the §4.8 item above: the member
+      specification cannot yet CARRY a domain, so a Si/SiO₂ run reaches
+      the ambiguity refusal rather than passing a choice through.
 - [x] STRUCTURAL 2 DESIGN follow-ons — RESOLVED by `DESIGN.md` §5-§6
       (2026-07-09), except (d). (a) **Both:** a constrained-minimization
       ladder at prescribed interface openings is the primary reversible
@@ -1086,6 +1203,141 @@ foundations, interaction rules. -->
 ## CODE
 
 <!-- Tasks related to implementation. -->
+
+- [ ] **PROPAGATE UP THE CHAIN: two changes landed in CODE on 2026-07-22
+      that the documents above do not yet describe.** Both are real
+      design decisions, not implementation detail, so they belong in
+      ARCHITECTURE/DESIGN before they drift.
+      (1) **Trajectory recording is now a RUN-TIME MODE.** `sabsim run`
+      grew `--dump-visuals` and `--dump-stride`; every dynamic stage —
+      the cascade and re-anneal of each half, the press and settle, and
+      each pull rung — records only when asked. Two design points to
+      write down: recording is OPERATIONAL rather than physical (two
+      runs differing only in it are the SAME study), which is why it is
+      a flag and not a spec field and why it lives in
+      `pipeline/run_options.py` rather than being threaded through the
+      contract runner; and the pull dump, which used to be written
+      unconditionally at 1.3 GB per rung, is now conditional — so the
+      DEFAULT run got dramatically smaller, and the §8 "snapshot
+      selector reads the dump back" language in `commands.py` is
+      ASPIRATIONAL, since nothing actually reads it (the analyzer
+      measures from the thermo log). Fix that comment or build the
+      selector.
+      (2) **The potential is now resolved per material from ONE
+      registry.** `cascade_potential.classical_force_model` serves the
+      re-anneal and the press/pull, which previously hard-coded
+      `sw Si.sw` in three separate places (one of which mapped EVERY
+      atom type to Si — harmless for Si/Si, wrong for anything else).
+      DESIGN §4.5 still describes the old arrangement. Also record the
+      `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` opt-in: the §4.7 refusal
+      stays the default, and bringing up a new material is an explicit,
+      per-run, job-script-visible choice whose results are provisional.
+
+- [ ] **The non-cubic box fix lives in a JOB SCRIPT, not the builder.**
+      `jobs/bulk_si/run_activation.py:orthogonalize_in_plane` now handles
+      a hexagonal surface by swapping in the orthogonal `(a, a + 2b)`
+      supercell — needed because alpha-quartz(001) leans at EXACTLY
+      LAMMPS's skew limit (legal only by a floating-point tie) and
+      because the activation gate's in-plane minimum-image assumes an
+      orthogonal cell, so a leaning box would have mis-measured
+      neighbour counts SILENTLY rather than crashing. That fix belongs
+      in `structure/slab_builder.py`, where `build_standalone_half` and
+      `build_facing_pair` can use it. Until it moves, ANY non-cubic
+      material going through `sabsim run` still has the problem —
+      including `si-sio2`.
+
+- [ ] **`si-sio2` names a crystal file that does not exist.**
+      `dev/templates/study_spec.toml` points wafer B at
+      `src/sabsim/structure/data/sio2_beta_cristobalite.cif`; there is no
+      such file, so the member has never been runnable. We now ship
+      `sio2_alpha_quartz.cif` (used by the new `sio2-sio2-reference`
+      member). Decide deliberately: quartz is what we have, but
+      beta-cristobalite is cubic and lattice-matches silicon far better,
+      which is presumably why it was named. Either obtain the
+      cristobalite file or re-point the member and record WHY the
+      lattice match got worse.
+
+- [ ] **Silica has no activation reference data**
+      (`share/activation/O_Si.toml` is missing), so its gate correctly
+      reports every metric UNRESOLVED. The 2026-07-22 run confirmed the
+      cascade itself works on silica — 42 impacts at 75 eV, zero
+      sputtered atoms out of 7920 — but nothing can yet JUDGE the
+      result. Needs an Si-O bond cutoff, a first-peak g(r), a
+      coordination band and a ring criterion for amorphous silica, plus
+      silica's own energy x dose sweep (the current dose is silicon's
+      operating point reused as a starting guess).
+
+- [ ] **MLIP INTEGRATION STATUS — the socket is built, the plug is
+      prototyped, they have NEVER been connected (2026-07-22).** The whole
+      MLIP / ALF / committee layer is design-complete and its riskiest
+      claim is prototype-proven, yet it has ZERO integration with the
+      running pipeline. This item makes that gap first-class so the
+      consumer side is never assumed from the producer side. It
+      COMPLEMENTS, and does not duplicate, two open items above: the
+      producer-side validation ("train + freeze an ensemble once a GPU +
+      step-1 data exist") and the DESIGN write-up ("document the
+      backend-plugin mechanism"). Those cover MAKING a committee; this
+      covers CONSUMING one in the eight-stage pipeline.
+      WHAT EXISTS. Design: `DESIGN.md` §4 (the most-filled section),
+      `ARCHITECTURE.md` §2.3, `VISION.md` principle 2. Prototype:
+      `prototypes/alf_deepmd/` — the two ALF contracts
+      (`train_DEEPMD_ensemble_task`, `DEEPMD_ASE_load_ensemble`) plus the
+      ANI-HDF5 -> DeePMD converter, round-trip unit-tested. It is NOT
+      imported by `src/` (`src/sabsim/__init__.py` states this outright).
+      WHAT DOES NOT. Nothing trains a committee, loads one, or computes an
+      uncertainty. `resolve_potential` returns a classical stand-in
+      regardless of `potential_ref` (`skeleton_stages.py`); every dynamic
+      stage resolves a CLASSICAL model from the registry
+      (`cascade_potential.classical_force_model`); `deepmd_model`
+      (`commands.py`) is defined but called from nowhere; `uncertainty` is
+      hard-coded 0.0 and only ONE realization runs; no bootstrap driver
+      exists anywhere under `src/` or `jobs/`.
+      THE SEAMS, and what fills each today (committee = the trained DeePMD
+      ensemble; stand-in = a classical registry potential wearing the same
+      `ForceModel` / `Potential` seam, which is WHY the swap is deferrable):
+
+      | Stage (step)              | Design -> runs on     | Today -> runs on   |
+      |---------------------------|-----------------------|--------------------|
+      | bootstrap loop (producer) | trains the committee  | NOT BUILT          |
+      | 2  resolve_potential      | trained committee     | classical stand-in |
+      | 4a cascade + ZBL          | classical (by design) | classical (correct)|
+      | 4b re-anneal              | committee             | classical registry |
+      | 6-7 press / settle / pull | committee             | classical registry |
+      | 8a analyzer (sigma)       | committee spread      | one run, sigma=0   |
+      | 8b characterization       | all-electron vs cmte  | mocked             |
+
+      Only 4a is correct as-is: the violent cascade MUST stay classical +
+      ZBL (STRUCTURAL 1b), so the production MLIP is never trained on
+      cascade distortion or on Ar. Every other "committee" row runs real
+      MD on the WRONG potential today.
+      THREE COMMITTEE ROLES, all absent, all from one source (which is why
+      its absence zeroes all three at once): (i) the production potential
+      for the gentle stages (4b, 6-7); (ii) the uncertainty SIGNAL —
+      `MLMD_calculator` sigma_E / sigma_F feed 8a's reported uncertainty,
+      STRUCTURAL 3's interface-fidelity gate, and the §7.3 live-abort
+      monitor (`DESIGN.md` §4.4, §7); (iii) the active-learning DRIVER —
+      the same sigma steers uncertainty-triggered + UDD-biased sampling in
+      the bootstrap (`DESIGN.md` §4.4-§4.5).
+      INTEGRATION CHECKLIST (none started; the order is a DEPENDENCY chain,
+      since the lower items block on a committee existing at all):
+      - [ ] Stand up ONE bootstrap pass end to end (seed -> generate ->
+            VASP-label -> train -> refine) emitting a fingerprinted
+            committee (`DESIGN.md` §4.5, `PSEUDOCODE.md` §11). Blocks the
+            rest; needs GPU + VASP + the producer-side validation above.
+      - [ ] Make `resolve_potential` a real LOOKUP returning that member's
+            committee, not the classical stand-in (`skeleton_stages.py`).
+      - [ ] Emit the committee `pair_style deepmd` line for the re-anneal
+            and the press/pull — wire `deepmd_model`, retire the stand-in
+            on those stages, and leave 4a classical (`commands.py`).
+      - [ ] Compute committee sigma along the trajectory and thread it into
+            the measure vector, replacing the hard-coded `uncertainty=0.0`
+            and lighting up the interface-fidelity gate (`live_stages.py`).
+      - [ ] Run the ensemble loop — the `amorphization_count` seeds are
+            already READ but only one realization runs today
+            (`live_stages.py`).
+      Keep this item open until the table's "Today" column matches its
+      "Design" column; it is the honest bridge between STRUCTURAL 1b
+      (design: RESOLVED) and a pipeline that actually runs on the MLIP.
 
 - [x] Wave-0 walking skeleton BUILT and tested (2026-07-13) — the
       `ARCHITECTURE.md` §5.3 Wave-0 target reached: the Tier-A thread runs

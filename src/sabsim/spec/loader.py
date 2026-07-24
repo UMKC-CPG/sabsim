@@ -307,6 +307,12 @@ def _reject_if_not_executable(
             f"{context}: potential_ref is empty — a member must point "
             f"at a potential generation (§1.3, §1.6)")
 
+    if not member.material_domain:
+        raise SpecificationError(
+            f"{context}: material_domain is empty — a member must name "
+            f"the structural/chemical regime its force model describes, "
+            f"because the species alone cannot select one (§4.8)")
+
 
 # ---------------------------------------------------------------------
 # Relation validation — compute what the schema says the validator
@@ -404,6 +410,8 @@ def load_and_validate_study(spec_path: str | Path) -> Study:
             ensemble=ensemble,
             potential_ref=str(_require(
                 member_table, "potential_ref", context)),
+            material_domain=str(_require(
+                member_table, "material_domain", context)),
         )
         _reject_if_not_executable(member)
         members.append(member)

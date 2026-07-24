@@ -79,3 +79,10 @@ dev/old_docs/
 # vendoring someone else's project.
 sunita/
 sunita2/
+
+# Editor scratch files. A vim swap file was staged once because the note
+# it belonged to was open while committing; ignoring the pattern is
+# cheaper than remembering to look.
+*.swp
+*.swo
+*~

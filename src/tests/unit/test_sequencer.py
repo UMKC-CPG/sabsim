@@ -57,11 +57,11 @@ def job_home(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------
 
 def test_exec_full_study_runs_every_member(job_home):
-    """Both template members run to a self-standing report."""
+    """Every template member runs to a self-standing report."""
     report = exec_full_study(_TEMPLATE_PATH, job_home)
     assert report.study_name == "sio2-si-sab-v1"
     assert tuple(r.specification.name for r in report.member_results) == (
-        "si-sio2", "si-si-reference")
+        "si-sio2", "si-si-reference", "sio2-sio2-reference")
 
 
 def test_every_skeleton_member_is_untrusted(job_home):
@@ -117,7 +117,7 @@ def test_study_record_is_json_serializable(job_home):
     # Round-trips through JSON without custom encoders.
     restored = json.loads(json.dumps(record))
     assert restored["study"] == "sio2-si-sab-v1"
-    assert len(restored["members"]) == 2
+    assert len(restored["members"]) == 3
 
 
 def test_provenance_stamps_the_fingerprinted_protocol(job_home):

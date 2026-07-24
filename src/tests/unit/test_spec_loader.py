@@ -57,9 +57,11 @@ def test_template_loads_into_a_study():
 
     assert isinstance(study, Study)
     assert study.name == "sio2-si-sab-v1"
-    # v1 has the dissimilar bond plus the Si/Si null test (§2.7, §7.4).
+    # v1 has the dissimilar bond plus TWO same-material null tests (§2.7,
+    # §7.4): silicon, and the silica one that proves the pipeline is not
+    # silicon-only.
     assert tuple(m.name for m in study.members) == (
-        "si-sio2", "si-si-reference")
+        "si-sio2", "si-si-reference", "sio2-sio2-reference")
 
 
 def test_template_values_map_to_the_schema_fields():
@@ -176,3 +178,46 @@ def test_relation_naming_a_missing_member_is_rejected(tmp_path):
     with pytest.raises(SpecificationError) as caught:
         load_and_validate_study(spec_path)
     assert "ghost-member" in str(caught.value)
+
+
+# ---------------------------------------------------------------------
+# material_domain — the second half of the force-model lookup key that
+# DESIGN.md §4.8 added, because a species set alone cannot select a form.
+# ---------------------------------------------------------------------
+
+def test_every_template_member_declares_a_material_domain():
+    """The domain is a required pointer, like potential_ref (§4.8)."""
+    study = load_and_validate_study(_TEMPLATE_PATH)
+    by_name = {member.name: member for member in study.members}
+
+    # Two members share the {Si, O} species set and would be
+    # indistinguishable without the domain; the silicon null test sits
+    # in the one domain registered for {Si} alone.
+    assert by_name["si-sio2"].material_domain == "silicon-and-silica"
+    assert by_name["si-si-reference"].material_domain == "diamond-cubic"
+    assert (by_name["sio2-sio2-reference"].material_domain
+            == "silicon-and-silica")
+
+
+def test_missing_material_domain_is_rejected(tmp_path):
+    """A member without a domain fails validation, naming the key."""
+    broken = _drop_lines_containing(_template_text(), "material_domain")
+    spec_path = _write_spec(tmp_path, broken)
+
+    with pytest.raises(SpecificationError) as caught:
+        load_and_validate_study(spec_path)
+    assert "material_domain" in str(caught.value)
+
+
+def test_empty_material_domain_is_rejected(tmp_path):
+    """An empty domain is refused rather than treated as 'any' (§4.8)."""
+    blanked = _template_text().replace(
+        'material_domain = "diamond-cubic"', 'material_domain = ""', 1)
+    spec_path = _write_spec(tmp_path, blanked)
+
+    with pytest.raises(SpecificationError) as caught:
+        load_and_validate_study(spec_path)
+    message = str(caught.value)
+    assert "material_domain" in message
+    # The message explains WHY the species alone will not do.
+    assert "species" in message

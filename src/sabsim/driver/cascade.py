@@ -52,6 +52,7 @@ from sabsim.driver.commands import (
     force_model_commands,
     insert_projectile_commands,
     to_metal,
+    trajectory_dump_commands,
 )
 from sabsim.driver.engine import Engine
 from sabsim.spec.records import MemberSpecification, Quantity
@@ -258,7 +259,9 @@ def run_cascade_to_fluence(
         spec: BombardmentSpec,
         seed: int,
         geometry: CascadeGeometry = CascadeGeometry(),
-        control: CascadeControl = CascadeControl()) -> CascadeOutcome:
+        control: CascadeControl = CascadeControl(),
+        trajectory_file: str | None = None,
+        trajectory_stride: int = 200) -> CascadeOutcome:
     """Bombard the surface to the target dose (PSEUDOCODE.md §10.4).
 
     Opens the cascade driver (the classical + ZBL force model, the
@@ -274,6 +277,13 @@ def run_cascade_to_fluence(
 
     ``seed`` seeds the border thermostat; the per-impact position and
     velocity seeds come from ``spec.impact_seeds``.
+
+    ``trajectory_file`` optionally records the whole bombardment for
+    visual inspection — one frame per ``trajectory_stride`` steps, held
+    open across every impact so the result is a single continuous movie
+    rather than one file per collision. It is off unless asked for: the
+    frames cost wall clock inside the hot cascade loop and the files are
+    large.
     """
     positions = np.asarray(built.atoms.get_positions())
     base_low = float(positions[:, 2].min())
@@ -282,6 +292,14 @@ def run_cascade_to_fluence(
     engine.commands(cascade_setup_commands(
         member, force_model, data_file, base_low, surface_high, seed,
         geometry))
+
+    # Opened once, before the first impact, and deliberately never closed
+    # here: the re-anneal that follows runs on this same engine, so
+    # leaving the dump open captures the surface HEALING as well as being
+    # damaged — which is the more informative half of the movie.
+    if trajectory_file is not None:
+        engine.commands(
+            trajectory_dump_commands(trajectory_file, trajectory_stride))
 
     relax_steps = max(1, round(
         spec.between_impact_relaxation
@@ -448,7 +466,10 @@ def activate_surface(
         data_file: str,
         seed: int,
         geometry: CascadeGeometry = CascadeGeometry(),
-        control: CascadeControl = CascadeControl()) -> ActivationResult:
+        control: CascadeControl = CascadeControl(),
+        allow_unvalidated_potential: bool = False,
+        trajectory_file: str | None = None,
+        trajectory_stride: int = 200) -> ActivationResult:
     """Activate ONE surface: cascade, re-anneal, then gate (§10.1).
 
     Resolves the classical + ZBL cascade force model for this slab's
@@ -458,13 +479,25 @@ def activate_surface(
     metric gate. ``built.type_map`` must already declare the projectile so
     the cascade can create those atoms; ``mlip_force_model`` is the gentle
     potential the re-anneal (and the rest of the pipeline) runs under.
+
+    ``allow_unvalidated_potential`` forwards the §4.7 escape hatch for
+    EXPLORATORY bring-up of a new material, where the run exists to
+    produce the very evidence the gate would judge. It stays False unless
+    a caller deliberately asks, and results obtained under it are
+    provisional.
+
+    ``trajectory_file`` optionally records the bombardment AND the
+    re-anneal that follows it as one continuous movie, for visual
+    inspection only — nothing downstream reads it.
     """
     cascade_force_model = resolve_cascade_generator(
-        built.type_map, _projectile_species(member))
+        built.type_map, _projectile_species(member),
+        allow_unvalidated=allow_unvalidated_potential,
+        domain=member.material_domain)
     spec = derive_bombardment_spec(built, member)
     cascade = run_cascade_to_fluence(
         engine, built, member, cascade_force_model, data_file, spec, seed,
-        geometry, control)
+        geometry, control, trajectory_file, trajectory_stride)
     projectile_types = [
         built.type_map[species]
         for species in _projectile_species(member)

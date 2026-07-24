@@ -61,7 +61,9 @@ machinery we drive but do not write).
 4. Amorphize ("activate") the model surfaces
    (classical+ZBL cascade, then a gentle MLIP anneal — see §2.3)
 5. Build the facing-pair (two amorphized surfaces toward each other)
-   (steps 3-5 may be reordered; ordering should be a setting)
+   (the ORDER is fixed by the physics — each surface is activated alone
+   in vacuum before the two halves ever meet; what IS a setting is
+   activation on / off, §5.3)
 6. Press the slabs together and let them settle  (uses the MLIP)
 7. Pull them back apart                           (uses the MLIP)
 8. Characterize the interface bonding from snapshots of steps 6-7
@@ -1218,11 +1220,19 @@ Every step is present from the start; fidelity rises in waves.
   measure, and the Imago variants come online last — the schedule
   insurance the design already guaranteed (`DESIGN.md` §8.8).
 
-One design freedom to protect from Wave 0: steps 3/4/5 are reorderable by
-setting (§2.1), so the structure builder and the activator must stay
-**order-agnostic behind the structure contract** — neither may assume it
-ran before or after the other. Hard-wiring build→amorphize→assemble in
-the skeleton would quietly forfeit that freedom.
+One design freedom to protect from Wave 0 — and one phantom freedom to
+stop protecting (retracted 2026-07-23). Steps 3/4/5 are **not**
+reorderable, and no setting should pretend they are: surface-activated
+bonding *means* each surface is prepared alone, in vacuum, before the two
+halves ever meet, so build → amorphize → assemble is fixed by the physics
+(§4.3, `DESIGN.md` §3.1). An earlier §2.1 called the ordering a setting;
+that claim is withdrawn, and no reorder engine is owed at any level.
+The freedom that genuinely exists is **activation on or off**, and it is
+the one the skeleton must keep live: with activation off the builder
+takes the crystalline all-in-one path (`build_facing_pair`, the Si/Si
+null test), and with it on the chain runs per half and assembles from two
+data files. Both paths must stay reachable behind the same structure
+contract; hard-wiring either would forfeit the choice that is real.
 
 ### 5.4 Consequence for PSEUDOCODE
 

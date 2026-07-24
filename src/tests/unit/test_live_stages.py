@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 
+from dataclasses import replace
+
 import pytest
 from ase.io import read as ase_read
 
@@ -251,3 +253,60 @@ def test_missing_cif_names_every_place_it_looked(monkeypatch, tmp_path):
     message = str(caught.value)
     assert "Looked in" in message
     assert str(tmp_path) in message, "the working directory must be listed"
+
+
+def _dissimilar_member():
+    """A Si/silica member built from CIFs that actually ship.
+
+    The template's si-sio2 member names a beta-cristobalite CIF that is
+    not created until the compound build lands, so this swaps the second
+    wafer for the alpha-quartz file already in the tree. What it exists
+    to exercise is the type map, not the lattice match: two wafers whose
+    crystals contribute DIFFERENT elements.
+    """
+    silicon = _si_si_member()
+    silica_wafer = replace(
+        silicon.material.wafer_b,
+        identity="SiO2",
+        cif_source="src/sabsim/structure/data/sio2_alpha_quartz.cif",
+        crystal_structure="alpha-quartz",
+        surface_face=(0, 0, 1))
+    return replace(
+        silicon,
+        material=replace(silicon.material, wafer_b=silica_wafer),
+        material_domain="silicon-and-silica")
+
+
+def test_both_halves_declare_the_member_species_union(tmp_path):
+    """A silicon half in a Si/silica member still declares oxygen (§4.3).
+
+    STRUCTURAL 1a puts one potential over the union of the pair's
+    species, and §4.3 makes that a single global type map so a type id
+    means the same element everywhere. Without it the silicon half would
+    declare no oxygen type, and the (species, domain) force-model lookup
+    of §4.8 could not resolve the member's declared domain for that half.
+    """
+    member = _dissimilar_member()
+    handle_a, handle_b, _ = build_halves(
+        member, potential=None, scratch_directory=str(tmp_path))
+
+    # Identical maps on both sides — same elements, same id for each.
+    assert handle_a.type_map == handle_b.type_map
+    assert set(handle_a.type_map) == {"Ar", "O", "Si"}
+
+    # Half A is the SILICON wafer: it declares oxygen but contains none.
+    half_a = read_standalone_half(
+        handle_a.data_file, handle_a.type_map, handle_a.identity)
+    assert set(half_a.atoms.get_chemical_symbols()) == {"Si"}
+
+    # Half B is the silica wafer and does contain both.
+    half_b = read_standalone_half(
+        handle_b.data_file, handle_b.type_map, handle_b.identity)
+    assert set(half_b.atoms.get_chemical_symbols()) == {"O", "Si"}
+
+
+def test_same_material_member_declares_only_its_own_species(tmp_path):
+    """The union changes nothing for a same-material pair (no bloat)."""
+    handle_a, _, _ = build_halves(
+        _si_si_member(), potential=None, scratch_directory=str(tmp_path))
+    assert set(handle_a.type_map) == {"Ar", "Si"}

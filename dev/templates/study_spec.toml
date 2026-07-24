@@ -84,6 +84,10 @@ controls = ["protocol", "potential"]
 [[member]]
 name          = "si-sio2"
 potential_ref = "PENDING-BOOTSTRAP"    # resolved by §11 on convergence
+# Elemental silicon on one side, silica on the other, so the form must
+# span BOTH plus the interface (§4.8). The silica-only alternative
+# cannot describe elemental silicon at all.
+material_domain = "silicon-and-silica"
   [member.wafer_a]
   material  = "Si"
   cif       = "src/sabsim/structure/data/si_diamond.cif"
@@ -91,13 +95,23 @@ potential_ref = "PENDING-BOOTSTRAP"    # resolved by §11 on convergence
   face      = [1, 0, 0]        # Miller indices of the bonding surface
   [member.wafer_b]
   material  = "SiO2"
-  cif       = "src/sabsim/structure/data/sio2_beta_cristobalite.cif"
-  structure = "beta-cristobalite"   # closest lattice match to Si (cubic)
-  face      = [1, 0, 0]
+  # STAND-IN CRYSTAL, and the reason is worth stating. The lattice-matched
+  # choice for a silicon counterface is BETA-CRISTOBALITE — it is cubic,
+  # so it is the closest match to Si(100) — but that CIF is created with
+  # the compound build and does not exist yet, and phase-three validation
+  # (§1.5) correctly refuses a spec pointing at a file that is not there.
+  # Alpha-quartz is a real silica phase whose CIF ships today, so the
+  # member stays loadable. Swap this back the moment the cristobalite CIF
+  # lands; the assembly cannot run a genuine mismatch until the wave-3
+  # coincidence matcher does either (§2.3), so nothing is lost meanwhile.
+  cif       = "src/sabsim/structure/data/sio2_alpha_quartz.cif"
+  structure = "alpha-quartz"        # stand-in; beta-cristobalite intended
+  face      = [0, 0, 1]             # the basal face
 
 [[member]]
 name          = "si-si-reference"   # same-material null test (§2.7, §7.4)
 potential_ref = "PENDING-BOOTSTRAP"    # the SAME generation as above
+material_domain = "diamond-cubic"      # {Si} has one registered domain
   [member.wafer_a]
   material  = "Si"
   cif       = "src/sabsim/structure/data/si_diamond.cif"
@@ -108,6 +122,33 @@ potential_ref = "PENDING-BOOTSTRAP"    # the SAME generation as above
   cif       = "src/sabsim/structure/data/si_diamond.cif"
   structure = "diamond"        # human label; the CIF is authoritative
   face      = [1, 0, 0]
+
+# The SILICA null test — the second material to go through the pipeline,
+# and the one that proves the machinery is not silicon-only. Same-material
+# on both faces (§2.7), so it needs no lattice matching between unlike
+# crystals and isolates ONE question: does activation work on a compound,
+# multi-species surface? It runs on the Munetoh Tersoff of DESIGN §4.7,
+# which is registered but has NOT cleared the §3.5 gate, so anything it
+# produces is EXPLORATORY and provisional (the run is what generates the
+# evidence the gate would eventually judge).
+[[member]]
+name          = "sio2-sio2-reference"
+potential_ref = "PENDING-BOOTSTRAP"    # the SAME generation as above
+# Silica on both faces, but still the silicon-and-silica form: the
+# comment above records why (the silica-only Vashishta entry carries its
+# own steric wall, so a ZBL overlay would double-count the repulsion).
+# A pure-silica member sits INSIDE this domain (§4.8 containment).
+material_domain = "silicon-and-silica"
+  [member.wafer_a]
+  material  = "SiO2"
+  cif       = "src/sabsim/structure/data/sio2_alpha_quartz.cif"
+  structure = "alpha-quartz"   # human label; the CIF is authoritative
+  face      = [0, 0, 1]        # the basal face
+  [member.wafer_b]
+  material  = "SiO2"
+  cif       = "src/sabsim/structure/data/sio2_alpha_quartz.cif"
+  structure = "alpha-quartz"   # human label; the CIF is authoritative
+  face      = [0, 0, 1]
 
 # ---------------------------------------------------------------------
 # PROTOCOL group (§1.2): HOW the experiment is performed. Every knob

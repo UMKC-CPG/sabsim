@@ -122,12 +122,14 @@ function exec_one_member(member_specification, scratch_directory):
                                                           # classical
         POTENTIAL_CONTRACT)
 
-    # Steps 3-4-5 are three SEPARATE stages, and their order is a SETTING
-    # (ARCHITECTURE §2.1): the builder and the activator are order-
-    # agnostic behind their contracts (§5.3), so the sequencer applies
-    # whatever order the spec declares. The default (and the only
-    # physically sensible order for v1) is build -> activate -> assemble;
-    # a general reorder engine is [DEPTH-FIRST] for this sequencer.
+    # Steps 3-4-5 are three SEPARATE stages in a FIXED order:
+    # build -> activate -> assemble. The order is not a setting and no
+    # reorder engine is owed (ARCHITECTURE §2.1, §5.3, retracted
+    # 2026-07-23) -- activating each surface alone in vacuum, before the
+    # halves meet, is what surface-activated bonding IS. What the spec
+    # does choose is whether activation runs AT ALL: with it off the
+    # builder emits the crystalline pair in one piece (the Si/Si null
+    # path) and the activate stage is skipped entirely.
 
     # Step 3 — build both slabs to the shared coincidence cell (§7). Each
     # is written to a data file under scratch_directory and returned as a
@@ -2003,8 +2005,9 @@ function minimize_at_fixed_opening(structure, opening, potential):
 ### 9.8 What bottoms out, what delegates
 
 `[BOTTOMS OUT here]` the persistent driver and its depth-zone carve +
-group -> fix map (§9.2); `press_and_bond`'s mode switch, no-impact gate, bias-removed
-thermostat, dual contact criterion, and hold (§9.3); `settle_reference`'s
+group -> fix map (§9.2); `press_and_bond`'s mode switch, no-impact gate,
+bias-removed thermostat, dual contact criterion, and hold (§9.3);
+`settle_reference`'s
 gated minimize+equilibrate (§9.4); `pull_at_rate`'s both-grip recording,
 warm-up-discarded averaged force, and strided frames (§9.5);
 `reduce_to_trajectory`'s two curves, separation point, and gates (§9.6);
@@ -2565,6 +2568,165 @@ pass of the OUTER loop (`VISION.md` principle 5), run by hand in v1: the
 inner refine-loop iterates, but re-entry for MORE pairs or study-driven
 weaknesses is manual.
 
+**The INPUT record, which every function below threads.** This object
+was passed through twelve call sites under the name
+`pair_specification` and defined nowhere; `DESIGN.md` §4.8 designs it and
+this is its shape. The name changed with the definition, because the old
+one was wrong twice: it is keyed by a species UNION and a DOMAIN rather
+than by a pair, and it is a manufacturing RECIPE rather than a
+description. It is the third input file of the project, alongside the
+study specification (§2) and the deployment configuration, and it
+changes on a third clock: manufactured once, costing weeks, then
+consumed unchanged by many members.
+
+```
+record ReferenceSettings:
+    # DESIGN §4.8 parts 3-4. The numerical controls of ONE accurate
+    # calculation. TWO instances live in a recipe and they are not
+    # interchangeable — see the two fields on ForceModelRecipe below.
+    basis_cutoff:          Quantity   # how finely wavefunctions resolve
+    reciprocal_spacing:    Quantity   # a SPACING, never a fixed mesh:
+                                      # one block must serve a few-atom
+                                      # bulk cell AND a §6.4 subcell, and
+                                      # only a spacing scales to both
+    exchange_correlation:  string     # the approximation used
+    occupancy_smearing:    Quantity   # partial-occupancy broadening
+    electronic_tolerance:  Quantity   # electronic convergence limit
+    geometric_tolerance:   Quantity   # force/geometry convergence limit
+    audited:               boolean    # has the part-4 audit actually been
+                                      # run against these values, or are
+                                      # they a plausible guess? Same idiom
+                                      # as the registry's `validated` and
+                                      # the reference file's `real` — a
+                                      # recipe may be unaudited, but what
+                                      # it makes is then EXPLORATORY
+    # [DEPTH-FIRST] every value above is a placeholder until the first
+    # audit runs (DESIGN §4.8 "Frozen for v1"); the FIELDS are fixed here
+    # because a value the manufacture uses must be visible (§1.4).
+
+record StartingCollection:
+    # DESIGN §4.8 part 2. The calm structures computed before anything
+    # else. Its purpose is stated out loud because it is easy to
+    # over-invest: it exists so the seed committee does not fly apart,
+    # NOT to make it accurate.
+    bulk_phases:        list of PhaseSpec   # every phase in the domain
+    clean_surfaces:     list of SurfaceSpec # their cut faces
+    strained_substrates: list of StrainSpec # STRUCTURAL 4's shared-cell
+                                            # stretch (a special case of
+                                            # the deformations below)
+    rattled_snapshots:  RattleSpec          # moderate-temperature shake
+    deformations:       list of StrainSpec  # uniform tension, compression
+                                            # and shear on each bulk
+                                            # phase, carried PAST the
+                                            # reversible range. Two
+                                            # reasons this is not
+                                            # optional: the §7.2 gate
+                                            # already checks elastic
+                                            # stiffness, so a model never
+                                            # shown a deformed cell would
+                                            # be gated on a property it
+                                            # was not taught; and the
+                                            # protocol IS a deformation
+                                            # experiment whose pull can
+                                            # fail through the CRYSTAL
+                                            # rather than the interface,
+                                            # an outcome §8 must tell
+                                            # apart from the other
+
+record ForceModelRecipe:
+    # DESIGN §4.8, all eight parts. What to manufacture, and how the
+    # result is judged.
+
+    # --- Part 1: the key. What this model covers. ---
+    species_union:  set of string   # STRUCTURAL 1a; fixes the §4.3 global
+                                    # type map every member inherits
+    domain:         string          # the structural/chemical REGIME. The
+                                    # species alone cannot identify a
+                                    # model: one composition spans
+                                    # different chemistries (carbon as
+                                    # diamond or graphite; silica from
+                                    # alpha-quartz to an amorphous
+                                    # network). A member's material_domain
+                                    # (§2) must lie INSIDE this one —
+                                    # containment, not equality, since a
+                                    # silicon-and-silica recipe covers a
+                                    # silica-only member.
+
+    # --- Part 2: what is computed first. ---
+    starting_collection: StartingCollection
+
+    # --- Parts 3-4: the two settings blocks, and why there are two. ---
+    # Three consumers of an accurate number are DIFFERENCES against the
+    # model (§2.2's lattice, §7.2's stiffness and surface energies,
+    # §6.4's interface_fidelity), and each stacks two errors. LEARNING
+    # error is how faithfully the fit absorbed the method it was trained
+    # on; METHOD error is how far that method sits from reality, which no
+    # extra training data removes. Inherit everywhere and the gate reads
+    # learning error cleanly but is BLIND to method error; tighten the
+    # references alone and the two mix with no way to separate them. So
+    # both are declared, and a reader can add them.
+    production_settings: ReferenceSettings   # the labels AND every
+                                             # reference differenced
+                                             # against the model
+    audit_settings:      ReferenceSettings   # tightened, run ONCE on a
+                                             # handful of small cells at
+                                             # recipe-creation time
+    audit_offset:        MeasureVector       # how far production sits
+                                             # from audit — a REPORTED
+                                             # quantity, not a footnote
+
+    # --- Part 5: how the hard configurations are made (§11.3). ---
+    generation_plan: GenerationPlan  # which stages run to harvest, on
+                                     # WHICH force model each runs (the
+                                     # cascade on the §4.7 classical form,
+                                     # the press/pull on the current
+                                     # committee), how many, and at what
+                                     # conditions
+
+    # --- Part 6: what gets the expensive labels (§11.4). ---
+    labeling_budget: int             # accurate calls per round; VASP is
+                                     # the cost bottleneck
+    labeling_rule:   SelectionRule   # favour the interface, prefer high
+                                     # committee spread, skip near-
+                                     # duplicates, frame interface configs
+                                     # as §6.4 subcells
+
+    # --- Part 7: the learning loop (§4.4, §4.6). ---
+    committee_size:    int           # independently-trained members
+    descriptor:        DescriptorSpec  # form and cutoff radius
+    training_schedule: TrainingSpec  # length; energy-vs-force loss balance
+    capture_cutoffs:   (Quantity, Quantity)   # Escut, Fscut
+    bias_weight:       Quantity      # the UDD push up the uncertainty
+                                     # gradient
+
+    # --- Part 8: when to stop, and what the result is called. ---
+    uncertainty_threshold: Quantity  # test 1 of §11.6, WITH a number: a
+                                     # stopping rule phrased as "below
+                                     # threshold" with no threshold is not
+                                     # a stopping rule
+    quality_tolerances:    map of string -> Quantity  # test 2's limits
+    reference_data_ref:    string    # POINTS AT the reference set (§3.5),
+                                     # never contains it: those values
+                                     # include laboratory measurements no
+                                     # recipe should own, and one set may
+                                     # serve several recipes. Recorded so
+                                     # the pairing is recoverable later.
+    # The name is COMPUTED, not stated — see fingerprint_of below — so a
+    # changed recipe cannot pass itself off as the model validated last
+    # month.
+```
+
+**Validation, mirroring §2's three phases.** A recipe is rejected if any
+field is absent (§1.4's no-hidden-defaults applies here exactly as it
+does to a study), if `domain` names a regime no registry entry covers,
+if `species_union` disagrees with the phases listed in the starting
+collection, or if `production_settings.audited` is false without the
+run having declared itself exploratory. The third phase — does every
+REFERENCED artifact actually exist — is built on the study side
+(`spec/references.py`) and this recipe's version reuses it: the
+`reference_data_ref` must resolve, and every phase named in the starting
+collection must have a crystal file that opens.
+
 ```
 record BootstrapResult:
     # What the bootstrap emits and §1's resolve_potential later looks up.
@@ -2572,13 +2734,15 @@ record BootstrapResult:
     fingerprint: string             # content id (§1.6) = a potential_ref
     convergence: ConvergenceReport  # the two tests of §11.6, for provenance
     provenance:  Provenance         # seed set, VASP subset, ALF rounds, seeds
+    recipe:      ForceModelRecipe   # the recipe that produced it, carried
+                                    # so the product records what made it
 ```
 
 ```
-function bootstrap_potential(pair_specification, reference_data):
+function bootstrap_potential(force_model_recipe, reference_data):
     # STEP 1 (seed): a committee that just does not explode near
     # equilibrium; its only job is to survive step-2 generation (§11.2).
-    committee = seed_committee(pair_specification, reference_data)   # §11.2
+    committee = seed_committee(force_model_recipe, reference_data)   # §11.2
     store = new_training_store(reference_data)   # ANI-style HDF5 (§4.3),
                                                  # primed with the seed labels
 
@@ -2586,13 +2750,13 @@ function bootstrap_potential(pair_specification, reference_data):
     # on the classical+ZBL potential (no MLIP), the interface/separation on
     # the seed committee — the configurations the potential must cover but a
     # near-equilibrium seed has never seen (§11.3).
-    configs = generate_hard_configs(committee, pair_specification)   # §11.3
+    configs = generate_hard_configs(committee, force_model_recipe)   # §11.3
 
     # STEP 3 (label, convert, retrain): VASP labels a selected subset, the
     # converter folds it into the store, ALF retrains -> the first committee
     # that has actually SEEN the hard region (§11.4).
     committee = label_convert_retrain(configs, store,
-                                      pair_specification)            # §11.4
+                                      force_model_recipe)            # §11.4
 
     # STEP 4 (refine by sampling): re-run the protocol under the committee;
     # the sampler flags where it is STILL uncertain; VASP labels those;
@@ -2601,7 +2765,7 @@ function bootstrap_potential(pair_specification, reference_data):
     converged = false
     while not converged:
         (committee, converged, report) = refine_by_sampling(
-            committee, store, pair_specification)          # §11.5, §11.6
+            committee, store, force_model_recipe)          # §11.5, §11.6
 
     return BootstrapResult{
         potential:   freeze(committee),
@@ -2613,7 +2777,7 @@ function bootstrap_potential(pair_specification, reference_data):
 ### 11.2 seed_committee — enough not to explode near equilibrium
 
 ```
-function seed_committee(pair_specification, reference_data):
+function seed_committee(force_model_recipe, reference_data):
     # DESIGN §4.5 step 1. Train an INITIAL committee on hand-built near-
     # equilibrium DFT: bulk Si and cristobalite, their surfaces, the
     # STRUCTURAL-4 strained substrates, and moderate-T rattled snapshots.
@@ -2625,7 +2789,7 @@ function seed_committee(pair_specification, reference_data):
     # DELEGATES to ALF contract 1 (train_DEEPMD_ensemble_task, §4.2):
     # n_models potentials from different seeds (§4.4). We supply the seed
     # SET; ALF does the training.
-    seed_set = assemble_seed_set(pair_specification, reference_data)
+    seed_set = assemble_seed_set(force_model_recipe, reference_data)
     return train_committee(seed_set)      # [DELEGATE -> ALF, §4.2]
 ```
 
@@ -2640,7 +2804,7 @@ reads their trajectory FRAMES as unlabeled training candidates. The
 stages themselves are unchanged — the same code, read two ways.
 
 ```
-function generate_hard_configs(committee, pair_specification):
+function generate_hard_configs(committee, force_model_recipe):
     # DESIGN §4.5 step 2. Two config families, from the two stages; in
     # BOTH the gate verdict is INFORMATIONAL, never halting — a "failed"
     # activation is a valuable hard config to LABEL, not a pipeline stop
@@ -2651,10 +2815,10 @@ function generate_hard_configs(committee, pair_specification):
     # always runs on the classical+ZBL potential (§10.2), in production and
     # here alike; the committee enters only via the gentle re-anneal
     # (§10.5). So the MLIP is never asked to reproduce a cascade (§3.3).
-    (handle_A, handle_B, shared) = build_slabs(pair_specification,
+    (handle_A, handle_B, shared) = build_slabs(force_model_recipe,
                                                committee,
                                                scratch_directory)
-    activated = activate_surfaces(handle_A, handle_B, pair_specification,
+    activated = activate_surfaces(handle_A, handle_B, force_model_recipe,
                                   committee)                        # §10
     candidates.extend(harvest_frames(activated))
 
@@ -2662,9 +2826,9 @@ function generate_hard_configs(committee, pair_specification):
     # COMMITTEE (§9) — the very region the potential must get right, so its
     # own trajectory is where the training signal is richest.
     structure = assemble_pair(activated.slab_A, activated.slab_B,
-                              shared, pair_specification)           # §7.5
+                              shared, force_model_recipe)           # §7.5
     bond_debond = run_bond_debond_md(structure, committee,
-                                     pair_specification)            # §9
+                                     force_model_recipe)            # §9
     candidates.extend(harvest_frames(bond_debond))
 
     return candidates
@@ -2673,7 +2837,7 @@ function generate_hard_configs(committee, pair_specification):
 ### 11.4 label_convert_retrain — VASP truth, then ALF retrains
 
 ```
-function label_convert_retrain(candidates, store, pair_specification):
+function label_convert_retrain(candidates, store, force_model_recipe):
     # DESIGN §4.5 step 3. The DOING is all adopted; ours is only the
     # SELECTION of what to label and the interface-subcell framing.
     #
@@ -2684,7 +2848,7 @@ function label_convert_retrain(candidates, store, pair_specification):
     # TRAINING config need only be valid and relevant, which frees the
     # subcell choice — unlike the §7.3 cross-check, which must fix the
     # system across two methods (DESIGN §4.5's stated asymmetry).
-    subset = select_for_labeling(candidates, pair_specification)
+    subset = select_for_labeling(candidates, force_model_recipe)
 
     labels = vasp_label(subset)        # [DELEGATE -> VASP, ALF QM_task]
     absorb_converted(store, labels)    # [DELEGATE -> converter, §4.3]
@@ -2694,7 +2858,7 @@ function label_convert_retrain(candidates, store, pair_specification):
 ### 11.5 refine_by_sampling — chase the potential's own uncertainty
 
 ```
-function refine_by_sampling(committee, store, pair_specification):
+function refine_by_sampling(committee, store, force_model_recipe):
     # DESIGN §4.5 step 4. Re-run the protocol under the CURRENT committee
     # and let it TELL us where it is still ignorant, instead of guessing.
     # Two sampler modes, both from ALF's MLMD_calculator (§4.4), both
@@ -2707,11 +2871,11 @@ function refine_by_sampling(committee, store, pair_specification):
     # here, and the bounded UDD excursion from its triggering config is the
     # most targeted sampler we have (DESIGN §4.5, §7.3).
     flagged = resample_high_uncertainty(committee,
-                                        pair_specification)     # §4.4
+                                        force_model_recipe)     # §4.4
     committee = label_convert_retrain(flagged, store,
-                                      pair_specification)       # §11.4 again
+                                      force_model_recipe)       # §11.4 again
     (converged, report) = test_convergence(committee, store,
-                                           pair_specification)  # §11.6
+                                           force_model_recipe)  # §11.6
     return (committee, converged, report)
 ```
 
@@ -2732,10 +2896,10 @@ record ConvergenceReport:
     quality_gate:          PotentialQualityVerdict  # the §5 gate, run to ACT
     passed:                boolean
 
-function test_convergence(committee, store, pair_specification):
+function test_convergence(committee, store, force_model_recipe):
     # Both tests read ONE full protocol run under the current committee
     # (activation §10 + press/pull §9), so run it once, measure two ways.
-    run = run_protocol_under(committee, pair_specification)   # §9, §10
+    run = run_protocol_under(committee, force_model_recipe)   # §9, §10
 
     # Test 1 — committee SPREAD across that run is below threshold: the
     # potential is confident everywhere the protocol goes (§4.4).
@@ -2748,7 +2912,7 @@ function test_convergence(committee, store, pair_specification):
     # one shared object is what makes the §1 marker's "acts here, reports
     # there" literally true. The bulk/surface half folds in §3.5's
     # amorphous-structure validation (STRUCTURAL 3, DESIGN §4.5's hand-off).
-    measures = analyze_run(run, pair_specification)          # §8
+    measures = analyze_run(run, force_model_recipe)          # §8
     quality  = potential_quality_gate(committee, measures)   # [-> §5]
 
     passed = below and quality.passes
@@ -2759,11 +2923,21 @@ function test_convergence(committee, store, pair_specification):
 
 ### 11.7 What bottoms out, what delegates
 
-`[OURS, bottoms out here]` the LOOP structure (§11.1); the seed-set
-COMPOSITION (§11.2 — which structures to hand ALF); the "generate mode"
-frame-harvesting that reuses §9/§10 (§11.3); the label-SUBSET selection
-and the interface-subcell framing (§11.4); and the TWO-test convergence
-with the gate run to ACT (§11.6). These are our orchestration decisions.
+`[OURS, bottoms out here]` the RECIPE record and its validation (§11.1 —
+what a force model must state before anyone spends weeks making one);
+the LOOP structure (§11.1); the seed-set COMPOSITION (§11.2 — which
+structures to hand ALF); the "generate mode" frame-harvesting that
+reuses §9/§10 (§11.3); the label-SUBSET selection and the
+interface-subcell framing (§11.4); and the TWO-test convergence with the
+gate run to ACT (§11.6). These are our orchestration decisions.
+
+The recipe deserves a word about WHY it is ours rather than adopted.
+Every DOING step it configures is someone else's — ALF trains, VASP
+labels, DeePMD fits. But nothing in those tools records what a model was
+supposed to cover, which settings its comparisons must inherit, or when
+it is finished. Those are the judgments that make a number traceable
+(`VISION.md` goal 3), and they have no home inside a black box we have
+committed to not looking into (§4.1).
 
 `[DELEGATE -> §9, §10, §7]` all config GENERATION runs the already-
 written activation (§10), bond/debond (§9), and structure (§7) stages

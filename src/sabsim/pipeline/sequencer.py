@@ -43,6 +43,7 @@ from sabsim.pipeline.measures import (
 from sabsim.pipeline.skeleton_stages import W0_STAGES
 from sabsim.deploy.scratch import member_scratch
 from sabsim.spec.loader import load_and_validate_study
+from sabsim.spec.references import check_study_references
 from sabsim.spec.records import MemberSpecification, Relation
 
 
@@ -77,6 +78,12 @@ def exec_full_study(
     whatever members ran (an unresolved relation is reported, not fatal).
     """
     study = load_and_validate_study(study_specification)
+    # Phase three (DESIGN.md §1.5): the spec parsed and is executable in
+    # principle — but does everything it POINTS AT actually exist? This
+    # needs the filesystem and the registry rather than the file's text,
+    # which is why it is separate from the loader, and it runs HERE
+    # because here is the last moment before node-hours are spent.
+    check_study_references(study)
 
     members = study.members
     if only is not None:

@@ -20,7 +20,8 @@ directory's scratch mirror (§4.2).
 
 The run/restart/refresh/test operations are FLAGS on ``run``, not separate
 verbs. v1 ships ``--dry-run`` (the login-node stub run) and ``--only`` (a
-member subset); ``--resume`` (reuse finished intermediates) and
+member subset); ``--dump-visuals`` (record every dynamic stage for viewing) and
+``--dump-stride``; ``--resume`` (reuse finished intermediates) and
 ``--refresh`` (recompute clean) land next, with reuse-by-default the
 intended policy once the stages learn to skip finished work.
 """
@@ -31,6 +32,10 @@ import argparse
 import os
 import sys
 
+from sabsim.pipeline.run_options import (
+    TrajectoryOptions,
+    set_trajectory_options,
+)
 from sabsim.pipeline.skeleton_stages import W0_STAGES
 
 
@@ -56,6 +61,18 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--only", action="append", metavar="MEMBER",
         help="run only this member (repeatable); default is every member")
+    run.add_argument(
+        "--dump-visuals", action="store_true",
+        help="record a trajectory for every dynamic stage — the "
+             "bombardment and re-anneal of each half, the press and "
+             "settle, and each pull rung — for viewing in Ovito. OFF by "
+             "default: the frames cost wall clock inside the MD loop and "
+             "the files are large (one pull rung ran to 1.3 GB)")
+    run.add_argument(
+        "--dump-stride", type=int, metavar="STEPS",
+        help="record one frame per STEPS of MD, overriding the spec's "
+             "frame_stride. Only meaningful with --dump-visuals; raise it "
+             "for smaller files, lower it for smoother playback")
     return parser
 
 
@@ -70,6 +87,14 @@ def _run(args: argparse.Namespace) -> int:
 
     # The run's home is where it was launched (decision: CWD, not a flag).
     job_directory = os.getcwd()
+
+    # Trajectory recording is an OPERATIONAL choice, not a physical one:
+    # two runs differing only in it are the same study, so it is a flag
+    # here rather than a field in the specification. Fixed once, before
+    # any stage runs, because the stages are invoked through a generic
+    # contract runner whose signatures cannot carry it (§4).
+    set_trajectory_options(TrajectoryOptions(
+        enabled=args.dump_visuals, stride=args.dump_stride))
 
     if args.dry_run:
         stage_set, comm = W0_STAGES, None

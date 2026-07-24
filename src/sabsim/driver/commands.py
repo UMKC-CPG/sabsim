@@ -455,21 +455,66 @@ def press_release_commands(member: MemberSpecification) -> list:
 
 
 def recording_commands(
-        member: MemberSpecification, dump_file: str) -> list:
-    """Dump strided frames and log the forces the analyzer reads (§9.5).
+        member: MemberSpecification,
+        dump_file: str | None = None,
+        stride: int | None = None) -> list:
+    """Log the forces the analyzer reads, and optionally record frames.
 
-    A strided coordinate dump (one frame per ``frame_stride`` steps, §2)
-    feeds the §8 snapshot selector; the custom thermo line logs the two
-    grip reactions and the energy the reference gate watches. The force
-    is NOT time-averaged here — averaging over a displacement window is a
-    slice-3 analysis on these dumped values, not a driver command.
+    Two different things used to be welded together here, and separating
+    them matters. The custom thermo line logs the two grip reactions and
+    the energy the reference gate watches — that is the MEASUREMENT, and
+    the analyzer cannot work without it, so it is always emitted. The
+    coordinate dump is for HUMAN inspection only; nothing in the pipeline
+    reads it back. Bundling the two meant every run paid 1.3 GB per pull
+    rung for frames that might never be opened.
+
+    So ``dump_file`` is now optional: pass a path to record a strided
+    trajectory, or leave it ``None`` to measure without recording. The
+    force is NOT time-averaged here — averaging over a displacement
+    window is a slice-3 analysis on these logged values, not a driver
+    command.
     """
-    stride = member.numerical.frame_stride
-    return [
-        f"dump traj all custom {stride} {dump_file} id type x y z",
-        f"thermo {stride}",
+    # The thermo cadence follows the SPEC, because the analyzer reads
+    # those lines and its sampling is part of the measurement. Only the
+    # DUMP honours an override, since frames are for looking at.
+    thermo_stride = member.numerical.frame_stride
+    stride = stride or thermo_stride
+    commands = [
+        f"thermo {thermo_stride}",
         "thermo_style custom step temp pe f_hold_bottom[3] c_top_reaction",
     ]
+    if dump_file is not None:
+        commands = trajectory_dump_commands(dump_file, stride) + commands
+    return commands
+
+
+def trajectory_dump_commands(dump_file: str, stride: int) -> list:
+    """Record one frame per ``stride`` steps, for visual inspection.
+
+    Used by every DYNAMIC stage — cascade, re-anneal, press, settle and
+    each pull rung — so a run requested with trajectories on can be
+    watched from end to end rather than only where somebody happened to
+    wire a dump in. Atoms are sorted by identity so a viewer sees a
+    stable ordering across frames even as the cascade creates and deletes
+    projectile atoms.
+    """
+    return [
+        f"dump traj all custom {stride} {dump_file} id type x y z",
+        "dump_modify traj sort id",
+    ]
+
+
+def stage_dump_file(output_directory: str, member_name: str,
+                    stage: str) -> str:
+    """Where one dynamic stage's trajectory lands.
+
+    Named for the member and the stage that produced it, so a directory
+    of trajectories reads as an account of the run — ``<member>_
+    activation_a.dump``, ``<member>_press.dump`` — rather than a pile of
+    files distinguishable only by timestamp. Run output belongs under the
+    run's OWN directory, never the working directory (ARCHITECTURE §4.1).
+    """
+    return os.path.join(output_directory, f"{member_name}_{stage}.dump")
 
 
 def _rate_slug(rate: Quantity) -> str:

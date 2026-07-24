@@ -49,11 +49,11 @@ from sabsim.driver.commands import (
     press_drive_commands,
     press_release_commands,
     pull_drive_commands,
-    pull_dump_file,
     pull_headroom_commands,
     recording_commands,
     region_group_commands,
     to_metal,
+    trajectory_dump_commands,
 )
 from sabsim.driver.engine import Engine
 from sabsim.spec.records import MemberSpecification, Quantity
@@ -151,20 +151,30 @@ def _steps(duration: Quantity, timestep: Quantity) -> int:
 
 
 def _press_setup(
-        built, member, force_model, data_file, seed, geometry) -> list:
+        built, member, force_model, data_file, seed, geometry,
+        trajectory_file=None, trajectory_stride=None) -> list:
     """The press command block WITHOUT the runs (the loop issues those).
 
     Installs the shared grip force gauges here, on the instance the press
     and settle share, so the settle can read them without redefining a
     compute (:func:`grip_hold_and_readback_commands`).
+
+    A ``trajectory_file`` opens a strided dump that stays open for the
+    press AND the settle that follows on this same engine, so the two
+    read as one continuous movie of the wafers meeting and relaxing.
     """
-    return (
+    commands = (
         preamble_commands(data_file, member.numerical.md_timestep)
         + force_model_commands(force_model)
         + region_group_commands(built, geometry)
         + integrator_commands(member, seed)
         + press_drive_commands(built, member)
         + grip_hold_and_readback_commands())
+    if trajectory_file is not None:
+        commands += trajectory_dump_commands(
+            trajectory_file,
+            trajectory_stride or member.numerical.frame_stride)
+    return commands
 
 
 def press_and_bond(
@@ -175,7 +185,9 @@ def press_and_bond(
         data_file: str,
         seed: int,
         geometry: RegionGeometry = RegionGeometry(),
-        control: RunControl = RunControl()) -> PressResult:
+        control: RunControl = RunControl(),
+        trajectory_file: str | None = None,
+        trajectory_stride: int | None = None) -> PressResult:
     """Press until the DUAL contact criterion fires, then hold (§9.3).
 
     Sets up the press, then advances in chunks: after each, it measures
@@ -188,7 +200,8 @@ def press_and_bond(
     """
     numerical = member.numerical
     engine.commands(
-        _press_setup(built, member, force_model, data_file, seed, geometry))
+        _press_setup(built, member, force_model, data_file, seed, geometry,
+                     trajectory_file, trajectory_stride))
 
     tags = np.asarray(built.atoms.get_tags())
     gap_threshold = to_metal(numerical.contact_gap_threshold, "distance")
@@ -236,6 +249,10 @@ def settle_reference(
     floor and the PE drift within threshold. A reference that fails either
     is reported as unsettled, never integrated over (§5.3).
 
+    Any trajectory dump the press opened is still open here (same
+    engine), so the settle is recorded as the tail of the press movie
+    rather than needing a file of its own.
+
     When ``reference_data_file`` is given, the settled state is written
     there and its path returned — the artifact the pull restores from,
     since the pull runs on a fresh engine and reads a file (§9.6). Handing
@@ -274,12 +291,18 @@ def settle_reference(
 
 def _pull_setup(
         built, member, force_model, data_file, rate, seed, geometry,
-        output_directory, travel_time: float) -> list:
+        travel_time: float, trajectory_file: str | None = None,
+        trajectory_stride: int | None = None) -> list:
     """The pull command block WITHOUT the run (the loop issues that).
 
     ``travel_time`` is how long this rung may pull for, which sizes the
     box headroom so the separation cannot carry atoms out through the
     top (see :func:`pull_headroom_commands`).
+
+    ``trajectory_file`` is optional because nothing downstream reads the
+    frames — the analyzer measures from the thermo log. Recording is for
+    human inspection, and one rung's frames ran to 1.3 GB, so a run that
+    nobody intends to watch does not write them.
     """
     return (
         preamble_commands(data_file, member.numerical.md_timestep)
@@ -289,8 +312,7 @@ def _pull_setup(
         + integrator_commands(member, seed)
         + grip_hold_and_readback_commands()
         + pull_drive_commands(rate)
-        + recording_commands(
-            member, pull_dump_file(output_directory, member, rate)))
+        + recording_commands(member, trajectory_file, trajectory_stride))
 
 
 def pull_at_rate(
@@ -304,7 +326,9 @@ def pull_at_rate(
         geometry: RegionGeometry = RegionGeometry(),
         control: RunControl = RunControl(),
         *,
-        output_directory: str) -> PullResult:
+        output_directory: str,
+        trajectory_file: str | None = None,
+        trajectory_stride: int | None = None) -> PullResult:
     """Pull apart at one rate until complete separation, then reduce (§9.5).
 
     Restores the reference (a fresh setup reading its data file), then
@@ -313,9 +337,10 @@ def pull_at_rate(
     separation — opening past the cutoff with the force at the noise floor
     — then reduces to the two curves: the averaged force versus grip
     displacement (leading warm-up dropped) and versus interface opening,
-    plus the separation point (§9.6). The strided trajectory dump lands in
-    ``output_directory`` (a required keyword — the run states where its
-    output goes, never the current working directory).
+    plus the separation point (§9.6). ``output_directory`` is a required
+    keyword — the run states where its output goes, never the current
+    working directory. A strided trajectory is written only when
+    ``trajectory_file`` names one.
     """
     numerical = member.numerical
     timestep = to_metal(numerical.md_timestep, "time")
@@ -324,7 +349,7 @@ def pull_at_rate(
     travel_time = control.max_chunks * control.chunk_steps * timestep
     engine.commands(_pull_setup(
         built, member, force_model, data_file, rate, seed, geometry,
-        output_directory, travel_time))
+        travel_time, trajectory_file, trajectory_stride))
 
     tags = np.asarray(built.atoms.get_tags())
     # The atom count as the pull STARTS, to be compared with the count it

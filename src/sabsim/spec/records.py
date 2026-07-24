@@ -186,6 +186,28 @@ class MemberSpecification:
     the fact (DESIGN.md §1.1). ``potential_ref`` names WHICH potential
     generation this member runs under: not a knob but a pointer to an
     upstream artifact (DESIGN.md §1.3, §1.6).
+
+    ``material_domain`` names the structural and chemical REGIME this
+    member's structures occupy (DESIGN.md §4.8). It is the other half of
+    the force-model lookup key, and it exists because a species set does
+    not identify a material model on its own: silicon-and-oxygen is
+    covered by one form that spans a silicon wafer, a silica wafer and
+    the interface between them, and by another that is better for
+    amorphous silica but cannot describe elemental silicon at all.
+    Nothing in a cell's composition distinguishes those cases, so the
+    specification must say which is meant. Like ``potential_ref`` it is a
+    pointer rather than a knob — refining it does not converge anything,
+    it selects a different description of the material.
+
+    A note on where this field will eventually live. §4.8 keys the
+    force-model RECIPE on (species union, domain) too, so once that
+    record exists the domain is properly a property of the artifact
+    ``potential_ref`` resolves to, and the two must agree. They agree by
+    CONTAINMENT rather than equality: a recipe whose domain is
+    ``silicon-and-silica`` legitimately covers a silica-only
+    member, because silica lies inside that regime. Checking that
+    containment is a follow-on (`TODO.md`), and until the recipe record
+    exists this member-level field is what carries the choice.
     """
 
     name: str                        # member id, referenced by relations
@@ -194,6 +216,7 @@ class MemberSpecification:
     numerical: NumericalKnobs        # how carefully it is computed
     ensemble: EnsembleKnobs          # which realizations to sample
     potential_ref: str               # the potential generation it uses
+    material_domain: str             # the structural/chemical regime
 
 
 @dataclass(frozen=True)

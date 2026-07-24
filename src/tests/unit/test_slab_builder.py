@@ -36,6 +36,12 @@ _SI_CIF = os.path.join(
 _SI_100 = (1, 0, 0)
 
 
+def _data_file(name: str) -> str:
+    """A shipped reference-data CIF, located beside the package."""
+    return os.path.join(
+        os.path.dirname(sabsim.structure.__file__), "data", name)
+
+
 def test_load_crystal_reads_the_cif():
     """The CIF loads to a silicon crystal (the authoritative structure)."""
     crystal = load_crystal(_SI_CIF)
@@ -206,3 +212,41 @@ def test_bulk_data_file_carries_per_type_masses(tmp_path):
     assert set(masses) == set(type_map.values())
     assert masses[type_map["Si"]] == pytest.approx(
         _SILICON_MASS_AMU, abs=1.0e-2)
+
+
+# ---------------------------------------------------------------------
+# Oxidation states are stripped at LOAD, so nothing downstream can see a
+# charge label where it expects a chemical symbol.
+# ---------------------------------------------------------------------
+
+def test_load_crystal_strips_oxidation_states():
+    """A CIF labelling sites by ion still yields bare element symbols.
+
+    The shipped alpha-quartz file writes ``Si4+`` and ``O2-`` in its
+    ``_atom_site_type_symbol`` column. Read literally, a site's species
+    stringifies to "O2-", which matches no potential-registry entry, no
+    LAMMPS type-map key, and no reference-data filename — all of which
+    are keyed on the element. Stripping at load is what makes every
+    consumer downstream immune, rather than each having to remember.
+    """
+    quartz = load_crystal(_data_file("sio2_alpha_quartz.cif"))
+
+    # Straight from the composition, and per-site: both bare.
+    assert {element.symbol
+            for element in quartz.composition.elements} == {"O", "Si"}
+    assert {str(element)
+            for element in quartz.composition.elements} == {"O", "Si"}
+    assert {str(site.specie) for site in quartz} == {"O", "Si"}
+
+
+def test_charge_labels_do_not_reach_the_type_map():
+    """A slab cut from an ion-labelled CIF maps bare elements to types.
+
+    The end-to-end consequence of the strip above: a type map carrying
+    "O2-" would be written into a LAMMPS data file as an element name
+    ASE cannot resolve, which is exactly how this surfaced.
+    """
+    quartz = load_crystal(_data_file("sio2_alpha_quartz.cif"))
+    slab = build_slab(quartz, (0, 0, 1),
+                      min_slab_thickness=6.0, min_vacuum=8.0)
+    assert set(slab.get_chemical_symbols()) == {"O", "Si"}
