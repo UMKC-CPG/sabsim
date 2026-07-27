@@ -147,6 +147,23 @@ class Engine(ABC):
         fresh setup would issue them.
         """
 
+    def is_primary(self) -> bool:
+        """Whether THIS rank owns the run's shared-FILE writes (§13.2).
+
+        Under MPI a member runs on many ranks that all issue the same
+        collective commands and read the same collective read-backs, so a
+        shared artifact must be written by ONE rank or the N ranks race on
+        the one path. This reports that rank. It is a CONCRETE default of
+        True — a single process is always its own primary, which is what
+        every login-node test and the mock want — and only the real
+        multi-rank engine overrides it (:class:`~sabsim.driver.lammps_
+        engine.LammpsEngine`). The engine state itself is written
+        COLLECTIVELY (all ranks, one file), so only the ledger and the
+        atomic renames consult this (:func:`sabsim.driver.resume.
+        write_checkpoint`).
+        """
+        return True
+
 
 class _Script:
     """Yield preset values one per call, repeating the last when spent.
@@ -193,8 +210,14 @@ class MockEngine(Engine):
             normal_stress=None,
             bottom_reaction=None,
             top_reaction=None,
-            energies=None) -> None:
+            energies=None,
+            primary_rank: bool = True) -> None:
         self.received_commands: list = []
+        # Which rank this mock stands in for: True (the default) is a lone
+        # primary process, as every single-process test wants; a test sets
+        # it False to check that a NON-primary rank writes no shared files
+        # (§13.2, :func:`sabsim.driver.resume.write_checkpoint`).
+        self._is_primary = primary_rank
         # The modelled ABSOLUTE step count. The mock runs no dynamics, but
         # it TRACKS this so the §13 resume logic can be tested against it:
         # every ``run N`` advances it by N, exactly as a real timestep
@@ -283,3 +306,7 @@ class MockEngine(Engine):
         """Restore the modelled step from a mock restart file at ``path``."""
         with open(path, encoding="utf-8") as restart_file:
             self._step = int(restart_file.read().strip())
+
+    def is_primary(self) -> bool:
+        """Report the preset rank role (True unless a test sets otherwise)."""
+        return self._is_primary

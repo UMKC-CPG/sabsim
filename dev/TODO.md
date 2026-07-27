@@ -404,18 +404,23 @@ so they are not discovered late (two touch non-negotiable goals). -->
       `run_resume_smoke.py`) — CHECK A exact `write_restart`/`read_restart`
       round-trip, CHECK B full kill-and-resume pull; run once at `-n 1`,
       look for `RESUME SMOKE: PASS`.
-- [ ] **MPI: rank-0-guard `resume.write_checkpoint`'s ledger write
-      before multi-rank production resume.** Surfaced writing the smoke
-      test (2026-07-27). `write_restart` is collective (all ranks, one
-      file — fine), but the `ledger.json` write and the two `os.replace`
-      renames run on EVERY rank, so under `srun/mpirun -n N` they race on
-      one path. The data is identical across ranks (the read-backs are
-      collective), so it is a filesystem race, not wrong content — but it
-      must become rank-0-only (and `load_checkpoint`'s ledger read either
-      rank-0 + broadcast, or all-ranks read-only). The driver seam has no
-      rank concept, so the rank has to reach it (an `is_primary` flag on
-      the call, or via the engine's comm). Until then the smoke test and
-      any resume run stay `-n 1` (`jobs/resume_smoke/` refuses `>1`).
+- [x] **MPI: rank-0-guard `resume.write_checkpoint`'s ledger write —
+      DONE 2026-07-27.** Surfaced writing the smoke test. `write_restart`
+      is collective (all ranks, one file) and stays on all ranks; the
+      `ledger.json` write and the two `os.replace` renames now run only on
+      the primary rank, so the N ranks of an MPI pipeline run no longer
+      race on one path (the data was identical across ranks — the
+      read-backs are collective — so it was a filesystem race, not wrong
+      content). The rank reaches the driver seam through the engine, which
+      already holds the communicator: `Engine.is_primary()` is a concrete
+      default-True (so the mock and serial runs are their own primary) and
+      `LammpsEngine` overrides it to `comm is None or comm.rank == 0`.
+      `load_checkpoint` is read-only, so it stays all-ranks. The rename
+      order (ledger before engine) is now in `PSEUDOCODE.md` §13.2 too.
+      NOTE: the pipeline passes an explicit comm, so this is correct
+      there; `jobs/resume_smoke/` opens engines with `comm=None` (LAMMPS
+      default world), under which rank 0 cannot be singled out, so THAT
+      script stays `-n 1` — a script limitation, not the pipeline's.
 - [ ] Decide which module owns provenance-by-discipline record-keeping
       (each step recording its inputs, exact tool version, and
       settings) (`ARCHITECTURE.md` §2.3 / §4, `VISION.md` goal 3 and

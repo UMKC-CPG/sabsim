@@ -80,6 +80,10 @@ def write_checkpoint(engine: Engine, ledger: Ledger,
     are fully on disk. The ledger's ``saved_step`` is stamped from the
     engine here, so it always matches the state just written.
     """
+    # All ranks ensure the directory and stamp the step (a collective
+    # read-back, identical on every rank), then all ranks write the engine
+    # state — ``write_restart`` is COLLECTIVE, every rank contributing to
+    # the one restart file (§9.2), so it MUST run everywhere.
     os.makedirs(checkpoint_dir, exist_ok=True)
     ledger.saved_step = engine.step()
 
@@ -89,6 +93,16 @@ def write_checkpoint(engine: Engine, ledger: Ledger,
     ledger_temp = ledger_final + ".tmp"
 
     engine.write_restart(engine_temp)
+
+    # The LEDGER and the atomic renames touch shared files that one path
+    # can hold once, so ONLY the primary rank does them, or the N ranks of
+    # an MPI run would race on the same path (§13.2). Nothing rank-specific
+    # is lost: the ledger's series come from collective read-backs, so it
+    # is identical on every rank. Non-primary ranks are done once their
+    # collective contribution to the restart above is made.
+    if not engine.is_primary():
+        return
+
     with open(ledger_temp, "w", encoding="utf-8") as ledger_file:
         json.dump(asdict(ledger), ledger_file)
     # os.replace is atomic on POSIX, so a reader never sees a partial

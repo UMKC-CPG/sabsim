@@ -79,6 +79,9 @@ class LammpsEngine(Engine):
         self._type_scalar = LMP_TYPE_SCALAR
         # cmdargs quiets the log/screen; comm is the mpi4py communicator
         # under `srun -n N python` (None -> LAMMPS's own MPI_COMM_WORLD).
+        # Kept so :meth:`is_primary` can name the one rank that writes the
+        # run's shared files (§13.2).
+        self._comm = comm
         self._lmp = lammps(
             cmdargs=list(command_line_args) if command_line_args else None,
             comm=comm)
@@ -281,3 +284,13 @@ class LammpsEngine(Engine):
         this returns (`PSEUDOCODE.md` §13.3), as a fresh setup would.
         """
         self._lmp.commands_list([f"read_restart {path}"])
+
+    def is_primary(self) -> bool:
+        """This rank writes the shared checkpoint files (§13.2).
+
+        With no communicator (a serial run) the sole process is primary;
+        under MPI only rank 0 is, so the progress ledger and the atomic
+        renames happen ONCE, not once per rank — the restart write itself
+        is collective and stays on all ranks.
+        """
+        return self._comm is None or self._comm.Get_rank() == 0

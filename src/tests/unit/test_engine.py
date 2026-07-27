@@ -53,6 +53,17 @@ def test_mock_step_starts_at_zero_and_advances_on_run():
     assert engine.step() == 1500
 
 
+def test_mock_is_primary_by_default_and_configurable():
+    """A lone mock is its own primary rank; a test can say it is not.
+
+    The primary rank is the one that writes a run's shared files under MPI
+    (§13.2); every single-process test wants True, and a test sets it
+    False to exercise the non-primary path.
+    """
+    assert MockEngine().is_primary() is True
+    assert MockEngine(primary_rank=False).is_primary() is False
+
+
 def test_mock_restart_round_trips_the_step(tmp_path):
     """write_restart then read_restart on a FRESH mock restores the step.
 

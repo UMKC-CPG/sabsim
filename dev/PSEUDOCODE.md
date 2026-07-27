@@ -3346,12 +3346,24 @@ function write_checkpoint(driver, ledger, checkpoint_dir):
     # rename is the atomic step, and the pair becomes visible only once
     # both parts are fully on disk.
     ledger.saved_step = driver.step         # the engine's ABSOLUTE step
+    # The engine state is written COLLECTIVELY — under MPI every rank
+    # contributes to the one restart file (§9.2) — so this runs on all
+    # ranks.
     write_restart(driver, checkpoint_dir / "engine.restart.tmp")
+    # ...but the LEDGER and the atomic renames touch shared files a single
+    # path can hold once, so ONLY the primary rank does them, or the ranks
+    # would race on one path. Nothing rank-specific is lost: the ledger's
+    # series come from collective read-backs, identical on every rank.
+    if not driver.is_primary:
+        return
     write_ledger(ledger,  checkpoint_dir / "ledger.json.tmp")
-    atomic_rename(checkpoint_dir / "engine.restart.tmp",
-                  checkpoint_dir / "engine.restart")
+    # Rename the LEDGER first, then the engine state, so a kill between the
+    # two leaves the ledger AHEAD of the engine (reconcile can trim that;
+    # it could not fill a gap the other way — §13.2, §13.5).
     atomic_rename(checkpoint_dir / "ledger.json.tmp",
                   checkpoint_dir / "ledger.json")
+    atomic_rename(checkpoint_dir / "engine.restart.tmp",
+                  checkpoint_dir / "engine.restart")
 
 function load_checkpoint(checkpoint_dir):
     # A checkpoint EXISTS only when BOTH parts are present. A lone restart
@@ -3524,9 +3536,10 @@ re-key to the engine step, the correctness hinge (§13.5); and the
 input-hash WARN-AND-STOP with a deliberate override (§13.4). Each is a
 small, testable operation over the driver seam and two files.
 
-`[DELEGATE -> ENGINE, §9.2]` `write_restart` / `read_restart` and the
-engine's `step` are the persistent LAMMPS driver's operations; this
-module CALLS them and never reimplements the saved-state format.
+`[DELEGATE -> ENGINE, §9.2]` `write_restart` / `read_restart`, the
+engine's `step`, and `is_primary` (which rank writes the shared files
+under MPI) are the persistent LAMMPS driver's operations; this module
+CALLS them and never reimplements the saved-state format or the rank map.
 
 `[DELEGATE -> §9.5 / §9.6]` the pull's setup, its stop rule, the
 averaging, the two curves, the separation point, and the §5.6 gates are

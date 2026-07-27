@@ -72,6 +72,29 @@ def test_write_leaves_no_temporary_files(tmp_path):
     assert present == ["engine.restart", "ledger.json"]
 
 
+def test_only_the_primary_rank_writes_the_pair(tmp_path):
+    """A non-primary rank writes no shared files, so no pair appears.
+
+    Under MPI the engine state is written collectively, but the ledger and
+    the atomic renames are the PRIMARY rank's alone, or the ranks race on
+    one path (§13.2). A non-primary rank must therefore leave no complete
+    checkpoint; the primary rank, given the same call, writes the pair.
+    """
+    checkpoint_dir = str(tmp_path / "checkpoints")
+
+    non_primary = MockEngine(atom_count=64, primary_rank=False)
+    non_primary.commands(["run 1000"])
+    write_checkpoint(non_primary, _sample_ledger(), checkpoint_dir)
+    # No ledger, so no checkpoint — a non-primary rank made nothing usable.
+    assert load_checkpoint(checkpoint_dir) is None
+    assert not os.path.exists(os.path.join(checkpoint_dir, "ledger.json"))
+
+    primary = MockEngine(atom_count=64, primary_rank=True)
+    primary.commands(["run 1000"])
+    write_checkpoint(primary, _sample_ledger(), checkpoint_dir)
+    assert load_checkpoint(checkpoint_dir) is not None
+
+
 def test_load_reports_none_on_a_half_pair(tmp_path):
     """A lone restart (or lone ledger) is treated as no checkpoint at all.
 
