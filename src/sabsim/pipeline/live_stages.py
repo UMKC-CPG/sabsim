@@ -326,6 +326,28 @@ def _pull_rung_paths(
         trajectory_stride=stride)
 
 
+def _pull_note(result) -> str:
+    """The human-facing one-line verdict for a pull rung (§9.6, §13.6).
+
+    States whether the rung separated, lost atoms, or ran out of budget,
+    and — for a resumed rung — that the number was produced across a
+    continuation (and whether the trust guard was overridden), so the
+    report stays honest about how it was made (`VISION.md` goal 3). A
+    resumed pull is the SAME measurement; the marker is provenance, not a
+    downgrade (§11.5).
+    """
+    if result.complete:
+        note = "separated"
+    elif not result.atoms_conserved:
+        note = "LOST ATOMS — result void (§9.6)"
+    else:
+        note = "did not fully separate within the pull budget"
+    if result.resumed:
+        note += (" [resumed; trust override]" if result.override_used
+                 else " [resumed]")
+    return note
+
+
 def _reanneal_force_model(
         type_map: dict,
         substrate: set,
@@ -661,16 +683,15 @@ def run_bond_debond_md_live(
         pull_engine.close()
         pulls.append(PullOutcome(
             rate_value=rate.value, rate_unit=rate.unit,
-            note=("separated" if result.complete
-                  else "LOST ATOMS — result void (§9.6)"
-                  if not result.atoms_conserved
-                  else "did not fully separate within the pull budget"),
+            note=_pull_note(result),
             complete=result.complete,
             separation_index=result.separation_index,
             grip_displacement=tuple(result.grip_displacement),
             force_vs_grip=tuple(result.force_vs_grip),
             atoms_conserved=result.atoms_conserved,
-            bridges_at_separation=result.bridges_at_separation))
+            bridges_at_separation=result.bridges_at_separation,
+            resumed=result.resumed,
+            override_used=result.override_used))
 
     return BondDebondResult(
         press=PressOutcome(

@@ -22,6 +22,7 @@ own.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
@@ -146,6 +147,26 @@ class PullResult:
     # itself rather than hiding inside the number (§5.5).
     bridges: np.ndarray | None = None
     bridges_at_separation: int | None = None
+    # Whether this rung's result was produced by RESUMING a checkpoint
+    # (§13), and whether the §13.4 trust guard was overridden to do so.
+    # Carried into the report so the history stays honest about how the
+    # number was produced (VISION goal 3) — NOT because the measurement
+    # differs, since a resumed pull is the SAME measurement (§11.5).
+    resumed: bool = False
+    override_used: bool = False
+
+
+class PullStart(NamedTuple):
+    """What :func:`begin_or_resume_pull` hands back to the loop (§13.3).
+
+    The ledger the loop extends, plus whether this pull is RESUMING a
+    checkpoint and whether the §13.4 trust guard was overridden to do so —
+    the two facts the result carries into provenance (§13.6, §11.5).
+    """
+
+    ledger: Ledger
+    resumed: bool
+    override_used: bool
 
 
 def _wafer_z(positions: np.ndarray, tags: np.ndarray) -> tuple:
@@ -364,7 +385,7 @@ def begin_or_resume_pull(
         control: RunControl,
         checkpoint_dir: str | None,
         trajectory_file: str | None,
-        trajectory_stride: int | None) -> Ledger:
+        trajectory_stride: int | None) -> PullStart:
     """Set the pull up fresh, or resume it from a checkpoint (§13.3).
 
     Whether this is a fresh pull or a resumed one is decided entirely by
@@ -397,15 +418,17 @@ def begin_or_resume_pull(
         # baseline, measured once and carried in the ledger so a resume
         # checks against the ORIGINAL count, not a depleted one (§13.1).
         starting_atom_count = int(np.asarray(engine.positions()).shape[0])
-        return Ledger(
+        ledger = Ledger(
             starting_atom_count=starting_atom_count,
             input_hash=input_hash(member, data_file, rate))
+        return PullStart(ledger=ledger, resumed=False, override_used=False)
 
     # RESUMING. Trust FIRST (§13.4): if the current inputs hash differently
     # from the run this checkpoint came from, STOP before touching the
-    # engine — unless the person has deliberately overridden, which the
-    # provenance then records (§13.6).
-    verify_inputs_or_stop(checkpoint, member, data_file, rate)
+    # engine — unless the person has deliberately overridden, which we
+    # carry forward so the provenance records it (§13.6).
+    override_used = verify_inputs_or_stop(
+        checkpoint, member, data_file, rate)
 
     # Restore the already-grown box with read_restart (never read_data,
     # and NO headroom — the box came back with it), then re-establish the
@@ -418,7 +441,9 @@ def begin_or_resume_pull(
         + _pull_fixture_commands(
             built, member, force_model, rate, seed, geometry,
             trajectory_file, trajectory_stride))
-    return reconcile(checkpoint.ledger, engine.step())
+    ledger = reconcile(checkpoint.ledger, engine.step())
+    return PullStart(
+        ledger=ledger, resumed=True, override_used=override_used)
 
 
 def pull_at_rate(
@@ -456,11 +481,14 @@ def pull_at_rate(
     timestep = to_metal(numerical.md_timestep, "time")
 
     # Fresh setup or restore-from-checkpoint, decided by what is on disk;
-    # either way this returns the ledger the loop below extends (§13.3).
-    ledger = begin_or_resume_pull(
+    # either way this returns the ledger the loop below extends, plus
+    # whether the pull resumed and whether the trust guard was overridden
+    # — the two facts the result carries into provenance (§13.3, §13.6).
+    start = begin_or_resume_pull(
         engine, built, member, force_model, data_file, rate, seed,
         geometry, control, checkpoint_dir, trajectory_file,
         trajectory_stride)
+    ledger = start.ledger
 
     tags = np.asarray(built.atoms.get_tags())
     rate_metal = to_metal(rate, "velocity")
@@ -550,4 +578,6 @@ def pull_at_rate(
         bridges=np.asarray(bridge_curve, dtype=float),
         bridges_at_separation=(
             int(round(float(bridge_curve[separation_index])))
-            if separation_index is not None and len(bridge_curve) else None))
+            if separation_index is not None and len(bridge_curve) else None),
+        resumed=start.resumed,
+        override_used=start.override_used)

@@ -261,13 +261,15 @@ def test_a_fresh_pull_reads_data_and_seeds_an_empty_ledger():
     """With no checkpoint on disk the pull begins normally (§13.3)."""
     engine = MockEngine(positions=[_frame(12.0)])
 
-    ledger = begin_or_resume_pull(
+    start = begin_or_resume_pull(
         engine, _fake_built(), _member(), _MODEL, "ref.data",
         Quantity(3.2, "m/s"), 1, RegionGeometry(), RunControl(),
         None, None, None)
 
-    assert ledger.sample_steps == []                # nothing accumulated
-    assert ledger.starting_atom_count == 200        # the §5.6 baseline
+    assert not start.resumed                        # a fresh start
+    assert not start.override_used
+    assert start.ledger.sample_steps == []          # nothing accumulated
+    assert start.ledger.starting_atom_count == 200  # the §5.6 baseline
     # A fresh run reads the reference with read_data (and so grows the box
     # headroom); it is NOT a restart.
     assert any("read_data" in line for line in engine.received_commands)
@@ -284,14 +286,16 @@ def test_a_present_checkpoint_restores_and_reconciles(tmp_path):
     _crafted_checkpoint(checkpoint_dir, _matching_hash())
     engine = MockEngine(positions=[_frame(12.0)])
 
-    ledger = begin_or_resume_pull(
+    start = begin_or_resume_pull(
         engine, _fake_built(), _member(), _MODEL, "ref.data",
         _PULL_RATE, 1, RegionGeometry(), RunControl(),
         checkpoint_dir, None, None)
 
+    assert start.resumed                            # it continued a run
+    assert not start.override_used                  # inputs matched cleanly
     assert engine.step() == 2000                    # restored, not zero
-    assert ledger.sample_steps == [1000, 2000]      # reconciled to it
-    assert ledger.starting_atom_count == 200        # baseline rides through
+    assert start.ledger.sample_steps == [1000, 2000]  # reconciled to it
+    assert start.ledger.starting_atom_count == 200  # baseline rides through
     stream = engine.received_commands
     assert not any("read_data" in line for line in stream)
     assert "units metal" in stream                  # restart preamble ran
@@ -317,6 +321,31 @@ def test_pull_writes_a_checkpoint_pair_on_the_cadence(tmp_path):
 
     assert os.path.exists(os.path.join(checkpoint_dir, "engine.restart"))
     assert os.path.exists(os.path.join(checkpoint_dir, "ledger.json"))
+
+
+def test_pull_result_flags_a_resumed_rung(tmp_path):
+    """pull_at_rate carries the resume fact into its result (§13.6).
+
+    A fresh pull reports resumed=False; one that continued a checkpoint
+    reports resumed=True, so the outcome can declare how it was produced.
+    """
+    fresh_engine = MockEngine(positions=[_frame(20.0)], top_reaction=[0.01])
+    fresh = pull_at_rate(
+        fresh_engine, _fake_built(), _member(), _MODEL, "ref.data",
+        rate=_PULL_RATE, seed=1, control=RunControl(max_chunks=6),
+        output_directory=str(tmp_path))
+    assert not fresh.resumed
+
+    checkpoint_dir = str(tmp_path / "pull_x" / "checkpoints")
+    _crafted_checkpoint(checkpoint_dir, _matching_hash())
+    resumed_engine = MockEngine(
+        positions=[_frame(20.0)], top_reaction=[0.01])
+    resumed = pull_at_rate(
+        resumed_engine, _fake_built(), _member(), _MODEL, "ref.data",
+        rate=_PULL_RATE, seed=1, control=RunControl(max_chunks=6),
+        output_directory=str(tmp_path), checkpoint_dir=checkpoint_dir)
+    assert resumed.resumed
+    assert not resumed.override_used
 
 
 # ---------------------------------------------------------------------
@@ -350,13 +379,15 @@ def test_resume_override_lets_a_mismatch_through(tmp_path, monkeypatch):
     monkeypatch.setenv("SABSIM_RESUME_OVERRIDE", "1")
     engine = MockEngine(positions=[_frame(12.0)])
 
-    ledger = begin_or_resume_pull(
+    start = begin_or_resume_pull(
         engine, _fake_built(), _member(), _MODEL, "ref.data",
         _PULL_RATE, 1, RegionGeometry(), RunControl(),
         checkpoint_dir, None, None)
 
+    assert start.resumed
+    assert start.override_used                       # the guard was lifted
     assert engine.step() == 2000                    # proceeded anyway
-    assert ledger.sample_steps == [1000, 2000]
+    assert start.ledger.sample_steps == [1000, 2000]
 
 
 def test_input_hash_is_stable_but_rate_sensitive(tmp_path):

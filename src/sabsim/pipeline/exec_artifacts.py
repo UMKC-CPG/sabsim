@@ -214,6 +214,12 @@ class PullOutcome:
     # a result that stopped with material still joining the two wafers
     # visible instead of buried in the number.
     bridges_at_separation: int | None = None
+    # Whether this rung was RESUMED from a checkpoint, and whether the
+    # §13.4 trust guard was overridden to do so. Recorded so the history
+    # stays honest about how the number was produced (VISION goal 3); a
+    # resumed pull is the SAME measurement, not a lesser one (§11.5).
+    resumed: bool = False
+    override_used: bool = False
 
 
 @dataclass(frozen=True)

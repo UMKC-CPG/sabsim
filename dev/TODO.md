@@ -395,12 +395,13 @@ so they are not discovered late (two touch non-negotiable goals). -->
       (`input_hash`/`verify_inputs_or_stop`, covering (d)(i)); and (f) the
       `live_stages.py` per-rung `pull_<rate>/` restructure that threads
       `checkpoint_dir` — resume is now ON for real runs (`_pull_rung_paths`,
-      each rung self-contained with its own `checkpoints/`). REMAINING:
-      (e) provenance notes a resumed run + any override — needs a `resumed`
-      flag threaded PullResult -> PullOutcome (deferred as its own small
-      piece, a reporting-chain change, not the resume mechanism); and the
-      compute-node smoke test (real restart round-trip continues the
-      trajectory).
+      each rung self-contained with its own `checkpoints/`); and (e)
+      provenance — `resumed`/`override_used` threaded `PullResult` ->
+      `PullOutcome`, and a `[resumed]` / `[resumed; trust override]` marker
+      on the rung note (`_pull_note`), so a continued run declares itself
+      (VISION goal 3). ALL §13 CODE DONE except the compute-node smoke
+      test (real `write_restart`/`read_restart` round-trip actually
+      continues the trajectory) — a scheduled job, not login-node work.
 - [ ] Decide which module owns provenance-by-discipline record-keeping
       (each step recording its inputs, exact tool version, and
       settings) (`ARCHITECTURE.md` §2.3 / §4, `VISION.md` goal 3 and

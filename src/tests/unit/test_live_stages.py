@@ -16,8 +16,11 @@ from dataclasses import replace
 import pytest
 from ase.io import read as ase_read
 
+from types import SimpleNamespace
+
 from sabsim.pipeline.live_stages import (
     _publish_file,
+    _pull_note,
     _pull_rung_paths,
     _resolve_cif,
     build_halves,
@@ -70,6 +73,31 @@ def test_pull_rungs_get_distinct_directories(tmp_path):
 
     assert fast.directory != slow.directory
     assert fast.checkpoint_directory != slow.checkpoint_directory
+
+
+def _pull_result(**overrides) -> SimpleNamespace:
+    """A stand-in pull result carrying just the fields _pull_note reads."""
+    fields = dict(
+        complete=True, atoms_conserved=True,
+        resumed=False, override_used=False)
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+def test_pull_note_declares_a_resumed_rung():
+    """A resumed rung says so in its note, and flags any override (§13.6)."""
+    # A fresh, clean separation carries no resume marker.
+    assert _pull_note(_pull_result()) == "separated"
+    # Resumed without an override.
+    assert _pull_note(_pull_result(resumed=True)) == "separated [resumed]"
+    # Resumed with the trust guard overridden — both facts surface.
+    assert _pull_note(_pull_result(
+        resumed=True, override_used=True)) == (
+            "separated [resumed; trust override]")
+    # The marker rides on the base verdict, whatever it is.
+    assert _pull_note(_pull_result(
+        complete=False, resumed=True)) == (
+            "did not fully separate within the pull budget [resumed]")
 
 
 def test_build_halves_writes_two_handles(tmp_path):
