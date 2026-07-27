@@ -112,6 +112,41 @@ class Engine(ABC):
         leaves their sum zero at a balanced reference.
         """
 
+    @abstractmethod
+    def step(self) -> int:
+        """Return the engine's ABSOLUTE MD step count.
+
+        This is the timestep counter the engine keeps across a whole run,
+        NOT the pull loop's per-process burst index. The within-run resume
+        (§13) keys the pull's grip displacement to THIS value, so that a
+        run restarted in a fresh process still reports where the grip
+        physically sits: a saved state preserves the step count, a fresh
+        burst counter resets to zero (`DESIGN.md` §11.1).
+        """
+
+    @abstractmethod
+    def write_restart(self, path: str) -> None:
+        """Write the engine's complete state to a restart file at ``path``.
+
+        One half of the resume checkpoint pair (§13.2): the atoms, their
+        velocities, the box, and the step count — enough to continue the
+        dynamics exactly across a process boundary. The progress ledger is
+        the other half, written beside it. Callers write to a temporary
+        name and rename, so a kill mid-write leaves no half-pair
+        (`DESIGN.md` §11.2).
+        """
+
+    @abstractmethod
+    def read_restart(self, path: str) -> None:
+        """Restore the engine's state from the restart file at ``path``.
+
+        The inverse of :meth:`write_restart`: it restores the atoms,
+        velocities, box, and step count, but NOT the run's fixes and
+        computes. The grips, integrator, and recording are re-issued by
+        the caller after this returns (press/pull §13.3), exactly as a
+        fresh setup would issue them.
+        """
+
 
 class _Script:
     """Yield preset values one per call, repeating the last when spent.
@@ -160,6 +195,11 @@ class MockEngine(Engine):
             top_reaction=None,
             energies=None) -> None:
         self.received_commands: list = []
+        # The modelled ABSOLUTE step count. The mock runs no dynamics, but
+        # it TRACKS this so the §13 resume logic can be tested against it:
+        # every ``run N`` advances it by N, exactly as a real timestep
+        # would, and a restart round-trip carries it across a fresh mock.
+        self._step = 0
         self._energy = energy
         self._box = np.eye(3) if box is None else np.asarray(box, float)
         self._atom_count = atom_count
@@ -171,8 +211,22 @@ class MockEngine(Engine):
         self._energies = _Script(energies)
 
     def commands(self, lines: Sequence[str]) -> None:
-        """Record the commands rather than run them."""
-        self.received_commands.extend(lines)
+        """Record the commands, and advance the step on any ``run``.
+
+        The mock runs no dynamics, but it MODELS the step counter so the
+        resume logic (§13) can be exercised against it: a ``run N``
+        advances the absolute step by N, just as LAMMPS's timestep would,
+        so a write_restart/read_restart round-trip restores a meaningful
+        step. Every other command is only recorded.
+        """
+        for line in lines:
+            self.received_commands.append(line)
+            fields = line.split()
+            if len(fields) >= 2 and fields[0] == "run":
+                try:
+                    self._step += int(fields[1])
+                except ValueError:
+                    pass          # not a plain "run N"; nothing to advance
 
     def energy(self) -> float:
         """Return the next scripted energy, else the fixed one."""
@@ -208,3 +262,24 @@ class MockEngine(Engine):
         script = (self._bottom_reaction if side == "bottom"
                   else self._top_reaction)
         return float(script.next(0.0))
+
+    def step(self) -> int:
+        """Return the modelled absolute step (advanced by ``run`` cmds)."""
+        return self._step
+
+    def write_restart(self, path: str) -> None:
+        """Model a restart write by saving JUST the step to ``path``.
+
+        The mock has no atoms to serialize; its whole modelled state is
+        the step counter, so a one-line file carrying that integer is a
+        faithful stand-in. It is enough to let a FRESH mock read the file
+        back and resume at the right step, which is exactly what the §13
+        resume logic is tested against.
+        """
+        with open(path, "w", encoding="utf-8") as restart_file:
+            restart_file.write(str(self._step))
+
+    def read_restart(self, path: str) -> None:
+        """Restore the modelled step from a mock restart file at ``path``."""
+        with open(path, encoding="utf-8") as restart_file:
+            self._step = int(restart_file.read().strip())

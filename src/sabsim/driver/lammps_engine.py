@@ -248,3 +248,36 @@ class LammpsEngine(Engine):
                 2, 0))
         return -float(self._lmp.extract_compute(
             _TOP_GRIP_COMPUTE, self._style_global, self._type_scalar))
+
+    # -- resume seam (§13) --------------------------------------------
+
+    def step(self) -> int:
+        """Return the absolute timestep (the ``step`` thermo value).
+
+        Like :meth:`energy`, this reads the most recent thermo evaluation,
+        so it is valid after a ``run`` (or ``run 0``). The resume keys the
+        pull's grip displacement to this rather than to a per-process
+        burst index, so a restarted run stays consistent (`DESIGN.md`
+        §11.1, `PSEUDOCODE.md` §13.5).
+        """
+        return int(self._lmp.get_thermo("step"))
+
+    def write_restart(self, path: str) -> None:
+        """Write a LAMMPS binary restart to ``path`` (§13.2 pair half).
+
+        Maps to the ``write_restart`` command, which saves the atoms,
+        their velocities, the box, and the timestep — the engine half of
+        the checkpoint pair. The caller writes to a temporary name and
+        renames, so a kill mid-write never leaves a half-pair.
+        """
+        self._lmp.commands_list([f"write_restart {path}"])
+
+    def read_restart(self, path: str) -> None:
+        """Read a LAMMPS binary restart from ``path``, restoring the state.
+
+        Maps to the ``read_restart`` command. It restores atoms,
+        velocities, box, and timestep, but NOT fixes and computes — the
+        grips, integrator, and recording are re-issued by the caller after
+        this returns (`PSEUDOCODE.md` §13.3), as a fresh setup would.
+        """
+        self._lmp.commands_list([f"read_restart {path}"])
