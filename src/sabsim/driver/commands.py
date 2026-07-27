@@ -197,20 +197,45 @@ def _cell_cross_section_area(built) -> float:
 # strings; the two assemblers at the bottom stitch them in order.
 # ---------------------------------------------------------------------
 
-def preamble_commands(data_file: str, timestep: Quantity) -> list:
-    """Units, box style, the structure, and the MD timestep (§9.2).
+def restart_preamble_commands() -> list:
+    """The units and box declarations that precede a read (§9.2, §13.3).
 
     ``metal`` units, ``atomic`` style (charge-free at this fidelity,
     matching the data file), and ``p p f`` — periodic in the plane, fixed
-    (open) along z, the box the builder wrote (DESIGN.md §2.6).
+    (open) along z, the box the builder wrote (DESIGN.md §2.6). These three
+    lines lead BOTH a fresh ``read_data`` and a resumed ``read_restart``,
+    so they live in one place; the structure and masses (and, on a
+    restart, the saved timestep) come after the read.
     """
     return [
         "units metal",
         "atom_style atomic",
         "boundary p p f",
-        f"read_data {data_file}",
-        f"timestep {_lammps_number(to_metal(timestep, 'time'))}",
     ]
+
+
+def timestep_command(timestep: Quantity) -> list:
+    """Set the MD timestep (§9.2), as a one-line command list.
+
+    A separate builder because a resumed pull sets the timestep AFTER its
+    ``read_restart`` — the restart carries a saved timestep, and this
+    re-asserts the member's value over it (§13.3) — whereas a fresh run
+    folds it into :func:`preamble_commands`.
+    """
+    return [f"timestep {_lammps_number(to_metal(timestep, 'time'))}"]
+
+
+def preamble_commands(data_file: str, timestep: Quantity) -> list:
+    """Units, box style, the structure, and the MD timestep (§9.2).
+
+    Opens with :func:`restart_preamble_commands` (the units and z-open
+    boundary), reads the structure the builder wrote, then sets the MD
+    timestep (:func:`timestep_command`).
+    """
+    return (
+        restart_preamble_commands()
+        + [f"read_data {data_file}"]
+        + timestep_command(timestep))
 
 
 def force_model_commands(force_model: ForceModel) -> list:

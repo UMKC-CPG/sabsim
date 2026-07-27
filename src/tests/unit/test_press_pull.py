@@ -13,14 +13,16 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from sabsim.driver.commands import classical_si_stand_in
+from sabsim.driver.commands import RegionGeometry, classical_si_stand_in
 from sabsim.driver.engine import MockEngine
 from sabsim.driver.press_pull import (
     RunControl,
+    begin_or_resume_pull,
     press_and_bond,
     pull_at_rate,
     settle_reference,
 )
+from sabsim.driver.resume import Ledger, write_checkpoint
 from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import Quantity
 from sabsim.structure.slab_builder import WAFER_A_TAG, WAFER_B_TAG
@@ -218,3 +220,85 @@ def test_pull_completeness_agrees_with_the_reduced_separation(tmp_path):
 
     assert result.complete == (result.separation_index is not None)
     assert not result.complete
+
+
+# ---------------------------------------------------------------------
+# pull resume — fresh vs. restore, decided by what is on disk (§13.3).
+# ---------------------------------------------------------------------
+
+def _crafted_checkpoint(checkpoint_dir: str) -> None:
+    """Write a two-sample checkpoint at engine step 2000, via the writer.
+
+    Uses the real :func:`write_checkpoint`, so the pair on disk is exactly
+    what a killed run would have left — an engine restart at step 2000
+    (the mock models the step) and a ledger stamped to match.
+    """
+    writer_engine = MockEngine()
+    writer_engine.commands(["run 2000"])          # engine now at step 2000
+    seed_ledger = Ledger(
+        sample_steps=[1000, 2000], displacement=[0.1, 0.2],
+        force=[1.0, 0.8], opening=[3.0, 4.0], bridges=[5.0, 2.0],
+        starting_atom_count=200)
+    write_checkpoint(writer_engine, seed_ledger, checkpoint_dir)
+
+
+def test_a_fresh_pull_reads_data_and_seeds_an_empty_ledger():
+    """With no checkpoint on disk the pull begins normally (§13.3)."""
+    engine = MockEngine(positions=[_frame(12.0)])
+
+    ledger = begin_or_resume_pull(
+        engine, _fake_built(), _member(), _MODEL, "ref.data",
+        Quantity(3.2, "m/s"), 1, RegionGeometry(), RunControl(),
+        None, None, None)
+
+    assert ledger.sample_steps == []                # nothing accumulated
+    assert ledger.starting_atom_count == 200        # the §5.6 baseline
+    # A fresh run reads the reference with read_data (and so grows the box
+    # headroom); it is NOT a restart.
+    assert any("read_data" in line for line in engine.received_commands)
+
+
+def test_a_present_checkpoint_restores_and_reconciles(tmp_path):
+    """Finding a pair, the pull restores the engine and trims the ledger.
+
+    The engine comes back at the saved step (the mock models this), the
+    ledger reconciles to it, and the setup uses read_restart — never
+    read_data, and so never re-grows the already-restored box (§13.3).
+    """
+    checkpoint_dir = str(tmp_path / "pull_x" / "checkpoints")
+    _crafted_checkpoint(checkpoint_dir)
+    engine = MockEngine(positions=[_frame(12.0)])
+
+    ledger = begin_or_resume_pull(
+        engine, _fake_built(), _member(), _MODEL, "ref.data",
+        Quantity(3.2, "m/s"), 1, RegionGeometry(), RunControl(),
+        checkpoint_dir, None, None)
+
+    assert engine.step() == 2000                    # restored, not zero
+    assert ledger.sample_steps == [1000, 2000]      # reconciled to it
+    assert ledger.starting_atom_count == 200        # baseline rides through
+    stream = engine.received_commands
+    assert not any("read_data" in line for line in stream)
+    assert "units metal" in stream                  # restart preamble ran
+    # The fixtures are re-issued over the restored box (a restart carries
+    # none of them), e.g. the held-grip gauge.
+    assert "fix hold_bottom bottom_grip setforce 0.0 0.0 0.0" in stream
+
+
+def test_pull_writes_a_checkpoint_pair_on_the_cadence(tmp_path):
+    """With a checkpoint dir and a due cadence, a pair lands on disk (§13.2).
+
+    A pull that never separates runs its whole budget; the first chunk
+    reaches the cadence (1000 steps), so the matched pair is written.
+    """
+    checkpoint_dir = str(tmp_path / "checkpoints")
+    engine = MockEngine(positions=[_frame(12.0)], top_reaction=[1.0])
+
+    pull_at_rate(
+        engine, _fake_built(), _member(), _MODEL, "ref.data",
+        rate=Quantity(3.2, "m/s"), seed=1,
+        control=RunControl(max_chunks=3, checkpoint_cadence=1000),
+        output_directory=str(tmp_path), checkpoint_dir=checkpoint_dir)
+
+    assert os.path.exists(os.path.join(checkpoint_dir, "engine.restart"))
+    assert os.path.exists(os.path.join(checkpoint_dir, "ledger.json"))

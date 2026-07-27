@@ -382,9 +382,6 @@ record NumericalKnobs:
                                       # DISPLACEMENT units (§9.5, §5.4)
     reference_pe_drift:     number    # max PE drift for the reference to
                                       # count as settled (§9.4, DESIGN §5.3)
-    checkpoint_cadence:     integer   # engine steps between §13 pull
-                                      # checkpoints; a §5.9 value trading
-                                      # work-lost-on-kill vs write cost
     detector_smoothing_window: number  # smooths each §12.2 detector series
     detector_prominence:    number    # min event prominence vs §5.4 floor
     frame_budget:           integer   # max frames to step 8; §1.2 knob
@@ -3449,11 +3446,15 @@ gates, unchanged; the only difference is that the series comes from the
 ledger. The coordinate archive is handled exactly as in §9.5.
 
 ```
-function pull_at_rate(driver, reference, rate, member,
+function pull_at_rate(driver, reference, rate, member, control,
                       checkpoint_dir):                            # §9.5
     numerical = member.numerical
     timestep  = numerical.md_timestep
-    cadence   = numerical.checkpoint_cadence     # steps between saves
+    # chunk_steps and checkpoint_cadence are RunControl ENGINEERING
+    # settings (the same home as §9's chunk controls), NOT NumericalKnobs
+    # — the answer is invariant to them; they trade work-lost-on-a-kill
+    # against write cost. Provisional values live in code, not the spec.
+    cadence   = control.checkpoint_cadence       # engine steps per save
 
     ledger = begin_or_resume_pull(driver, reference, rate, member,
                                   checkpoint_dir)   # §13.3
@@ -3467,7 +3468,7 @@ function pull_at_rate(driver, reference, rate, member,
     # averaging-window confirmation tail — a press_pull.py refinement,
     # not itself in §9.5/§9.6.
     while not separated_with_confirmation_tail(ledger):
-        run(driver, numerical.chunk_steps)
+        run(driver, control.chunk_steps)
         step = driver.step               # the engine's ABSOLUTE step
 
         # THE HINGE (DESIGN §11.1). Displacement is the grip's travel,
@@ -3550,6 +3551,8 @@ to. The sequencer (§1) decides nothing new — it reruns the same command
 serialization (the four series plus the two scalars).
 
 `[DESIGN §5.9 / §11.6 numeric follow-on]` the checkpoint CADENCE — how
-many engine steps between saves — is DECLARED here as a NumericalKnob
-(`checkpoint_cadence`, §2) with its VALUE left as a DESIGN task,
-balancing work lost on a kill against time spent writing state.
+many engine steps between saves — is a RunControl ENGINEERING setting
+(`checkpoint_cadence`, beside `chunk_steps` and `max_chunks`), NOT a
+NumericalKnob: the answer is invariant to it, so it takes a provisional
+value in code rather than a spec-visible one, balancing work lost on a
+kill against time spent writing state.

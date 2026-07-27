@@ -3877,6 +3877,7 @@ no new flag; and a hash mismatch warns and stops until explicitly
 overridden. DESIGN follow-ons: extending the same mechanism to the press
 and the settle should they ever need it; the exact fields of the trust
 hash (with §1's fingerprint definition); and the checkpoint cadence — how
-often the engine state is saved — a numeric choice like the other §5
-thresholds, balancing work lost on a kill against time spent writing
+often the engine state is saved — an engineering choice (it sits with the
+chunking controls, not the physics knobs; the answer is invariant to it),
+balancing work lost on a kill against time spent writing
 state.

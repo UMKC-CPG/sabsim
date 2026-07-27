@@ -52,10 +52,18 @@ from sabsim.driver.commands import (
     pull_headroom_commands,
     recording_commands,
     region_group_commands,
+    restart_preamble_commands,
+    timestep_command,
     to_metal,
     trajectory_dump_commands,
 )
 from sabsim.driver.engine import Engine
+from sabsim.driver.resume import (
+    Ledger,
+    load_checkpoint,
+    reconcile,
+    write_checkpoint,
+)
 from sabsim.spec.records import MemberSpecification, Quantity
 from sabsim.structure.slab_builder import WAFER_A_TAG, WAFER_B_TAG
 
@@ -84,6 +92,12 @@ class RunControl:
     # STAND-IN matching live_stages' _BOND_CUTOFF; the §3.5 reference
     # data carries a bond_cutoff that both should eventually read.
     bond_cutoff: float = 2.8           # Å, Si first g(r) minimum
+    # Engine steps between §13 resume checkpoints, when a checkpoint
+    # directory is given. It lives here beside chunk_steps and max_chunks
+    # because it is the SAME kind of setting — chunking engineering, not
+    # physics; the answer is invariant to it (it trades work-lost-on-a-
+    # kill against time spent writing state). Provisional value.
+    checkpoint_cadence: int = 10000
 
 
 @dataclass(frozen=True)
@@ -289,30 +303,112 @@ def settle_reference(
         reference_data_file=reference_data_file)
 
 
-def _pull_setup(
-        built, member, force_model, data_file, rate, seed, geometry,
-        travel_time: float, trajectory_file: str | None = None,
+def _pull_fixture_commands(
+        built, member, force_model, rate, seed, geometry,
+        trajectory_file: str | None = None,
         trajectory_stride: int | None = None) -> list:
-    """The pull command block WITHOUT the run (the loop issues that).
+    """The pull's fixtures — everything that is NOT the box itself (§13.3).
 
-    ``travel_time`` is how long this rung may pull for, which sizes the
-    box headroom so the separation cannot carry atoms out through the
-    top (see :func:`pull_headroom_commands`).
-
-    ``trajectory_file`` is optional because nothing downstream reads the
-    frames — the analyzer measures from the thermo log. Recording is for
-    human inspection, and one rung's frames ran to 1.3 GB, so a run that
-    nobody intends to watch does not write them.
+    The force model, the region/group carve, the integrator, the grip
+    gauges, the pull drive, and the recording. These are re-established the
+    same way whether the box arrived from a fresh ``read_data`` or a
+    resumed ``read_restart``, because none of them live in a restart file:
+    a restart carries atoms, box, velocities, and timestep — not fixes,
+    computes, regions, or groups. So both setups end with this same block.
     """
     return (
-        preamble_commands(data_file, member.numerical.md_timestep)
-        + pull_headroom_commands(rate, travel_time)
-        + force_model_commands(force_model)
+        force_model_commands(force_model)
         + region_group_commands(built, geometry)
         + integrator_commands(member, seed)
         + grip_hold_and_readback_commands()
         + pull_drive_commands(rate)
         + recording_commands(member, trajectory_file, trajectory_stride))
+
+
+def _pull_setup(
+        built, member, force_model, data_file, rate, seed, geometry,
+        travel_time: float, trajectory_file: str | None = None,
+        trajectory_stride: int | None = None) -> list:
+    """The FRESH pull command block WITHOUT the run (the loop issues that).
+
+    ``travel_time`` is how long this rung may pull for, which sizes the
+    box headroom so the separation cannot carry atoms out through the top
+    (see :func:`pull_headroom_commands`). A resumed pull instead restores
+    an already-grown box and reuses :func:`_pull_fixture_commands` over it,
+    NEVER re-growing the headroom (§13.3).
+
+    ``trajectory_file`` is optional because nothing downstream reads the
+    frames for the reduction — the strided dump is the coordinate archive
+    for §8/§12 and human inspection (§9.5). One rung's frames ran to
+    1.3 GB, so a run nobody intends to analyze does not write them.
+    """
+    return (
+        preamble_commands(data_file, member.numerical.md_timestep)
+        + pull_headroom_commands(rate, travel_time)
+        + _pull_fixture_commands(
+            built, member, force_model, rate, seed, geometry,
+            trajectory_file, trajectory_stride))
+
+
+def begin_or_resume_pull(
+        engine: Engine,
+        built,
+        member: MemberSpecification,
+        force_model: ForceModel,
+        data_file: str,
+        rate: Quantity,
+        seed: int,
+        geometry: RegionGeometry,
+        control: RunControl,
+        checkpoint_dir: str | None,
+        trajectory_file: str | None,
+        trajectory_stride: int | None) -> Ledger:
+    """Set the pull up fresh, or resume it from a checkpoint (§13.3).
+
+    Whether this is a fresh pull or a resumed one is decided entirely by
+    what is on disk: with no checkpoint pair in ``checkpoint_dir`` (or no
+    directory given) the pull begins normally and seeds an empty ledger
+    carrying only the starting atom count; finding a pair, it restores the
+    engine from the saved state, reloads the ledger, and reconciles it to
+    the restored step. Either way it returns the ledger the loop extends.
+
+    The two setups differ in exactly two lines. A fresh run reads the
+    settled reference with ``read_data`` and grows the box headroom for
+    the whole travel; a resume restores the already-grown box with
+    ``read_restart`` and so must NOT grow it again, or the box would
+    double. Everything else — the fixtures — is identical, because a
+    restart file carries none of it (:func:`_pull_fixture_commands`).
+    """
+    numerical = member.numerical
+    timestep = to_metal(numerical.md_timestep, "time")
+
+    checkpoint = (
+        load_checkpoint(checkpoint_dir) if checkpoint_dir else None)
+
+    if checkpoint is None:
+        # FRESH. Read the reference and size the box for the whole travel.
+        travel_time = control.max_chunks * control.chunk_steps * timestep
+        engine.commands(_pull_setup(
+            built, member, force_model, data_file, rate, seed, geometry,
+            travel_time, trajectory_file, trajectory_stride))
+        # The atom count as the pull STARTS — the §5.6 conservation
+        # baseline, measured once and carried in the ledger so a resume
+        # checks against the ORIGINAL count, not a depleted one (§13.1).
+        starting_atom_count = int(np.asarray(engine.positions()).shape[0])
+        return Ledger(starting_atom_count=starting_atom_count)
+
+    # RESUMING. Restore the already-grown box with read_restart (never
+    # read_data, and NO headroom — the box came back with it), then
+    # re-establish the fixtures over it. The step count rides in with the
+    # restart, so the ledger reconciles to where the atoms actually are.
+    engine.commands(restart_preamble_commands())
+    engine.read_restart(checkpoint.engine_state)
+    engine.commands(
+        timestep_command(numerical.md_timestep)
+        + _pull_fixture_commands(
+            built, member, force_model, rate, seed, geometry,
+            trajectory_file, trajectory_stride))
+    return reconcile(checkpoint.ledger, engine.step())
 
 
 def pull_at_rate(
@@ -328,38 +424,36 @@ def pull_at_rate(
         *,
         output_directory: str,
         trajectory_file: str | None = None,
-        trajectory_stride: int | None = None) -> PullResult:
+        trajectory_stride: int | None = None,
+        checkpoint_dir: str | None = None) -> PullResult:
     """Pull apart at one rate until complete separation, then reduce (§9.5).
 
-    Restores the reference (a fresh setup reading its data file), then
-    advances in chunks, recording the grip displacement, the top-grip
-    reaction force, and the interface opening. It stops at complete
-    separation — opening past the cutoff with the force at the noise floor
-    — then reduces to the two curves: the averaged force versus grip
-    displacement (leading warm-up dropped) and versus interface opening,
-    plus the separation point (§9.6). ``output_directory`` is a required
-    keyword — the run states where its output goes, never the current
-    working directory. A strided trajectory is written only when
-    ``trajectory_file`` names one.
+    Sets up (or resumes) the pull, then advances in chunks, recording into
+    a ledger the grip displacement, the top-grip reaction force, the
+    interface opening, and the bridge count — each keyed to the engine's
+    ABSOLUTE step so a resumed run stays consistent (§13.5). It stops at
+    complete separation — opening past the cutoff with no atom still
+    bridging — then reduces to the two curves and the separation point
+    (§9.6). ``output_directory`` is a required keyword: the run states
+    where its output goes, never the working directory.
+
+    When ``checkpoint_dir`` is given, a resume checkpoint pair is written
+    there every ``control.checkpoint_cadence`` steps, and if one is already
+    present the pull RESUMES from it rather than starting over (§13.3). A
+    strided trajectory is written only when ``trajectory_file`` names one.
     """
     numerical = member.numerical
     timestep = to_metal(numerical.md_timestep, "time")
-    # The whole budget this rung may spend, which is also the furthest
-    # the grip can travel — what the box must be tall enough to allow.
-    travel_time = control.max_chunks * control.chunk_steps * timestep
-    engine.commands(_pull_setup(
-        built, member, force_model, data_file, rate, seed, geometry,
-        travel_time, trajectory_file, trajectory_stride))
+
+    # Fresh setup or restore-from-checkpoint, decided by what is on disk;
+    # either way this returns the ledger the loop below extends (§13.3).
+    ledger = begin_or_resume_pull(
+        engine, built, member, force_model, data_file, rate, seed,
+        geometry, control, checkpoint_dir, trajectory_file,
+        trajectory_stride)
 
     tags = np.asarray(built.atoms.get_tags())
-    # The atom count as the pull STARTS, to be compared with the count it
-    # ends on. A non-periodic z boundary deletes anything driven out of
-    # the box without stopping the run, so this is the only thing that
-    # tells a measurement from a fiction (§9.6, §5.6).
-    initial_atom_count = int(np.asarray(engine.positions()).shape[0])
     rate_metal = to_metal(rate, "velocity")
-    noise_floor = to_metal(numerical.noise_floor, "force")
-
     window = to_metal(numerical.force_average_window, "distance")
     # How far the grip travels per chunk, hence how many further chunks
     # are needed to lay down one full averaging window of record.
@@ -368,41 +462,50 @@ def pull_at_rate(
         int(np.ceil(window / per_chunk)) + 1 if per_chunk else 1)
 
     lateral_cell = np.asarray(built.atoms.get_cell())
-    displacement: list = []
-    force: list = []
-    opening: list = []
-    bridges: list = []
+    # The total step budget, which is what the box headroom was sized for.
+    # Bounding the loop by the engine's ABSOLUTE step means a resume
+    # continues toward the SAME ceiling instead of starting a fresh budget
+    # that would drive the grip out through the top of the box (§13.5).
+    step_budget = control.max_chunks * control.chunk_steps
     remaining_tail = None
-    for chunk in range(control.max_chunks):
+    while engine.step() < step_budget:
         engine.commands([f"run {control.chunk_steps}"])
-        elapsed = (chunk + 1) * control.chunk_steps * timestep
-        displacement.append(rate_metal * elapsed)
+        step = engine.step()
+        # THE HINGE (§13.5, DESIGN §11.1): displacement is grip travel =
+        # rate x elapsed, and elapsed is the ABSOLUTE step x timestep, not
+        # a per-process burst count. Identical on a fresh run; correct
+        # across a resume, where a burst counter would restart at zero.
+        ledger.sample_steps.append(step)
+        ledger.displacement.append(rate_metal * (step * timestep))
         frame = np.asarray(engine.positions())
         z_lower, z_upper = _wafer_z(frame, tags)
-        opening.append(interface_opening(
+        ledger.opening.append(interface_opening(
             z_lower, z_upper, control.density_bin_width))
-        force.append(engine.grip_reaction("top"))
-        # Bonds crossing the interface plane, counted over ALL atoms
-        # regardless of which wafer they were built in — a transferred
-        # atom belongs to whichever body it now sits in.
-        bridges.append(cross_interface_bridges(
+        ledger.force.append(engine.grip_reaction("top"))
+        # Bonds crossing the interface plane, over ALL atoms regardless of
+        # which wafer they were built in — a transferred atom belongs to
+        # whichever body it now sits in.
+        ledger.bridges.append(cross_interface_bridges(
             frame, lateral_cell,
             interface_plane(z_lower, z_upper, control.density_bin_width),
             control.bond_cutoff))
 
+        # Save the checkpoint pair on the cadence (§13.2), when resuming is
+        # enabled for this rung. It is keyed to the step just run.
+        cadence_due = (
+            step - ledger.saved_step >= control.checkpoint_cadence)
+        if checkpoint_dir is not None and cadence_due:
+            write_checkpoint(engine, ledger, checkpoint_dir)
+
         # The raw test is a STOPPING heuristic, not the verdict. It says
-        # "there is probably nothing more to learn here", and the run
-        # then continues for one more averaging window so the REDUCED
-        # curve extends past the separation instead of ending exactly at
-        # it. Without that tail the two tests disagree in both
-        # directions: a rung that stopped at 0.49 A left too short a
-        # record to average at all, while a fast rung stopped just as
-        # its raw force dipped, denying the averaged force the samples
-        # it needed to settle. The verdict is taken ONCE, below, from
-        # the same curves the work integral is computed over.
+        # "there is probably nothing more to learn here", and the run then
+        # continues one more averaging window so the REDUCED curve extends
+        # past the separation instead of ending exactly at it. The verdict
+        # is taken ONCE, below, from the same curves the work integral is
+        # computed over.
         if remaining_tail is None:
-            if (opening[-1] > control.separation_cutoff
-                    and bridges[-1] == 0):
+            if (ledger.opening[-1] > control.separation_cutoff
+                    and ledger.bridges[-1] == 0):
                 remaining_tail = confirmation_chunks
         else:
             remaining_tail -= 1
@@ -410,15 +513,17 @@ def pull_at_rate(
                 break
 
     final_atom_count = int(np.asarray(engine.positions()).shape[0])
-    conserved = atom_count_conserved(initial_atom_count, final_atom_count)
+    conserved = atom_count_conserved(
+        ledger.starting_atom_count, final_atom_count)
 
-    grip_curve, averaged = averaged_force_curve(displacement, force, window)
+    grip_curve, averaged = averaged_force_curve(
+        ledger.displacement, ledger.force, window)
     opening_curve, _ = reexpress_versus_opening(
-        grip_curve, averaged, displacement, opening)
-    # The bridge count carried onto the same samples as the curve, so
-    # the stop is decided on the record the work integral runs over.
+        grip_curve, averaged, ledger.displacement, ledger.opening)
+    # The bridge count carried onto the same samples as the curve, so the
+    # stop is decided on the record the work integral runs over.
     bridge_curve, _ = reexpress_versus_opening(
-        grip_curve, averaged, displacement, bridges)
+        grip_curve, averaged, ledger.displacement, ledger.bridges)
     separation_index = separation_point(
         opening_curve, bridge_curve, control.separation_cutoff)
     # ONE definition of "separated": the reduced curves are authoritative,

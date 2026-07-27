@@ -346,7 +346,8 @@ so they are not discovered late (two touch non-negotiable goals). -->
       `input_hash` warn-and-stop with deliberate override; 13.5 the
       re-keyed, check-pointed `pull_at_rate` loop (the hinge); 13.6
       completeness+provenance unchanged; 13.7 bottoms-out/delegates.
-      Pins `checkpoint_cadence` as a §2 NumericalKnob, value a §5.9 task.
+      `checkpoint_cadence` is a `RunControl` engineering setting (beside
+      `chunk_steps`), value a §5.9 task.
 - [ ] **CODE follow-on for `DESIGN.md` §11 / `PSEUDOCODE.md` §13
       (resume).** Design and pseudocode are done; the code is not.
       Concrete pieces §13 pins: (a) in `driver/press_pull.py`, key the
@@ -365,13 +366,13 @@ so they are not discovered late (two touch non-negotiable goals). -->
       identity + the pull RATE — the only per-rung distinguisher, §13.4)
       recorded in the checkpoint, compared on resume — mismatch WARNS AND
       STOPS unless an explicit override (§13.4); (e) provenance notes a
-      run was resumed (and any override) (§13.6). Also add the
-      `checkpoint_cadence` NumericalKnob (`PSEUDOCODE.md` §13.5, declared
-      in §2) to `src/sabsim/spec/records.py` + the study-spec template,
-      mirroring the §12-knobs item above; its VALUE is a `DESIGN.md` §5.9
-      / §11.6 task. The `Engine` seam needs `write_restart` /
-      `read_restart` / `step` added (§9.2). Pull ONLY in v1; press/settle
-      adopt §13's routines later.
+      run was resumed (and any override) (§13.6). `checkpoint_cadence`
+      lives on `RunControl` beside `chunk_steps` / `max_chunks` (an
+      ENGINEERING setting, NOT a spec-visible NumericalKnob — the code
+      revealed its siblings live there; DESIGN/PSEUDOCODE updated to
+      match), so no `records.py` / template change is needed; its VALUE
+      is a provisional-in-code `DESIGN.md` §5.9 / §11.6 task. Pull ONLY
+      in v1; press/settle adopt §13's routines later.
       GROUNDING (2026-07-27, from reading the seams): (f) `pipeline/
       live_stages.py` runs the ladder's rungs in ONE shared
       `scratch_directory`, filename-distinguished (`log.pull_<i>`,
