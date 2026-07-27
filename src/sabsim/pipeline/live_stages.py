@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from ase.io import read as ase_read
@@ -287,6 +288,42 @@ def _stage_trajectory(
     if not options.enabled:
         return None, stride
     return stage_dump_file(output_directory, member.name, stage), stride
+
+
+class _PullRungPaths(NamedTuple):
+    """The self-contained paths for one pull rung (`DESIGN.md` §11.3)."""
+
+    directory: str
+    checkpoint_directory: str
+    log_file: str
+    trajectory_file: str | None
+    trajectory_stride: int
+
+
+def _pull_rung_paths(
+        scratch_directory: str,
+        member: MemberSpecification,
+        rate) -> _PullRungPaths:
+    """Lay out one pull rung's OWN directory and return its paths (§11.3).
+
+    Each rate is a separate pull, so it gets its own ``pull_<rate>/``
+    directory holding its log, its (optional) trajectory, and its resume
+    ``checkpoints/`` subdir — so resuming one rung never reaches into
+    another's state (`DESIGN.md` §11.3, `PSEUDOCODE.md` §13.3). The
+    directory is created here so the engine's log can be written into it;
+    the ``checkpoints/`` subdir is created lazily by the first checkpoint
+    write, so a rung that never checkpoints leaves none behind.
+    """
+    directory = os.path.join(
+        scratch_directory, f"pull_{_rate_slug(rate)}")
+    os.makedirs(directory, exist_ok=True)
+    trajectory_file, stride = _stage_trajectory(directory, member, "pull")
+    return _PullRungPaths(
+        directory=directory,
+        checkpoint_directory=os.path.join(directory, "checkpoints"),
+        log_file=os.path.join(directory, "log.pull"),
+        trajectory_file=trajectory_file,
+        trajectory_stride=stride)
 
 
 def _reanneal_force_model(
@@ -604,22 +641,23 @@ def run_bond_debond_md_live(
             press=PressOutcome(bonded=False, note=press.note),
             reference_ok=False, pulls=pulls)
 
-    # One fresh engine per pull rung, each restoring the settled reference.
+    # One fresh engine per pull rung, each in its OWN directory so it can
+    # be resumed from its own checkpoints without touching another rung
+    # (§11.3). Passing checkpoint_dir turns resume ON: the rung writes a
+    # checkpoint pair on the cadence and, if one is already present,
+    # continues from it rather than starting over (§13.3).
     pulls = []
-    for index, rate in enumerate(ladder):
+    for rate in ladder:
+        rung = _pull_rung_paths(scratch_directory, member, rate)
         pull_engine = LammpsEngine(
-            command_line_args=[
-                "-screen", "none",
-                "-log", os.path.join(
-                    scratch_directory, f"log.pull_{index}")],
+            command_line_args=["-screen", "none", "-log", rung.log_file],
             comm=comm)
-        pull_trajectory, pull_stride = _stage_trajectory(
-            scratch_directory, member, f"pull_{_rate_slug(rate)}")
         result = pull_at_rate(
             pull_engine, built, member, force_model, reference_file, rate,
-            seed, output_directory=scratch_directory,
-            trajectory_file=pull_trajectory,
-            trajectory_stride=pull_stride)
+            seed, output_directory=rung.directory,
+            trajectory_file=rung.trajectory_file,
+            trajectory_stride=rung.trajectory_stride,
+            checkpoint_dir=rung.checkpoint_directory)
         pull_engine.close()
         pulls.append(PullOutcome(
             rate_value=rate.value, rate_unit=rate.unit,

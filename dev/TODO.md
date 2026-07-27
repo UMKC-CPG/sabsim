@@ -392,10 +392,13 @@ so they are not discovered late (two touch non-negotiable goals). -->
       commit fbb9eb3); the ledger/hinge/checkpoint pair/reconcile
       (`driver/resume.py` + `press_pull.py`, commit 018a079, covering
       (a)(b)(c)(g)(h)); and the trust hash + warn-and-stop + override
-      (`input_hash`/`verify_inputs_or_stop`, covering (d)(i)). REMAINING:
-      (f) the `live_stages.py` per-rung `pull_<rate>/` restructure that
-      threads `checkpoint_dir` — the wiring that turns resume ON for real
-      runs; (e) provenance notes a resumed run + any override; and the
+      (`input_hash`/`verify_inputs_or_stop`, covering (d)(i)); and (f) the
+      `live_stages.py` per-rung `pull_<rate>/` restructure that threads
+      `checkpoint_dir` — resume is now ON for real runs (`_pull_rung_paths`,
+      each rung self-contained with its own `checkpoints/`). REMAINING:
+      (e) provenance notes a resumed run + any override — needs a `resumed`
+      flag threaded PullResult -> PullOutcome (deferred as its own small
+      piece, a reporting-chain change, not the resume mechanism); and the
       compute-node smoke test (real restart round-trip continues the
       trajectory).
 - [ ] Decide which module owns provenance-by-discipline record-keeping

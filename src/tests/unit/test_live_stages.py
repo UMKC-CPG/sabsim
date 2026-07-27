@@ -18,6 +18,7 @@ from ase.io import read as ase_read
 
 from sabsim.pipeline.live_stages import (
     _publish_file,
+    _pull_rung_paths,
     _resolve_cif,
     build_halves,
 )
@@ -39,6 +40,36 @@ def _si_si_member():
         if member.name == "si-si-reference":
             return member
     raise AssertionError("si-si-reference member not found in template")
+
+
+def test_pull_rung_paths_are_self_contained(tmp_path):
+    """Each rung gets its own directory, log, and checkpoints seam (§11.3).
+
+    The self-contained layout is what lets a rung resume from its own
+    checkpoints without reaching into another rung's state.
+    """
+    scratch = str(tmp_path)
+    rung = _pull_rung_paths(scratch, _si_si_member(), Quantity(3.2, "m/s"))
+
+    assert rung.directory == os.path.join(scratch, "pull_3p2mps")
+    assert os.path.isdir(rung.directory)            # created for the log
+    assert rung.log_file == os.path.join(rung.directory, "log.pull")
+    assert rung.checkpoint_directory == os.path.join(
+        rung.directory, "checkpoints")
+    # The checkpoints subdir is created lazily by the first write, so a
+    # rung that never checkpoints leaves none behind.
+    assert not os.path.exists(rung.checkpoint_directory)
+
+
+def test_pull_rungs_get_distinct_directories(tmp_path):
+    """Two rates never share a directory, so their resumes stay apart."""
+    fast = _pull_rung_paths(
+        str(tmp_path), _si_si_member(), Quantity(3.2, "m/s"))
+    slow = _pull_rung_paths(
+        str(tmp_path), _si_si_member(), Quantity(1.0, "m/s"))
+
+    assert fast.directory != slow.directory
+    assert fast.checkpoint_directory != slow.checkpoint_directory
 
 
 def test_build_halves_writes_two_handles(tmp_path):
