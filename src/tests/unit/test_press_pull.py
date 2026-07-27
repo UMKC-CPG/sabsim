@@ -12,6 +12,7 @@ import os
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from sabsim.driver.commands import RegionGeometry, classical_si_stand_in
 from sabsim.driver.engine import MockEngine
@@ -22,7 +23,12 @@ from sabsim.driver.press_pull import (
     pull_at_rate,
     settle_reference,
 )
-from sabsim.driver.resume import Ledger, write_checkpoint
+from sabsim.driver.resume import (
+    Ledger,
+    ResumeInputMismatch,
+    input_hash,
+    write_checkpoint,
+)
 from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import Quantity
 from sabsim.structure.slab_builder import WAFER_A_TAG, WAFER_B_TAG
@@ -226,19 +232,28 @@ def test_pull_completeness_agrees_with_the_reduced_separation(tmp_path):
 # pull resume — fresh vs. restore, decided by what is on disk (§13.3).
 # ---------------------------------------------------------------------
 
-def _crafted_checkpoint(checkpoint_dir: str) -> None:
+_PULL_RATE = Quantity(3.2, "m/s")
+
+
+def _matching_hash() -> str:
+    """The trust hash the resume tests' inputs (member, ref, rate) yield."""
+    return input_hash(_member(), "ref.data", _PULL_RATE)
+
+
+def _crafted_checkpoint(checkpoint_dir: str, stored_hash: str) -> None:
     """Write a two-sample checkpoint at engine step 2000, via the writer.
 
     Uses the real :func:`write_checkpoint`, so the pair on disk is exactly
-    what a killed run would have left — an engine restart at step 2000
-    (the mock models the step) and a ledger stamped to match.
+    what a killed run would have left — an engine restart at step 2000 (the
+    mock models the step) and a ledger stamped to match. ``stored_hash`` is
+    the §13.4 trust field the resume compares against.
     """
     writer_engine = MockEngine()
     writer_engine.commands(["run 2000"])          # engine now at step 2000
     seed_ledger = Ledger(
         sample_steps=[1000, 2000], displacement=[0.1, 0.2],
         force=[1.0, 0.8], opening=[3.0, 4.0], bridges=[5.0, 2.0],
-        starting_atom_count=200)
+        starting_atom_count=200, input_hash=stored_hash)
     write_checkpoint(writer_engine, seed_ledger, checkpoint_dir)
 
 
@@ -266,12 +281,12 @@ def test_a_present_checkpoint_restores_and_reconciles(tmp_path):
     read_data, and so never re-grows the already-restored box (§13.3).
     """
     checkpoint_dir = str(tmp_path / "pull_x" / "checkpoints")
-    _crafted_checkpoint(checkpoint_dir)
+    _crafted_checkpoint(checkpoint_dir, _matching_hash())
     engine = MockEngine(positions=[_frame(12.0)])
 
     ledger = begin_or_resume_pull(
         engine, _fake_built(), _member(), _MODEL, "ref.data",
-        Quantity(3.2, "m/s"), 1, RegionGeometry(), RunControl(),
+        _PULL_RATE, 1, RegionGeometry(), RunControl(),
         checkpoint_dir, None, None)
 
     assert engine.step() == 2000                    # restored, not zero
@@ -302,3 +317,69 @@ def test_pull_writes_a_checkpoint_pair_on_the_cadence(tmp_path):
 
     assert os.path.exists(os.path.join(checkpoint_dir, "engine.restart"))
     assert os.path.exists(os.path.join(checkpoint_dir, "ledger.json"))
+
+
+# ---------------------------------------------------------------------
+# pull resume — the trust guard: warn, and stop (§13.4).
+# ---------------------------------------------------------------------
+
+def test_resume_stops_when_the_inputs_differ(tmp_path):
+    """A checkpoint from a different run halts the resume before it acts.
+
+    The guard fires when the current inputs hash differently from the run
+    the checkpoint was written for — here a deliberately wrong stored
+    hash — and it stops rather than stitch new inputs onto old dynamics.
+    """
+    checkpoint_dir = str(tmp_path / "pull_x" / "checkpoints")
+    _crafted_checkpoint(checkpoint_dir, "deadbeefdeadbeef")
+    engine = MockEngine(positions=[_frame(12.0)])
+
+    with pytest.raises(ResumeInputMismatch):
+        begin_or_resume_pull(
+            engine, _fake_built(), _member(), _MODEL, "ref.data",
+            _PULL_RATE, 1, RegionGeometry(), RunControl(),
+            checkpoint_dir, None, None)
+    # It stopped BEFORE touching the engine (the trust check is first).
+    assert engine.step() == 0
+
+
+def test_resume_override_lets_a_mismatch_through(tmp_path, monkeypatch):
+    """The deliberate override env var lifts the stop (§13.4)."""
+    checkpoint_dir = str(tmp_path / "pull_x" / "checkpoints")
+    _crafted_checkpoint(checkpoint_dir, "deadbeefdeadbeef")
+    monkeypatch.setenv("SABSIM_RESUME_OVERRIDE", "1")
+    engine = MockEngine(positions=[_frame(12.0)])
+
+    ledger = begin_or_resume_pull(
+        engine, _fake_built(), _member(), _MODEL, "ref.data",
+        _PULL_RATE, 1, RegionGeometry(), RunControl(),
+        checkpoint_dir, None, None)
+
+    assert engine.step() == 2000                    # proceeded anyway
+    assert ledger.sample_steps == [1000, 2000]
+
+
+def test_input_hash_is_stable_but_rate_sensitive(tmp_path):
+    """The same inputs hash the same; a different rate hashes differently.
+
+    The rate is the only thing that tells one rung of a member from
+    another, so it MUST move the hash (§13.4).
+    """
+    reference = str(tmp_path / "ref.data")
+    with open(reference, "w", encoding="utf-8") as handle:
+        handle.write("a settled structure")
+
+    fast = input_hash(_member(), reference, Quantity(3.2, "m/s"))
+    slow = input_hash(_member(), reference, Quantity(1.0, "m/s"))
+    assert fast != slow
+    assert fast == input_hash(_member(), reference, Quantity(3.2, "m/s"))
+
+
+def test_input_hash_tracks_the_reference_content(tmp_path):
+    """A different settled reference in the same path hashes differently."""
+    reference = tmp_path / "ref.data"
+    reference.write_text("structure A")
+    before = input_hash(_member(), str(reference), _PULL_RATE)
+    reference.write_text("structure B")
+    after = input_hash(_member(), str(reference), _PULL_RATE)
+    assert before != after

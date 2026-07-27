@@ -60,8 +60,10 @@ from sabsim.driver.commands import (
 from sabsim.driver.engine import Engine
 from sabsim.driver.resume import (
     Ledger,
+    input_hash,
     load_checkpoint,
     reconcile,
+    verify_inputs_or_stop,
     write_checkpoint,
 )
 from sabsim.spec.records import MemberSpecification, Quantity
@@ -395,12 +397,20 @@ def begin_or_resume_pull(
         # baseline, measured once and carried in the ledger so a resume
         # checks against the ORIGINAL count, not a depleted one (§13.1).
         starting_atom_count = int(np.asarray(engine.positions()).shape[0])
-        return Ledger(starting_atom_count=starting_atom_count)
+        return Ledger(
+            starting_atom_count=starting_atom_count,
+            input_hash=input_hash(member, data_file, rate))
 
-    # RESUMING. Restore the already-grown box with read_restart (never
-    # read_data, and NO headroom — the box came back with it), then
-    # re-establish the fixtures over it. The step count rides in with the
-    # restart, so the ledger reconciles to where the atoms actually are.
+    # RESUMING. Trust FIRST (§13.4): if the current inputs hash differently
+    # from the run this checkpoint came from, STOP before touching the
+    # engine — unless the person has deliberately overridden, which the
+    # provenance then records (§13.6).
+    verify_inputs_or_stop(checkpoint, member, data_file, rate)
+
+    # Restore the already-grown box with read_restart (never read_data,
+    # and NO headroom — the box came back with it), then re-establish the
+    # fixtures over it. The step count rides in with the restart, so the
+    # ledger reconciles to where the atoms actually are.
     engine.commands(restart_preamble_commands())
     engine.read_restart(checkpoint.engine_state)
     engine.commands(

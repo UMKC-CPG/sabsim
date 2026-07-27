@@ -13,11 +13,13 @@ with no LAMMPS (§13.7).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import asdict, dataclass, field
 
 from sabsim.driver.engine import Engine
+from sabsim.spec.records import MemberSpecification, Quantity
 
 
 # The two files that make up the pair on disk (§13.2). Their names are
@@ -142,3 +144,95 @@ def reconcile(ledger: Ledger, restored_step: int) -> Ledger:
         starting_atom_count=ledger.starting_atom_count,
         saved_step=restored_step,
         input_hash=ledger.input_hash)
+
+
+# --- the trust guard: warn, and stop (§13.4) -------------------------
+
+class ResumeInputMismatch(RuntimeError):
+    """Raised when a resume's inputs differ from the checkpointed run.
+
+    The §13.4 trust guard's stop: resuming reuses what a previous run left
+    in a directory, and this is the rare-mistake alert that the CURRENT
+    inputs hash differently from the run the checkpoint came from. It halts
+    — a stop the person cannot scroll past — until they deliberately
+    override with the environment variable (`DESIGN.md` §11.4).
+    """
+
+
+_RESUME_OVERRIDE_VARIABLE = "SABSIM_RESUME_OVERRIDE"
+
+
+def resume_override_is_set() -> bool:
+    """Whether the person has deliberately overridden the trust guard.
+
+    Mirrors the unvalidated-potential opt-in: an environment variable set
+    in the job script, so the deliberate choice stays visible in the run's
+    own record rather than hiding in a forgotten shell.
+    """
+    setting = os.environ.get(_RESUME_OVERRIDE_VARIABLE, "")
+    return setting.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def input_hash(member: MemberSpecification, reference_file: str,
+               rate: Quantity) -> str:
+    """A short hash of the run's inputs, for the resume trust guard (§13.4).
+
+    What identifies "the same run": the study's CONTENT — here the
+    protocol's knobs, the same material `DESIGN.md` §1.4's fingerprint
+    draws on — the identity of the settled reference the pull restores
+    from, and the pull RATE, the only input that tells one rung of a member
+    from another (they share the protocol and the one reference). Paths and
+    the wall-clock are deliberately excluded: only a genuinely different
+    experiment should change this. The exact fields are `DESIGN.md` §1.8's
+    open follow-on; this is a sufficient guard, not the last word.
+    """
+    protocol = json.dumps(
+        asdict(member.protocol), sort_keys=True, default=str)
+    reference_id = _reference_identity(reference_file)
+    rate_id = f"{rate.value}:{rate.unit}"
+    material = "|".join([protocol, reference_id, rate_id])
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+
+def _reference_identity(reference_file: str) -> str:
+    """A content hash of the settled reference, or its path if unreadable.
+
+    The reference is the upstream artifact the pull restores from, so its
+    CONTENT is what should match on resume — a different settled structure
+    in the same directory is exactly the mistake the guard catches. If the
+    file cannot be read (it need not be present on the resume path, which
+    reads a restart instead), the path stands in, which still differs when
+    a genuinely different run was set up.
+    """
+    try:
+        with open(reference_file, "rb") as reference:
+            return hashlib.sha256(reference.read()).hexdigest()[:16]
+    except OSError:
+        return f"path:{reference_file}"
+
+
+def verify_inputs_or_stop(checkpoint: Checkpoint,
+                          member: MemberSpecification,
+                          reference_file: str, rate: Quantity) -> bool:
+    """Halt a resume whose inputs differ from the checkpointed run (§13.4).
+
+    A guardrail, not a correctness gate. It checks that the current study,
+    settled reference, and rate still hash to what the checkpoint was
+    written for. On a match it returns ``False`` (no override needed). On a
+    mismatch it STOPS by raising :class:`ResumeInputMismatch` — the stop is
+    what makes the warning seen rather than scrolled past — UNLESS the
+    person has set the override, in which case it returns ``True`` so the
+    caller can record that an override was used (§13.6). In practice it is
+    hard to resume the wrong run by accident, because the checkpoint sits
+    in the run's own directory, which is exactly where the resume looks.
+    """
+    stored = checkpoint.ledger.input_hash
+    if input_hash(member, reference_file, rate) == stored:
+        return False
+    if resume_override_is_set():
+        return True
+    raise ResumeInputMismatch(
+        "resume inputs differ from the run this checkpoint was written "
+        "for (study, settled reference, or rate changed); refusing to "
+        "stitch new inputs onto old dynamics. Set "
+        f"{_RESUME_OVERRIDE_VARIABLE}=1 to continue anyway.")

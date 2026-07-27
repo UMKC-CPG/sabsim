@@ -387,6 +387,17 @@ so they are not discovered late (two touch non-negotiable goals). -->
       `read_data` of the reference; on resume it branches to
       `read_restart` of the checkpoint instead. (i) the §13.4 override is
       an env var mirroring `SABSIM_ALLOW_UNVALIDATED_POTENTIAL`.
+      PROGRESS (2026-07-27): DONE — the `Engine` seam
+      (`step`/`write_restart`/`read_restart` + `MockEngine` step model,
+      commit fbb9eb3); the ledger/hinge/checkpoint pair/reconcile
+      (`driver/resume.py` + `press_pull.py`, commit 018a079, covering
+      (a)(b)(c)(g)(h)); and the trust hash + warn-and-stop + override
+      (`input_hash`/`verify_inputs_or_stop`, covering (d)(i)). REMAINING:
+      (f) the `live_stages.py` per-rung `pull_<rate>/` restructure that
+      threads `checkpoint_dir` — the wiring that turns resume ON for real
+      runs; (e) provenance notes a resumed run + any override; and the
+      compute-node smoke test (real restart round-trip continues the
+      trajectory).
 - [ ] Decide which module owns provenance-by-discipline record-keeping
       (each step recording its inputs, exact tool version, and
       settings) (`ARCHITECTURE.md` §2.3 / §4, `VISION.md` goal 3 and
