@@ -399,9 +399,23 @@ so they are not discovered late (two touch non-negotiable goals). -->
       provenance — `resumed`/`override_used` threaded `PullResult` ->
       `PullOutcome`, and a `[resumed]` / `[resumed; trust override]` marker
       on the rung note (`_pull_note`), so a continued run declares itself
-      (VISION goal 3). ALL §13 CODE DONE except the compute-node smoke
-      test (real `write_restart`/`read_restart` round-trip actually
-      continues the trajectory) — a scheduled job, not login-node work.
+      (VISION goal 3). ALL §13 CODE DONE. The compute-node smoke test is
+      WRITTEN and ready to submit: `jobs/resume_smoke/` (slurm + README +
+      `run_resume_smoke.py`) — CHECK A exact `write_restart`/`read_restart`
+      round-trip, CHECK B full kill-and-resume pull; run once at `-n 1`,
+      look for `RESUME SMOKE: PASS`.
+- [ ] **MPI: rank-0-guard `resume.write_checkpoint`'s ledger write
+      before multi-rank production resume.** Surfaced writing the smoke
+      test (2026-07-27). `write_restart` is collective (all ranks, one
+      file — fine), but the `ledger.json` write and the two `os.replace`
+      renames run on EVERY rank, so under `srun/mpirun -n N` they race on
+      one path. The data is identical across ranks (the read-backs are
+      collective), so it is a filesystem race, not wrong content — but it
+      must become rank-0-only (and `load_checkpoint`'s ledger read either
+      rank-0 + broadcast, or all-ranks read-only). The driver seam has no
+      rank concept, so the rank has to reach it (an `is_primary` flag on
+      the call, or via the engine's comm). Until then the smoke test and
+      any resume run stay `-n 1` (`jobs/resume_smoke/` refuses `>1`).
 - [ ] Decide which module owns provenance-by-discipline record-keeping
       (each step recording its inputs, exact tool version, and
       settings) (`ARCHITECTURE.md` §2.3 / §4, `VISION.md` goal 3 and
