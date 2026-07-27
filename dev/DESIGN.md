@@ -974,9 +974,9 @@ swapping how one is computed, touches nothing else.
 
 Judgment is **per realization.** Each metric judges ONE re-annealed slab
 against its reference; the spread over amorphization seeds is taken ABOVE
-this module, by the sequencer's realization ensemble (§10.8, STRUCTURAL
-4), exactly as the bond metric's spread is. So a metric verdict is one
-measurement against one threshold, not an averaged distribution.
+this module, by the sequencer's realization ensemble (`PSEUDOCODE.md` §10.8,
+STRUCTURAL 4), exactly as the bond metric's spread is. So a metric verdict is
+one measurement against one threshold, not an averaged distribution.
 
 The registered metrics, each with what it actually discriminates:
 
@@ -1028,7 +1028,7 @@ The registered metrics, each with what it actually discriminates:
   Phase-1 stand-in's top-contiguous scan. This metric supplies the
   MEASURED `activated_depth` that the structure builder's thickness
   criterion (§2.5) only estimated a-priori, closing that loop, and that
-  labels the activated skin (§10.7).
+  labels the activated skin (`PSEUDOCODE.md` §10.7).
 
 **Where the references and thresholds live.** They are deliberately NOT
 physics-spec knobs — a threshold is a criterion of the gate, not a choice
@@ -1325,9 +1325,9 @@ designed" must not be read as "the MLIP runs."
 
 ### 4.7 The classical cascade generator: selection, acceptance, fallback
 
-Sections §3.3 and §10 run the surface-activation cascade on a *classical*
-potential spliced with ZBL, deliberately not the MLIP (STRUCTURAL 1b: the
-production MLIP must never be trained on cascade-level distortion or on
+Sections §3.3 and `PSEUDOCODE.md` §10 run the surface-activation cascade on a
+*classical* potential spliced with ZBL, deliberately not the MLIP (STRUCTURAL
+1b: the production MLIP must never be trained on cascade-level distortion or on
 the projectile species). That classical potential is the one genuinely
 per-material piece of an otherwise chemistry-agnostic cascade — everything
 else already generalizes across materials without change: the
@@ -1350,7 +1350,7 @@ substrate-substrate core). Whether the classical form underneath is
 Stillinger-Weber, a Tersoff / bond-order form, a Vashishta form, a
 Buckingham form with a repulsive splice, or — the fallback below — a
 foundation MLIP, the caller sees the same setup. The cascade driver
-(§10.2) never names a potential; it asks the resolver. That same
+(`PSEUDOCODE.md` §10.2) never names a potential; it asks the resolver. That same
 registry now also serves the QUIET stages, which ask it for the bare
 classical form with no ZBL cores spliced in (§4.5) — so one entry
 describes a material everywhere that material is simulated, and step 4
@@ -1448,9 +1448,9 @@ letting two atoms fuse, but for a Buckingham form it is *load-bearing* —
 it must actually overpower the `−C/r⁶` attraction that diverges to −∞, not
 merely supplement a finite wall. Second, shell-model forms (a real
 lithium-niobate option) carry massless shells that must be relaxed every
-step, which complicates the persistent-driver and adaptive-timestep design
-of §10.2 and costs extra per-step work. Neither is a showstopper; both
-must be recorded so a future contributor is not surprised.
+step, which complicates the persistent-driver and adaptive-timestep design of
+`PSEUDOCODE.md` §10.2 and costs extra per-step work. Neither is a showstopper;
+both must be recorded so a future contributor is not surprised.
 
 **Frozen for v1 (scope decision (a), 2026-07-18).** The generator resolver
 and the registry schema are built now; the registry is populated with
@@ -2015,10 +2015,14 @@ plus margin.
 Two things are then gates rather than warnings. **Atom count is
 conserved**: a non-periodic boundary silently deletes any atom that
 leaves the box, so a lost atom invalidates the run. And **the trajectory
-must be complete**: walltime is budgeted from pull distance divided by
-pull rate, not set to a flat four hours. Prior art's headline number was
-computed from a trajectory that stopped at 122,500 of 150,000 steps, in
-a directory containing a file named `NOTE_INCOMPLETE.txt`.
+must be complete**: the requested walltime must cover the whole pull — a
+number the *person* sets, estimated from pull distance divided by pull
+rate (§10.6), not a flat four hours — and it is this completeness gate,
+not the scheduler's clock, that certifies the run finished. A run cut
+short is resubmitted as a continuation (§10.6), never reported as-is.
+Prior art's headline number was computed from a trajectory that stopped
+at 122,500 of 150,000 steps, in a directory containing a file named
+`NOTE_INCOMPLETE.txt`.
 
 ### 5.7 Provenance is part of the measurement
 
@@ -2092,8 +2096,9 @@ integral labelled "work of adhesion" (→ the measure vector of §6, with
 the dissipation identity as a sign check); a single seed and no error bar
 (→ an ensemble with a spread); a single unvalidated pull rate (→ the rate
 ladder); a discarded bottom-grip reaction force (→ the Newton check); a
-flat walltime and a truncated trajectory (→ budgeted walltime and a
-completeness gate); and a report string that names a potential the run
+flat walltime and a truncated trajectory (→ a person-set walltime sized
+to the pull, §10.6, and a completeness gate); and a report string that
+names a potential the run
 did not use (→ provenance emitted from the run, not typed).
 
 **Frozen for v1:** load-controlled press to a **target pressure of
@@ -3502,9 +3507,369 @@ id  type  x y z  group  coordination  defect  provenance
 where `group` is the LabeledGroup membership (frozen-base / border /
 interior / activated-skin) as an integer to color by; `coordination` and
 `defect` mark the amorphized region; and `provenance` is which slab an atom
-was built in (the interface's two sides). The `activated-skin` value is
-exactly the per-atom set §10.7's `label_activated_skin` records, which is
-why that step — deferred in Phase 2 — becomes load-bearing here: it is the
+was built in (the interface's two sides). The `activated-skin` value is exactly
+the per-atom set `PSEUDOCODE.md` §10.7's `label_activated_skin` records, which
+is why that step — deferred in Phase 2 — becomes load-bearing here: it is the
 field that lights up the amorphized layer. A single endpoint frame may also
 be written into the job directory as a convenience, but it is secondary to
 the trajectory.
+
+## 10. Deployment — preparing and submitting a study to a cluster
+
+Every section above says *what* to compute. This one says *where* it
+runs — how a study becomes jobs a scheduler will accept, on whatever
+machine you happen to be sitting at. The policy is already fixed one
+level up in `ARCHITECTURE.md` §4.1: three execution tiers (a thin
+sequencer we own, opaque Parsl sub-orchestrators we adopt, and plain
+jobs we submit directly); a machine-local deployment file carrying a
+`[hardware]` inventory and a `[usage.*]` map keyed by kind of job; and
+three roots (`SABSIM_SCRATCH` / `SABSIM_SHARE` / `SABSIM_LOCAL`) set by a
+sourced shell rc upstream of Python. The template already exists
+(`dev/templates/deployment_rc.toml`). What was missing — and what this
+section designs — is the **consumer**: the mechanism that reads that file
+and acts on it.
+
+Two rules from §1 bound the whole design and are never bent here. The
+study spec may **never** express where it runs (§1.2), so nothing in
+deployment leaks back into it. And convenience lives in *writing* a
+complete file, never in a silent fallback at load time (§1.4), so the
+deployment consumer is a **generator**, exactly as the study-spec loader
+is.
+
+### 10.1 The consumer is a writer, not a submitter
+
+It is tempting to imagine `sabsim` itself submitting jobs and watching
+them to completion. It must not, for a concrete reason recorded in
+`ARCHITECTURE.md` §4.1: a long-lived submit-and-watch process cannot sit
+on a login node — that is one of the six execution walls. So the consumer
+**writes ready-to-submit scripts and hands them back**; the human submits
+them and watches them. This is the §1.4 generator pattern lifted from the
+study spec to deployment — the same tool that emits a complete, editable
+study spec now also emits complete, editable submission scripts with the
+site-specifics already filled in. Nothing is submitted for you, and
+nothing runs on the login node except the writing itself.
+
+The consumer is two commands:
+
+- **`sabsim prepare <spec>`** — the writer. It reads *both* the study
+  spec (which members, and what each one needs) *and* the deployment file
+  (which hardware each kind of job wants), and writes the scripts. It is
+  the single place the two inputs meet: the study spec still never names
+  the cluster, and `prepare` joins the two only at the moment of writing.
+- **`sabsim run <spec> --activate|--bond|--analyze`** — the executor.
+  It runs one job's worth of the pipeline, and this is the line that
+  lives *inside* each generated script. It runs within an allocation
+  (wrapped in the launcher), submits nothing itself, and does the actual
+  science.
+
+### 10.2 One member is three per-kind jobs
+
+A member's eight steps neither all want the same machine nor all want to
+run without a human looking. So a member is prepared as **three jobs**,
+submitted in order, each watched to completion and checked for
+correctness before the next is submitted:
+
+- **activate** (ordinary / CPU): build both wafers, roughen both surfaces
+  with the classical + ZBL cascade (§3), and bring them together. Named
+  for its heavy, gating work; the cheap build-and-assemble glue rides
+  along. The checkpoint that follows it is the **activation gate** (§3.5)
+  — a boundary that is at once a change of machine kind *and* a decision
+  the human should inspect before spending scarce GPU time.
+- **bond** (GPU): press, settle, and pull (§5), with the committee of
+  MLIP models evaluated together in one process.
+- **analyze** (ordinary / CPU): measure (§6). Split into its *own* job —
+  not folded into bond — because the all-electron characterization (§8)
+  will eventually be heavy, and drawing the boundary now avoids moving it
+  later.
+
+This **revises `ARCHITECTURE.md` §4.3**, which today describes a member
+as a single job. §4.3 was written to *allow* the split — every stage
+hands off through a file on disk, so a boundary may fall between any two
+stages — and this section fixes where the boundaries actually fall.
+
+**The committee runs within the one bond job.** All committee models are
+loaded together in the single bond process, evaluated on each
+configuration, and their disagreement *is* the live uncertainty signal
+(§7.3). There are no per-model submits. Committee size raises the bond
+job's per-step cost — which bears on the walltime of §10.6 — but never
+adds jobs.
+
+### 10.3 One ordered job registry, read by both commands
+
+The real safeguard against the two commands drifting apart is that the
+set of jobs is defined **once** in code, as a small **ordered registry**:
+activate → bond → analyze, each entry naming the job, the pipeline stages
+it runs, and the abstract resource *class* it needs (which the deployment
+file resolves to a real partition). *Both* the `run` selector's flags and
+the `prepare` writer read from this one registry.
+
+The payoff is extensibility. Inserting a new kind of job later — say, a
+relaxation between activate and bond — is a one-line edit to the registry,
+and the flags, the written filenames, the guided index, and the run
+selector all follow from it. No truth about *what the jobs are and in
+what order they run* is ever written down twice, which is why the CLI
+surface (flags versus a valued option) barely matters: neither form
+scatters that truth.
+
+### 10.4 The run selector
+
+`sabsim run <spec>` accepts **at most one** of three mutually exclusive
+flags — `--activate`, `--bond`, `--analyze` — each selecting exactly the
+stages that job owns, per the registry. Giving **no** flag runs the whole
+member chain end to end; that is what a login-node `--dry-run` exercises
+and what a small local test uses. Adding `--only <member>` narrows any of
+these to a single member when a study defines several.
+
+The flags deliberately carry no category noun — there is no
+`--stage bond`. Dropping the noun lets the verbs stand alone, and it
+keeps the word "stage" out of the CLI entirely, since that word is
+already overloaded across the eight pipeline steps and the finer internal
+stages.
+
+### 10.5 What `prepare` writes into each script
+
+A generated script's "get the machine ready" preamble is kept small and
+boring, because most of what a run needs is already true by virtue of the
+environment being installed and activated — not restated in every script.
+"Getting ready" is three kinds of thing, each sorted to one home:
+
+- **The three location roots** (scratch, shared, personal override) are
+  **baked in as resolved values** — a frozen snapshot, *not* a line that
+  re-reads the shell rc at run time. This is §1.4's "emit a complete
+  file" applied to deployment: the script names the exact locations it
+  used, so it reproduces months later and does not depend on the rc still
+  existing or being unchanged at submit time. Their proper definition
+  home is the sourced rc (`.sabsim/sabsimrc`), which is where `prepare`
+  reads them from. The accepted cost: changing a root means regenerating.
+  - **A fail-fast gate.** Before writing anything, `prepare` checks that
+    the three roots actually resolve. If they do not, it **stops and
+    reports on the login node** — where the message is readable — rather
+    than emitting scripts that would fail on a compute node an hour into
+    a job. This is the same discipline as the study-reference check
+    (§1.5) and the activation gate (§3.5): catch the missing piece early,
+    name it, and refuse.
+- **The outside tools to switch on are per kind of job**, not
+  machine-wide. The activate script switches on only the
+  classical-dynamics engine, bond only the GPU force-model engine,
+  analyze only the electronic-structure package. This **reshapes the
+  deployment file**: the tool list moves out of the machine-wide
+  `[hardware]` inventory and into each per-kind `[usage.*]` block, so a
+  script loads exactly what its job needs and nothing that could conflict
+  with it. It matches the by-kind routing the file already uses for
+  partitions.
+- **Everything else gets no home in the script.** The classical potential
+  files are found through the shared-data root (they are reference data,
+  in §3.5's registry idiom); the Python interpreter and the launcher come
+  from the activated install. None of these is hand-named in a generated
+  script.
+
+**Filenames are semantic and carry no ordinal number** — `activate`,
+`bond`, `analyze`, named for the work. Ordinals were rejected because
+inserting a job between two existing ones would break the numbering.
+Order lives in one place instead: a short, descriptively named guided
+index the writer drops beside the scripts (a submission *guide*, never
+`index` or `readme`), reinforced by each script printing, on success,
+what to check and which job to submit next. That serves the hand-driven,
+checkpoint-by-checkpoint model directly. (The command verb `run` is kept
+— a common, understood word, like `git commit` — since the naming rule
+governs files, not verbs.)
+
+### 10.6 Walltime — a number the person provides, and one cheap check
+
+Every job must declare a wall-clock limit up front, and for most jobs any
+comfortable number will do. The bond job is the interesting one, because
+part of its length is *physics*: §5.6's pull consumes pull-distance ÷
+pull-rate of simulated time, and that cannot be shrunk without changing
+the experiment.
+
+The design deliberately does **not** have the writer predict that length.
+Predicting simulation time is fragile, and it would make the thin
+sequencer clever about physics it has no business modeling. Instead the
+requested walltime is a value the **person provides**, in the deployment
+file's per-kind `[usage.*]` block, and refines with a little experience —
+after a few runs, the right number for a given pull is plain. §5.6's
+pull-distance ÷ pull-rate relation stays, but as the human's **estimation
+guide**, not something the software computes; this reframes §5.6, which
+previously read as though the tool budgeted the number.
+
+**One cheap check earns its place**, precisely because it predicts
+nothing — it only compares two numbers already written in the deployment
+file. Each hardware partition already names a `max_walltime` ceiling (the
+longest job that pool will ever allow). If a requested per-kind walltime
+exceeds its partition's ceiling, `prepare` **stops and says so**, instead
+of letting the scheduler bounce the job after submission. It is symmetric
+with the roots gate of §10.5: a static, login-node refusal with a
+readable reason.
+
+When a run *does* exhaust its walltime, the response is neither to
+silently shorten the pull — that would report a different measurement as
+if it were the one asked for — nor to have the writer auto-split the job,
+which is machinery we do not have. It is the human resubmitting a
+**continuation**: noticing that the job stopped short and picking it up
+where it left off. The completeness gate of §5.6 is what makes this safe
+— an unfinished trajectory is caught and never reported as-is (prior
+art's headline number came from a trajectory that stopped at 122,500 of
+150,000 steps). That continuation is the within-run resume built in §11,
+which restores an interrupted pull and carries it to its end; this section
+relies on it, and §11 is where it is specified.
+
+### 10.7 What we keep, what we replace, and v1
+
+**Keep:** the throwaway field scripts under `jobs/*` as the honest
+starting template — they already enumerate exactly what a real submission
+needs (partition, account, task count, walltime, the potentials path, the
+interpreter, the launcher, `PYTHONPATH`, the scratch root, and the
+`mpirun -np N python -m sabsim run` line); the three-tier routing and the
+`[hardware]` / `[usage.*]` split (`ARCHITECTURE.md` §4.1); and the
+roots-via-sourced-rc mechanism.
+
+**Replace:** the hardcoded partition / account / paths of those throwaway
+scripts (→ values `prepare` fills from the deployment file); one coarse
+job per member (→ three per-kind jobs, revising `ARCHITECTURE.md` §4.3);
+a machine-wide tool list (→ per-kind `[usage.*]` tool lists); any notion
+of the tool submitting or babysitting jobs (→ a writer plus a human); and
+a tool that budgets walltime (→ a human-provided walltime with a cheap
+ceiling check).
+
+**Frozen for v1:** three jobs named activate / bond / analyze; `prepare`
+writes and the human submits; the ordered registry as the single source
+of job identity and order; baked-in frozen roots guarded by a
+resolve-or-refuse gate; per-kind tool lists; user-provided walltime with
+the partition-ceiling check; and overrun handled by human continuation.
+DESIGN follow-ons: the installer plus INSTALL/README that emit the
+deployment rc (the packaging story); and whether a per-study walltime
+override on `prepare` is worth adding once studies vary widely. (The
+restart/resume mechanism the continuation relies on is now built as §11.)
+
+## 11. Resuming an interrupted run
+
+The clock, not the physics, is what most often cuts a run short. §10.6
+made the deployment side of this a person's job — the walltime is chosen
+by hand, and a run that overruns is picked up and continued rather than
+silently shortened — and it named the mechanism that continuation leans
+on but left it unbuilt. This section builds it: how a run the scheduler
+killed partway is resumed and carried to its proper end, so that the
+completeness gate of §5.6, not the wall-clock, is what certifies a run
+finished.
+
+The one run that matters here in v1 is the **pull**. Its length is partly
+physics — §5.6's separation consumes pull-distance ÷ pull-rate of
+simulated time, which cannot be shrunk without changing the experiment —
+so it is the run most likely to meet the wall before it meets its natural
+end. The press and the settle are short and rarely overrun; the mechanism
+below is written so they can adopt it later, but v1 makes only the pull
+resumable.
+
+### 11.1 A run's progress lives in two places
+
+It is tempting to think a saved simulation state is enough to continue:
+restore the atoms and their velocities, press go. For the pull it is not,
+and seeing why fixes the whole design. The pull advances in short bursts,
+and after each burst it records, in ordinary program memory, the grip
+displacement, the pulling force, the interface opening, and the count of
+bonds still bridging the gap. Those running lists are not decoration — the
+final force-versus-displacement curve and the separation point are built
+from them at the end. Two more facts hide in the same loop: the
+displacement is currently computed from the **burst counter**, which a
+fresh process resets to zero; and the **starting atom count** — the
+baseline the §5.6 completeness gate checks against, since atoms driven out
+of the box are silently deleted — is measured once, at the top.
+
+So a resume that restored only the simulation state would restart the
+burst counter at zero, desynchronizing the reported displacement from
+where the grip physically sits; it would have lost the accumulated record
+the final curves are made of; and it would re-measure the atom-count
+baseline against an already-depleted box. The progress lives in two places
+at once — the engine and the program — and a resume that saves only one of
+them silently corrupts the measurement.
+
+### 11.2 A checkpoint is a matched pair
+
+The design follows directly. A checkpoint is **two artifacts written
+together**: the engine's complete saved state, and a small **ledger** of
+the run's progress so far — the accumulated displacement / force / opening
+/ bridge record, the starting atom count, and how far along the run is.
+Neither is useful without the other, so they are written as a pair and
+restored as a pair.
+
+Two rules keep the pair honest. First, the run's progress is keyed to the
+**engine's own step count**, which a saved state preserves, and never to
+the burst counter, which it does not — so the restored displacement lines
+up with the restored atoms. Second, because the engine's state is saved on
+a coarser cadence than the ledger is appended, a resume may find a ledger
+that runs a few bursts past the last saved state; it **reconciles** by
+dropping the ledger entries beyond the saved step, so the two agree before
+the run goes on. The saved state makes the physics exact across the seam;
+the ledger — a few short lists of numbers — is what makes the resumed run
+the *same* measurement rather than a fresh one welded onto old dynamics.
+
+### 11.3 Fresh or resuming is decided by what is on disk
+
+The pull needs no new flag to know which case it is in. At its start it
+looks in its own scratch for a checkpoint pair. Finding none, it begins
+normally and starts writing them. Finding one, it restores the engine,
+reloads and reconciles the ledger, and continues from there to the end.
+The same command that ran the pull the first time resumes it the second;
+the difference is entirely in what is already on disk — the same
+discipline the stage handoffs already follow (`ARCHITECTURE.md` §4.3).
+
+### 11.4 The trust alert: warn, and stop
+
+Resuming reuses what a previous run left in a directory, so it owes one
+guard against the rare mistake of continuing the *wrong* run — a directory
+in which something genuinely different ran before. The checkpoint
+therefore carries a **hash of the run's inputs**, drawn from the study's
+content fingerprint (§1) and the identity of the upstream artifact the
+pull reads. On resume, if the current inputs hash differently, the run
+**warns and stops**: it refuses to continue until the person confirms with
+an explicit override, rather than quietly stitching new inputs onto old
+dynamics.
+
+This is a guardrail, not a correctness gate, and it is mild in spirit even
+though it stops. In practice it is hard to resume the wrong run by
+accident, because the checkpoint sits in the run's own directory and that
+is exactly where the resume looks. The warning is there for the person who
+truly changed something and forgot, and the stop is what makes sure the
+warning is seen rather than scrolled past. The exact fields the hash
+covers ride on the same open question as the fingerprint itself (§1.8's
+follow-on): what counts as a difference that ought to matter.
+
+### 11.5 Completeness is judged on the whole, not the pieces
+
+Resuming changes nothing about how a run is judged finished. The §5.6
+completeness gate already asks whether the trajectory reached its target
+and whether the atom count was conserved; it does not ask, and need not
+care, how many submissions it took to get there. A pull that reaches its
+end across two or three continuations is complete; one that still falls
+short is caught exactly as before and never reported as-is. The one thing
+resuming adds is a note in the provenance record that the run was
+continued — and, if an overriding of the trust warning ever happens, that
+too — so the history stays honest about how the number was produced
+(`VISION.md` goal 3).
+
+### 11.6 What we keep, what we replace, and v1
+
+**Keep:** the durable file handoff that already lets a finished stage
+survive a crash (`ARCHITECTURE.md` §4.3); the §5.6 completeness gate and
+its atom-count baseline as the real arbiter of "finished"; the §1 content
+fingerprint as the material the trust hash is drawn from; and the manual
+`jobs/si_si_e2e/rerun_back_half.py` as the honest precedent for resuming
+at a *stage* boundary — the coarse cousin of the within-run resume built
+here.
+
+**Replace:** the non-answer of raising the walltime and re-running the
+pull from zero, which only meets the same wall again (→ a pull that
+continues from where it stopped); and the silent assumption that a
+process's in-memory progress is safe to lose (→ a progress ledger kept on
+disk beside the saved state).
+
+**Frozen for v1:** the pull is the only resumable run; a checkpoint is the
+matched pair of saved engine state and progress ledger, keyed to the
+engine's step count; a resume is chosen by the presence of that pair, with
+no new flag; and a hash mismatch warns and stops until explicitly
+overridden. DESIGN follow-ons: extending the same mechanism to the press
+and the settle should they ever need it; the exact fields of the trust
+hash (with §1's fingerprint definition); and the checkpoint cadence — how
+often the engine state is saved — a numeric choice like the other §5
+thresholds, balancing work lost on a kill against time spent writing
+state.

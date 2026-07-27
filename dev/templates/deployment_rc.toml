@@ -21,10 +21,12 @@
 
 [hardware]
 # The per-cluster swap unit: replace this block to move machines.
+# The tools to switch on are NOT listed here — they live per KIND OF
+# JOB, in each [usage.*] block below, so a job loads only what it needs
+# and nothing that could conflict with it (DESIGN.md §10.5).
 cluster_name    = "pixstor"
 scheduler       = "slurm"
 default_account = "cpg"
-modules         = ["lammps/2024", "deepmd-kit/3.0", "vasp/6.4"]
 
   [hardware.partitions.cpu]
   name           = "general"
@@ -47,12 +49,16 @@ modules         = ["lammps/2024", "deepmd-kit/3.0", "vasp/6.4"]
 partition = "cpu"
 nodes     = 2
 walltime  = { value = 12.0, unit = "h" }
+modules   = ["lammps/2024"]  # the classical-dynamics engine only
 
 [usage.bond-md]
 # MLIP bond/debond MD (§5): GPU-accelerated DeePMD evaluation.
 partition = "gpu"
 nodes     = 1
 walltime  = { value = 18.0, unit = "h" }
+# The GPU force model runs as a DeePMD pair style hosted inside LAMMPS,
+# so this kind needs both the host engine and the DeePMD module.
+modules   = ["lammps/2024", "deepmd-kit/3.0"]
 
 [usage.vasp]
 # Direct VASP NOT inside ALF — the bootstrap's hand-built seed configs
@@ -61,9 +67,13 @@ walltime  = { value = 18.0, unit = "h" }
 partition = "cpu"
 nodes     = 4
 walltime  = { value = 6.0, unit = "h" }
+modules   = ["vasp/6.4"]  # the electronic-structure package only
 
 [usage.sequence]
 # The orchestrating driver that submits and chains the jobs above.
 partition = "cpu"
 nodes     = 1
 walltime  = { value = 48.0, unit = "h" }
+# The orchestrator only submits and chains jobs; it loads no science
+# tool of its own, so its tool list is deliberately empty.
+modules   = []

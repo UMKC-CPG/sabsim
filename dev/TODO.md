@@ -287,6 +287,90 @@ so they are not discovered late (two touch non-negotiable goals). -->
       installer + `INSTALL`/README that actually emit the rc are unwritten
       (the packaging story, not yet started); the derive-`SABSIM_SHARE`
       alternative was considered and DROPPED as unnecessary.
+      **DESIGN CONSUMER — SECTION WRITTEN (2026-07-26) as `DESIGN.md`
+      §10.** All questions Q1-Q5 resolved; §5.6/§5.9 reframed for the
+      walltime decision. PROPAGATION (2026-07-26): (1) DONE — revised
+      `ARCHITECTURE.md` §4.3 to three per-kind jobs, keeping its
+      Approach-A serial-halves argument as a SEPARATE axis inside the
+      activate job; (2) DONE — reshaped
+      `dev/templates/deployment_rc.toml` (tool list machine-wide ->
+      per-kind `[usage.*]`: cascade=lammps, bond=lammps+deepmd,
+      vasp=vasp, sequence=[]); (4) DONE — `/refine`: the bare `§10.x`
+      refs were `PSEUDOCODE.md` §10 cross-refs missing the prefix (now
+      prefixed), so no DESIGN §10 was ever reserved; the stub was removed
+      and deployment renumbered §11 -> §10. (3) DONE at DESIGN level —
+      restart/resume is now its OWN section, `DESIGN.md` §11 ("Resuming
+      an interrupted run"): within-run continuation of the PULL only in
+      v1; a checkpoint is a MATCHED PAIR (saved engine state + a small
+      progress ledger), keyed to the engine's step count not the burst
+      counter; resume is chosen by the pair's presence (no new flag); an
+      input-hash mismatch WARNS AND STOPS until explicitly overridden;
+      §5.6 completeness gate unchanged (judges the whole, not the
+      pieces). §10.6/§10.7 repointed at §11. No code yet — see the CODE
+      follow-on below. Full capture:
+      `dev/notes/deployment-design-discussion.md`. The
+      settled decisions: the consumer is a WRITER
+      (`sabsim prepare <spec>` emits ready-to-submit scripts, human
+      submits — not a submitter, not schema-only); one member = THREE
+      per-kind jobs run in order with human checkpoints — **activate**
+      (CPU cascade+build+assemble), **bond** (GPU press/pull), **analyze**
+      (CPU, split off for future heavy all-electron work); each job runs
+      `sabsim run <spec> --activate|--bond|--analyze [--only <member>]`
+      (mutually exclusive flags, none = whole chain); semantic filenames,
+      NO ordinals, order in a guided index; the real safeguard is ONE
+      ordered job registry in code that both `run` and `prepare` read;
+      committee runs within the one `bond` submit. Q4 RESOLVED: scripts
+      are SELF-CONTAINED — the generator BAKES resolved location values
+      inline as a FROZEN SNAPSHOT (matches §1.4 "emit a complete file"),
+      with a FAIL-FAST GATE that stops+reports on the login node if the
+      roots (defined in the sabsimrc) don't resolve; TOOL LISTS GO
+      PER-KIND (out of `[hardware]`, into each `[usage.*]` —
+      RESHAPES the template); plumbing (potentials/interpreter/launcher)
+      stays out of scripts; CLI verb `run` kept. Q5 RESOLVED: walltime is
+      PERSON-PROVIDED per-kind (writer does NOT predict it); §5.6's
+      formula becomes the human's estimation guide (reframed §5.6/§5.9);
+      `prepare` refuses if requested walltime > partition `max_walltime`
+      (cheap ceiling check); overrun -> HUMAN CONTINUATION (restart/resume
+      is the G5 follow-on). All captured in `DESIGN.md` §10 (renumbered
+      from §11 by the 2026-07-26 `/refine`: the bare §10.x refs turned
+      out to be `PSEUDOCODE.md` §10 cross-refs, so no DESIGN §10 was
+      reserved and the placeholder stub was dropped).
+- [x] **PSEUDOCODE for `DESIGN.md` §11 (resume) — DONE 2026-07-27 as
+      `PSEUDOCODE.md` §13** ("Resuming an interrupted run"). A dedicated
+      top-level section (chosen over folding into §9) so resume stays
+      coherent in one place at every level, mirroring DESIGN §11 1:1; the
+      pull's §9.5 is its only v1 caller. Seven subsections: 13.1 the
+      Checkpoint/Ledger structures; 13.2 the matched-pair write (temp-
+      then-rename atomicity, both-parts-present load); 13.3 fresh-vs-
+      resume by disk presence + `reconcile` to the saved step; 13.4 the
+      `input_hash` warn-and-stop with deliberate override; 13.5 the
+      re-keyed, check-pointed `pull_at_rate` loop (the hinge); 13.6
+      completeness+provenance unchanged; 13.7 bottoms-out/delegates.
+      Pins `checkpoint_cadence` as a §2 NumericalKnob, value a §5.9 task.
+- [ ] **CODE follow-on for `DESIGN.md` §11 / `PSEUDOCODE.md` §13
+      (resume).** Design and pseudocode are done; the code is not.
+      Concrete pieces §13 pins: (a) in `driver/press_pull.py`, key the
+      pull's `displacement` to the engine's ABSOLUTE step count, not the
+      `chunk` counter (today `elapsed = (chunk+1)*chunk_steps*timestep`
+      resets on a fresh process — the correctness hinge, §13.5); (b)
+      write the checkpoint PAIR on a cadence — the engine's saved state
+      (LAMMPS `write_restart`, none in the code today) plus a small
+      on-disk ledger of the accumulated displacement/force/opening/bridge
+      record AND the starting atom count (the §5.6 conservation baseline,
+      also lost on a kill today), temp-then-rename so a kill mid-write
+      leaves no half-pair (§13.2); (c) at pull start, detect the pair in
+      scratch, `read_restart` + reload/RECONCILE the ledger (drop entries
+      past the saved step), else begin fresh (§13.3); (d) an input hash
+      (from the `DESIGN.md` §1.4 fingerprint + the settled-reference
+      identity) recorded in the checkpoint, compared on resume — mismatch
+      WARNS AND STOPS unless an explicit override (§13.4); (e) provenance
+      notes a run was resumed (and any override) (§13.6). Also add the
+      `checkpoint_cadence` NumericalKnob (`PSEUDOCODE.md` §13.5, declared
+      in §2) to `src/sabsim/spec/records.py` + the study-spec template,
+      mirroring the §12-knobs item above; its VALUE is a `DESIGN.md` §5.9
+      / §11.6 task. The `Engine` seam needs `write_restart` /
+      `read_restart` / `step` added (§9.2). Pull ONLY in v1; press/settle
+      adopt §13's routines later.
 - [ ] Decide which module owns provenance-by-discipline record-keeping
       (each step recording its inputs, exact tool version, and
       settings) (`ARCHITECTURE.md` §2.3 / §4, `VISION.md` goal 3 and
@@ -1222,7 +1306,19 @@ foundations, interaction rules. -->
       selector reads the dump back" language in `commands.py` is
       ASPIRATIONAL, since nothing actually reads it (the analyzer
       measures from the thermo log). Fix that comment or build the
-      selector.
+      selector. FRAMES ROLE NOW SETTLED at design level (2026-07-27):
+      pinned in `PSEUDOCODE.md` §9.5 / §9.6 / §3 — the pull's reduction
+      runs off the live per-chunk SERIES, and the strided dump is a
+      SEPARATE coordinate archive written ONLY when a consumer will read
+      it (step-8 characterization in the run that feeds Imago / RDF /
+      structural descriptors, OR a person via `--dump-visuals`). So the
+      reduction no longer "reads frames" (§9.6 now matches the code); the
+      `--dump-visuals` half of the write-trigger already exists; the
+      characterization half — and the selector that reads this archive —
+      lands when step 8 is built. Remaining CODE: build the selector, and
+      reword the `commands.py` comment to say the archive is
+      consumer-gated, not dead. See also the §13 resume ledger, which is
+      the SERIES made durable — a different artifact from this archive.
       (2) **The potential is now resolved per material from ONE
       registry.** `cascade_potential.classical_force_model` serves the
       re-anneal and the press/pull, which previously hard-coded

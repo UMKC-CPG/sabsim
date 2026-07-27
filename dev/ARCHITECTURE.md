@@ -1046,10 +1046,24 @@ different master seed — are independent and could run at once.
 `relax-bulk`, `solve-shared-cell`, and the half GEOMETRY (`build-halves`)
 are deterministic and SHARED across realizations, computed once; what
 repeats per realization is writing a fresh half data file and amorphizing
-it, then `assemble` through `pull`. But v1 does NOT fan those units out. A
-member runs its whole chain in ONE job (Approach A), the two halves
-bombarded one after the other, each bombardment using the job's FULL core
-allocation.
+it, then `assemble` through `pull`. But v1 does NOT fan those units out
+(Approach A): the two halves are bombarded one after the other, each
+using its job's FULL core allocation, rather than split into concurrent
+jobs. That concurrency choice is ORTHOGONAL to how the serial chain is
+handed to the scheduler, which the next paragraph settles.
+
+**The serial chain is submitted as THREE per-kind jobs.** Approach A
+keeps the independent units serial; it does NOT make the whole member a
+single submission. The chain is cut where the HARDWARE KIND changes and
+a human should stop to look — into **activate** (CPU: build and amorphize
+both halves, then assemble), **bond** (GPU: press, settle, pull), and
+**analyze** (CPU: measure) — three jobs submitted in order, each watched
+to completion and checked before the next is sent (`DESIGN.md` §10.2).
+The cut costs nothing precisely because every stage already hands off
+through a file (above): a job boundary is just a file-handoff seam the
+human elects to pause at. So a member runs as three sequential per-kind
+jobs, and the two-halves-serial choice of Approach A lives INSIDE the
+activate job.
 
 **Why serial slabs, not two-at-once inside one job.** Running the two
 halves concurrently in a single job would mean SPLITTING that job's cores
@@ -1061,8 +1075,8 @@ efficiently — is captured BETTER by submitting each slab as its own
 smaller job and letting the scheduler run them together, never by
 splitting cores in-process. So in-process cross-slab concurrency is a
 DOMINATED option and is not built. The parallelism v1 relies on is the two
-levels it already has: whole MEMBERS run as separate jobs, and each single
-bombardment is itself a multi-core (MPI) simulator run.
+levels it already has: different MEMBERS run as independent job sets, and
+each single bombardment is itself a multi-core (MPI) simulator run.
 
 **The separate-job fan-out stays available, for free, through the files
 (Approach C).** Should the small-slab efficiency win ever be wanted, the

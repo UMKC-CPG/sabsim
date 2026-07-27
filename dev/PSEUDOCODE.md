@@ -382,6 +382,9 @@ record NumericalKnobs:
                                       # DISPLACEMENT units (§9.5, §5.4)
     reference_pe_drift:     number    # max PE drift for the reference to
                                       # count as settled (§9.4, DESIGN §5.3)
+    checkpoint_cadence:     integer   # engine steps between §13 pull
+                                      # checkpoints; a §5.9 value trading
+                                      # work-lost-on-kill vs write cost
     detector_smoothing_window: number  # smooths each §12.2 detector series
     detector_prominence:    number    # min event prominence vs §5.4 floor
     frame_budget:           integer   # max frames to step 8; §1.2 knob
@@ -543,7 +546,8 @@ record Trajectory:
                                   # per-frame PE, sigma_zz, ... (small)
     reference_state:      StateRef  # gated zero-load reference (§5.3);
                                   # the M1 integral's start
-    separation_point:     frame-index or none   # complete separation
+    separation_point:     curve-index or none   # into the reduced curves,
+                                  # not a frame index (§9.6)
     complete:             boolean   # ran to the end (DESIGN §5.6) — GATE
     atom_count_conserved: boolean   # non-periodic box lost none — GATE
     grip_reaction:        pair of Curve   # BOTH grips -> Newton check
@@ -552,9 +556,17 @@ record Trajectory:
 
 record FrameSetRef:
     # A reference to the ACTUAL atomic-coordinate trajectory on shared
-    # scratch. First-class: any measure, the §8 snapshot selector, or a
-    # human may read it. The available per-atom CHANNELS are declared so
-    # a consumer knows what is present without opening the (large) file.
+    # scratch — the coordinate ARCHIVE. Its consumers are the ones that
+    # need atomic POSITIONS: §8/§12 characterization (Imago, RDF,
+    # structural descriptors), the §8 snapshot selector, and human
+    # inspection. The pull's OWN reduction never reads it (§9.6). It is
+    # written only when such a consumer is in play, so the reference is
+    # `none` for a bare bond-strength run. CONVERSELY, the frame-reading
+    # §8 measures (§8.6, §8.8) presume the archive EXISTS; the §9.5
+    # write-trigger is what guarantees it whenever such a measure is in
+    # the run, so those measures never meet a `none`. The per-atom
+    # CHANNELS are declared so a consumer knows what is present without
+    # opening the (large) file.
     # We NEVER store every timestep — the frame set is a STRIDED
     # subsample, so frame_count is a small fraction of the step count.
     location:    path on scratch
@@ -585,16 +597,18 @@ In the walking skeleton the analyzer needs only `force_vs_grip`,
 `separation_point`, and the two gate flags (`complete`,
 `atom_count_conserved`) — M1's inputs. `force_vs_opening`, the σ_zz
 series, and `grip_reaction` are populated but read only by deeper
-measures and checks. Crucially the **`frames` reference is populated
-too**: the MD stand-in writes an atomic-coordinate dump even though no
-walking-skeleton
-measure reads it, so the by-reference seam is real and exercised from the
-start — the §8 selector and any human re-analysis inherit working
-plumbing rather than a stub.
+measures and checks. The **`frames` reference** is the coordinate
+archive (§3): the MD stand-in can write the strided dump when recording
+is turned on, so the by-reference seam is real and exercised — the
+§8/§12 consumers and any human re-analysis inherit working plumbing
+rather than a stub. It is written only when a coordinate consumer is in
+play (§9.5), so a bare walking-skeleton run that asks for none leaves the
+reference empty by design, not by omission.
 
 `[DEPTH-FIRST]` the reduction that produces the curves and scalar series
-from the raw frames (`DESIGN.md` §5.5). The frame stride is a NUMERICAL
-knob (`NumericalKnobs.frame_stride`, §2) — one stored configuration per N
+from the live per-chunk SERIES, not from stored frames (`DESIGN.md`
+§5.5; §9.6). The frame stride is a NUMERICAL knob
+(`NumericalKnobs.frame_stride`, §2) — one stored configuration per N
 steps, typically 100-1000, never every step — and `FrameSetRef.stride`
 records the value a member actually used, for provenance.
 
@@ -1906,45 +1920,70 @@ function pull_at_rate(driver, reference, rate, member_specification):
     # never queries it, and throws the check away.
     record_both_grip_reactions(driver)
 
-    # Force is TIME-AVERAGED and the average's WARM-UP is DISCARDED (§5.4).
-    # The window is in units of GRIP DISPLACEMENT (small vs a bond
-    # length), not timesteps. An averaging fix emits a leading ZERO before
-    # its first window closes — DROP it (prior art kept it as debond.dat's
-    # first point, anchoring both a trapezoid and a modulus fit).
-    curve = averaged_force_curve(driver,
-                window = numerical.force_average_window,
-                drop_leading_zero = true)
+    # THE COORDINATE ARCHIVE is opened up front, and ONLY when a consumer
+    # will actually read it — anything that needs atomic POSITIONS: the §8
+    # measures that read frames (contact area, bond graphs, relaxed
+    # snapshots), step-8 characterization (Imago, RDF, structural
+    # descriptors), or a person keeping the movie. A strided atomic-
+    # coordinate dump -> FrameSetRef (§3); NEVER every step (frame_stride,
+    # §2). It is a SEPARATE artifact, NOT read by the reduction. The bare
+    # bond-strength run opens nothing — its 1.3 GB/rung is why the default
+    # omits it.
+    if a coordinate consumer is in play:
+        frames_ref = open_strided_frame_dump(driver,
+                                             numerical.frame_stride)
+    else:
+        frames_ref = none
 
-    # A STRIDED atomic-coordinate dump -> FrameSetRef (§3); NEVER every
-    # step (frame_stride, §2). The by-reference frames feed §8 and §8-of-
-    # DESIGN's snapshot selector.
-    frames = strided_frame_dump(driver, numerical.frame_stride)
+    # The pull advances in CHUNKS; after each, the per-chunk SERIES are
+    # read back and appended (§13.5 shows the loop in full, re-keyed for
+    # resume): grip displacement, force, interface opening, and the
+    # cross-interface bond count. These live scalar lists — NOT stored
+    # frames — are the ONLY thing the reduction is built from.
+    series = run_pull_gathering_series(driver, rate, numerical)
 
-    return reduce_to_trajectory(driver, curve, frames, reference, rate,
-                                member_specification)          # §9.6
+    return reduce_to_trajectory(driver, series, frames_ref, reference,
+                                rate, member_specification)        # §9.6
 ```
 
 ### 9.6 reduce_to_trajectory — two curves, separation, and the gates
 
 ```
-function reduce_to_trajectory(driver, curve, frames, reference, rate,
-                              member_specification):
+function reduce_to_trajectory(driver, series, frames_ref, reference,
+                              rate, member_specification):
     numerical = member_specification.numerical
-    # TWO curves (§5.5). Force vs GRIP DISPLACEMENT is what a testing
-    # machine measures and the M1 integrand. Force vs INTERFACE OPENING
-    # (distance between the two §2.6 dividing surfaces) is where the
-    # interface actually is — separation is NOT grip displacement, which
-    # also contains the slabs' elastic stretch.
-    force_vs_grip    = curve
-    force_vs_opening = reexpress_versus_opening(curve, frames)
+    # The reduction is built ENTIRELY from the per-chunk SERIES gathered
+    # live in the loop (§9.5) — displacement, force, opening, bridges.
+    # `frames_ref` is the SEPARATE coordinate archive (§3): carried
+    # through to Trajectory.frames for real analysis and human eyes, and
+    # NOT read here. It is `none` when no consumer needed it (§9.5).
 
-    # COMPLETE SEPARATION (§5.5): the interface opening exceeds the
-    # potential cutoff (6 A, §4.6) AND the averaged force has returned to
-    # zero within the noise floor. The M1 integral (§8.4) stops HERE, not
-    # at the record's end (prior art integrated the whole noise tail).
-    separation = first_frame_where(frames,
-        opening_exceeds(potential_cutoff) and
-        abs(averaged_force) <= numerical.noise_floor)
+    # Force is TIME-AVERAGED and the average's WARM-UP is DISCARDED
+    # (§5.4). The window is in units of GRIP DISPLACEMENT (small vs a
+    # bond length), not timesteps. An averaging fix emits a leading ZERO
+    # before its first window closes — DROP it (prior art kept it as
+    # debond.dat's first point, anchoring a trapezoid and a modulus fit).
+    force_vs_grip = averaged_force_curve(series.displacement, series.force,
+                        numerical.force_average_window,
+                        drop_leading_zero = true)
+
+    # TWO curves (§5.5). Force vs GRIP DISPLACEMENT is the M1 integrand.
+    # Force vs INTERFACE OPENING (distance between the two §2.6 dividing
+    # surfaces) is where the interface actually is — separation is NOT
+    # grip displacement, which also holds the slabs' elastic stretch.
+    # Both re-expressions run off the SERIES, never off stored frames.
+    force_vs_opening = reexpress_versus_opening(force_vs_grip,
+                           series.displacement, series.opening)
+    bridge_curve     = reexpress_versus_opening(force_vs_grip,
+                           series.displacement, series.bridges)
+
+    # COMPLETE SEPARATION (§5.5): the FIRST sample of the REDUCED curves
+    # where the interface opening exceeds the potential cutoff (6 A, §4.6)
+    # and NO bonds still bridge the gap. This is an index into the curves,
+    # NOT a frame index. The M1 integral (§8.4) stops HERE, not at the
+    # record's end (prior art integrated the whole noise tail).
+    separation = separation_point(force_vs_opening, bridge_curve,
+                                  potential_cutoff)
 
     # The PEAK is EXTRACTED above the noise floor by a stated margin, not
     # max() over noise (§5.4); a below-margin peak is marked unresolved by
@@ -1961,12 +2000,12 @@ function reduce_to_trajectory(driver, curve, frames, reference, rate,
         force_vs_opening:     force_vs_opening,
         scalar_series:        series_of(driver),   # sigma_zz, PE, ...
         reference_state:      reference,
-        separation_point:     separation,
+        separation_point:     separation,  # index into the reduced curves
         complete:             ran_to_completion(driver),
         atom_count_conserved: atom_count_unchanged(driver),
         grip_reaction:        both_grip_curves(driver),
         provenance:           provenance_of(rate, member_specification),
-        frames:               frames }
+        frames:               frames_ref }
 ```
 
 The **dissipation sign check** (§5.5) — mechanical work >= thermodynamic
@@ -2009,8 +2048,9 @@ group -> fix map (§9.2); `press_and_bond`'s mode switch, no-impact gate,
 bias-removed thermostat, dual contact criterion, and hold (§9.3);
 `settle_reference`'s
 gated minimize+equilibrate (§9.4); `pull_at_rate`'s both-grip recording,
-warm-up-discarded averaged force, and strided frames (§9.5);
-`reduce_to_trajectory`'s two curves, separation point, and gates (§9.6);
+its live per-chunk series, and the conditional coordinate archive (§9.5);
+`reduce_to_trajectory`'s warm-up-discarded averaged force, two curves,
+separation point, and gates, all off the series (§9.6);
 and the three minimizer/anneal routines (§9.7). Each is a LAMMPS-driver
 operation plus a clear gate or extraction.
 
@@ -3242,3 +3282,267 @@ then.
 prominence, the frame budget and its adequacy refinement, the merge
 tolerance, and the one-time denser-mesh Γ check are DECLARED here (the
 three new NumericalKnobs in §2) with their VALUES left as DESIGN tasks.
+
+## 13. Resuming an interrupted run — algorithms (`DESIGN.md` §11)
+
+This is the resume mechanism DESIGN §11 designed and §10.6 leans on: how
+a pull the scheduler killed partway is carried to its proper end, so the
+§5.6 completeness gate — not the wall-clock — is what certifies a run
+finished. It is a small, self-contained module of checkpoint routines
+that the pull calls into; nothing above it changes shape (`DESIGN.md`
+§11.3 adds no new flag), and only the pull uses it in v1.
+
+The one fact that drives every routine below (`DESIGN.md` §11.1): a
+pull's progress lives in TWO places at once. The engine holds the atoms
+and their velocities; ordinary program memory holds the accumulated
+record the final curves are built from — the displacement, force,
+opening, and bridge-count series of §9.5 — plus the starting atom count
+the §5.6 gate checks against. A resume that restored only the engine
+would keep the atoms but lose the record, restart the burst counter that
+the displacement is (today) computed from, and re-measure the atom-count
+baseline against an already-depleted box. So the checkpoint must save
+BOTH places, as a matched pair.
+
+### 13.1 The module's top-level shape
+
+The module offers the pull four routines over a checkpoint that lives in
+the pull's own scratch directory: `write_checkpoint` (save the pair on a
+cadence), `load_checkpoint` (read it back, or report none), `reconcile`
+(trim the ledger to the saved engine step), and `verify_inputs_or_stop`
+(the trust alert). The pull's loop (§9.5) gains exactly three touch
+points — decide fresh-or-resume on entry, key each burst's displacement
+to the engine step and append it to the ledger, and write the pair every
+so many steps — and nothing else in the stage moves.
+
+```
+# The matched pair (DESIGN §11.2): two artifacts written TOGETHER and
+# restored together. Neither is useful without the other.
+structure Checkpoint:
+    engine_state         # the engine's complete saved state (write_restart)
+    ledger               # the Ledger below, saved beside it
+
+# The progress that lives in program memory (DESIGN §11.1), keyed so a
+# resume lines the record back up with the restored atoms. These four
+# series ARE the raw record §9.6 reduces into the two curves — the
+# ledger is not a new structure, it is §9.5's in-memory lists made
+# durable, plus the two scalars a fresh process would otherwise lose.
+structure Ledger:
+    sample_steps          # engine step each sample below was taken at
+    displacement          # grip displacement series (§9.5)
+    force                 # top-grip reaction series (§9.5)
+    opening               # interface-opening series (§9.5)
+    bridges               # cross-interface bond-count series (§9.5)
+    starting_atom_count   # the §5.6 conservation baseline, measured once
+    saved_step            # engine step the paired state was written at
+    input_hash            # the §13.4 trust field
+```
+
+### 13.2 The checkpoint pair — written together, keyed to the step
+
+```
+function write_checkpoint(driver, ledger, scratch):
+    # Written as a PAIR (DESIGN §11.2). A kill DURING the write must never
+    # leave a half-pair that a later resume would trust, so each artifact
+    # is written to a temporary name and then RENAMED into place; the
+    # rename is the atomic step, and the pair becomes visible only once
+    # both parts are fully on disk.
+    ledger.saved_step = driver.step         # the engine's ABSOLUTE step
+    write_restart(driver, scratch / "engine.restart.tmp")
+    write_ledger(ledger,  scratch / "ledger.json.tmp")
+    atomic_rename(scratch / "engine.restart.tmp",
+                  scratch / "engine.restart")
+    atomic_rename(scratch / "ledger.json.tmp",
+                  scratch / "ledger.json")
+
+function load_checkpoint(scratch):
+    # A checkpoint EXISTS only when BOTH parts are present. A lone restart
+    # or a lone ledger is treated as no checkpoint at all — the pair
+    # discipline of §11.2 refuses to restore from half a pair.
+    if not (exists(scratch / "engine.restart")
+            and exists(scratch / "ledger.json")):
+        return None
+    return Checkpoint{
+        engine_state = scratch / "engine.restart",
+        ledger       = read_ledger(scratch / "ledger.json") }
+```
+
+### 13.3 Fresh or resuming, decided by what is on disk
+
+```
+function begin_or_resume_pull(driver, reference, rate, member, scratch):
+    # No new flag (DESIGN §11.3): the presence of the pair decides.
+    checkpoint = load_checkpoint(scratch)
+
+    if checkpoint is None:
+        # FRESH. The ordinary §9.5 setup: restore the settled reference
+        # into the driver, hold the bottom grip, drive the top grip at
+        # rate. Seed a ledger with the baseline the §5.6 gate needs and
+        # the trust hash this run will be resumed against.
+        restore(driver, reference)
+        hold(driver.grips.bottom)
+        drive_grip(driver.grips.top, rate)
+        return new Ledger{
+            starting_atom_count = atom_count(driver),
+            input_hash          = input_hash(member, reference),
+            saved_step          = driver.step }        # 0 on a fresh run
+
+    # RESUMING. Trust FIRST (§13.4), so a wrong-run resume stops before
+    # it touches the engine. Then restore the saved atoms and reconcile
+    # the record to them.
+    verify_inputs_or_stop(checkpoint, member, reference)
+    read_restart(driver, checkpoint.engine_state)
+    drive_grip(driver.grips.top, rate)         # re-arm the constant pull
+    return reconcile(checkpoint.ledger, driver.step)
+
+function reconcile(ledger, restored_step):
+    # The ledger is appended every burst but the engine is saved on a
+    # COARSER cadence (§13.5), so a ledger may run a few bursts PAST the
+    # last saved state. Drop every sample taken beyond the restored step
+    # so the record and the atoms agree before the run goes on (DESIGN
+    # §11.2). Keying each sample to its engine step is exactly what makes
+    # this trim well-defined.
+    keep = indices i where ledger.sample_steps[i] <= restored_step
+    return ledger with every series (sample_steps, displacement, force,
+                                     opening, bridges) trimmed to `keep`
+```
+
+### 13.4 The trust alert: warn, and stop
+
+```
+function input_hash(member, reference):
+    # What identifies "the same run" (DESIGN §11.4): the study's CONTENT
+    # fingerprint (DESIGN §1.4, the identity §12.4 builds on) and the
+    # identity of the settled reference the pull restores from. NOT
+    # paths, NOT the wall-clock — only things whose change means a
+    # genuinely different experiment. The exact fields ride on the same
+    # open follow-on as the fingerprint itself (DESIGN §1.8).
+    return content_hash(member.fingerprint, reference.identity)
+
+function verify_inputs_or_stop(checkpoint, member, reference):
+    # A guardrail, not a correctness gate (DESIGN §11.4). Resuming reuses
+    # what a previous run left in a directory, so it owes one check that
+    # the inputs still match the run the checkpoint came from.
+    if input_hash(member, reference) == checkpoint.ledger.input_hash:
+        return                                  # the common case: proceed
+    warn("this run's inputs differ from the run this checkpoint was "
+         "written for; refusing to stitch new inputs onto old dynamics")
+    # WARN AND STOP. The stop is what makes the warning seen rather than
+    # scrolled past; it lifts ONLY on an explicit, deliberate override —
+    # the one switch the person must set by hand to say "yes, continue
+    # anyway", recorded in provenance when they do (§13.6).
+    if not resume_override_is_set():
+        stop
+```
+
+### 13.5 The pull loop, re-keyed and check-pointed (`§9.5`)
+
+This is the delta to §9.5: the same loop, with the displacement re-keyed
+to the engine step and the two new touch points folded in. After the
+loop, §9.6 reduces the ledger's raw series — the very series a fresh run
+gathers in memory — into the two curves, the separation point, and the
+gates, unchanged; the only difference is that the series comes from the
+ledger. The coordinate archive is handled exactly as in §9.5.
+
+```
+function pull_at_rate(driver, reference, rate, member, scratch):   # §9.5
+    numerical = member.numerical
+    timestep  = numerical.md_timestep
+    cadence   = numerical.checkpoint_cadence     # steps between saves
+
+    ledger = begin_or_resume_pull(driver, reference, rate, member,
+                                  scratch)       # §13.3
+
+    # The loop of §9.5, now step-keyed. On a fresh run the ledger is
+    # empty and this fills it; on a resume it is pre-loaded and this
+    # extends it — the SAME code either way (DESIGN §11.3).
+    #
+    # Stop on the §9.6 separation test (opening past cutoff, force back
+    # to the floor, no bridges left), extended by the code's one-more-
+    # averaging-window confirmation tail — a press_pull.py refinement,
+    # not itself in §9.5/§9.6.
+    while not separated_with_confirmation_tail(ledger):
+        run(driver, numerical.chunk_steps)
+        step = driver.step               # the engine's ABSOLUTE step
+
+        # THE HINGE (DESIGN §11.1). Displacement is the grip's travel,
+        # which is rate x elapsed-simulated-time; elapsed time is the
+        # ENGINE STEP x timestep, NOT (burst_index x chunk_steps), so a
+        # resumed run whose burst index restarts at zero still reports
+        # where the grip physically sits. On a fresh run the two agree
+        # exactly; they diverge only across a resume, which is the bug.
+        append to ledger:
+            sample_steps <- step
+            displacement <- rate * (step * timestep)
+            force        <- grip_reaction(driver.grips.top)
+            opening      <- interface_opening(driver)
+            bridges      <- cross_interface_bridges(driver)
+
+        # Save the pair on a cadence. Cheap relative to the MD between
+        # saves; the cadence trades work-lost-on-a-kill against
+        # write cost (a §5.9-style number, §13.7).
+        if step - ledger.saved_step >= cadence:
+            write_checkpoint(driver, ledger, scratch)      # §13.2
+
+    # §9.6's reduction, fed straight from the ledger — the ledger IS the
+    # series it reduces (displacement/force/opening/bridges). The
+    # coordinate archive is the on-disk strided dump: a SEPARATE artifact
+    # that survives a kill, so it is not in the ledger, and it exists only
+    # when a consumer is in play (§9.5); else the reference is none.
+    frames_ref = the strided dump on disk if a consumer is in play,
+                 else none
+    return reduce_to_trajectory(driver, ledger, frames_ref, reference,
+                                rate, member)                        # §9.6
+```
+
+### 13.6 Completeness and provenance are unchanged
+
+Resuming changes nothing about how a run is judged finished (`DESIGN.md`
+§11.5). The §5.6 gate in §9.6 asks whether the trajectory reached its
+target and whether the atom count was conserved against the ledger's
+`starting_atom_count`; it does not ask, and need not care, how many
+submissions it took. A pull that reaches its end across two or three
+continuations is complete; one still short is caught exactly as before.
+The only addition is honesty in the record: `reduce_to_trajectory`'s
+provenance (§9.6) gains a note that the run was CONTINUED, and — if the
+§13.4 trust warning was ever overridden — that too, so the history stays
+truthful about how the number was produced (`VISION.md` goal 3).
+
+### 13.7 What bottoms out, what delegates
+
+`[OURS, bottoms out here]` the MATCHED-PAIR write with temp-then-rename
+atomicity and the both-parts-present load (§13.2); the step-keyed ledger
+and its RECONCILE-to-saved-step trim (§13.3); the on-disk presence test
+that decides fresh-vs-resume with no new flag (§13.3); the displacement
+re-key to the engine step, the correctness hinge (§13.5); and the
+input-hash WARN-AND-STOP with a deliberate override (§13.4). Each is a
+small, testable operation over the driver seam and two files.
+
+`[DELEGATE -> ENGINE, §9.2]` `write_restart` / `read_restart` and the
+engine's `step` are the persistent LAMMPS driver's operations; this
+module CALLS them and never reimplements the saved-state format.
+
+`[DELEGATE -> §9.5 / §9.6]` the pull's setup, its stop rule, the
+averaging, the two curves, the separation point, and the §5.6 gates are
+all §9's; §13 only re-keys the displacement and threads the ledger
+through them. The MEASUREMENT is unchanged.
+
+`[DELEGATE -> fingerprint, `DESIGN.md` §1.4]` the study identity the
+trust hash draws on is the content fingerprint of `DESIGN.md` §1.4 (the
+same machinery `PSEUDOCODE.md` §12.4 uses); this module composes it with
+the settled-reference identity and compares, but does not define what a
+"difference that matters" is — that is `DESIGN.md` §1.8's open follow-on.
+
+`[ABOVE this module]` only the PULL is resumable in v1 (`DESIGN.md`
+§11.6); `press_and_bond` (§9.3) and `settle_reference` (§9.4) are short
+and adopt the same four routines later, unchanged, should they ever need
+to. The sequencer (§1) decides nothing new — it reruns the same command
+(`DESIGN.md` §10.6).
+
+`[CODE level, below pseudocode]` the exact `write_restart` /
+`read_restart` syntax, the atomic-rename call, and the ledger's on-disk
+serialization (the four series plus the two scalars).
+
+`[DESIGN §5.9 / §11.6 numeric follow-on]` the checkpoint CADENCE — how
+many engine steps between saves — is DECLARED here as a NumericalKnob
+(`checkpoint_cadence`, §2) with its VALUE left as a DESIGN task,
+balancing work lost on a kill against time spent writing state.
