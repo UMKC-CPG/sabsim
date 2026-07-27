@@ -3805,12 +3805,15 @@ the *same* measurement rather than a fresh one welded onto old dynamics.
 
 ### 11.3 Fresh or resuming is decided by what is on disk
 
-The pull needs no new flag to know which case it is in. At its start it
-looks in its own scratch for a checkpoint pair. Finding none, it begins
-normally and starts writing them. Finding one, it restores the engine,
-reloads and reconciles the ledger, and continues from there to the end.
-The same command that ran the pull the first time resumes it the second;
-the difference is entirely in what is already on disk — the same
+The pull needs no new flag to know which case it is in. The pull is run
+as a **ladder of rungs**, one per rate (§5.4); each rung gets its OWN
+directory and checkpoints there independently, so a rung's "own scratch"
+is its directory and resuming one rung never touches another. At its
+start a rung looks in that directory for a checkpoint pair. Finding none,
+it begins normally and starts writing them. Finding one, it restores the
+engine, reloads and reconciles the ledger, and continues from there to
+the end. The same command that ran the pull the first time resumes it the
+second; the difference is entirely in what is already on disk — the same
 discipline the stage handoffs already follow (`ARCHITECTURE.md` §4.3).
 
 ### 11.4 The trust alert: warn, and stop
@@ -3819,11 +3822,15 @@ Resuming reuses what a previous run left in a directory, so it owes one
 guard against the rare mistake of continuing the *wrong* run — a directory
 in which something genuinely different ran before. The checkpoint
 therefore carries a **hash of the run's inputs**, drawn from the study's
-content fingerprint (§1) and the identity of the upstream artifact the
-pull reads. On resume, if the current inputs hash differently, the run
-**warns and stops**: it refuses to continue until the person confirms with
-an explicit override, rather than quietly stitching new inputs onto old
-dynamics.
+content fingerprint (§1), the identity of the upstream artifact the pull
+reads, and the **pull rate**. The rate is in the hash because the rungs of
+one member share both the study fingerprint and the single settled
+reference they all restore from, so the rate is the only input that tells
+them apart; folding it in means a checkpoint carried into the wrong rung's
+directory is caught rather than silently continued. On resume, if the
+current inputs hash differently, the run **warns and stops**: it refuses
+to continue until the person confirms with an explicit override, rather
+than quietly stitching new inputs onto old dynamics.
 
 This is a guardrail, not a correctness gate, and it is mild in spirit even
 though it stops. In practice it is hard to resume the wrong run by

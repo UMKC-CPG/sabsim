@@ -362,15 +362,30 @@ so they are not discovered late (two touch non-negotiable goals). -->
       scratch, `read_restart` + reload/RECONCILE the ledger (drop entries
       past the saved step), else begin fresh (§13.3); (d) an input hash
       (from the `DESIGN.md` §1.4 fingerprint + the settled-reference
-      identity) recorded in the checkpoint, compared on resume — mismatch
-      WARNS AND STOPS unless an explicit override (§13.4); (e) provenance
-      notes a run was resumed (and any override) (§13.6). Also add the
+      identity + the pull RATE — the only per-rung distinguisher, §13.4)
+      recorded in the checkpoint, compared on resume — mismatch WARNS AND
+      STOPS unless an explicit override (§13.4); (e) provenance notes a
+      run was resumed (and any override) (§13.6). Also add the
       `checkpoint_cadence` NumericalKnob (`PSEUDOCODE.md` §13.5, declared
       in §2) to `src/sabsim/spec/records.py` + the study-spec template,
       mirroring the §12-knobs item above; its VALUE is a `DESIGN.md` §5.9
       / §11.6 task. The `Engine` seam needs `write_restart` /
       `read_restart` / `step` added (§9.2). Pull ONLY in v1; press/settle
       adopt §13's routines later.
+      GROUNDING (2026-07-27, from reading the seams): (f) `pipeline/
+      live_stages.py` runs the ladder's rungs in ONE shared
+      `scratch_directory`, filename-distinguished (`log.pull_<i>`,
+      `pull_<slug>` trajectory) — §13/DESIGN §11.3 now want each rung
+      SELF-CONTAINED in `pull_<rate>/` with its log, trajectory, and a
+      `checkpoints/` subdir; this restructures per-rung scratch layout
+      and gives `pull_at_rate` a `checkpoint_dir` arg (threaded like
+      `trajectory_file`). (g) `MockEngine` steps NOTHING today — it must
+      gain a step counter that advances on `run N` plus a write/read_
+      restart round-trip, or §13 cannot stay MockEngine-tested (the whole
+      seam point). (h) `_pull_setup`'s `preamble_commands` does a
+      `read_data` of the reference; on resume it branches to
+      `read_restart` of the checkpoint instead. (i) the §13.4 override is
+      an env var mirroring `SABSIM_ALLOW_UNVALIDATED_POTENTIAL`.
 - [ ] Decide which module owns provenance-by-discipline record-keeping
       (each step recording its inputs, exact tool version, and
       settings) (`ARCHITECTURE.md` §2.3 / §4, `VISION.md` goal 3 and

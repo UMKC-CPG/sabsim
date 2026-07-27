@@ -3306,13 +3306,15 @@ BOTH places, as a matched pair.
 ### 13.1 The module's top-level shape
 
 The module offers the pull four routines over a checkpoint that lives in
-the pull's own scratch directory: `write_checkpoint` (save the pair on a
-cadence), `load_checkpoint` (read it back, or report none), `reconcile`
-(trim the ledger to the saved engine step), and `verify_inputs_or_stop`
-(the trust alert). The pull's loop (§9.5) gains exactly three touch
-points — decide fresh-or-resume on entry, key each burst's displacement
-to the engine step and append it to the ledger, and write the pair every
-so many steps — and nothing else in the stage moves.
+the RUNG's own checkpoint directory — `pull_<rate>/checkpoints/`, since
+each rate is a separate pull with its own self-contained directory
+(`DESIGN.md` §11.3): `write_checkpoint` (save the pair on a cadence),
+`load_checkpoint` (read it back, or report none), `reconcile` (trim the
+ledger to the saved engine step), and `verify_inputs_or_stop` (the trust
+alert). The pull's loop (§9.5) gains exactly three touch points — decide
+fresh-or-resume on entry, key each burst's displacement to the engine
+step and append it to the ledger, and write the pair every so many steps
+— and nothing else in the stage moves.
 
 ```
 # The matched pair (DESIGN §11.2): two artifacts written TOGETHER and
@@ -3340,38 +3342,39 @@ structure Ledger:
 ### 13.2 The checkpoint pair — written together, keyed to the step
 
 ```
-function write_checkpoint(driver, ledger, scratch):
+function write_checkpoint(driver, ledger, checkpoint_dir):
     # Written as a PAIR (DESIGN §11.2). A kill DURING the write must never
     # leave a half-pair that a later resume would trust, so each artifact
     # is written to a temporary name and then RENAMED into place; the
     # rename is the atomic step, and the pair becomes visible only once
     # both parts are fully on disk.
     ledger.saved_step = driver.step         # the engine's ABSOLUTE step
-    write_restart(driver, scratch / "engine.restart.tmp")
-    write_ledger(ledger,  scratch / "ledger.json.tmp")
-    atomic_rename(scratch / "engine.restart.tmp",
-                  scratch / "engine.restart")
-    atomic_rename(scratch / "ledger.json.tmp",
-                  scratch / "ledger.json")
+    write_restart(driver, checkpoint_dir / "engine.restart.tmp")
+    write_ledger(ledger,  checkpoint_dir / "ledger.json.tmp")
+    atomic_rename(checkpoint_dir / "engine.restart.tmp",
+                  checkpoint_dir / "engine.restart")
+    atomic_rename(checkpoint_dir / "ledger.json.tmp",
+                  checkpoint_dir / "ledger.json")
 
-function load_checkpoint(scratch):
+function load_checkpoint(checkpoint_dir):
     # A checkpoint EXISTS only when BOTH parts are present. A lone restart
     # or a lone ledger is treated as no checkpoint at all — the pair
     # discipline of §11.2 refuses to restore from half a pair.
-    if not (exists(scratch / "engine.restart")
-            and exists(scratch / "ledger.json")):
+    if not (exists(checkpoint_dir / "engine.restart")
+            and exists(checkpoint_dir / "ledger.json")):
         return None
     return Checkpoint{
-        engine_state = scratch / "engine.restart",
-        ledger       = read_ledger(scratch / "ledger.json") }
+        engine_state = checkpoint_dir / "engine.restart",
+        ledger       = read_ledger(checkpoint_dir / "ledger.json") }
 ```
 
 ### 13.3 Fresh or resuming, decided by what is on disk
 
 ```
-function begin_or_resume_pull(driver, reference, rate, member, scratch):
+function begin_or_resume_pull(driver, reference, rate, member,
+                              checkpoint_dir):
     # No new flag (DESIGN §11.3): the presence of the pair decides.
-    checkpoint = load_checkpoint(scratch)
+    checkpoint = load_checkpoint(checkpoint_dir)
 
     if checkpoint is None:
         # FRESH. The ordinary §9.5 setup: restore the settled reference
@@ -3383,13 +3386,13 @@ function begin_or_resume_pull(driver, reference, rate, member, scratch):
         drive_grip(driver.grips.top, rate)
         return new Ledger{
             starting_atom_count = atom_count(driver),
-            input_hash          = input_hash(member, reference),
+            input_hash          = input_hash(member, reference, rate),
             saved_step          = driver.step }        # 0 on a fresh run
 
     # RESUMING. Trust FIRST (§13.4), so a wrong-run resume stops before
     # it touches the engine. Then restore the saved atoms and reconcile
     # the record to them.
-    verify_inputs_or_stop(checkpoint, member, reference)
+    verify_inputs_or_stop(checkpoint, member, reference, rate)
     read_restart(driver, checkpoint.engine_state)
     drive_grip(driver.grips.top, rate)         # re-arm the constant pull
     return reconcile(checkpoint.ledger, driver.step)
@@ -3409,20 +3412,22 @@ function reconcile(ledger, restored_step):
 ### 13.4 The trust alert: warn, and stop
 
 ```
-function input_hash(member, reference):
+function input_hash(member, reference, rate):
     # What identifies "the same run" (DESIGN §11.4): the study's CONTENT
-    # fingerprint (DESIGN §1.4, the identity §12.4 builds on) and the
-    # identity of the settled reference the pull restores from. NOT
-    # paths, NOT the wall-clock — only things whose change means a
-    # genuinely different experiment. The exact fields ride on the same
-    # open follow-on as the fingerprint itself (DESIGN §1.8).
-    return content_hash(member.fingerprint, reference.identity)
+    # fingerprint (DESIGN §1.4, the identity §12.4 builds on), the
+    # identity of the settled reference the pull restores from, and the
+    # pull RATE — the only input that tells one rung from another, since
+    # every rung shares the fingerprint and the one settled reference
+    # (DESIGN §11.4). NOT paths, NOT the wall-clock — only things whose
+    # change means a genuinely different experiment. The exact fields
+    # ride on the same open follow-on as the fingerprint (DESIGN §1.8).
+    return content_hash(member.fingerprint, reference.identity, rate)
 
-function verify_inputs_or_stop(checkpoint, member, reference):
+function verify_inputs_or_stop(checkpoint, member, reference, rate):
     # A guardrail, not a correctness gate (DESIGN §11.4). Resuming reuses
     # what a previous run left in a directory, so it owes one check that
     # the inputs still match the run the checkpoint came from.
-    if input_hash(member, reference) == checkpoint.ledger.input_hash:
+    if input_hash(member, reference, rate) == checkpoint.ledger.input_hash:
         return                                  # the common case: proceed
     warn("this run's inputs differ from the run this checkpoint was "
          "written for; refusing to stitch new inputs onto old dynamics")
@@ -3444,13 +3449,14 @@ gates, unchanged; the only difference is that the series comes from the
 ledger. The coordinate archive is handled exactly as in §9.5.
 
 ```
-function pull_at_rate(driver, reference, rate, member, scratch):   # §9.5
+function pull_at_rate(driver, reference, rate, member,
+                      checkpoint_dir):                            # §9.5
     numerical = member.numerical
     timestep  = numerical.md_timestep
     cadence   = numerical.checkpoint_cadence     # steps between saves
 
     ledger = begin_or_resume_pull(driver, reference, rate, member,
-                                  scratch)       # §13.3
+                                  checkpoint_dir)   # §13.3
 
     # The loop of §9.5, now step-keyed. On a fresh run the ledger is
     # empty and this fills it; on a resume it is pre-loaded and this
@@ -3481,7 +3487,7 @@ function pull_at_rate(driver, reference, rate, member, scratch):   # §9.5
         # saves; the cadence trades work-lost-on-a-kill against
         # write cost (a §5.9-style number, §13.7).
         if step - ledger.saved_step >= cadence:
-            write_checkpoint(driver, ledger, scratch)      # §13.2
+            write_checkpoint(driver, ledger, checkpoint_dir)   # §13.2
 
     # §9.6's reduction, fed straight from the ledger — the ledger IS the
     # series it reduces (displacement/force/opening/bridges). The
@@ -3529,8 +3535,9 @@ through them. The MEASUREMENT is unchanged.
 `[DELEGATE -> fingerprint, `DESIGN.md` §1.4]` the study identity the
 trust hash draws on is the content fingerprint of `DESIGN.md` §1.4 (the
 same machinery `PSEUDOCODE.md` §12.4 uses); this module composes it with
-the settled-reference identity and compares, but does not define what a
-"difference that matters" is — that is `DESIGN.md` §1.8's open follow-on.
+the settled-reference identity and the pull rate, then compares, but does
+not define what a "difference that matters" is — that is `DESIGN.md`
+§1.8's open follow-on.
 
 `[ABOVE this module]` only the PULL is resumable in v1 (`DESIGN.md`
 §11.6); `press_and_bond` (§9.3) and `settle_reference` (§9.4) are short
