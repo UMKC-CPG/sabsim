@@ -409,6 +409,16 @@ so they are not discovered late (two touch non-negotiable goals). -->
       from §11 by the 2026-07-26 `/refine`: the bare §10.x refs turned
       out to be `PSEUDOCODE.md` §10 cross-refs, so no DESIGN §10 was
       reserved and the placeholder stub was dropped).
+      REFINE 2026-07-29 (before starting the wiring): the §10 consumer
+      goes DESIGN -> Code DIRECTLY, with NO PSEUDOCODE pass — PSEUDOCODE
+      is scoped (its preamble) to per-module algorithms + the control-flow
+      skeleton, and the `prepare`/`run` writer+selector is deployment
+      orchestration, not a module algorithm. Also reconciled the template
+      to `ARCHITECTURE.md` §4.4: `deployment_rc.toml` `bond-md` loads ONE
+      engine module (`cpg_lammps/2024.08.29-deepmd`), NOT a separate
+      deepmd-kit module (DeePMD is a runtime `plugin load`), `cascade-md`
+      loads `cpg_lammps/22Jul2025`, and a machine-wide `module_paths` adds
+      the `module use` for the CPG modulefile tree.
 - [x] **PSEUDOCODE for `DESIGN.md` §11 (resume) — DONE 2026-07-27 as
       `PSEUDOCODE.md` §13** ("Resuming an interrupted run"). A dedicated
       top-level section (chosen over folding into §9) so resume stays

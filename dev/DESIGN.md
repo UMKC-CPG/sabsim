@@ -3582,10 +3582,11 @@ correctness before the next is submitted:
   will eventually be heavy, and drawing the boundary now avoids moving it
   later.
 
-This **revises `ARCHITECTURE.md` §4.3**, which today describes a member
-as a single job. §4.3 was written to *allow* the split — every stage
-hands off through a file on disk, so a boundary may fall between any two
-stages — and this section fixes where the boundaries actually fall.
+This is **mirrored in `ARCHITECTURE.md` §4.3**, since updated from the
+single-job member it first described. §4.3 was written to *allow* the
+split — every stage hands off through a file on disk, so a boundary may
+fall between any two stages — and this section fixes where the boundaries
+actually fall.
 
 **The committee runs within the one bond job.** All committee models are
 loaded together in the single bond process, evaluated on each
