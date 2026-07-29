@@ -410,10 +410,14 @@ so they are not discovered late (two touch non-negotiable goals). -->
       out to be `PSEUDOCODE.md` §10 cross-refs, so no DESIGN §10 was
       reserved and the placeholder stub was dropped).
       REFINE 2026-07-29 (before starting the wiring): the §10 consumer
-      goes DESIGN -> Code DIRECTLY, with NO PSEUDOCODE pass — PSEUDOCODE
-      is scoped (its preamble) to per-module algorithms + the control-flow
-      skeleton, and the `prepare`/`run` writer+selector is deployment
-      orchestration, not a module algorithm. Also reconciled the template
+      gets a PSEUDOCODE pass FIRST — as `PSEUDOCODE.md §14`, "Deployment:
+      prepare and run" — before any code. (A `/refine` had tentatively
+      leaned DESIGN -> Code directly for §10; the user OVERRODE it into the
+      standing rule: ALWAYS pseudocode from design before code, no
+      shortcut, for any section. DESIGN §10 judged complete enough to
+      pseudocode: the three jobs map to crisp §4.3 file-handoff boundaries
+      — activate ends at the assembled-pair file, bond reads it and ends at
+      the pull output, analyze reads that.) Also reconciled the template
       to `ARCHITECTURE.md` §4.4: `deployment_rc.toml` `bond-md` loads ONE
       engine module (`cpg_lammps/2024.08.29-deepmd`), NOT a separate
       deepmd-kit module (DeePMD is a runtime `plugin load`), `cascade-md`

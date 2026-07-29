@@ -3569,3 +3569,202 @@ many engine steps between saves — is a RunControl ENGINEERING setting
 NumericalKnob: the answer is invariant to it, so it takes a provisional
 value in code rather than a spec-visible one, balancing work lost on a
 kill against time spent writing state.
+
+## 14. Deployment — preparing and running (`DESIGN.md` §10)
+
+The CONSUMER of the machine-local deployment file (`ARCHITECTURE.md`
+§4.1, §4.4; `DESIGN.md` §10). It is two commands that share one registry:
+a WRITER, `prepare`, that reads the study spec AND the deployment rc and
+emits ready-to-submit scripts; and an EXECUTOR, `run`, that lives INSIDE
+each script and does one job's worth of the pipeline. `sabsim` submits
+NOTHING and watches nothing (the login-node wall, §4.1); the human
+submits the scripts and inspects each gate before sending the next.
+
+Nothing here trains a potential or layers in a physics default. The force
+model a member uses is a LOOKUP behind the §1 `resolve_potential` seam —
+the classical stand-in today, the trained committee once the bootstrap
+(§11, a SEPARATE upstream Tier-B process) has produced one — so the same
+three jobs run either, unchanged. Deployment is "where," never "what"
+(`DESIGN.md` §1.2).
+
+### 14.1 The deployment records (CLOSED)
+
+```
+record DeploymentConfig:              # the parsed rc (DESIGN §10, §4.1)
+    cluster_name:     text
+    scheduler:        text            # e.g. "slurm"
+    default_account:  text
+    module_paths:     list of path    # `module use` roots (§4.4)
+    partitions:       map[resource_class -> Partition]  # "cpu" / "gpu"
+    usage:            map[job_kind -> UsageBlock]        # keyed by KIND
+
+record Partition:                     # one [hardware.partitions.*]
+    name:          text               # the REAL scheduler partition
+    capacity:      map[text -> number]  # cores_per_node / gpus_per_node
+    max_walltime:  duration           # the ceiling §14.4 checks against
+
+record UsageBlock:                    # one [usage.*], keyed by job kind
+    resource_class: text              # names a Partition ("cpu" / "gpu")
+    nodes:          integer
+    walltime:       duration          # HUMAN-provided (§10.6), not computed
+    modules:        list of text      # module(s) to `module load` (§4.4)
+```
+`load_deployment` reads the rc into this as a COMPLETE object with no
+silent physics default (§1.4): a missing required field is a loud stop,
+never a fallback. `[DELEGATE -> the TOML PARSING, and the three location
+roots read from the sourced `.sabsim/sabsimrc`, `DESIGN.md` §10.5]`.
+
+### 14.2 One ordered job registry, read by both commands (§10.3)
+
+```
+# The SINGLE source of truth for what the jobs are and in what order they
+# run. Each entry names the job, the abstract resource class the rc
+# resolves to a partition, and the CONTIGUOUS slice of the §1 member chain
+# it owns -- with the on-disk artifact it READS at entry and WRITES at
+# exit. That handoff (ARCHITECTURE §4.3) is exactly what lets one job
+# start mid-chain in its own submission.
+record JobKind:
+    name:            text             # "activate" / "bond" / "analyze"
+    resource_class:  text             # -> a UsageBlock + a Partition
+    stages:          ordered list of Stage   # its slice of the §1 chain
+    reads:           artifact_name or NONE    # entry file in member scratch
+    writes:          artifact_name            # exit file in member scratch
+
+JOB_REGISTRY = ordered [
+    JobKind("activate", "cpu",
+            stages = [build_slabs,        # §7
+                      activate_surfaces,  # §10 (its own §3.5 gate)
+                      assemble_pair],     # §7
+            reads  = NONE,                # starts from the spec
+            writes = ASSEMBLED_PAIR),     # the assembled-pair data file
+    JobKind("bond", "gpu",
+            stages = [press_and_bond,     # §9.3
+                      settle_reference,   # §9.4
+                      pull_ladder],       # §9.5 (rungs, committee in-proc)
+            reads  = ASSEMBLED_PAIR,
+            writes = PULL_RESULTS),       # per-rung curves + trajectories
+    JobKind("analyze", "cpu",
+            stages = [run_analyzer],      # §8 (measure vector)
+            reads  = PULL_RESULTS,
+            writes = MEASURE_VECTOR),     # the §4 measure schema
+]
+```
+Inserting a job later (§10.3, say a relax between activate and bond) is
+ONE entry here; the `run` flags, the written filenames, and the guided
+index all follow — the truth is never written twice.
+
+### 14.3 The run selector — one job, or the whole chain (§10.4)
+
+```
+function run(study_spec_path, job_flag, only_member):
+    # job_flag is at most ONE of {activate, bond, analyze}, or NONE for
+    # the whole member chain (§10.4). only_member narrows a multi-member
+    # study to one. This is the line that lives INSIDE each generated
+    # script; it runs within an allocation and submits nothing itself.
+    validated = load_and_validate_study(study_spec_path)     # §2
+    members   = validated.members
+    if only_member is given:
+        members = [ the member named only_member ]           # or STOP
+    for each member in members:
+        scratch = member_scratch(job_directory, validated.name,
+                                 member.name)                # §1
+        if job_flag is NONE:
+            exec_one_member(member, scratch)                 # §1 whole chain
+        else:
+            run_member_job(member, scratch,
+                           registry_lookup(job_flag))
+```
+
+```
+function run_member_job(member, scratch, job):
+    # ONE job's contiguous slice of the §1 chain. It ENTERS by re-reading
+    # its `reads` artifact from the member scratch -- the same
+    # read-from-file handoff activate_surfaces already uses (§1 re-reads the
+    # pristine half), so this process needs NONE of the stages before it.
+    # The potential is the LOOKUP every job does (§1 resolve_potential):
+    # classical stand-in now, trained committee later, SAME seam.
+    potential = run_to_contract(
+        () -> resolve_potential(member), POTENTIAL_CONTRACT)  # §1
+    seed = (job.reads is NONE)
+           ? member                            # activate: from the spec
+           : read_artifact(scratch, job.reads) # bond/analyze: from disk
+    # Run this job's stages exactly as §1 runs them, but only this slice,
+    # each guarded by run_to_contract so a bad artifact HALTS here (§5.1).
+    # The final stage writes job.writes into scratch; the NEXT job (a
+    # separate submission) reads it. Nothing crosses the seam in memory.
+    run_stage_slice(job.stages, seed, member, potential, scratch)
+```
+`[DELEGATE -> the exact per-stage calls and signatures are §1's; `run_
+member_job` reuses them, differing only in that it starts from `seed`
+rather than the previous in-memory handle.]`
+
+### 14.4 prepare — the writer (§10.5, §10.6)
+
+```
+function prepare(study_spec_path, deployment_rc_path):
+    # Reads BOTH inputs and writes scripts; submits nothing (§10.1). Runs
+    # on the login node, so it must FAIL THERE, readably, rather than emit
+    # scripts that die on a compute node an hour in.
+    roots = resolve_location_roots()      # scratch / share / local, §10.5
+    if any root does not resolve:
+        STOP on the login node, naming the missing root   # §10.5 gate
+    deployment = load_deployment(deployment_rc_path)      # §14.1
+    validated  = load_and_validate_study(study_spec_path) # §2
+
+    guide = new submission guide          # the ORDERED index (§10.5)
+    for each member in validated.members:
+        for each job in JOB_REGISTRY:     # activate -> bond -> analyze
+            usage     = deployment.usage[job.name]
+            partition = deployment.partitions[usage.resource_class]
+            # The one cheap check (§10.6): compare two numbers already
+            # written in the rc. Predict NOTHING about run length.
+            if usage.walltime > partition.max_walltime:
+                STOP on the login node, naming job + ceiling  # §10.6 gate
+            script = render_job_script(validated, member, job,
+                                       usage, partition, deployment, roots)
+            path   = semantic_name(member, job)   # "activate" / "bond" /
+                                                  # "analyze" -- NO ordinal
+            write script to path
+            guide.append(member, job, path)       # ORDER lives here, §10.5
+    write guide beside the scripts        # a submission GUIDE, not "readme"
+    return guide
+```
+
+### 14.5 What a generated script contains (§10.5, §10.7)
+
+```
+function render_job_script(study, member, job, usage, partition,
+                           deployment, roots):
+    # A small, boring preamble plus the run line. Anything already true of
+    # the activated install is NOT restated (§10.5).
+    return a script with, in order:
+      - SCHEDULER DIRECTIVES from (partition.name, usage.nodes,
+        usage.walltime, deployment.default_account) -- the §10.7 field set
+        the throwaway jobs/* scripts already enumerate.
+      - `module use <p>` for each p in deployment.module_paths, THEN
+        `module load <m>` for each m in usage.modules (§4.4: the cpg tree
+        is not on the default path; bond loads the ONE deepmd engine,
+        whose module also LD_PRELOADs libstdc++ and exports
+        DEEPMD_LMP_PLUGIN).
+      - the three location roots BAKED IN as resolved values -- a frozen
+        snapshot, not a re-read of the rc at run time (§10.5, §1.4).
+      - the launcher + `python -m sabsim run <study> --<job.name>
+        --only <member.name>` (§14.3) -- e.g. `mpirun -np <N>` INSIDE the
+        allocation, never on the login node (§4.1).
+      - on success, a printed line naming what to check and which script
+        to submit next (§10.5), reinforcing the guide.
+```
+`[DELEGATE -> the deepmd `plugin load`: the bond job's LAMMPS INPUT issues
+`variable dp getenv DEEPMD_LMP_PLUGIN; plugin load ${dp}` inside the
+force-model command block (`ARCHITECTURE.md` §4.4, `driver/commands` §9),
+NOT here -- render_job_script only loads the module that exports the var.]`
+
+`[CODE level, below pseudocode]` the exact directive syntax (SLURM
+`#SBATCH`), the script templating, and the guide's on-disk format.
+
+`[ABOVE this module / OUT of scope]` the BOOTSTRAP (steps 1-2, §11) is NOT
+one of these three jobs and NOT a `run` flag: it is a separate Tier-B
+process (ALF's own Parsl loop plus direct VASP seed jobs, `DESIGN.md`
+§4.5) that MANUFACTURES the potential upstream of every member. `prepare`
+writes the three MEMBER jobs that CONSUME it; deploying the bootstrap
+itself is ALF's concern, not this consumer's (§4.1, "no Parsl-in-Parsl").
