@@ -40,6 +40,68 @@
 
 <!-- Tasks related to layout, modules, build. -->
 
+- [ ] **Engine acquisition — adopt the CPG LAMMPS module scheme; DeePMD
+      needs a dedicated site build (de-risked 2026-07-28).** Today sabsim
+      imports a conda-vendored LAMMPS (`virtual_envs/sabsim`), which on a
+      real compute node links a CONDA OpenMPI (not the site interconnect)
+      and whose sibling `mamba/envs/sabsim/lib/liblammps.so` won't even
+      load on the nodes (needs GLIBC_2.29; nodes are 2.28). Imago already
+      solved this: a CPG-owned modulefile tree at `/cluster/VAST/
+      rulisp-lab/cpg/modulefiles/cpg_lammps/22Jul2025.lua` builds LAMMPS
+      with the SITE toolchain (gcc 12.3.0 / OpenMPI 4.1.5, RPATH-baked,
+      glibc <= 2.14, no libpython) so it runs on the real interconnect
+      from any/no conda env and sets LAMMPS_POTENTIALS / PATH / PYTHONPATH
+      / LD_LIBRARY_PATH itself. A consumer selects it by TWO `md.init`
+      lines (`module use ... && module load cpg_lammps`), zero code — the
+      scheme is built for MULTIPLE versions (`family("lammps")` makes them
+      exclusive). ADOPT it for sabsim's compute jobs: fixes the conda-MPI
+      mismatch and the stale `LAMMPS_POTENTIALS` (see the resume-smoke
+      CODE item) in one move; the classical SW-Si stand-in — all we run
+      today — works on it. Lands in `ARCHITECTURE.md` §4 (engine
+      acquisition, beside the §4.1 Engine seam) + the deployment
+      `deployment_rc.toml` `[usage.bond-md]`. DeePMD DE-RISKING VERDICT:
+      the prebuilt conda deepmd plugin CANNOT be loaded into the site
+      build — three layers, last one fatal: (1) glibc fine; (2) CXXABI
+      fixable (conda TF needs gcc >= 13 libstdc++, site pins 12.3 —
+      LD_PRELOAD clears it, LD_LIBRARY_PATH does not: site lmp pins
+      libstdc++ via DT_RPATH); (3) HARD LAMMPS-ABI mismatch — deepmd-kit
+      3.1.3 is built against `lammps 2024.08.29`, the site build is
+      22Jul2025, and `utils::bounds` gained a trailing `int` between them,
+      so the plugin's symbol is undefined. To run DeePMD we need a MATCHED
+      site build: LAMMPS 29Aug2024 + the deepmd interface compiled as a
+      pair, site toolchain (and gcc >= 13 for the TF/torch backend),
+      published as a second `cpg_lammps/2024.08.29-deepmd` module — one
+      `md.init` line for sabsim, no code change. Deferred until the
+      trained MLIP exists; the version to target (29Aug2024) is now known.
+      ENV NOTE (2026-07-29, running the resume smoke): the `cpg_lammps`
+      modulefile is CORRECT — its `prefix` IS versioned (Lua concatenates
+      `".../programs/lammps/"` with `"22Jul2025-gcc12.3.0-ompi4.1.5"`
+      across two lines), and it sets `LAMMPS_POTENTIALS` to the real
+      versioned `share/lammps/potentials` (where `Si.sw` lives). The bug
+      is only in the JOB scripts: `jobs/*/slurm` hardcode
+      `LAMMPS_POTENTIALS=.../programs/lammps/share/lammps/potentials` — a
+      versionless path with nothing under it, so a hand-run fails "cannot
+      open Si.sw". FIX when adopting the module scheme: drop the hardcoded
+      export and `module load cpg_lammps`, which sets it right. (Ran the
+      smoke by pointing the env at `.../lammps/current/share/lammps/
+      potentials` directly.)
+
+- [ ] **General-triclinic support — lift the orthogonal-cell boundary
+      (documented 2026-07-29 in `ARCHITECTURE.md`).** The facing-pair
+      builder reduces any REMOVABLE in-plane tilt to zero
+      (`slab_builder.orthogonalize_in_plane`), which lands every v1 Si and
+      SiO2 face on an orthogonal cell — but a genuinely oblique face (a
+      hexagonal surface, a non-reducible triclinic cell) stays oblique,
+      and the activation gate's minimum-image assumes an ORTHOGONAL cell
+      (scalar per-axis wrapping, `driver/activation_gate.py`), so it would
+      mis-measure such a face. To admit general lattices, replace that
+      scalar min-image with a full triclinic one (wrap in fractional
+      coordinates against the cell matrix, or the LAMMPS reduced-tilt
+      convention). NOT needed for v1's material pairs; this is the single
+      known blocker to running an arbitrary crystal face. See the
+      `orthogonalize_in_plane` note further down and the restart round-trip
+      that motivated the reduction (resume-smoke item).
+
 <!-- Pre-DESIGN priority cluster. These four holes are load-bearing for
 the DESIGN level and should be resolved before DESIGN.md is filled in.
 Raised in the 2026-07-03 refine of VISION + ARCHITECTURE; the first two
@@ -404,6 +466,33 @@ so they are not discovered late (two touch non-negotiable goals). -->
       `run_resume_smoke.py`) — CHECK A exact `write_restart`/`read_restart`
       round-trip, CHECK B full kill-and-resume pull; run once at `-n 1`,
       look for `RESUME SMOKE: PASS`.
+      SMOKE RUN — RESOLVED 2026-07-29, `RESUME SMOKE: PASS` (interactive
+      node, `-n 1`). CHECK A first FAILED with `read_restart` err0016
+      "Did not assign all restart atoms correctly". The parked "`boundary
+      p p f` before the read" hypothesis was DISPROVEN — all three preamble
+      variants (units+style+boundary, units+style, units-only) failed
+      identically. REAL cause: `build_facing_pair` emitted a triclinic box
+      whose in-plane tilt sat at TWICE LAMMPS's skew limit (xy = -lx); a
+      pymatgen coincidence cell can lean that far, `read_data` tolerates
+      it, but `write_restart` / `read_restart` mis-bin atoms at the limit
+      and silently drop them (55 of 640). FIX: orthogonalize the assembled
+      pair in `slab_builder.build_facing_pair` — the same
+      `orthogonalize_in_plane` lattice reduction `build_standalone_half`
+      already applies — a no-op on an already-square face, so Si(100) is
+      unchanged. CHECK A now round-trips to 7e-16. CHECK B was RESCOPED to
+      what resume actually owns: `resumed` + `advanced` past the checkpoint
+      step + `atoms_conserved`; `complete` is printed but NOT asserted —
+      the coherent crystalline Si/Si smoke fixture necks and holds bridges
+      instead of cleanly separating (a fresh un-killed pull of it does not
+      complete either; that is FIXTURE physics, covered mock-side, not
+      resume). Run 2026-07-29: CHECK A ok; CHECK B resumed=True
+      advanced=True (step 800 -> 100000) atoms_conserved=True. Resume is
+      DONE-DONE — its restart physics is now proven on live LAMMPS. Env
+      note: the run needs `LAMMPS_POTENTIALS` at the VERSIONED build
+      (`.../programs/lammps/current/share/lammps/potentials`, or let
+      `module load cpg_lammps` set it); only the `jobs/*/slurm` scripts
+      hardcode a versionless path — the modulefile itself is correct (see
+      the engine-acquisition item).
 - [x] **MPI: rank-0-guard `resume.write_checkpoint`'s ledger write —
       DONE 2026-07-27.** Surfaced writing the smoke test. `write_restart`
       is collective (all ranks, one file) and stays on all ranks; the

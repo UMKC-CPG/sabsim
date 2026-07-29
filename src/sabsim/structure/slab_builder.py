@@ -223,16 +223,26 @@ def build_slab(
 
 
 def orthogonalize_in_plane(slab: Atoms) -> Atoms:
-    """Drive the surface cell's xy tilt to zero, preserving the lattice.
+    """Reduce the surface cell's in-plane tilt into LAMMPS's legal range.
 
-    A pymatgen-cut surface cell often carries an in-plane tilt (for the
-    Si(100) cell the second vector's x-component is ``-a_x``). LAMMPS
-    rejects a box whose tilt exceeds half the box length, AND the cascade
-    gate's in-plane minimum-image math assumes an ORTHOGONAL cell — so the
-    tilt must go. Replacing the second vector ``b`` with ``b -
+    Despite the name this is a tilt REDUCTION, not a forced squaring. A
+    pymatgen-cut surface cell often carries an in-plane tilt (for the
+    Si(100) cell the second vector's x-component is ``-a_x``). Two things
+    demand it be tamed: LAMMPS rejects — or fails to round-trip through a
+    restart — a box whose tilt exceeds half the box length, AND the
+    cascade gate's in-plane minimum-image math assumes an ORTHOGONAL cell
+    (`activation_gate.py`). Replacing the second vector ``b`` with ``b -
     round(b_x / a_x) * a`` is a valid LATTICE operation (``b`` stays a
-    lattice vector, the crystal is unchanged) that reduces the tilt into
-    bounds; for the Si(100) cell it drives it to exactly zero. Atoms are
+    lattice vector, the crystal is unchanged) that folds the tilt into the
+    reduced range; for a COMMENSURATE face like Si(100)/(111) it lands on
+    exactly zero, but a general oblique cell keeps a legal, non-zero tilt.
+
+    SCOPE (see ARCHITECTURE, general-lattice support): this reduces only
+    the b-against-a (xy) tilt, by a single subtraction, and never forms a
+    supercell. It does NOT touch xz/yz, nor square a cell that needs
+    doubling to become orthogonal. Such genuinely oblique or low-symmetry
+    triclinic faces are outside v1's Si/SiO2 scope, and would still be
+    mis-measured by the gate's orthogonal-cell min-image. Atoms are
     re-wrapped into the reduced cell. Returns the same object, modified.
     """
     cell = np.array(slab.get_cell())
@@ -441,7 +451,17 @@ def build_facing_pair(
         load_crystal(cif_b), miller_face_b,
         min_slab_thickness, grip_vacuum)
     match = match_surfaces(slab_a, slab_b, max_area, misfit_tolerance)
-    return assemble_facing_pair(slab_a, slab_b, match, gap, grip_vacuum)
+    pair = assemble_facing_pair(slab_a, slab_b, match, gap, grip_vacuum)
+    # Drive the assembled cell's in-plane tilt to zero — the same lattice
+    # reduction build_standalone_half applies to a single slab (§2.6). A
+    # pymatgen coincidence cell can lean all the way to LAMMPS's skew
+    # limit; read_data tolerates that, but write_restart / read_restart
+    # cannot round-trip it (atoms mis-bin at the limit and are dropped),
+    # so a pull that must be resumable needs the pair orthogonal. On a
+    # cell that is already square this is a no-op, so Si(100) and other
+    # orthogonal faces are unchanged.
+    orthogonalize_in_plane(pair.atoms)
+    return pair
 
 
 def _type_map_with_species(atoms: Atoms, extra_species) -> dict:

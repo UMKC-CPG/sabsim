@@ -240,6 +240,23 @@ MLIP is never asked to reproduce cascades.
   because the interface is a disordered amorphous contact the bond
   metric should be **averaged over amorphization realizations**, not
   read from a single seed.
+  A **v1 cell-shape boundary** rides on this construction, worth stating
+  where the pair's cell is solved. The assembled pair's in-plane cell is
+  driven **orthogonal** before it is written — a lattice reduction that
+  zeroes any *removable* tilt (`slab_builder.orthogonalize_in_plane`),
+  the same step a standalone half already takes. It is physics-preserving
+  (a relabeling of the periodic cell; no atom moves relative to its
+  neighbors) and not cosmetic: a pymatgen coincidence cell can lean to
+  **twice LAMMPS's skew limit**, which `read_data` tolerates but a
+  restart round-trip (the §4 resume) silently mis-bins, dropping atoms.
+  On an already-square face (e.g. Si(100)) it is a no-op. The catch is
+  that it removes only a *removable* tilt: a genuinely oblique face — a
+  hexagonal surface, or a non-reducible triclinic cell — stays oblique,
+  and the activation gate's minimum-image is written for an **orthogonal
+  cell** (scalar per-axis wrapping), so it would mis-measure such a face.
+  v1's Si and SiO2 faces all reduce to orthogonal, so this bounds nothing
+  we run today; a general-triclinic minimum-image is the work that lifts
+  it (tracked in `TODO.md`).
   Just as importantly, ASE is the **translator** that converts a
   structure between programs' file formats — including carrying a
   step-7 snapshot into Imago for step 8. ASE is the busiest tool but
