@@ -1127,6 +1127,60 @@ without paying for concurrency the plan does not need: the serial member
 chain and the optional separate-job fan-out share the same stage code and
 the same files — only the submission wrapper differs.
 
+### 4.4 Engine acquisition — the LAMMPS module scheme
+
+§4.1 fixes how the engine RUNS; this fixes how the engine BINARY is
+obtained. The two are kept separate on purpose, so the choice of LAMMPS
+build never leaks into the orchestration. The Engine seam (§4.1,
+`LammpsEngine`) imports a `lammps` Python module and drives it; it does
+NOT know or care which LAMMPS binary answers. That knowledge lives
+entirely in the runtime environment, selected by a modulefile — so a
+different engine build is a deployment knob, not a code change.
+
+**Not a conda-vendored engine.** A LAMMPS taken from a conda/mamba
+environment fails on this cluster twice over: its binary needs a glibc
+newer than the compute nodes provide (so it will not start), and it links
+a generic conda OpenMPI with no verbs/InfiniBand and no ties to the
+site's SLURM (so a real MPI run is slow and fragile). The engine is
+therefore acquired from a **CPG-owned modulefile tree** (adopted from the
+Imago project), whose builds use the SITE toolchain — gcc 12.3.0, OpenMPI
+4.1.5, FFTW — with every dependency baked into an RPATH and no libpython
+linked. Two consequences make this the right seam: the binary **starts
+anywhere** (no glibc symbol above 2.14, resolvable from inside any conda
+environment or none), and it **runs on the real interconnect**. Because
+no PYTHON package is compiled in, one pure-ctypes wrapper serves every
+Python version, which is exactly what lets `LammpsEngine` import it
+unchanged.
+
+**Selection is two bring-up lines, and it is multi-version.** A run
+chooses an engine by loading a module (`module use <cpg modulefiles>` +
+`module load cpg_lammps/<version>`) in the job's bring-up — no source
+edit. The modules declare `family("lammps")`, so versions are mutually
+exclusive: exactly one engine is ever on the path. Publishing a rebuild
+is repointing a prefix; publishing a NEW version is a second modulefile
+beside the first. This is what makes the next point cheap.
+
+**The DeePMD engine is a second version, not a fork.** The machine-
+learned-potential runs (§2.2's force model, once the trained MLIP exists)
+need `pair_style deepmd`, supplied by deepmd-kit's prebuilt LAMMPS
+plugin. That plugin is ABI-locked to the LAMMPS release it was built
+against (LAMMPS 2024.08.29): a single LAMMPS utility signature changed
+after that release, so the plugin loads into a 2024.08.29 engine and
+refuses a newer one. The response is not to rebuild deepmd, but to
+publish a second engine at the matching version — `cpg_lammps/
+2024.08.29-deepmd`, the SAME site-toolchain recipe as the default engine
+with only the LAMMPS version changed. sabsim selects it exactly as it
+selects any engine (the module line, plus the `deployment_rc.toml` usage
+block for the MD job kind); the Engine seam is untouched. Reaching the
+plugin at run time costs two things, both confined to the modulefile and
+the LAMMPS input: the deepmd backend's newer C++ runtime is supplied by
+preloading a compatible `libstdc++` (the site toolchain's is too old for
+one symbol version the backend needs), and the plugin is loaded from its
+real install directory by an input line, so its own dependencies resolve.
+The lesson the multi-version scheme was designed for is thus realized: a
+second, deliberately older engine coexists with the default one and is
+chosen per job, with no change to the pipeline that drives it.
+
 ---
 
 ## 5. Development Trajectory and Checkpoints

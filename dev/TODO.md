@@ -57,9 +57,10 @@
       exclusive). ADOPT it for sabsim's compute jobs: fixes the conda-MPI
       mismatch and the stale `LAMMPS_POTENTIALS` (see the resume-smoke
       CODE item) in one move; the classical SW-Si stand-in — all we run
-      today — works on it. Lands in `ARCHITECTURE.md` §4 (engine
-      acquisition, beside the §4.1 Engine seam) + the deployment
-      `deployment_rc.toml` `[usage.bond-md]`. DeePMD DE-RISKING VERDICT:
+      today — works on it. LANDED in `ARCHITECTURE.md` §4.4 (engine
+      acquisition, beside the §4.1 Engine seam); the deployment
+      `deployment_rc.toml` `[usage.bond-md]` wiring is the code half, still
+      open. DeePMD DE-RISKING VERDICT:
       the prebuilt conda deepmd plugin CANNOT be loaded into the site
       build — three layers, last one fatal: (1) glibc fine; (2) CXXABI
       fixable (conda TF needs gcc >= 13 libstdc++, site pins 12.3 —
@@ -71,8 +72,19 @@
       site build: LAMMPS 29Aug2024 + the deepmd interface compiled as a
       pair, site toolchain (and gcc >= 13 for the TF/torch backend),
       published as a second `cpg_lammps/2024.08.29-deepmd` module — one
-      `md.init` line for sabsim, no code change. Deferred until the
-      trained MLIP exists; the version to target (29Aug2024) is now known.
+      `md.init` line for sabsim, no code change. DeePMD BUILD DONE
+      2026-07-29: `cpg_lammps/2024.08.29-deepmd` built + installed +
+      verified on a compute node (`module load` -> `plugin load ${dp}` ->
+      `pair_style deepmd` registers). The LIGHT path worked — build LAMMPS
+      29Aug2024 (proven `build-lammps.sbatch` recipe, only the version
+      changed) to ABI-match the prebuilt conda deepmd plugin; NO deepmd
+      rebuild. ABI proven by symbol: `utils::bounds<int>(...,Error*)` no
+      trailing int (29Aug2024) vs `...,Error*,int` (22Jul2025). Runtime:
+      LD_PRELOAD conda libstdc++ (CXXABI_1.3.15) + `variable dp getenv
+      DEEPMD_LMP_PLUGIN; plugin load ${dp}`. Consuming it from sabsim
+      (emit the two `plugin load` lines in the deepmd force-model block,
+      select the module in `deployment_rc.toml`) is the remaining wiring,
+      still gated on the trained MLIP.
       ENV NOTE (2026-07-29, running the resume smoke): the `cpg_lammps`
       modulefile is CORRECT — its `prefix` IS versioned (Lua concatenates
       `".../programs/lammps/"` with `"22Jul2025-gcc12.3.0-ompi4.1.5"`
