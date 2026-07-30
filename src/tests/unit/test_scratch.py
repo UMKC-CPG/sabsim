@@ -98,6 +98,37 @@ def test_a_stale_link_is_repointed(deployment):
     assert Path(os.readlink(link)) == mirror
 
 
+def test_intermediate_link_survives_a_concurrent_create(
+        deployment, monkeypatch):
+    """A peer rank creating the link first must not crash us (MPI race).
+
+    This reproduces the deadlock the deployment three-job smoke exposed:
+    on a FRESH job directory every MPI rank races to create
+    ``intermediate``, and the losers hit ``FileExistsError``. The winner's
+    link is exactly the state we wanted, so ``job_scratch`` must accept it
+    rather than raise — otherwise the losing ranks halt while the winner
+    waits at the next collective, and the run hangs. Simulated here by a
+    ``symlink_to`` that creates the link (a peer) THEN raises, exactly the
+    order a real race produces.
+    """
+    job = deployment["job"]
+    mirror = mirror_path(job)
+    real_symlink_to = Path.symlink_to
+
+    def racing_symlink_to(self, target, target_is_directory=False):
+        real_symlink_to(
+            self, target, target_is_directory=target_is_directory)
+        raise FileExistsError(17, "File exists")
+
+    monkeypatch.setattr(Path, "symlink_to", racing_symlink_to)
+
+    # Must not raise, and the link must end up pointing at the mirror.
+    assert job_scratch(job) == mirror
+    link = job / INTERMEDIATE_LINK_NAME
+    assert link.is_symlink()
+    assert Path(os.readlink(link)) == mirror
+
+
 def test_a_real_directory_in_the_way_is_never_destroyed(deployment):
     """`intermediate` as a real directory is data, not ours to delete.
 

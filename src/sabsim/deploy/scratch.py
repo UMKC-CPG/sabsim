@@ -158,18 +158,34 @@ def _refresh_intermediate_link(job_directory: Path, mirror: Path) -> None:
     touched: that is someone's data sitting where the link belongs, and
     deleting it to make room for a convenience link would trade the
     user's bytes for our tidiness. Refuse and say so instead.
+
+    MPI-SAFE. Under a parallel run EVERY rank calls this against the SAME
+    job directory, so two ranks can both pass the checks below and both
+    try to create the link; the loser lands on a ``FileExistsError``. A
+    concurrent create that points where we wanted IS success (the same
+    idempotence the ``mkdir(exist_ok=True)`` beside it already has), so it
+    is accepted, not raised — otherwise a fresh job directory deadlocks
+    the run (the losers halt while the winner waits at the next barrier).
     """
     link = job_directory / INTERMEDIATE_LINK_NAME
     if link.is_symlink():
         if Path(os.readlink(link)) == mirror:
             return
-        link.unlink()
+        link.unlink(missing_ok=True)   # repoint a stale link (race-safe)
     elif link.exists():
         raise ScratchError(
             f"{link} already exists and is NOT a symlink, so it is not "
             f"ours to replace. Move or remove it by hand if the scratch "
             f"mirror link belongs there.")
-    link.symlink_to(mirror, target_is_directory=True)
+    try:
+        link.symlink_to(mirror, target_is_directory=True)
+    except FileExistsError:
+        # A peer rank created the link between our check and here. If it
+        # now points to the mirror we wanted, that is the state we were
+        # after; anything else — a real file appeared — is re-raised.
+        if not (link.is_symlink()
+                and Path(os.readlink(link)) == mirror):
+            raise
 
 
 def _check_single_path_segment(label: str, value: str) -> None:
