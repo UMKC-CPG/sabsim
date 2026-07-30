@@ -443,6 +443,34 @@ so they are not discovered late (two touch non-negotiable goals). -->
       activate/bond/analyze. CODE SLICE 1 now STARTING (in `deploy/`):
       §14.1 loader+records + §14.2 registry + §14.3 `run` selector + unit
       tests; `prepare` (§14.4-14.5) deferred to slice 2.
+      SLICE 1a DONE (2026-07-30, commit 4732eba): `deploy/config.py`
+      (§14.1 load_deployment + DeploymentConfig/Partition/UsageBlock/
+      Duration) and `deploy/registry.py` (§14.2 ordered JOB_REGISTRY,
+      artifact names, registry_lookup); 18 tests.
+      SLICE 1b DONE (2026-07-30): the `run` selector + artifact I/O.
+      (a) PSEUDOCODE §14.6 pinned the handoff artifact form — a readable
+      manifest + large payloads by reference (§3 small-inline/large-by-ref
+      rule) — resolving §14.3's delegated read_artifact/write_artifact;
+      manifest is TOML (user pref), hand-rolled writer since `tomllib`
+      only reads, null fields omitted. (b) `pipeline/handoff.py`:
+      write/read_artifact for ASSEMBLED_PAIR (LAMMPS .data + an extended-
+      XYZ atoms payload that round-trips the per-wafer TAGS the driver
+      needs + a TOML groups manifest) and PULL_RESULTS (TOML manifest of
+      the reduced curves); the ASSEMBLED_PAIR re-read is the Approach-C
+      the `Structure.built` comment forecast. (c) `pipeline/member_jobs.py`:
+      `run` selector + `run_member_job` — activate builds from the spec
+      and writes ASSEMBLED_PAIR; bond re-reads it, presses/pulls, writes
+      PULL_RESULTS; analyze reads PULL_RESULTS AND re-reads ASSEMBLED_PAIR
+      for the interface cell, writes MEASURE_VECTOR; no-flag delegates to
+      exec_full_study. (d) CLI: mutually-exclusive --activate/--bond/
+      --analyze on `run`, --dry-run rejected with a job flag (dry-run is
+      the whole-chain login check, §10.4), per-job summary with the
+      next-job hint. 19 new tests (handoff round-trip incl. tags, three-
+      separate-jobs chain, CLI); full suite 271 passed.
+      REMAINING: (1) a LIVE compute-node smoke test of the three-job chain
+      on real LAMMPS (the fake-stage-set unit tests prove orchestration +
+      I/O, not the live stages across the boundary) — a `jobs/` smoke like
+      resume_smoke. (2) `prepare` (§14.4-14.5) — SLICE 2.
 - [x] **PSEUDOCODE for `DESIGN.md` §11 (resume) — DONE 2026-07-27 as
       `PSEUDOCODE.md` §13** ("Resuming an interrupted run"). A dedicated
       top-level section (chosen over folding into §9) so resume stays

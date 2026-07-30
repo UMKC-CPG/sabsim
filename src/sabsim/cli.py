@@ -61,6 +61,29 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--only", action="append", metavar="MEMBER",
         help="run only this member (repeatable); default is every member")
+
+    # The three per-kind member jobs (DESIGN.md §10.2, §14.3), mutually
+    # exclusive: a run does ONE job's slice of the chain, or — with no
+    # flag — the whole chain. store_const on one shared dest gives both
+    # the exclusivity and a single job_flag value. These are the lines a
+    # generated deployment script carries; the human submits activate,
+    # then bond, then analyze, checking each before the next (§10.5).
+    jobs = run.add_mutually_exclusive_group()
+    jobs.add_argument(
+        "--activate", dest="job_flag", action="store_const",
+        const="activate",
+        help="run only the activate job: build both wafers, roughen the "
+             "surfaces, assemble the pair (CPU); writes the assembled pair")
+    jobs.add_argument(
+        "--bond", dest="job_flag", action="store_const", const="bond",
+        help="run only the bond job: press, settle, and pull on the MLIP "
+             "(GPU); reads the assembled pair, writes the pull results")
+    jobs.add_argument(
+        "--analyze", dest="job_flag", action="store_const",
+        const="analyze",
+        help="run only the analyze job: reduce the pull to the measure "
+             "vector (CPU); reads the pull results, writes the measures")
+    run.set_defaults(job_flag=None)
     run.add_argument(
         "--dump-visuals", action="store_true",
         help="record a trajectory for every dynamic stage — the "
@@ -78,11 +101,24 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _run(args: argparse.Namespace) -> int:
     """Execute ``sabsim run``: pick the stage set, run the study, report."""
-    from sabsim.pipeline.sequencer import exec_full_study
+    from sabsim.pipeline.member_jobs import run as run_study
 
     if not os.path.isfile(args.spec):
         print(f"sabsim: no study spec at '{args.spec}' — give a path, or "
               f"put a sabsim.toml in this directory", file=sys.stderr)
+        return 2
+
+    # A job flag selects ONE slice of the chain, meant for a compute-node
+    # submission with real physics (§14.3). The whole-chain --dry-run is
+    # the login-node control-flow check (§10.4); the two do not combine —
+    # a single job cannot be exercised by the placeholder stages, whose
+    # assembled pair has no built geometry to hand across a job boundary.
+    if args.job_flag is not None and args.dry_run:
+        print("sabsim: --dry-run runs the whole chain on the login node; "
+              "it does not combine with --activate/--bond/--analyze, which "
+              "are real per-job runs inside an allocation (§10.4). Drop "
+              "the flag for a dry run, or drop --dry-run to run the job.",
+              file=sys.stderr)
         return 2
 
     # The run's home is where it was launched (decision: CWD, not a flag).
@@ -114,8 +150,9 @@ def _run(args: argparse.Namespace) -> int:
         stage_set = LIVE_STAGES
 
     try:
-        report = exec_full_study(
-            args.spec, job_directory, stage_set, comm, only=args.only)
+        report = run_study(
+            args.spec, job_directory, stage_set, comm,
+            job_flag=args.job_flag, only=args.only)
     except Exception as failure:                       # noqa: BLE001
         # A run that halts (a broken contract, an unresolved spec) reports
         # WHY and exits non-zero, rather than a raw traceback the user must
@@ -123,7 +160,10 @@ def _run(args: argparse.Namespace) -> int:
         print(f"sabsim: run halted — {failure}", file=sys.stderr)
         return 1
 
-    _print_summary(report, dry_run=args.dry_run)
+    if args.job_flag is not None:
+        _print_job_summary(report)
+    else:
+        _print_summary(report, dry_run=args.dry_run)
     return 0
 
 
@@ -183,6 +223,36 @@ def _print_summary(report, dry_run: bool) -> None:
         value = ("unresolved" if outcome.value is None
                  else f"{outcome.value:.4g}")
         print(f"  relation {outcome.kind} {list(outcome.members)}: {value}")
+
+
+def _print_job_summary(results) -> None:
+    """Print what ONE per-kind job produced, and what to submit next.
+
+    A per-job run is one checkpoint in the hand-driven submission sequence
+    (DESIGN.md §10.2, §10.5), so the summary names the artifact each member
+    wrote and — reinforcing the guided index — which job comes next in the
+    registry order, or that the chain is complete.
+    """
+    from sabsim.deploy.registry import JOB_NAMES
+
+    if not results:
+        print("\nsabsim run: no members ran")
+        return
+    job_name = results[0].job_name
+    position = JOB_NAMES.index(job_name)
+    next_job = (JOB_NAMES[position + 1]
+                if position + 1 < len(JOB_NAMES) else None)
+
+    print(f"\nsabsim run: job '{job_name}' complete")
+    for result in results:
+        print(f"  member '{result.member_name}': wrote "
+              f"{result.artifact_written}")
+    if next_job is not None:
+        print(f"  check the result, then submit the '{next_job}' job "
+              f"(sabsim run --{next_job}).")
+    else:
+        print("  this was the last job in the chain; the measure vector "
+              "is written.")
 
 
 def main(argv=None) -> int:

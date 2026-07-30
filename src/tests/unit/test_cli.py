@@ -72,3 +72,30 @@ def test_live_run_off_allocation_is_refused(run_home, monkeypatch):
 def test_no_subcommand_prints_help_and_returns_two(capsys):
     """Bare `sabsim` prints help and exits non-zero."""
     assert main([]) == 2
+
+
+def test_dry_run_does_not_combine_with_a_job_flag(run_home, capsys):
+    """`--dry-run --activate` is refused: dry-run is the whole-chain check.
+
+    A single job cannot be exercised by the placeholder stages (their
+    assembled pair has no built geometry to hand across a boundary), so the
+    two are kept apart with a readable message rather than a deep failure.
+    """
+    code = main(["run", _TEMPLATE, "--dry-run", "--activate"])
+    output = capsys.readouterr().err
+    assert code == 2
+    assert "does not combine" in output
+
+
+def test_a_job_flag_takes_the_live_path_and_is_guarded(run_home,
+                                                       monkeypatch):
+    """A per-job run (e.g. --bond) is a live run, so it hits the
+    allocation guard and never spawns LAMMPS on the login node."""
+    monkeypatch.delenv("SLURM_PROCID", raising=False)
+    assert main(["run", _TEMPLATE, "--bond"]) == 2
+
+
+def test_job_flags_are_mutually_exclusive(run_home):
+    """Two job flags at once is an argparse error (exits non-zero)."""
+    with pytest.raises(SystemExit):
+        main(["run", _TEMPLATE, "--activate", "--bond"])

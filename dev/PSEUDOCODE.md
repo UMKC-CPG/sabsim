@@ -3808,10 +3808,24 @@ existing LAMMPS data file is written yet -- but the seam IS the
 by-reference one, so a field that GROWS large is externalized later
 without changing the contract.
 
-`[DELEGATE -> the manifest's on-disk syntax (TOML, matching the study-spec
-and rc loaders) and the compression codec for a bulky payload are
-CODE-level; the CONTRACT here is only "readable manifest + referenced
-payloads, small-inline / large-by-reference."]`
+One more re-read the analyze job makes. `run_analyzer` needs the interface
+AREA (the assembled pair's lateral cell) to reduce the work per unit area,
+which the PULL_RESULTS does not carry. So analyze reads its OWN entry
+artifact (PULL_RESULTS) AND re-reads the earlier ASSEMBLED_PAIR from the
+SAME member scratch -- both artifacts persist there, so this is a plain
+re-read, not a new hand-off. A job's `reads` field (§14.2) names its
+DEFINING upstream; a job may still re-open any earlier artifact its member
+scratch holds.
+
+`[DELEGATE -> the manifest's on-disk syntax and the compression codec for
+a bulky payload are CODE-level. The manifest is written as TOML, keeping
+it consistent with the study-spec and rc files a human reads and edits.
+The standard library READS TOML (`tomllib`) but cannot WRITE it, so the
+code emits the few value types a manifest uses (scalars, scalar arrays,
+nested tables, arrays of tables) through a small hand-rolled writer; a
+null field is simply OMITTED, since TOML has no null, and the read side
+maps a missing key back to "none". The CONTRACT here is only "readable
+manifest + referenced payloads, small-inline / large-by-reference."]`
 
 `[CODE level, below pseudocode]` the exact directive syntax (SLURM
 `#SBATCH`), the script templating, and the guide's on-disk format.
