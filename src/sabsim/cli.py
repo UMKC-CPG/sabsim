@@ -160,10 +160,16 @@ def _run(args: argparse.Namespace) -> int:
         print(f"sabsim: run halted — {failure}", file=sys.stderr)
         return 1
 
-    if args.job_flag is not None:
-        _print_job_summary(report)
-    else:
-        _print_summary(report, dry_run=args.dry_run)
+    # Print the summary on ONE rank only. Under MPI every rank runs this
+    # same code, so an unguarded print repeats the whole summary once per
+    # rank (16 identical copies in a 16-rank run — as the deploy smoke's
+    # log showed); rank 0 speaks for the job. A dry run has no comm and
+    # prints normally.
+    if comm is None or comm.Get_rank() == 0:
+        if args.job_flag is not None:
+            _print_job_summary(report)
+        else:
+            _print_summary(report, dry_run=args.dry_run)
     return 0
 
 
