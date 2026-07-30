@@ -88,17 +88,20 @@ def test_usage_is_keyed_by_member_job():
     activate = config.usage["activate"]
     assert activate.resource_class == "cpu"
     assert activate.nodes == 2
+    assert activate.tasks_per_node == 32     # tuned, not all 64 cores
     assert activate.walltime.in_hours() == 12.0
     assert activate.modules == ("cpg_lammps/22Jul2025",)
 
     bond = config.usage["bond"]
     assert bond.resource_class == "gpu"
     assert bond.nodes == 1
+    assert bond.tasks_per_node == 4          # one rank per GPU
     assert bond.walltime.in_hours() == 18.0
     assert bond.modules == ("cpg_lammps/2024.08.29-deepmd",)
 
     analyze = config.usage["analyze"]
     assert analyze.resource_class == "cpu"
+    assert analyze.tasks_per_node == 1       # serial Python measure
     # The v1 analyze job loads NO science module — the mechanical measure
     # is pure Python and the §8 characterization is Tier-B (DESIGN §10.5).
     # An empty list is allowed and MEANINGFUL, but the key is required.

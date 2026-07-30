@@ -3705,6 +3705,16 @@ pull-distance ÷ pull-rate relation stays, but as the human's **estimation
 guide**, not something the software computes; this reframes §5.6, which
 previously read as though the tool budgeted the number.
 
+The **MPI rank count is person-provided the same way**, and for the same
+reason. The parallelism is LAMMPS domain decomposition over one cell, so
+what matters is atoms *per rank*: too few ranks and the run is slow, too
+many and each rank's ghost-atom halo dwarfs the atoms it owns, so the run
+is slower *again*. That atoms-per-rank sweet spot is a per-kind tuning
+choice the person makes — not something the writer should derive by
+filling every core on a node. So each `[usage.*]` block also names a
+`tasks_per_node` (MPI ranks per node); the writer emits it verbatim and
+predicts nothing, exactly as it does for walltime.
+
 **One cheap check earns its place**, precisely because it predicts
 nothing — it only compares two numbers already written in the deployment
 file. Each hardware partition already names a `max_walltime` ceiling (the

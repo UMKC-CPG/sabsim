@@ -30,6 +30,15 @@ from sabsim.deploy.registry import (
     JobKind,
     registry_lookup,
 )
+from sabsim.deploy.roots import (
+    LocationRoots,
+    resolve_location_roots,
+)
+from sabsim.deploy.prepare import (
+    SubmissionEntry,
+    prepare,
+    render_job_script,
+)
 
 __all__ = [
     "DeploymentConfig",
@@ -45,4 +54,9 @@ __all__ = [
     "PULL_RESULTS",
     "JobKind",
     "registry_lookup",
+    "LocationRoots",
+    "resolve_location_roots",
+    "SubmissionEntry",
+    "prepare",
+    "render_job_script",
 ]

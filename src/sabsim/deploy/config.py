@@ -115,15 +115,17 @@ class UsageBlock:
     Keyed in the rc by member job (``activate`` / ``bond`` / ``analyze``,
     DESIGN.md §10.2), a usage block names the abstract resource
     ``resource_class`` the hardware section resolves to a
-    :class:`Partition`, the human-provided ``nodes`` and ``walltime`` for
-    the job (PSEUDOCODE.md §14.1 — walltime is chosen, never predicted,
-    DESIGN.md §10.6), and the ``modules`` that job switches on (the
+    :class:`Partition`, the human-provided ``nodes``, ``tasks_per_node``
+    (MPI ranks per node), and ``walltime`` for the job (PSEUDOCODE.md
+    §14.1 — all chosen, never predicted, DESIGN.md §10.6), and the
+    ``modules`` that job switches on (the
     per-kind tool list, DESIGN.md §10.5; the bond job's one deepmd engine,
     ARCHITECTURE.md §4.4).
     """
 
     resource_class: str
     nodes: int
+    tasks_per_node: int
     walltime: Duration
     modules: tuple[str, ...]
 
@@ -266,6 +268,7 @@ def _usage_from_table(
     return UsageBlock(
         resource_class=str(_require(table, "partition", context)),
         nodes=int(_require(table, "nodes", context)),
+        tasks_per_node=int(_require(table, "tasks_per_node", context)),
         walltime=_require_duration(table, "walltime", context),
         modules=_require_str_list(table, "modules", context),
     )

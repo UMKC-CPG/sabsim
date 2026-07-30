@@ -59,6 +59,12 @@ module_paths    = ["/cluster/VAST/rulisp-lab/cpg/modulefiles"]
 # build-and-assemble glue rides along with the heavy cascade (§10.2).
 partition = "cpu"
 nodes     = 2
+# MPI ranks per node — the atoms-per-rank sweet spot for the cascade
+# (DESIGN.md §10.6), NOT all 64 cores: too many ranks and each rank's
+# ghost-atom halo dwarfs the atoms it owns, so the run is slower. 32 is
+# the tuned value at this member size (~137-275 atoms/rank in jobs/
+# si_si_e2e); asking for fewer cores also clears the queue faster.
+tasks_per_node = 32
 walltime  = { value = 12.0, unit = "h" }
 modules   = ["cpg_lammps/22Jul2025"]  # the classical + ZBL engine
 
@@ -67,6 +73,7 @@ modules   = ["cpg_lammps/22Jul2025"]  # the classical + ZBL engine
 # DeePMD evaluation, all committee models in the one process (§10.2).
 partition = "gpu"
 nodes     = 1
+tasks_per_node = 4    # one MPI rank per GPU on the node (§10.6)
 walltime  = { value = 18.0, unit = "h" }
 # The GPU force model is a DeePMD pair style hosted inside LAMMPS. It is
 # NOT a separate module: the engine here is a version of LAMMPS built to
@@ -88,5 +95,10 @@ modules   = ["cpg_lammps/2024.08.29-deepmd"]
 # is ever run outside that Parsl loop.
 partition = "cpu"
 nodes     = 1
+# Analyze's v1 work is the pure-Python mechanical measure (no LAMMPS, not
+# domain-decomposed), so ONE rank is right — extra ranks would just redo
+# the same serial reduction (§10.6; the §8 heavy characterization is
+# Tier-B, ARCHITECTURE.md §4.1).
+tasks_per_node = 1
 walltime  = { value = 4.0, unit = "h" }
 modules   = []

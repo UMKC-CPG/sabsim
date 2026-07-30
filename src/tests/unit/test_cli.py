@@ -99,3 +99,36 @@ def test_job_flags_are_mutually_exclusive(run_home):
     """Two job flags at once is an argparse error (exits non-zero)."""
     with pytest.raises(SystemExit):
         main(["run", _TEMPLATE, "--activate", "--bond"])
+
+
+_RC_TEMPLATE = os.path.abspath(os.path.join(
+    os.path.dirname(__file__),
+    "..", "..", "..", "dev", "templates", "deployment_rc.toml"))
+
+
+def test_prepare_missing_spec_returns_two(run_home):
+    """`sabsim prepare` with no spec is a clean error, not a traceback."""
+    assert main(["prepare", "does_not_exist.toml"]) == 2
+
+
+def test_prepare_missing_rc_returns_two(run_home):
+    """`sabsim prepare` with a spec but no deployment rc is a clean error."""
+    (run_home / "sabsim.toml").write_text(
+        open(_TEMPLATE, encoding="utf-8").read())
+    assert main(["prepare"]) == 2          # default deployment.toml absent
+
+
+def test_prepare_writes_scripts_and_guide(run_home, monkeypatch, capsys):
+    """`sabsim prepare` with spec + rc + roots writes scripts and a guide."""
+    monkeypatch.setenv("SABSIM_SHARE", "/cluster/VAST/rulisp-lab/cpg")
+    (run_home / "sabsim.toml").write_text(
+        open(_TEMPLATE, encoding="utf-8").read())
+    (run_home / "deployment.toml").write_text(
+        open(_RC_TEMPLATE, encoding="utf-8").read())
+
+    code = main(["prepare"])
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "wrote" in output and ".slurm" in output
+    assert list(run_home.glob("*.slurm"))
+    assert (run_home / "SUBMISSION_GUIDE.md").is_file()

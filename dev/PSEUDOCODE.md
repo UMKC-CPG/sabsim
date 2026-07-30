@@ -3606,6 +3606,11 @@ record Partition:                     # one [hardware.partitions.*]
 record UsageBlock:                    # one [usage.*], keyed by job kind
     resource_class: text              # names a Partition ("cpu" / "gpu")
     nodes:          integer
+    tasks_per_node: integer           # MPI ranks per node; HUMAN-provided
+                                      # (§10.6), NOT filled from the
+                                      # partition -- the atoms-per-rank
+                                      # sweet spot is a per-kind tuning
+                                      # choice, like walltime
     walltime:       duration          # HUMAN-provided (§10.6), not computed
     modules:        list of text      # module(s) to `module load` (§4.4)
 ```
@@ -3763,7 +3768,9 @@ function render_job_script(study, member, job, usage, partition,
         snapshot, not a re-read of the rc at run time (§10.5, §1.4).
       - the launcher + `python -m sabsim run <study> --<job.name>
         --only <member.name>` (§14.3) -- e.g. `mpirun -np <N>` INSIDE the
-        allocation, never on the login node (§4.1).
+        allocation, never on the login node (§4.1). N = usage.nodes x
+        usage.tasks_per_node, emitted as `--ntasks-per-node` so the
+        scheduler's own $SLURM_NTASKS drives the launcher.
       - on success, a printed line naming what to check and which script
         to submit next (§10.5), reinforcing the guide.
 ```

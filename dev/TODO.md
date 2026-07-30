@@ -488,7 +488,26 @@ so they are not discovered late (two touch non-negotiable goals). -->
       M1 needs the slow rate ladder = the full-run's job, nothing
       small-system-specific to transfer. Smoke files: jobs/deploy_smoke/
       (gitignored).
-      REMAINING: `prepare` (§14.4-14.5) — SLICE 2.
+      PREPARE (§14.4-14.5) DONE (2026-07-30): `deploy/roots.py`
+      (resolve_location_roots — SCRATCH+SHARE required, LOCAL optional,
+      the §10.5 login-node gate) + `deploy/prepare.py` (prepare +
+      render_job_script + the guide) + the `sabsim prepare` CLI verb.
+      Scripts are the (A) FAITHFUL lean §10.5 form (directives + modules +
+      frozen roots + run line; NO PYTHONPATH/LAMMPS_POTENTIALS — those
+      come from the activated install). Also added a `tasks_per_node`
+      field to UsageBlock (DESIGN §10.6 + PSEUDO §14.1 first, then code +
+      template): MPI ranks/node is HUMAN-provided per-kind (atoms-per-rank
+      sweet spot), not filled from the partition — template = 32/4/1 for
+      activate/bond/analyze. 287 tests. The deployment consumer's design
+      chain is now complete THROUGH CODE (run + prepare both built +
+      tested; run validated live by the smoke).
+      REMAINING (deployment): the "install" so the lean scripts run — a
+      `.sabsim/sabsimrc` (the three roots + LAMMPS_POTENTIALS + conda
+      activation) and `pip install -e .` (registers `sabsim`, puts the
+      venv on PATH). This is the packaging follow-on §10.7 named; it is
+      what makes the (A) scripts self-sufficient. Optional later: a
+      tasks_per_node<=capacity ceiling check (like the walltime one);
+      per-study walltime override on prepare (§10.7 follow-on).
 - [ ] **URGENT (ARCHITECTURE ↔ DESIGN): the MLIP re-anneal's resource
       class.** `ARCHITECTURE.md` §4.1's resource table marks the MLIP
       re-anneal as GPU work, but `DESIGN.md` §10.2 folds it into the CPU

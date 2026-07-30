@@ -96,6 +96,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="record one frame per STEPS of MD, overriding the spec's "
              "frame_stride. Only meaningful with --dump-visuals; raise it "
              "for smaller files, lower it for smoother playback")
+
+    # `prepare` — the WRITER (DESIGN.md §10.1, PSEUDOCODE §14.4): reads the
+    # study spec AND the machine-local deployment rc, and writes one
+    # ready-to-submit script per (member, job) plus a submission guide. It
+    # submits nothing; the human submits the scripts in order.
+    prepare = subcommands.add_parser(
+        "prepare",
+        help="write ready-to-submit scripts for a study (submits nothing)")
+    prepare.add_argument(
+        "spec", nargs="?", default="sabsim.toml",
+        help="the study specification (default: sabsim.toml here)")
+    prepare.add_argument(
+        "--rc", metavar="PATH", default="deployment.toml",
+        help="the machine-local deployment rc (default: deployment.toml "
+             "here) — the [hardware]/[usage.*] file this cluster provides")
     return parser
 
 
@@ -261,11 +276,50 @@ def _print_job_summary(results) -> None:
               "is written.")
 
 
+def _prepare(args: argparse.Namespace) -> int:
+    """Execute ``sabsim prepare``: write the submission scripts + guide.
+
+    Runs on the login node and submits nothing (DESIGN.md §10.1). The spec
+    and the rc must both exist; the writer's own gates (an unset root, a
+    walltime over its partition ceiling) stop with a readable message
+    rather than a traceback (§10.5, §10.6).
+    """
+    from sabsim.deploy.prepare import GUIDE_FILENAME, prepare
+
+    if not os.path.isfile(args.spec):
+        print(f"sabsim: no study spec at '{args.spec}' — give a path, or "
+              f"put a sabsim.toml in this directory", file=sys.stderr)
+        return 2
+    if not os.path.isfile(args.rc):
+        print(f"sabsim: no deployment rc at '{args.rc}' — give one with "
+              f"--rc, or put a deployment.toml in this directory",
+              file=sys.stderr)
+        return 2
+
+    job_directory = os.getcwd()
+    try:
+        entries = prepare(args.spec, args.rc, job_directory)
+    except Exception as failure:                       # noqa: BLE001
+        # A gate failure (unset root, walltime over ceiling, bad rc) reports
+        # WHY and exits non-zero, not a raw traceback (DESIGN.md §5.7).
+        print(f"sabsim: prepare halted — {failure}", file=sys.stderr)
+        return 1
+
+    print(f"\nsabsim prepare: wrote {len(entries)} script(s) to "
+          f"{job_directory}")
+    for entry in entries:
+        print(f"  {entry.script_name}")
+    print(f"  submit in the order in {GUIDE_FILENAME}.")
+    return 0
+
+
 def main(argv=None) -> int:
     """The ``sabsim`` console entry point; returns a process exit code."""
     parser = _build_parser()
     args = parser.parse_args(argv)
-    if args.command != "run":
-        parser.print_help()
-        return 2
-    return _run(args)
+    if args.command == "run":
+        return _run(args)
+    if args.command == "prepare":
+        return _prepare(args)
+    parser.print_help()
+    return 2
