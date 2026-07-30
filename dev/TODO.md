@@ -467,10 +467,28 @@ so they are not discovered late (two touch non-negotiable goals). -->
       the whole-chain login check, §10.4), per-job summary with the
       next-job hint. 19 new tests (handoff round-trip incl. tags, three-
       separate-jobs chain, CLI); full suite 271 passed.
-      REMAINING: (1) a LIVE compute-node smoke test of the three-job chain
-      on real LAMMPS (the fake-stage-set unit tests prove orchestration +
-      I/O, not the live stages across the boundary) — a `jobs/` smoke like
-      resume_smoke. (2) `prepare` (§14.4-14.5) — SLICE 2.
+      LIVE SMOKE DONE (2026-07-30, job 15454930, "DEPLOY SMOKE: PASS" in
+      24 min): the three-job chain ran end-to-end on real LAMMPS for the
+      si-si-reference member as three SEPARATE `sabsim run --activate/
+      --bond/--analyze` processes sharing one scratch — ASSEMBLED_PAIR
+      (data + tagged atoms + manifest) and PULL_RESULTS round-tripped
+      across the boundary, so the run selector §14.3 + handoff §14.6 are
+      validated on the LIVE stages, not just the fake-stage-set units. Two
+      bugs the smoke surfaced, both committed: (a) an MPI race in the
+      scratch intermediate-link creation that DEADLOCKED a fresh job dir —
+      all ranks race to make the link, losers halt, winner hangs at the
+      next collective (commit 2289e3d, + deterministic regression test;
+      the e2e never hit it because its link already existed); (b) the CLI
+      summary printed on all 16 ranks, now rank-0 only (commit d144a99).
+      NOTE the smoke trimmed the PROTOCOL (single 10 m/s pull rung, 20 ps
+      press hold) on the SAME full-size ~8800-atom pair — the cell is
+      PINNED in live_stages, not a spec knob, so there is no "small
+      system." M1 came back UNRESOLVED by design (a single fast,
+      non-quasi-static pull that did not fully separate); a real converged
+      M1 needs the slow rate ladder = the full-run's job, nothing
+      small-system-specific to transfer. Smoke files: jobs/deploy_smoke/
+      (gitignored).
+      REMAINING: `prepare` (§14.4-14.5) — SLICE 2.
 - [ ] **URGENT (ARCHITECTURE ↔ DESIGN): the MLIP re-anneal's resource
       class.** `ARCHITECTURE.md` §4.1's resource table marks the MLIP
       re-anneal as GPU work, but `DESIGN.md` §10.2 folds it into the CPU
