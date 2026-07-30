@@ -63,7 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="run only this member (repeatable); default is every member")
 
     # The three per-kind member jobs (DESIGN.md §10.2, §14.3), mutually
-    # exclusive: a run does ONE job's slice of the chain, or — with no
+    # exclusive: a run does ONE job's sub-stage of the chain, or — no
     # flag — the whole chain. store_const on one shared dest gives both
     # the exclusivity and a single job_flag value. These are the lines a
     # generated deployment script carries; the human submits activate,
@@ -108,7 +108,7 @@ def _run(args: argparse.Namespace) -> int:
               f"put a sabsim.toml in this directory", file=sys.stderr)
         return 2
 
-    # A job flag selects ONE slice of the chain, meant for a compute-node
+    # A job flag selects ONE sub-stage of the chain, for a compute-node
     # submission with real physics (§14.3). The whole-chain --dry-run is
     # the login-node control-flow check (§10.4); the two do not combine —
     # a single job cannot be exercised by the placeholder stages, whose

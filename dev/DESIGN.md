@@ -3651,13 +3651,25 @@ environment being installed and activated — not restated in every script.
     name it, and refuse.
 - **The outside tools to switch on are per kind of job**, not
   machine-wide. The activate script switches on only the
-  classical-dynamics engine, bond only the GPU force-model engine,
-  analyze only the electronic-structure package. This **reshapes the
+  classical-dynamics engine, bond only the GPU force-model engine, and
+  analyze only what its measurement needs. This **reshapes the
   deployment file**: the tool list moves out of the machine-wide
   `[hardware]` inventory and into each per-kind `[usage.*]` block, so a
   script loads exactly what its job needs and nothing that could conflict
   with it. It matches the by-kind routing the file already uses for
-  partitions.
+  partitions. **What analyze needs is broader than electronic structure,
+  and in v1 it is nothing extra.** Analyze owns the whole measurement
+  tail: the mechanical work-of-separation (M1, §6), the structural
+  characterization (radial pair-distribution, structural descriptors,
+  §8/§12), and the report plots (force and stress/strain curves). All of
+  that is the already-installed Python stack (numpy / matplotlib / ASE),
+  so v1 loads NO dedicated science module — which is why `[usage.analyze]`
+  carries `modules = []`. The one genuinely electronic-structure piece is
+  the all-electron characterization, and it is Tier-B: Imago/Kaleidoscope
+  owns its own Parsl + SLURM submission (§4.1), so analyze does not load
+  it as a module. A DIRECT electronic-structure tool would join the
+  analyze block only if such analysis were ever run OUTSIDE that Tier-B
+  loop.
 - **Everything else gets no home in the script.** The classical potential
   files are found through the shared-data root (they are reference data,
   in §3.5's registry idiom); the Python interpreter and the launcher come

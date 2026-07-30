@@ -3,7 +3,7 @@
 These pin the registry's job as the SINGLE source of truth for what the
 member jobs are and in what order they run (PSEUDOCODE.md §14.2,
 DESIGN.md §10.3): three jobs in submission order, each owning a
-contiguous slice of the §1 chain, and — the property that makes a
+contiguous sub-stage of the §1 chain, and — the property that makes a
 mid-chain start possible — a file handoff where each job READS exactly
 what the previous job WROTE (ARCHITECTURE.md §4.3).
 """
@@ -60,8 +60,8 @@ def test_the_handoff_chain_is_contiguous():
         assert later.reads == earlier.writes
 
 
-def test_every_job_owns_a_nonempty_slice():
-    """Each job runs at least one stage of the §1 chain."""
+def test_every_job_owns_a_nonempty_sub_stage():
+    """Each job's sub-stage runs at least one stage of the §1 chain."""
     for job in JOB_REGISTRY:
         assert job.stages, f"job '{job.name}' owns no stages"
 

@@ -77,13 +77,15 @@ walltime  = { value = 18.0, unit = "h" }
 modules   = ["cpg_lammps/2024.08.29-deepmd"]
 
 [usage.analyze]
-# Turn the pull result into the measure vector (§6): CPU. In v1 the only
-# real measure is the mechanical work-integral (M1), which is pure Python
-# and loads NO science module. The all-electron characterization (§8)
-# that will eventually run here is Kaleidoscope/Imago — Tier B, which
-# owns its own submission (ARCHITECTURE.md §4.1) — so nothing is keyed
-# for it here; a DIRECT electronic-structure tool would be added only if
-# one is ever run outside that Parsl loop.
+# Reduce the run to results (§6, §8): CPU. Analyze owns the whole
+# measurement tail — the mechanical work-integral (M1), the structural
+# characterization (RDF, structural descriptors, §8/§12), and the report
+# plots (force, stress/strain) — all of which is the already-installed
+# Python stack (numpy/matplotlib/ASE), so v1 loads NO dedicated science
+# module. The all-electron characterization is Tier-B (Kaleidoscope/Imago
+# owns its own submission, ARCHITECTURE.md §4.1), so nothing is keyed for
+# it here; a DIRECT electronic-structure tool would be added only if one
+# is ever run outside that Parsl loop.
 partition = "cpu"
 nodes     = 1
 walltime  = { value = 4.0, unit = "h" }

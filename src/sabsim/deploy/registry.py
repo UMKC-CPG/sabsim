@@ -11,9 +11,11 @@ twice. Inserting a fourth kind later (say a relax between activate and
 bond) is one entry here; the flags, the written filenames, and the
 guided index all follow (DESIGN.md §10.3).
 
-Each entry pins the CONTIGUOUS slice of the §1 member chain a job owns,
-and — crucially — the on-disk artifact it READS at entry and WRITES at
-exit. That file handoff (ARCHITECTURE.md §4.3) is exactly what lets a job
+Each entry pins the CONTIGUOUS **sub-stage** of the §1 member chain a job
+owns — a run of adjacent pipeline stages (its ``stages`` list): a section
+of the whole stage sequence, not a piece of any one stage — and,
+crucially, the on-disk artifact it READS at entry and WRITES at exit.
+That file handoff (ARCHITECTURE.md §4.3) is exactly what lets a job
 submitted on its own start mid-chain: it re-reads its entry artifact in a
 fresh process rather than inheriting a warm object (§14.3, §14.6).
 """
@@ -54,7 +56,7 @@ FROM_SPEC = None
 
 @dataclass(frozen=True)
 class JobKind:
-    """One kind of member job: its resource class, slice, and handoffs.
+    """One kind of member job: its resource class, sub-stage, and handoffs.
 
     ``name`` is the job's verb (``"activate"`` / ``"bond"`` / ``"analyze"``),
     which is also the ``run`` flag and the generated script's semantic
@@ -62,10 +64,13 @@ class JobKind:
     abstract class a deployment rc resolves to a real partition
     (:meth:`sabsim.deploy.config.DeploymentConfig.partition_for`).
 
-    ``stages`` names this job's contiguous slice of the §1 chain, using
-    the sequencer's stage-set method names (:class:`~sabsim.pipeline.
-    skeleton_stages.StageSet`) so the runner can dispatch them directly;
-    each maps to the algorithm stage §14.2 lists (build→``build_slabs``,
+    ``stages`` names the pipeline operations this job runs — the adjacent
+    stages that make up its sub-stage of the §1 chain — using the
+    sequencer's stage-set method names
+    (:class:`~sabsim.pipeline.skeleton_stages.StageSet`) for traceability
+    to §14.2. It is DESCRIPTIVE, not the dispatcher: ``run_member_job``
+    branches on ``name``, not by iterating this list. Each maps to the
+    algorithm stage §14.2 lists (build→``build_slabs``,
     activate→``activate_surfaces``, assemble→``assemble_pair``;
     bond→press/settle/pull, all inside one ``bond_debond`` method;
     analyze→``run_analyzer`` with the mocked characterization merged in).
@@ -124,7 +129,8 @@ def registry_lookup(job_name: str) -> JobKind:
     The ``run`` selector calls this with the one job flag it was given
     (§14.3). An unknown name — a flag no registry entry defines — is a
     clear error listing the valid names, never a silent miss, so a typo in
-    a generated script fails readably rather than running the wrong slice.
+    a generated script fails readably rather than running the wrong
+    sub-stage.
     """
     for job in JOB_REGISTRY:
         if job.name == job_name:

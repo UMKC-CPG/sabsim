@@ -3619,14 +3619,18 @@ roots read from the sourced `.sabsim/sabsimrc`, `DESIGN.md` §10.5]`.
 ```
 # The SINGLE source of truth for what the jobs are and in what order they
 # run. Each entry names the job, the abstract resource class the rc
-# resolves to a partition, and the CONTIGUOUS slice of the §1 member chain
-# it owns -- with the on-disk artifact it READS at entry and WRITES at
-# exit. That handoff (ARCHITECTURE §4.3) is exactly what lets one job
+# resolves to a partition, and the CONTIGUOUS SUB-STAGE of the §1 member
+# chain it owns -- with the on-disk artifact it READS at entry and WRITES
+# at exit. That handoff (ARCHITECTURE §4.3) is exactly what lets one job
 # start mid-chain in its own submission.
+#
+# A SUB-STAGE is a run of ADJACENT pipeline stages -- a section of the
+# whole §1 stage sequence, NOT a piece of any one stage. Each job owns
+# one; the `stages` field lists the stages that make it up.
 record JobKind:
     name:            text             # "activate" / "bond" / "analyze"
     resource_class:  text             # -> a UsageBlock + a Partition
-    stages:          ordered list of Stage   # its slice of the §1 chain
+    stages:          ordered list of Stage   # the stages of its sub-stage
     reads:           artifact_name or NONE    # entry file in member scratch
     writes:          artifact_name            # exit file in member scratch
 
@@ -3644,9 +3648,10 @@ JOB_REGISTRY = ordered [
             reads  = ASSEMBLED_PAIR,
             writes = PULL_RESULTS),       # per-rung curves + trajectories
     JobKind("analyze", "cpu",
-            stages = [run_analyzer],      # §8 (measure vector)
+            stages = [run_analyzer,          # §4 measure vector, PLUS
+                      run_characterization], #   the mocked step-8 char
             reads  = PULL_RESULTS,
-            writes = MEASURE_VECTOR),     # the §4 measure schema
+            writes = MEASURE_VECTOR),     # the §4 vector, GATED (§14.3)
 ]
 ```
 Inserting a job later (§10.3, say a relax between activate and bond) is
@@ -3677,7 +3682,7 @@ function run(study_spec_path, job_flag, only_member):
 
 ```
 function run_member_job(member, scratch, job):
-    # ONE job's contiguous slice of the §1 chain. It ENTERS by re-reading
+    # ONE job's contiguous SUB-STAGE of the §1 chain. It ENTERS by re-reading
     # its `reads` artifact from the member scratch -- the same
     # read-from-file handoff activate_surfaces already uses (§1 re-reads the
     # pristine half), so this process needs NONE of the stages before it.
@@ -3688,15 +3693,23 @@ function run_member_job(member, scratch, job):
     seed = (job.reads is NONE)
            ? member                            # activate: from the spec
            : read_artifact(scratch, job.reads) # bond/analyze: from disk
-    # Run this job's stages exactly as §1 runs them, but only this slice,
-    # each guarded by run_to_contract so a bad artifact HALTS here (§5.1).
-    # The final stage writes job.writes into scratch; the NEXT job (a
-    # separate submission) reads it. Nothing crosses the seam in memory.
-    run_stage_slice(job.stages, seed, member, potential, scratch)
+    # Run this job's stages exactly as §1 runs them, but only this
+    # sub-stage, each guarded by run_to_contract so a bad artifact HALTS
+    # here (§5.1). The final stage writes job.writes into scratch; the NEXT
+    # job (a separate submission) reads it. Nothing crosses in memory.
+    run_sub_stage(job.stages, seed, member, potential, scratch)
 ```
 `[DELEGATE -> the exact per-stage calls and signatures are §1's; `run_
 member_job` reuses them, differing only in that it starts from `seed`
 rather than the previous in-memory handle.]`
+
+The analyze job's sub-stage is the WHOLE tail of `exec_one_member` (§1),
+not just `run_analyzer`: after it, the job MERGES the mocked step-8
+characterization (`run_characterization`, §4) and READS the §5 gate, so
+the MEASURE_VECTOR it writes is the GATED member result (§1's
+MemberResult), not a bare measure list. The gate adds no stage -- it only
+reads the vector and reports (§5, VISION principle 5) -- which is why
+§14.2 lists the two producing stages while the gate rides along here.
 
 ### 14.4 prepare — the writer (§10.5, §10.6)
 

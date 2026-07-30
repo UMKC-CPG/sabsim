@@ -7,9 +7,9 @@ itself (DESIGN.md §10.1); the human submits the scripts in order.
 
 Giving NO job flag runs the whole member chain end to end — the existing
 :func:`~sabsim.pipeline.sequencer.exec_full_study`, which also grades the
-study's relations. Giving one flag runs exactly the contiguous slice of
-the §1 chain that :data:`~sabsim.deploy.registry.JOB_REGISTRY` assigns to
-that job, and — the property that makes a separate submission possible —
+study's relations. Giving one flag runs exactly the contiguous sub-stage
+of the §1 chain that :data:`~sabsim.deploy.registry.JOB_REGISTRY` assigns
+to that job, and — the property that makes a separate submission possible —
 it ENTERS by re-reading its ``reads`` artifact from the member scratch
 rather than inheriting a warm in-memory object (§14.3, §14.6). Every
 stage is routed through the SAME ``run_to_contract`` guard the whole-chain
@@ -107,7 +107,7 @@ def run(study_spec_path, job_directory, stage_set, comm=None,
 
 def run_member_job(member, scratch_directory, job: JobKind,
                    stage_set, comm=None) -> JobRunResult:
-    """Run ONE job's contiguous slice of the §1 chain for ONE member (§14.3).
+    """Run ONE job's contiguous sub-stage of the §1 chain, one member (§14.3).
 
     The job ENTERS by re-reading its ``reads`` artifact from the member
     scratch (or from the spec itself, for the activate job) and EXITS by
@@ -116,9 +116,9 @@ def run_member_job(member, scratch_directory, job: JobKind,
     of the stages before it. Each stage is guarded by ``run_to_contract``
     exactly as the whole-chain run guards it, so a bad artifact halts here.
 
-    The three slices reuse the sequencer's own stage calls (§1), differing
-    only in that they start from ``scratch``'s artifact rather than the
-    previous in-memory handle. The potential is the lookup every job does
+    The three sub-stages reuse the sequencer's own stage calls (§1),
+    differing only in that they start from ``scratch``'s artifact rather
+    than the previous in-memory handle. The potential is the lookup every job does
     (``resolve_potential``): classical stand-in now, trained committee
     later, the SAME seam.
     """

@@ -471,6 +471,17 @@ so they are not discovered late (two touch non-negotiable goals). -->
       on real LAMMPS (the fake-stage-set unit tests prove orchestration +
       I/O, not the live stages across the boundary) — a `jobs/` smoke like
       resume_smoke. (2) `prepare` (§14.4-14.5) — SLICE 2.
+- [ ] **URGENT (ARCHITECTURE ↔ DESIGN): the MLIP re-anneal's resource
+      class.** `ARCHITECTURE.md` §4.1's resource table marks the MLIP
+      re-anneal as GPU work, but `DESIGN.md` §10.2 folds it into the CPU
+      `activate` job. v1 is unaffected (the cascade dominates activate, and
+      the cold-start re-anneal runs on the classical STAND-IN = CPU), but
+      once a trained MLIP makes the re-anneal genuinely GPU-flavoured this
+      must be settled: split the re-anneal out of the CPU activate job onto
+      GPU, give the activate job GPU for that phase, or accept it as cheap
+      enough for CPU. Surfaced by the 2026-07-30 usage-key reconciliation;
+      flagged URGENT (resolve before the MLIP goes live, not after). Note
+      landed at `ARCHITECTURE.md` §4.1 (after the resource table).
 - [x] **PSEUDOCODE for `DESIGN.md` §11 (resume) — DONE 2026-07-27 as
       `PSEUDOCODE.md` §13** ("Resuming an interrupted run"). A dedicated
       top-level section (chosen over folding into §9) so resume stays

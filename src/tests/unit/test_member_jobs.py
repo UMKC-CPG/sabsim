@@ -212,7 +212,7 @@ def test_bond_without_an_assembled_pair_halts(tmp_path):
 
 
 def test_run_member_job_rejects_an_unknown_job(tmp_path):
-    """A job kind run_member_job has no slice for is a loud stop."""
+    """A job kind run_member_job has no sub-stage for is a loud stop."""
     phantom = JobKind(
         name="relax", resource_class="cpu", stages=("relax",),
         reads=None, writes="relaxed")

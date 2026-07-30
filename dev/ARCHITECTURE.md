@@ -881,6 +881,17 @@ CPU and then a gentle MLIP anneal on GPU:
 | MLIP re-anneal + press / separate      | GPU (`deepmd`) |
 | Imago (step 8)                         | CPU            |
 
+**OPEN — URGENT (this table ↔ `DESIGN.md` §10.2): where the MLIP
+re-anneal's resource falls.** This table marks the MLIP re-anneal as GPU
+work, but §10.2 folds it into the CPU `activate` job (the violent cascade
+dominates that job, and at cold start the re-anneal runs on the classical
+STAND-IN, so v1 activate is CPU throughout). Once a trained MLIP makes the
+re-anneal genuinely GPU-flavoured, this must be settled: either the
+re-anneal splits out of the CPU activate job onto GPU, or the activate job
+gains GPU for that phase, or the re-anneal is accepted as cheap enough to
+stay on CPU. Not blocking v1, but to be resolved SOON — tracked URGENT in
+`TODO.md`.
+
 **Structure of the deployment config — two concerns, one file.** The
 config separates *what the machine has* from *how each kind of work uses
 it*, because the two change on different clocks:
