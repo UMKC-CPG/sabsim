@@ -3759,6 +3759,60 @@ function render_job_script(study, member, job, usage, partition,
 force-model command block (`ARCHITECTURE.md` §4.4, `driver/commands` §9),
 NOT here -- render_job_script only loads the module that exports the var.]`
 
+### 14.6 The handoff artifact form (`read_artifact`/`write_artifact`)
+
+§14.3 delegated the READ and WRITE at the two mid-chain seams; this pins
+what those artifacts physically ARE. A job submitted on its own re-reads
+its entry artifact in a FRESH process -- it does not inherit the warm
+in-memory object the whole-chain run passes stage to stage. So the two
+mid-chain artifacts (ASSEMBLED_PAIR, which activate writes and bond
+reads; PULL_RESULTS, which bond writes and analyze reads) must be
+COMPLETE on disk: everything the downstream job needs, reconstructible
+from files alone. Each takes the SAME shape the §3 trajectory already
+uses -- small things INLINE, large things BY REFERENCE.
+
+```
+record HandoffArtifact:              # one written mid-chain artifact
+    manifest: path       # a READABLE index (the small, self-describing
+                         # half): scalars, geometry, per-rate fields,
+                         # verdicts, provenance -- and the NAMES of any
+                         # bulky payloads below. Human-inspectable and
+                         # durable across a code change (VISION goal 3),
+                         # NOT an opaque pickle of the whole record.
+    payloads: map[name -> path]   # the LARGE half, each its OWN file: an
+                         # engine data file (LAMMPS), or a numeric array
+                         # stored as its own (optionally COMPRESSED)
+                         # binary. NEVER a large array inlined into the
+                         # manifest; the manifest references these by name.
+```
+
+So ASSEMBLED_PAIR is the LAMMPS `assembled_pair.data` (the atoms -- a
+payload the assemble stage already writes) plus a manifest carrying the
+labeled-group geometry the bond job CANNOT re-derive from the atoms: the
+per-wafer z-ranges, the interface plane, and the MEASURED activated_skin
+atom-index set (`DESIGN.md` §2.6 -- a measured set, not a depth cut, so
+it MUST travel). PULL_RESULTS is a manifest of each rung's reduced fields
+(rate, complete, separation_index, atoms_conserved, the verdicts) plus
+its reduced curves (grip_displacement, force_vs_grip): a curve small
+enough stays inline, a curve large enough becomes a payload file -- the
+SAME small-inline / large-by-reference rule, applied field by field. The
+full per-atom trajectory is ALREADY a §3 FrameSetRef payload on scratch
+and is NOT duplicated here.
+
+`write_artifact(scratch, name, record)` writes the manifest and any
+payloads under the member scratch; `read_artifact(scratch, name)` reads
+the manifest and rehydrates the record, opening a payload only when a
+consumer needs it. In v1 the ASSEMBLED_PAIR groups and the PULL_RESULTS
+curves are both small enough to sit inline, so no payload beyond the
+existing LAMMPS data file is written yet -- but the seam IS the
+by-reference one, so a field that GROWS large is externalized later
+without changing the contract.
+
+`[DELEGATE -> the manifest's on-disk syntax (TOML, matching the study-spec
+and rc loaders) and the compression codec for a bulky payload are
+CODE-level; the CONTRACT here is only "readable manifest + referenced
+payloads, small-inline / large-by-reference."]`
+
 `[CODE level, below pseudocode]` the exact directive syntax (SLURM
 `#SBATCH`), the script templating, and the guide's on-disk format.
 

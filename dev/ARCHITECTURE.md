@@ -890,34 +890,40 @@ it*, because the two change on different clocks:
   stack, the scheduler. Stable; it changes only when the machine does, so
   it is the **per-cluster swap unit** — retargeting to a new HPC rewrites
   this section and nothing above it.
-- **Usage section** — keyed by **kind of job**, not by script: the LAMMPS
-  `cascade-md` and `bond-md` runs, any direct `vasp` not inside ALF, and
-  the thin `sequence` footprint. Each names a resource *class* and a size
-  (node / GPU counts, walltime). This is mostly machine-independent — a
-  cascade wants "CPU, ~1 node" on any cluster — so it travels with the
-  pipeline, not with the site.
+- **Usage section** — keyed by **kind of member job**, not by script or
+  by tool: the three per-kind jobs `activate` / `bond` / `analyze` that a
+  member is prepared as (`DESIGN.md` §10.2). Each block names a resource
+  *class* (CPU or GPU), a size (node / GPU counts, walltime), and the
+  module(s) that job switches on. This is mostly machine-independent — an
+  activate job wants "CPU, ~1 node" on any cluster — so it travels with
+  the pipeline, not with the site. This REPLACES an earlier tool-kind
+  keying (`cascade-md` / `bond-md` / direct `vasp` / `sequence`); the
+  member-job axis is the one DESIGN §10 fixed and PSEUDOCODE §14 loads.
 
-The seam between the two is the word **class**: usage names an abstract
-class plus a size; the hardware section binds that class to *this*
-machine's concrete partition and modules, so retargeting is a one-section
-swap. Keying usage by *kind of job* rather than by script follows from
-"routing is per job, not per step" and `VISION.md` principle 7 — the
-Tier-A sequencer is one script that launches several job kinds, so a
-per-script key would lump resource shapes that must differ, while a
-per-kind key lets two scripts that launch the same work share a profile.
+The seam between the two is the word **class**: a usage block names an
+abstract class plus a size, and the hardware section binds that class to
+*this* machine's concrete partition, so retargeting is a one-section
+swap. Keying usage by *kind of member job* rather than by script follows
+from "routing is per job, not per step" and `VISION.md` principle 7: the
+three member jobs want different machines (activate and analyze CPU, bond
+GPU — `DESIGN.md` §10.2), and each switches on only the tool it needs, so
+one key per member job keeps those resource shapes from lumping together.
 
 **The Tier-B boundary — not all resource config is ours.** The usage
-section covers **Tier C** (the LAMMPS cascade and press / pull, plus any
-direct VASP) and the **Tier-A** sequencer. **Tier B is excluded by
-design:** ALF (DeePMD training and the VASP-inside-ALF labeling) and
-Kaleidoscope (Imago characterization) each own their own Parsl + SLURM
-submission (the "no Parsl in Parsl" rule and wall 5), so the deployment
-config *points at* their configs rather than duplicating them — DeePMD
-GPU counts live in ALF's Parsl config, not here. Three of the five rows
-above (VASP-inside-ALF, DeePMD training, Imago) are Tier B and so
-informational — work the pipeline pays for but does not itself route; the
-cascade and re-anneal / press-pull rows are the Tier-C jobs the usage
-section actually keys.
+section covers the three **Tier-C** member jobs (`activate` / `bond` /
+`analyze`) — the LAMMPS cascade and assembly, the press / pull, and the
+measure. It carries no `sequence` footprint: `sabsim` writes scripts and
+the human submits them (`DESIGN.md` §10.1), so the **Tier-A** sequencer
+never claims an allocation of its own — its control flow runs INSIDE each
+member job. **Tier B is excluded by design:** ALF (DeePMD training and
+the VASP-inside-ALF labeling) and Kaleidoscope (Imago characterization)
+each own their own Parsl + SLURM submission (the "no Parsl in Parsl" rule
+and wall 5), so the deployment config *points at* their configs rather
+than duplicating them — DeePMD GPU counts live in ALF's Parsl config, not
+here. The bootstrap's direct VASP seed jobs (steps 1-2) are likewise NOT
+among the three member jobs and NOT keyed here (`PSEUDOCODE.md` §14.5):
+manufacturing the potential is a separate upstream process, and this
+usage map routes only its three consumers.
 
 **Execution walls, flagged for DESIGN.**
 1. **Parsl-in-Parsl** — avoided by the tier separation above.

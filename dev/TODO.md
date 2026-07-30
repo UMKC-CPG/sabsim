@@ -423,6 +423,26 @@ so they are not discovered late (two touch non-negotiable goals). -->
       deepmd-kit module (DeePMD is a runtime `plugin load`), `cascade-md`
       loads `cpg_lammps/22Jul2025`, and a machine-wide `module_paths` adds
       the `module use` for the CPG modulefile tree.
+      PSEUDOCODE §14 DONE (2026-07-29, commit 4c90f7d) — "Deployment:
+      preparing and running": 14.1 closed records (DeploymentConfig /
+      Partition / UsageBlock), 14.2 the ordered JOB_REGISTRY (activate /
+      bond / analyze), 14.3 the `run` selector + `run_member_job`, 14.4
+      the `prepare` writer, 14.5 the generated-script shape.
+      USAGE-KEY RECONCILIATION (2026-07-30): §14.1/§14.4 key `usage` by
+      MEMBER JOB (activate/bond/analyze), but `ARCHITECTURE.md` §4.1 and
+      the template still keyed it by TOOL (cascade-md/bond-md/vasp/
+      sequence) — the §10.2 axis change had only reached §4.3. Fixed BOTH
+      together (user chose "§4.1 + template"): §4.1's usage paragraphs
+      rewritten to member-job keys (resource_class is the inner class
+      seam; `sequence` dropped — the writer+human model has no
+      orchestrator allocation, §10.1; direct-VASP-seed out, §14.5), and
+      `deployment_rc.toml` rewritten to `[usage.activate|bond|analyze]`
+      (activate = classical engine / CPU, bond = deepmd / GPU, analyze =
+      CPU with NO science module in v1 — M1 is pure Python, and the §8
+      characterization is Tier-B Kaleidoscope). Template parses; keys =
+      activate/bond/analyze. CODE SLICE 1 now STARTING (in `deploy/`):
+      §14.1 loader+records + §14.2 registry + §14.3 `run` selector + unit
+      tests; `prepare` (§14.4-14.5) deferred to slice 2.
 - [x] **PSEUDOCODE for `DESIGN.md` §11 (resume) — DONE 2026-07-27 as
       `PSEUDOCODE.md` §13** ("Resuming an interrupted run"). A dedicated
       top-level section (chosen over folding into §9) so resume stays
