@@ -1,0 +1,106 @@
+# environment.yml — SABSIM conda/mamba BASE layer (DRAFT, ARCHITECTURE §4.1)
+# ==========================================================================
+# The conda half of the SABSIM deployment stack, made reproducible. Build:
+#     mamba env create -f environment.yml
+# then layer the venv on top (see build_venv.sh) — the two together ARE the
+# environment. This file is the "how to install SABSIM" record that did not
+# exist before 2026-07-31 (the old env was hand-built with nothing written
+# down). DRAFT: build it under a DEV name, validate, then adopt (§4.1).
+#
+# THREE HARD-WON PRINCIPLES decide what is — and is NOT — here:
+#
+#  1. NO lammps.  LAMMPS is installed by NEITHER conda NOR pip. It comes
+#     ONLY from the site `cpg_lammps` modules (22Jul2025 classical, and
+#     2024.08.29-deepmd for the bond stage): both are glibc-2.14 and ship
+#     their own python wrapper. A conda/pip lammps drops a competing
+#     liblammps.so into the env, and the mamba python's RPATH ($ORIGIN/../
+#     lib) makes a bare dlopen("liblammps.so") load THAT copy (glibc 2.34)
+#     ahead of the site build — which then dies on the glibc-2.28 compute
+#     nodes. (Diagnosed 2026-07-31 by probe job 15520412.)
+#
+#  2. NO mpi4py here.  SABSIM runs `import lammps` and `import mpi4py` in
+#     ONE process, so the two must share ONE MPI runtime. The site LAMMPS
+#     is built against SITE OpenMPI 4.1.5; therefore mpi4py must be built
+#     against that SAME OpenMPI — NOT conda's 5.0. So mpi4py is pip-built
+#     in the venv layer AFTER `module load openmpi/4.1.5_gcc_12.3.0`,
+#     never installed from conda.
+#
+#  3. This layer supplies python + the BINARY ML/inference stack the bond
+#     stage's `pair_style deepmd` needs (deepmd-kit + pytorch + tensorflow
+#     + CUDA) plus the scientific core (numpy/scipy/h5py/pandas/matplotlib).
+#     Compilers and MPI come from the SITE modules, not from conda.
+#
+# MPI DECISION: everything uses the SITE OpenMPI 4.1.5 (the module the
+#   `cpg_lammps` engines are built against, and the one that actually
+#   drives this cluster's interconnect — a generic conda OpenMPI does not,
+#   which is why the conda-MPI path only ever worked single-node). LAMMPS
+#   and mpi4py both use site 4.1.5; NO conda MPI in the pipeline's comms.
+#
+# ONE OPEN VALIDATION RISK (settle with a real MPI-parallel bond run):
+#   deepmd's LAMMPS plugin (libdeepmd_lmp.so) and core libs link NO MPI —
+#   bond inference rides on LAMMPS's site 4.1.5. BUT its PyTorch-op library
+#   libdeepmd_op_pt.so DOES link conda OpenMPI 5.0. If that op library is
+#   exercised at inference (not only in training), it could pull OpenMPI
+#   5.0 into a process that already holds site 4.1.5. A bond run decides:
+#   if fine, site 4.1.5 covers everything and NO OpenMPI 5 is needed; if it
+#   collides, request a SITE-compiled OpenMPI 5 (a documented TODO
+#   contingency, NOT conda's) and rebuild cpg_lammps + deepmd against it.
+# ==========================================================================
+
+# DEV name on purpose: build this ALONGSIDE the production `sabsim`,
+#   validate it, THEN retire the old one and repoint the rc. Never destroy
+#   a working env before its replacement passes the engine probe +
+#   activate + bond smoke.
+name: sabsim_dev
+
+channels:
+  - conda-forge
+  # The old env's history also listed https://conda.software.inl.gov/public
+  #   and defaults. Re-add ONLY if a needed package is missing from
+  #   conda-forge (none is known to be). Omitted to keep the recipe lean
+  #   and the provenance of every package obvious.
+
+dependencies:
+  # --- interpreter ------------------------------------------------------
+  # Pin the minor: the deepmd / torch / tensorflow builds below are all
+  #   cp311 wheels, so 3.11 is load-bearing, not cosmetic (was 3.11.15).
+  - python=3.11
+
+  # --- MLIP inference stack for the bond stage (pair_style deepmd) ------
+  # deepmd-kit is PINNED because its prebuilt LAMMPS plugin is ABI-locked
+  #   to LAMMPS 2024.08.29 (ARCHITECTURE §4.4) — the exact version of the
+  #   `cpg_lammps/2024.08.29-deepmd` site module. These two versions move
+  #   together or not at all. pytorch / tensorflow are deepmd's backends;
+  #   pinned to document the CUDA-12.9 ABI the old env resolved to.
+  - deepmd-kit=3.1.3
+  - pytorch=2.11.*
+  - tensorflow=2.19.*
+  # Pin CUDA to the cluster's GPU/driver level so the GPU builds above
+  #   resolve deterministically (the A100 nodes; was 12.9 in the old env).
+  - cuda-version=12.9
+
+  # --- scientific core (binary; cleanest from conda-forge) -------------
+  - numpy=2.4.*
+  - scipy=1.17.*
+  # The nompi h5py build is CORRECT here — SABSIM's HDF5 I/O is not
+  #   MPI-collective, and a nompi h5py avoids dragging in a second MPI.
+  - h5py=3.16.*
+  - pandas
+  - matplotlib
+
+  # --- housekeeping (explicitly requested in the old env's history) ----
+  - ca-certificates
+  - openssl
+
+  # === DELIBERATELY ABSENT — do NOT add back ===========================
+  #   lammps    -> site `cpg_lammps` modules              (principle 1)
+  #   mpi4py    -> venv, built against site OpenMPI 4.1.5 (principle 2)
+  #   openmpi / gcc / gfortran / fftw / kim-api / n2p2 / plumed / voro /
+  #     cmake / make -> these entered the OLD env ONLY as conda-lammps
+  #     dependencies (they are 40 of the 41 that `mamba remove lammps`
+  #     wanted to prune). The site modules + site toolchain provide them.
+  #     NOTE: deepmd-kit will still pull its own conda openmpi 5.0 — that
+  #     is the validation risk named in the header, not an oversight.
+  #   ase / pymatgen / parsl / ALF / sabsim -> the VENV layer (pip),
+  #     because ase & pymatgen are version-pinned there and ALF & sabsim
+  #     are EDITABLE git installs. See build_venv.sh.

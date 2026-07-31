@@ -40,6 +40,56 @@
 
 <!-- Tasks related to layout, modules, build. -->
 
+- [ ] **Clean deployment-environment rebuild (`sabsim_dev`) — the ROOT fix
+      for the engine failures** (opened 2026-07-31). The hand-built env had
+      NO recorded recipe AND a fatal flaw: sabsim loads LAMMPS in-process
+      (`import lammps`), and a competing conda `liblammps.so` (glibc 2.34)
+      in the mamba env gets loaded via the Python's `DT_RPATH=$ORIGIN/../
+      lib` — searched BEFORE `LD_LIBRARY_PATH` — ahead of the glibc-2.14
+      site build, so it dies on the glibc-2.28 nodes (probe 15520412). The
+      site `cpg_lammps` modules already provide BOTH engines (22Jul2025
+      classical, 2024.08.29-deepmd), glibc-safe, with Python wrappers, so
+      the conda/pip LAMMPS is redundant AND harmful. RECIPE authored in
+      `install/` (DRAFT): `environment.yml` (conda base — NO lammps, NO
+      mpi4py) + `build_venv.sh` (venv — site-OpenMPI-4.1.5-built mpi4py,
+      pinned ase/pymatgen/parsl, editable ALF + sabsim). Build under the
+      DEV name `sabsim_dev` ALONGSIDE the working env; VALIDATE (engine
+      probe -> site liblammps loads; single- then multi-node activate; a
+      real bond/deepmd run); THEN retire the old env + repoint the rc.
+      OPEN RISK: deepmd-kit pulls conda OpenMPI 5.0 while the in-process
+      MPI is site 4.1.5 — the deepmd plugin runs inside site LAMMPS (which
+      owns MPI), so they SHOULD not collide, but a parallel bond run has
+      never been done; if it fails, the deepmd plugin must be rebuilt
+      against site OpenMPI 4.1.5 (heavier). SUBSUMES the multi-node and
+      engine-acquisition items below. Recorded in `ARCHITECTURE.md` §4.1.
+- [ ] **CONTINGENCY (do NOT act yet): request a SITE-compiled OpenMPI 5
+      from the sysadmins** — Paul's idea, 2026-07-31. Trigger ONLY if the
+      clean-env bond validation shows deepmd's `libdeepmd_op_pt.so`
+      actually EXERCISES its linked conda OpenMPI 5.0 at inference and
+      collides with the site OpenMPI 4.1.5 that LAMMPS owns. Evidence so
+      far: the deepmd LAMMPS plugin + core libs link NO MPI (inference
+      rides on LAMMPS's 4.1.5); only `op_pt` links OpenMPI 5.0, and it may
+      be a training-only path. IF the collision is real, conda's generic
+      OpenMPI 5.0 is the WRONG fix (not interconnect-tuned); ask the admins
+      for a SITE-compiled OpenMPI 5 (fabric-aware, like the existing site
+      4.1.5), THEN rebuild `cpg_lammps` (both engines) and the deepmd stack
+      against it. Until the bond run proves the collision, do NOT file the
+      request — the pipeline's MPI (LAMMPS + mpi4py) needs only site 4.1.5,
+      which already exists.
+- [ ] **Multi-node MPI launch failed on the 2-node activate job** (found
+      2026-07-31, job 15516798: ORTE daemon "failed after launch and
+      before communicating back to mpirun" — no common interface/route,
+      dies ~16 s). CORRECTION to the first read: probe 15520412 showed that
+      after `module load cpg_lammps` the launcher IS the SITE OpenMPI 4.1.5
+      (the module loads `openmpi/4.1.5` as a dependency), NOT conda's — so
+      this is most likely a SITE-OpenMPI cross-node INTERFACE-selection
+      issue, not a conda-launcher one. Single node works (job 15517370,
+      1x32); the 2-node run was worked around with `[usage.activate]
+      nodes=1`. LIKELY SUBSUMED by the clean-env rebuild (site-consistent
+      MPI) + launching with `srun` (SLURM PMI, what imago uses) instead of
+      `mpirun`; re-test multi-node there. If it persists, set the
+      `OMPI_MCA` btl/oob TCP interface includes. A `srun`/interface change
+      lands in the `prepare` writer (`src/sabsim/deploy/prepare.py`).
 - [ ] **Engine acquisition — adopt the CPG LAMMPS module scheme; DeePMD
       needs a dedicated site build (de-risked 2026-07-28).** Today sabsim
       imports a conda-vendored LAMMPS (`virtual_envs/sabsim`), which on a
@@ -666,6 +716,17 @@ so they are not discovered late (two touch non-negotiable goals). -->
 <!-- Tasks related to algorithms and data structures, mathematical
 foundations, interaction rules. -->
 
+- [ ] **Rename the study-level "member" to "material pair"** (deferred,
+      opened 2026-07-31). The word is overloaded: §1.1/§2.1 and
+      `spec/records.py` use "member" for a study-level MATERIAL PAIR,
+      while §4.4 uses it for a COMMITTEE member (one of the `n_models`
+      MLIPs). Preference (Paul, 2026-07-31): RESERVE "member" for
+      committee members — matching §4.4's existing usage — and rename the
+      material-pair sense to "material pair" (or similar) across
+      DESIGN / PSEUDOCODE / `records.py` / the spec schema / tests. A
+      disambiguation note in §1.1 covers readers for now (added the same
+      day); the full rename is NOT urgent — do not scour the code until
+      this is scheduled deliberately.
 - [ ] Document the MLIP backend-plugin mechanism when DESIGN work
       begins: the ANI-HDF5 ↔ DeePMD unit-factor conversion (round-trip
       already prototyped and unit-tested) and the potential-agnostic

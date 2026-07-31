@@ -71,6 +71,16 @@ So a **study** names its members and declares the **relations** among them
 **member** is one material pair under one protocol, and beneath that a
 **realization** is one seed.
 
+**A caution on the word "member."** The member here is a *material
+pair*. It is NOT the *committee member* of §4.4 — one of the `n_models`
+machine-learned potentials whose mutual disagreement is the uncertainty
+signal. These are different axes: a **study** is composed of members
+(material pairs), whereas a single **potential** is composed of
+committee members (models). Both borrow the word only because each is
+one element of a set — nothing else connects them. One leaf directory
+runs one material-pair member under a committee of (by default four)
+models.
+
 But a member must remain **self-contained and independently
 reproducible**, executable on its own and identical whether or not a
 study ever mentions it. A study is a composition over members, not an
