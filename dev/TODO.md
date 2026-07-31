@@ -44,54 +44,52 @@
       for the engine failures** (opened 2026-07-31). The hand-built env had
       NO recorded recipe AND a fatal flaw: sabsim loads LAMMPS in-process
       (`import lammps`), and a competing conda `liblammps.so` (glibc 2.34)
-      in the mamba env gets loaded via the Python's `DT_RPATH=$ORIGIN/../
-      lib` — searched BEFORE `LD_LIBRARY_PATH` — ahead of the glibc-2.14
-      site build, so it dies on the glibc-2.28 nodes (probe 15520412). The
-      site `cpg_lammps` modules already provide BOTH engines (22Jul2025
-      classical, 2024.08.29-deepmd), glibc-safe, with Python wrappers, so
-      the conda/pip LAMMPS is redundant AND harmful. RECIPE authored in
-      `install/` (DRAFT): `environment.yml` (conda base — NO lammps, NO
-      mpi4py) + `build_venv.sh` (venv — site-OpenMPI-4.1.5-built mpi4py,
-      pinned ase/pymatgen/parsl, editable ALF + sabsim). Build under the
-      DEV name `sabsim_dev` ALONGSIDE the working env; VALIDATE (engine
-      probe -> site liblammps loads; single- then multi-node activate; a
-      real bond/deepmd run); THEN retire the old env + repoint the rc.
-      OPEN RISK: deepmd-kit pulls conda OpenMPI 5.0 while the in-process
-      MPI is site 4.1.5 — the deepmd plugin runs inside site LAMMPS (which
-      owns MPI), so they SHOULD not collide, but a parallel bond run has
-      never been done; if it fails, the deepmd plugin must be rebuilt
-      against site OpenMPI 4.1.5 (heavier). SUBSUMES the multi-node and
-      engine-acquisition items below. Recorded in `ARCHITECTURE.md` §4.1.
-- [ ] **CONTINGENCY (do NOT act yet): request a SITE-compiled OpenMPI 5
-      from the sysadmins** — Paul's idea, 2026-07-31. Trigger ONLY if the
-      clean-env bond validation shows deepmd's `libdeepmd_op_pt.so`
-      actually EXERCISES its linked conda OpenMPI 5.0 at inference and
-      collides with the site OpenMPI 4.1.5 that LAMMPS owns. Evidence so
-      far: the deepmd LAMMPS plugin + core libs link NO MPI (inference
-      rides on LAMMPS's 4.1.5); only `op_pt` links OpenMPI 5.0, and it may
-      be a training-only path. IF the collision is real, conda's generic
-      OpenMPI 5.0 is the WRONG fix (not interconnect-tuned); ask the admins
-      for a SITE-compiled OpenMPI 5 (fabric-aware, like the existing site
-      4.1.5), THEN rebuild `cpg_lammps` (both engines) and the deepmd stack
-      against it. Until the bond run proves the collision, do NOT file the
-      request — the pipeline's MPI (LAMMPS + mpi4py) needs only site 4.1.5,
-      which already exists.
-- [ ] **Multi-node MPI launch failed on the 2-node activate job** (found
-      2026-07-31, job 15516798: ORTE daemon "failed after launch and
-      before communicating back to mpirun" — no common interface/route,
-      dies ~16 s). CORRECTION to the first read: probe 15520412 showed that
-      after `module load cpg_lammps` the launcher IS the SITE OpenMPI 4.1.5
-      (the module loads `openmpi/4.1.5` as a dependency), NOT conda's — so
-      this is most likely a SITE-OpenMPI cross-node INTERFACE-selection
-      issue, not a conda-launcher one. Single node works (job 15517370,
-      1x32); the 2-node run was worked around with `[usage.activate]
-      nodes=1`. LIKELY SUBSUMED by the clean-env rebuild (site-consistent
-      MPI) + launching with `srun` (SLURM PMI, what imago uses) instead of
-      `mpirun`; re-test multi-node there. If it persists, set the
-      `OMPI_MCA` btl/oob TCP interface includes. A `srun`/interface change
-      lands in the `prepare` writer (`src/sabsim/deploy/prepare.py`).
+      was loaded via the Python's `DT_RPATH=$ORIGIN/../lib` (searched BEFORE
+      `LD_LIBRARY_PATH`), dying on the glibc-2.28 nodes (probe 15520412).
+      RECIPE in `install/` (DRAFT): `environment.yml` (conda base, NO
+      lammps package; mpi4py FROM conda) + `build_venv.sh` (venv — pinned
+      ase/pymatgen/parsl, editable ALF + sabsim). Both BUILT + verified
+      2026-07-31 (GPU builds land with `CONDA_OVERRIDE_CUDA=12.9`; venv +
+      editable installs OK). MPI RESOLVED: the stack runs on CONDA OpenMPI
+      5.0.10 (deepmd forces it, the python RPATH loads it), and it DRIVES
+      THE INFINIBAND FABRIC via UCX at ~12 GB/s (job 15551674) — no site
+      OpenMPI needed. Launcher = `srun --mpi=pmix` / `mpirun` after
+      `unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU` (the
+      allocation exports those mutually-exclusive — that was the whole
+      multi-node blocker). REMAINING: (a) build LAMMPS from SOURCE on the
+      cluster (el8-native) against conda OpenMPI 5.0.10 -> venv, BOTH the
+      classical engine and the deepmd-2024.08.29 engine (the site
+      `cpg_lammps` 4.1.5 modules DON'T fit — they mismatch conda 5.0.10);
+      (b) a `sabsimrc.dev` (activate sabsim_dev + venv); (c) validate
+      engine + activate + bond, THEN retire the old env + repoint the rc.
+      SUBSUMES the multi-node and engine-acquisition items below. Recorded
+      in `ARCHITECTURE.md` §4.1.
+- [x] **RESOLVED — the OpenMPI-5 sysadmin request is NOT needed**
+      (2026-07-31). Paul's contingency idea. The fabric test (job 15551674)
+      showed conda OpenMPI 5.0.10 + UCX ALREADY drives this cluster's
+      InfiniBand fabric at ~12 GB/s (UCX picks `rc_mlx5`) — a site-compiled
+      OpenMPI 5 would buy nothing. And the op_pt collision fear is moot: the
+      whole stack is ONE MPI (conda 5.0.10), so there is nothing for it to
+      collide with. Do not file the request.
+- [x] **RESOLVED — multi-node launch works; the blocker was a SLURM env
+      conflict, not the interconnect** (2026-07-31). Not conda-vs-site MPI
+      either: the allocation exports `SLURM_MEM_PER_NODE` and
+      `SLURM_MEM_PER_CPU` together, and the nested `srun` that OpenMPI 5's
+      PRRTE uses to launch its per-node daemon aborts on "mutually
+      exclusive" (job 15551533). FIX: `unset SLURM_MEM_PER_NODE
+      SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU` before launch — then BOTH
+      `srun --mpi=pmix` and `mpirun` span nodes cleanly (job 15551674, 2
+      nodes, ~12 GB/s over the fabric). Also disproves the old
+      "srun --mpi=pmix fails / munge" memory: pmix (pmix_v2) is offered and
+      works. Bake the unset into the generated run scripts
+      (`src/sabsim/deploy/prepare.py`).
 - [ ] **Engine acquisition — adopt the CPG LAMMPS module scheme; DeePMD
-      needs a dedicated site build (de-risked 2026-07-28).** Today sabsim
+      needs a dedicated site build (de-risked 2026-07-28).**
+      SUPERSEDED for the `sabsim_dev` env (see the rebuild item above): the
+      site `cpg_lammps` modules are OpenMPI 4.1.5 and MISMATCH the conda
+      OpenMPI 5.0.10 that env forces in-process, so LAMMPS is instead
+      source-built against conda 5.0.10. The DeePMD build de-risking below
+      still applies to whatever LAMMPS build hosts the plugin. Today sabsim
       imports a conda-vendored LAMMPS (`virtual_envs/sabsim`), which on a
       real compute node links a CONDA OpenMPI (not the site interconnect)
       and whose sibling `mamba/envs/sabsim/lib/liblammps.so` won't even

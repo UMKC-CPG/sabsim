@@ -785,37 +785,34 @@ engines, with the Python side untouched. Either way the CMake experience
 carries over; neither path abandons pip for the package itself.
 
 **The environment that package installs into is a reproducible two-layer
-recipe (`install/`), and it deliberately vendors no LAMMPS.** The stack is
-a conda/mamba base (`install/environment.yml`: Python 3.11 + the binary
-ML/inference stack — deepmd-kit, pytorch, tensorflow, CUDA — plus the
-scientific core) with a venv layered on top (`install/build_venv.sh`: the
-editable `sabsim` and ALF, the pinned `ase`/`pymatgen`/`parsl`, and a
-*source-built* `mpi4py`). Three principles, learned by diagnosing a real
-compute-node failure (probe job 15520412, 2026-07-31), decide what the env
-may contain. First, **no vendored LAMMPS**: LAMMPS comes only from the
-site `cpg_lammps` modules (both the classical 22Jul2025 and the deepmd
-2024.08.29, each glibc-2.14 with its own Python wrapper). A conda- or
-pip-installed LAMMPS leaves a competing `liblammps.so` in the env, and
-because the conda Python carries `DT_RPATH=$ORIGIN/../lib` — searched
-*before* `LD_LIBRARY_PATH` — a bare `dlopen("liblammps.so")` loads that
-copy (glibc 2.34) ahead of the site build and dies on the glibc-2.28
-nodes. Second, **one MPI**: SABSIM runs `import lammps` and `import
-mpi4py` in one process, so both must share the site OpenMPI 4.1.5 the site
-LAMMPS is built against — hence `mpi4py` is source-built against the site
-`mpicc`, never taken from conda's OpenMPI 5.0. Third, **compilers and MPI
-come from the site modules, not conda** — and the site OpenMPI 4.1.5 is
-what drives this cluster's interconnect (a generic conda OpenMPI does not,
-which is why the conda-MPI path only ever ran single-node). One risk stays
-open until a real MPI-parallel bond run proves it: deepmd's LAMMPS plugin
-and core libraries link no MPI (bond inference rides on LAMMPS's 4.1.5),
-but its PyTorch-op library `libdeepmd_op_pt.so` links conda OpenMPI 5.0 —
-and if that op is exercised at inference it could pull 5.0 into a process
-already holding site 4.1.5. The bond run decides it: clean means no
-OpenMPI 5 is ever needed; a collision escalates to the OpenMPI-5
-contingency (`TODO.md`) — a *site*-compiled 5, then cpg_lammps and deepmd
-rebuilt on it. The recipe is built under a DEV name (`sabsim_dev`) alongside the
-working env and adopted only after it passes the engine probe, activate,
-and bond checks — never by mutating the live env in place.
+recipe (`install/`), built on ONE MPI: conda OpenMPI 5.0.10.** The stack
+is a conda/mamba base (`install/environment.yml`: Python 3.11 + the binary
+ML/inference stack — deepmd-kit, pytorch, tensorflow, CUDA — the
+scientific core, and `mpi4py`) with a venv layered on top
+(`install/build_venv.sh`: the editable `sabsim` and ALF, and the pinned
+`ase`/`pymatgen`/`parsl`). Its shape was learned by diagnosing real
+compute-node failures (probe 15520412; launcher jobs 15551533/15551674,
+2026-07-31). **The MPI is conda OpenMPI 5.0.10, and it is forced, not
+chosen**: deepmd-kit pulls it into the env, and the conda Python's
+`DT_RPATH=$ORIGIN/../lib` — searched *before* `LD_LIBRARY_PATH` — makes
+its `libmpi` the one every in-process `import` loads. It is also the right
+answer: conda's 5.0.10 ships UCX and drives this cluster's InfiniBand
+fabric at ~12 GB/s (UCX selects `rc_mlx5`), so no site-compiled OpenMPI is
+needed. `mpi4py` therefore comes from conda too, matching that `libmpi`.
+**LAMMPS is not a conda/pip package**: such a package leaves a competing
+`liblammps.so` that the RPATH loads ahead of anything else, and its glibc
+floor kills it on the 2.28 nodes. Instead LAMMPS is a *source* build made
+on the cluster (el8-native, glibc-safe) and linked against this env's
+conda OpenMPI 5.0.10, installed into the venv, so it shares the one MPI.
+The site `cpg_lammps` modules do NOT fit here — built against site OpenMPI
+4.1.5, they mismatch the conda 5.0.10 the Python forces. **The launcher**
+is `srun --mpi=pmix` (or `mpirun`) after `unset SLURM_MEM_PER_NODE
+SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU` — the allocation exports those
+mutually-exclusive, which otherwise aborts the nested daemon launch, so
+every generated run script bakes in the unset. The recipe is built under a
+DEV name (`sabsim_dev`) alongside the working env and adopted only after
+it passes the engine, activate, and bond checks — never by mutating the
+live env in place.
 
 **Resolution: `SABSIM_LOCAL` first, then `SABSIM_SHARE`.** For any
 shared input — a potential, a reference dataset, the deployment config
