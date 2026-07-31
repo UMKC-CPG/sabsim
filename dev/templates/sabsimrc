@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# =====================================================================
+# SABSIM shell rc — TEMPLATE (tracked, distributable)
+# ---------------------------------------------------------------------
+# This is the source of truth the install step copies to a MACHINE-LOCAL
+# `.sabsim/sabsimrc` inside the user's clone (which is gitignored); each
+# user then edits that copy to match their own machine. It travels with
+# the repository, sitting beside the study-spec and deployment-rc
+# templates in `dev/templates/`.
+#
+# Like `deployment_rc.toml`, the values below are EXAMPLES for the local
+# admin to set — the Rulis-lab pixstor/cpg paths, shown as a WORKED
+# example — NOT defaults baked into the code. "Where to run" is stated
+# here, never guessed (VISION principle 1; DESIGN.md §1.4, no hidden
+# defaults). Edit every path to your own machine before relying on it.
+#
+# WHY a shell file and not the TOML deployment rc: the three roots must
+# be live before the first `python` starts, because SABSIM_SHARE names
+# the install itself — a config the code had to locate first would be a
+# circular lookup — so the roots live in this sourced shell file, upstream
+# of any SABSIM code (ARCHITECTURE.md §4.1). After it is sourced, an
+# sbatch job INHERITS this environment (SLURM's default is --export=ALL),
+# so the generated compute-node scripts find `python`, `mpirun`, and the
+# `sabsim` command already on PATH without restating any of it.
+#
+# Source it from your login shell (the `ssabsim` alias does exactly this)
+# before running `sabsim prepare`.
+# =====================================================================
+
+# --- The three location roots (ARCHITECTURE.md §4.1) -----------------
+# SABSIM_SCRATCH — per-user, write-heavy, regenerable run output. Stated
+# as the human-readable $HOME/data path (a link to the pixstor mount),
+# NOT the resolved mount, so a sysadmin's mount detail never leaks into
+# the baked-in script snapshots (§4.1: a link is convenience, not
+# evidence).
+export SABSIM_SCRATCH="$HOME/data/scratch/sabsim"
+
+# SABSIM_SHARE — group, read-mostly, authoritative: the install, the
+# engines (LAMMPS), the source potentials and reference datasets.
+export SABSIM_SHARE="/cluster/VAST/rulisp-lab/cpg"
+
+# SABSIM_LOCAL — OPTIONAL per-user override of anything in SABSIM_SHARE.
+# Declared-but-inert in v1 (every lookup falls straight through); its
+# absence is normal, not an error. Uncomment and point it at a personal
+# copy only when you actually need one — the manifest records the winner
+# so an override stays auditable rather than silent.
+# export SABSIM_LOCAL="$HOME/data/sabsim-local"
+
+# --- Engine reference data (derived from SABSIM_SHARE) ---------------
+# Where LAMMPS looks for its bundled potential files (Si.sw, etc.). Read
+# through the `current` symlink so a LAMMPS rebuild retargets this in one
+# place rather than in every rc and script.
+export LAMMPS_POTENTIALS=\
+"$SABSIM_SHARE/programs/lammps/current/share/lammps/potentials"
+
+# --- The layered runtime environment --------------------------------
+# This reproduces the proven two-step interactive activation (the `sabsim`
+# then `ssabsim` aliases): a full `conda activate` of the mamba env, then
+# the venv sourced ON TOP of it. Doing the FULL conda activate — not just
+# a PATH-prepend — is deliberate: activation runs the env's
+# `etc/conda/activate.d` hooks, which is where the deepmd plugin path
+# (LAMMPS_PLUGIN_PATH, for the bond GPU job) and the compiler toolchain
+# (CC/CXX/FC, for any future Fortran build) get set. A bare PATH-prepend
+# would run none of those hooks and silently omit both.
+#
+# Step 1 — the conda/mamba env: supplies mpirun and the MPI stack, and
+# fires the activate.d hooks described above. The LD_LIBRARY_PATH append
+# mirrors the `sabsim` alias, a belt-and-suspenders for any library not
+# already found via rpath (most plausibly the deepmd/torch stack).
+conda activate sabsim
+export LD_LIBRARY_PATH=\
+"/cluster/VAST/rulisp-lab/cpg/mamba/envs/sabsim/lib:$LD_LIBRARY_PATH"
+
+# Step 2 — the venv ON TOP: its activate prepends its own bin, so `python`
+# resolves to the venv interpreter — which carries the editable `sabsim`
+# install and the pinned numpy / ASE / pymatgen / mpi4py / LAMMPS-binding
+# deps (the venv was built --system-site-packages over this same conda
+# env) — while `mpirun` still resolves from the conda env beneath it.
+source /cluster/VAST/rulisp-lab/cpg/virtual_envs/sabsim/bin/activate

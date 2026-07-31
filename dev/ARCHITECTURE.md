@@ -736,7 +736,16 @@ fully populated, and the user is guided to edit it to match their own
 machine — which keeps faith with "none is defaulted": the values are
 stated in a file the user owns rather than inferred by code, and the
 generator is exactly the "defaults exist only as a generator that emits
-a complete file" escape hatch (`DESIGN.md` §1.4).
+a complete file" escape hatch (`DESIGN.md` §1.4). That generation starts
+from a *tracked* template, `dev/templates/sabsimrc`, sitting beside the
+study-spec and deployment-rc templates — the distributable source of
+truth that carries the lab's own paths as a WORKED example, exactly as
+`deployment_rc.toml` does, not as code-level defaults. The v1 install
+instantiates it by copying the template to `.sabsim/sabsimrc`, guarded so
+an already-edited rc is never clobbered; the user then edits that copy.
+A smarter emit-with-detected-values generator can replace the copy later
+without touching the template or this contract, because the tracked
+template is the invariant either way.
 
 **Two install shapes share the one rc mechanism** (a system-wide
 administrator install, serving every user at once, is deferred). For a
@@ -749,6 +758,31 @@ split the three roots were drawn along, and the case where `SABSIM_LOCAL`
 finally earns its keep: a personal potential shadowing the group's copy,
 recorded by the manifest (below) so the override is auditable rather than
 silent.
+
+**How the package installs — pip today, a compiled backend when Fortran
+arrives.** SABSIM is a Python package (`src/sabsim`, with inter-module
+imports and a console entry point), so it installs with `pip install -e .
+--no-deps` into the environment the rc activates: *editable*, so the
+working tree stays live with no reinstall as it is developed, and
+`--no-deps`, so pip never re-resolves the numpy / ASE / pymatgen / mpi4py
+/ LAMMPS-binding stack the conda+venv layer pins by hand to match the
+LAMMPS ABI. That install is precisely what lets a generated script
+(`DESIGN.md` §10.5) stay lean: `python -m sabsim` and the `sabsim`
+command both resolve from the activated environment, so no script has to
+restate a `PYTHONPATH`. This is deliberately NOT the CMake-driven install
+the group's Fortran codes use (imago) — pip understands packages, entry
+points, and the editable link, whereas a CMake copy-to-bin would
+hand-roll, worse, what pip gives for free. The two reconcile the day
+SABSIM grows Fortran, and the choice then follows how that Fortran is
+USED. Fortran *called from* Python (an imported subroutine) switches the
+build backend to one that drives CMake or Meson under `pip install`
+itself — `scikit-build-core`, or `meson-python` as numpy/scipy now use —
+keeping the editable install and the `sabsim` command intact. Standalone
+Fortran *executables* invoked as subprocesses (imago's shape, and how
+SABSIM already drives LAMMPS) instead get their own small CMake build
+that installs the binaries into `SABSIM_SHARE/bin` beside the other
+engines, with the Python side untouched. Either way the CMake experience
+carries over; neither path abandons pip for the package itself.
 
 **Resolution: `SABSIM_LOCAL` first, then `SABSIM_SHARE`.** For any
 shared input — a potential, a reference dataset, the deployment config
