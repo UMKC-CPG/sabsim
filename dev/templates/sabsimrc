@@ -64,12 +64,14 @@ export LAMMPS_POTENTIALS=\
 # would run none of those hooks and silently omit both.
 #
 # Step 1 — the conda/mamba env: supplies mpirun and the MPI stack, and
-# fires the activate.d hooks described above. The LD_LIBRARY_PATH append
-# mirrors the `sabsim` alias, a belt-and-suspenders for any library not
-# already found via rpath (most plausibly the deepmd/torch stack).
+# fires the activate.d hooks described above. Do NOT append the env's
+# `lib` to LD_LIBRARY_PATH: conda's RPATH already resolves the whole stack
+# (numpy/mpi4py/torch/deepmd/ase/pymatgen/sabsim import with an EMPTY
+# LD_LIBRARY_PATH — verified 2026-08-04), and a global prepend leaks the
+# env's newer libssl/libstdc++ onto the path of unrelated system binaries
+# a login shell runs (e.g. `/usr/bin/flatpak` from /etc/profile.d/
+# flatpak.sh), which then print noisy `version not found` loader warnings.
 conda activate sabsim
-export LD_LIBRARY_PATH=\
-"/cluster/VAST/rulisp-lab/cpg/mamba/envs/sabsim/lib:$LD_LIBRARY_PATH"
 
 # Step 2 — the venv ON TOP: its activate prepends its own bin, so `python`
 # resolves to the venv interpreter — which carries the editable `sabsim`
