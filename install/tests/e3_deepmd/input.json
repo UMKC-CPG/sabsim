@@ -1,0 +1,63 @@
+{
+    "_comment": "E3 SMOKE — adapted from cpg/share/train_deepmd_si/input.json. Trimmed to a SHORT run under deepmd-kit 3.1.3 (PyTorch backend) inside sabsim_dev, purely to freeze a VALID Si model for a pair_style deepmd force step on the Stack C engine. Physics is NOT converged and is not the point; systems point at the real shared AIMD Si data (read-only).",
+    "model": {
+        "type_map": ["Si"],
+        "descriptor": {
+            "type": "se_e2_a",
+            "rcut_smth": 5.0,
+            "rcut": 6.0,
+            "sel": [80],
+            "neuron": [25, 50, 100],
+            "resnet_dt": false,
+            "axis_neuron": 16,
+            "seed": 1
+        },
+        "fitting_net": {
+            "neuron": [240, 240, 240],
+            "resnet_dt": true,
+            "seed": 1
+        }
+    },
+    "learning_rate": {
+        "type": "exp",
+        "decay_steps": 500,
+        "start_lr": 0.001,
+        "stop_lr": 3.51e-6
+    },
+    "loss": {
+        "type": "ener",
+        "start_pref_e": 0.02,
+        "limit_pref_e": 1,
+        "start_pref_f": 1000,
+        "limit_pref_f": 1,
+        "start_pref_v": 0.02,
+        "limit_pref_v": 1
+    },
+    "training": {
+        "training_data": {
+            "systems": [
+                "/cluster/VAST/rulisp-lab/cpg/share/train_deepmd_si/data/aimd_300k_nvt",
+                "/cluster/VAST/rulisp-lab/cpg/share/train_deepmd_si/data/strained_new",
+                "/cluster/VAST/rulisp-lab/cpg/share/train_deepmd_si/data/relax_bulk"
+            ],
+            "batch_size": "auto",
+            "auto_prob": "prob_sys_size"
+        },
+        "validation_data": {
+            "systems": [
+                "/cluster/VAST/rulisp-lab/cpg/share/train_deepmd_si/data/relax_bulk"
+            ],
+            "batch_size": 1,
+            "numb_btch": 3
+        },
+        "numb_steps": 3000,
+        "seed": 10,
+        "disp_file": "lcurve.out",
+        "disp_freq": 200,
+        "save_freq": 1000,
+        "save_ckpt": "model.ckpt",
+        "disp_training": true,
+        "time_training": true,
+        "profiling": false
+    }
+}
