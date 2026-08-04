@@ -82,6 +82,23 @@ dependencies:
   - pandas
   - matplotlib
 
+  # --- build toolchain for the LAMMPS source build ---------------------
+  # LAMMPS is built from source against THIS env's conda OpenMPI 5.0.10
+  #   (install/build_lammps.sh), so the conda C/C++ compiler + cmake +
+  #   make + FFTW must be in the env. Building with the CONDA toolchain
+  #   (not the site gcc) means the LAMMPS binary uses conda's libstdc++
+  #   (16), which matches the deepmd plugin's CXXABI — likely removing the
+  #   LD_PRELOAD dance the site build needed.
+  - cxx-compiler
+  - cmake
+  - make
+  - fftw
+  # LAMMPS optional-package deps — provide what packages need rather than
+  #   trimming LAMMPS. COMPRESS needs zlib HEADERS (the env ships only the
+  #   runtime libzlib). Add libpng / libcurl here too if WITH_PNG /
+  #   WITH_CURL are enabled in build_lammps.sh.
+  - zlib
+
   # --- housekeeping (explicitly requested in the old env's history) ----
   - ca-certificates
   - openssl

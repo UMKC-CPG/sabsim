@@ -31,6 +31,7 @@ ALF_CLONE="/cluster/VAST/rulisp-lab/cpg/clones/ALF"   # ALF clone (editable)
 ASE_VERSION="3.29.0"
 PYMATGEN_VERSION="2026.5.4"
 PARSL_VERSION="2026.6.29"
+PYTEST_VERSION="9.1.1"          # the test suite's own runner (dev dep)
 
 # --- 1. Create the venv over the conda base ---------------------------
 # --system-site-packages so the venv SEES the conda deepmd/torch/tf/numpy
@@ -44,10 +45,14 @@ python -m pip install --upgrade pip
 python -c "import mpi4py; print('mpi4py from conda:', mpi4py.__file__)"
 
 # --- 2. Pinned scientific + orchestration deps ------------------------
+# pytest is included so a fresh checkout can run the test suite (the
+#   project's definition-of-done leans on it, ARCHITECTURE §5.1) without a
+#   second manual install.
 python -m pip install \
     "ase==${ASE_VERSION}" \
     "pymatgen==${PYMATGEN_VERSION}" \
-    "parsl==${PARSL_VERSION}"
+    "parsl==${PARSL_VERSION}" \
+    "pytest==${PYTEST_VERSION}"
 
 # --- 3. Editable installs: ALF first, then SABSIM ---------------------
 # ALF is the active-learning driver; SABSIM imports it. --no-deps on
