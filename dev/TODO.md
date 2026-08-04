@@ -64,6 +64,15 @@
       engine + activate + bond, THEN retire the old env + repoint the rc.
       SUBSUMES the multi-node and engine-acquisition items below. Recorded
       in `ARCHITECTURE.md` §4.1.
+- [ ] **Restore the trimmed LAMMPS packages when a study needs them**
+      (2026-07-31, Paul flagged). The first conda-toolchain build
+      (`install/build_lammps.sh`) cut `ML-HDNNP`/`DOWNLOAD_N2P2`,
+      `VORONOI`/`DOWNLOAD_VORO`, and `WITH_PNG`/`WITH_CURL` to isolate a
+      clean core build. None are on the v1 SW/ZBL + deepmd path, but
+      re-add them (dep -> `environment.yml`, flag -> `build_lammps.sh`;
+      `libpng`/`libcurl` for PNG/CURL, n2p2/voro self-download) if a later
+      study needs HDNNP potentials, Voronoi analysis, or image/curl
+      output. Also noted at the package list in `build_lammps.sh`.
 - [x] **RESOLVED — the OpenMPI-5 sysadmin request is NOT needed**
       (2026-07-31). Paul's contingency idea. The fabric test (job 15551674)
       showed conda OpenMPI 5.0.10 + UCX ALREADY drives this cluster's
@@ -145,6 +154,28 @@
       export and `module load cpg_lammps`, which sets it right. (Ran the
       smoke by pointing the env at `.../lammps/current/share/lammps/
       potentials` directly.)
+      LANDED 2026-08-04 — PIVOTED to the CONDA-DERIVED engine as primary:
+      the code needs mpi4py comm-sharing, which the site OpenMPI-4.1.5
+      build cannot provide (adopting it would need a site-4.1.5 mpi4py, so
+      "adopt" doesn't avoid a build). Both engines source-built against
+      conda OpenMPI 5.0.10 and published as `cpg_lammps_conda/{22Jul2025,
+      2024.08.29-deepmd}` modules (NO LD_PRELOAD — conda libstdc++
+      suffices); `deployment_rc` + `prepare.py` wired; `programs/lammps/
+      current` repointed; `ARCHITECTURE.md` §4.1/§4.4 reconciled. Validated
+      F1/E1/E2/E3/E4/E5/build/feat ALL PASS
+      (`install/tests/{MATRIX,LEDGER}.md`), incl. a real deepmd 2.2.10/TF
+      `graph.pb` running on the 3.1.3 plugin (job 15686597) and a full
+      `prepare`->activate green run (job 15703266). Site `cpg_lammps` stays
+      a documented fallback. STILL OPEN: retire the old `sabsim` env; run
+      the `bond` job kind end-to-end.
+
+- [ ] **Deployment: add a MEMORY knob to `[usage.*]` (CODE).** E5 (job
+      15697360) OOM-killed the activate cascade on the partition default;
+      `deployment_rc`/`prepare.py` emit no `#SBATCH --mem`, so E5 only
+      passed with a hand-added `--mem=96G` (actual peak was ~306 MB). Add a
+      `memory` field to the usage schema (`deploy/config.py`) and emit it
+      from `prepare.py` with a sensible default. Record: T-E5-ACTIVATE in
+      `install/tests/LEDGER.md`.
 
 - [ ] **General-triclinic support — lift the orthogonal-cell boundary
       (documented 2026-07-29 in `ARCHITECTURE.md`).** The facing-pair

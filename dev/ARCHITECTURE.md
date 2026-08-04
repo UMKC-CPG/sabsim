@@ -803,9 +803,14 @@ needed. `mpi4py` therefore comes from conda too, matching that `libmpi`.
 `liblammps.so` that the RPATH loads ahead of anything else, and its glibc
 floor kills it on the 2.28 nodes. Instead LAMMPS is a *source* build made
 on the cluster (el8-native, glibc-safe) and linked against this env's
-conda OpenMPI 5.0.10, installed into the venv, so it shares the one MPI.
-The site `cpg_lammps` modules do NOT fit here — built against site OpenMPI
-4.1.5, they mismatch the conda 5.0.10 the Python forces. **The launcher**
+conda OpenMPI 5.0.10. It installs to a *versioned prefix* with a
+`PKG_PYTHON=OFF` ctypes wrapper, selected per job by `PYTHONPATH` — a
+`family("lammps")` module over the conda build (§4.4), NOT dropped into the
+venv, which holds only one `lammps`. It shares the one MPI because its
+RPATH resolves this env's conda `libmpi`. The site `cpg_lammps` modules
+link site OpenMPI 4.1.5, so they cannot share `mpi4py`'s conda-5.0.10
+communicator (they run only in the LAMMPS-owns-MPI model, §4.4); they stay
+a documented fallback, not the primary. **The launcher**
 is `srun --mpi=pmix` (or `mpirun`) after `unset SLURM_MEM_PER_NODE
 SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU` — the allocation exports those
 mutually-exclusive, which otherwise aborts the nested daemon launch, so
@@ -1219,28 +1224,46 @@ NOT know or care which LAMMPS binary answers. That knowledge lives
 entirely in the runtime environment, selected by a modulefile — so a
 different engine build is a deployment knob, not a code change.
 
-**Not a conda-vendored engine.** A LAMMPS taken from a conda/mamba
-environment fails on this cluster twice over: its binary needs a glibc
-newer than the compute nodes provide (so it will not start), and it links
-a generic conda OpenMPI with no verbs/InfiniBand and no ties to the
-site's SLURM (so a real MPI run is slow and fragile). The engine is
-therefore acquired from a **CPG-owned modulefile tree** (adopted from the
-Imago project), whose builds use the SITE toolchain — gcc 12.3.0, OpenMPI
-4.1.5, FFTW — with every dependency baked into an RPATH and no libpython
-linked. Two consequences make this the right seam: the binary **starts
-anywhere** (no glibc symbol above 2.14, resolvable from inside any conda
-environment or none), and it **runs on the real interconnect**. Because
-no PYTHON package is compiled in, one pure-ctypes wrapper serves every
-Python version, which is exactly what lets `LammpsEngine` import it
-unchanged.
+**Source-built and conda-linked, because the code forces one MPI.** The
+engine build is not a free choice: §4.1 establishes that sabsim loads
+LAMMPS *in-process* and shares one `MPI_COMM_WORLD` between `mpi4py` and
+`liblammps` (`cli.py`, `lammps_engine.py`, `live_stages.py`), so both MUST
+link the SAME `libmpi`. The conda Python's `DT_RPATH` already forces that
+`libmpi` to be the env's conda OpenMPI 5.0.10 (§4.1). An engine linking
+any other MPI cannot share the communicator. The site `cpg_lammps` builds
+(adopted from Imago; SITE toolchain gcc 12.3.0 / **OpenMPI 4.1.5**) link
+the wrong `libmpi`: they load and run in the LAMMPS-*owns*-MPI model
+(verified, job 15580445) but CANNOT share `mpi4py`'s communicator without
+also building a site-4.1.5 `mpi4py` — so "adopt the site engine" does not
+actually avoid a build (VISION principle 2 is about avoiding *net*
+machinery, and here adopting costs more of it, not less). The engine is
+therefore a **source build made on the cluster, linked against this env's
+conda OpenMPI 5.0.10** (`install/build_lammps.sh`): el8-native and
+glibc-safe (no symbol above GLIBC_2.14, so it starts on the 2.28 nodes),
+`PKG_PYTHON=OFF` so one pure-ctypes wrapper serves any Python and
+`LammpsEngine` imports it unchanged, with an RPATH to the conda libs so it
+finds that one `libmpi`. The conda 5.0.10 is not the "slow and fragile"
+TCP fallback an earlier draft feared: it ships UCX and drives this
+cluster's InfiniBand at ~12 GB/s (`rc_mlx5`, job 15551674). The site
+`cpg_lammps` modules remain a DOCUMENTED, zero-maintenance FALLBACK for
+the LAMMPS-owns-MPI model (job 15580445), not the primary.
 
-**Selection is two bring-up lines, and it is multi-version.** A run
-chooses an engine by loading a module (`module use <cpg modulefiles>` +
-`module load cpg_lammps/<version>`) in the job's bring-up — no source
-edit. The modules declare `family("lammps")`, so versions are mutually
-exclusive: exactly one engine is ever on the path. Publishing a rebuild
-is repointing a prefix; publishing a NEW version is a second modulefile
-beside the first. This is what makes the next point cheap.
+**Selection is still the module scheme, now over the conda-built
+prefixes.** The engine binary is obtained exactly as before — the run
+loads a module (`module use <cpg modulefiles>` + `module load
+cpg_lammps_conda/<version>`) in the job's bring-up, no source edit — but
+the modules point at the conda-built prefixes and are THIN over the active
+`sabsim_dev` env: because the binary's RPATH already resolves conda
+`libmpi`/`libstdc++`, a module need only put the ctypes wrapper on
+`PYTHONPATH`, the potentials on `LAMMPS_POTENTIALS`, and (for deepmd) the
+plugin path on `DEEPMD_LMP_PLUGIN`. They declare `family("lammps")`, so
+versions are mutually exclusive: exactly one engine is ever on the path.
+Publishing a rebuild is repointing a prefix; a NEW version is a second
+modulefile beside the first. Feature parity is deliberate and verified
+(job 15683172): the conda build carries the 25 packages every style the
+pipeline emits needs; only `ML-HDNNP` and `VORONOI` are dropped, neither
+used by any code path, both restorable from the recipe if a later study
+needs them.
 
 **The DeePMD engine is a second version, not a fork.** The machine-
 learned-potential runs (§2.2's force model, once the trained MLIP exists)
@@ -1249,19 +1272,23 @@ plugin. That plugin is ABI-locked to the LAMMPS release it was built
 against (LAMMPS 2024.08.29): a single LAMMPS utility signature changed
 after that release, so the plugin loads into a 2024.08.29 engine and
 refuses a newer one. The response is not to rebuild deepmd, but to
-publish a second engine at the matching version — `cpg_lammps/
-2024.08.29-deepmd`, the SAME site-toolchain recipe as the default engine
+publish a second engine at the matching version — `cpg_lammps_conda/
+2024.08.29-deepmd`, the SAME conda-linked recipe as the default engine
 with only the LAMMPS version changed. sabsim selects it exactly as it
 selects any engine (the module line, plus the `deployment_rc.toml` usage
-block for the MD job kind); the Engine seam is untouched. Reaching the
-plugin at run time costs two things, both confined to the modulefile and
-the LAMMPS input: the deepmd backend's newer C++ runtime is supplied by
-preloading a compatible `libstdc++` (the site toolchain's is too old for
-one symbol version the backend needs), and the plugin is loaded from its
-real install directory by an input line, so its own dependencies resolve.
-The lesson the multi-version scheme was designed for is thus realized: a
-second, deliberately older engine coexists with the default one and is
-chosen per job, with no change to the pipeline that drives it.
+block for the bond job kind); the Engine seam is untouched. Reaching the
+plugin at run time is cheaper than on the site toolchain: NO `libstdc++`
+preload is needed (the conda env already ships a new-enough `libstdc++`
+for the backend's CXXABI), and the plugin is loaded EXPLICITLY by a LAMMPS
+input line (`plugin load $DEEPMD_LMP_PLUGIN`) so its own dependencies
+resolve — never auto-loaded via an inherited `LAMMPS_PLUGIN_PATH`, which
+the job scripts `unset`. This engine is deepmd-kit **3.1.3** (dual TF +
+PyTorch backend), and it loads a model frozen by the group's separate
+deepmd **2.2.10 / TensorFlow** training stack DIRECTLY — a real 2.2.10
+`.pb` ran a force step through it with no conversion (job 15686597) — so
+the training→inference path needs no bridge. A second, deliberately older
+engine thus coexists with the default and is chosen per job, with no
+change to the pipeline that drives it.
 
 ---
 

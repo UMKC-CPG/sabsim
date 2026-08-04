@@ -30,7 +30,7 @@ scheduler       = "slurm"
 default_account = "cpg"
 # Extra MODULEPATH roots to `module use` before any `module load` below.
 # The CPG-owned modulefile tree that publishes the LAMMPS engines
-# (cpg_lammps/*) is NOT on the default path, so it must be added here
+# (cpg_lammps_conda/*) is NOT on the default path, so it must be added here
 # (ARCHITECTURE.md §4.4). Stock site modules like VASP need none of this.
 module_paths    = ["/cluster/VAST/rulisp-lab/cpg/modulefiles"]
 
@@ -66,7 +66,7 @@ nodes     = 2
 # si_si_e2e); asking for fewer cores also clears the queue faster.
 tasks_per_node = 32
 walltime  = { value = 12.0, unit = "h" }
-modules   = ["cpg_lammps/22Jul2025"]  # the classical + ZBL engine
+modules   = ["cpg_lammps_conda/22Jul2025"]  # conda-derived classical + ZBL
 
 [usage.bond]
 # Press, settle, and pull on the MLIP committee (§5): GPU-accelerated
@@ -79,9 +79,10 @@ walltime  = { value = 18.0, unit = "h" }
 # NOT a separate module: the engine here is a version of LAMMPS built to
 # ABI-match the prebuilt DeePMD plugin, and the LAMMPS input loads that
 # plugin at run time (variable dp getenv DEEPMD_LMP_PLUGIN; plugin load
-# ${dp}); the module also LD_PRELOADs the libstdc++ the backend needs
-# (ARCHITECTURE.md §4.4). So this kind loads ONE engine module.
-modules   = ["cpg_lammps/2024.08.29-deepmd"]
+# ${dp}). The conda-derived engine needs NO libstdc++ preload (its env
+# already supplies the CXXABI the backend wants, ARCHITECTURE.md §4.4).
+# So this kind loads ONE engine module.
+modules   = ["cpg_lammps_conda/2024.08.29-deepmd"]
 
 [usage.analyze]
 # Reduce the run to results (§6, §8): CPU. Analyze owns the whole

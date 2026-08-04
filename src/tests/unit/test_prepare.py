@@ -59,8 +59,12 @@ def test_activate_script_directives_and_run_line(roots_set, tmp_path):
     assert "#SBATCH --ntasks-per-node=32" in text    # activate tasks_per_node
     assert "#SBATCH --time=12:00:00" in text         # activate walltime 12h
     assert "module use /cluster/VAST/rulisp-lab/cpg/modulefiles" in text
-    assert "module load cpg_lammps/22Jul2025" in text
+    assert "module load cpg_lammps_conda/22Jul2025" in text
     assert 'export SABSIM_SHARE="/cluster/VAST/rulisp-lab/cpg"' in text
+    # The launcher clears the mutually-exclusive memory exports first, or
+    # the nested daemon launch aborts (ARCHITECTURE §4.1).
+    assert "unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU" \
+        in text
     assert f"--activate --only {member}" in text
     assert f"{member}_bond.slurm" in text            # the "submit next" hint
 
@@ -74,7 +78,7 @@ def test_bond_script_is_gpu(roots_set, tmp_path):
     assert "#SBATCH --partition=gpu" in text
     assert "#SBATCH --ntasks-per-node=4" in text     # bond tasks_per_node
     assert "#SBATCH --time=18:00:00" in text         # bond walltime 18h
-    assert "module load cpg_lammps/2024.08.29-deepmd" in text
+    assert "module load cpg_lammps_conda/2024.08.29-deepmd" in text
     assert f"--bond --only {member}" in text
 
 
