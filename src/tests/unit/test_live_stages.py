@@ -19,6 +19,7 @@ from ase.io import read as ase_read
 from types import SimpleNamespace
 
 from sabsim.pipeline.live_stages import (
+    _bonded_force_model,
     _publish_file,
     _pull_note,
     _pull_rung_paths,
@@ -43,6 +44,40 @@ def _si_si_member():
         if member.name == "si-si-reference":
             return member
     raise AssertionError("si-si-reference member not found in template")
+
+
+def test_bonded_force_model_is_classical_without_override(monkeypatch):
+    """With no deepmd override, the pair bonds under the classical stand-in."""
+    monkeypatch.delenv("SABSIM_DEEPMD_MODEL", raising=False)
+    model = _bonded_force_model(
+        {"Si": 1}, {"Si"}, "diamond-cubic", allow_unvalidated=True)
+    assert model.pair_style == "sw"        # Stillinger-Weber, no plugin
+    assert model.preload == ()
+
+
+def test_bonded_force_model_uses_deepmd_override(monkeypatch, tmp_path):
+    """An explicit SABSIM_DEEPMD_MODEL bonds under THAT deepmd model.
+
+    The trained-MLIP force path drops in behind the same seam: the pair
+    style becomes ``deepmd <path>`` and the model carries its plugin load.
+    """
+    model_file = tmp_path / "graph.pb"
+    model_file.write_bytes(b"\x00")        # a stand-in file; only its path
+    monkeypatch.setenv("SABSIM_DEEPMD_MODEL", str(model_file))
+    model = _bonded_force_model(
+        {"Si": 1}, {"Si"}, "diamond-cubic", allow_unvalidated=True)
+    assert model.pair_style == f"deepmd {model_file}"
+    assert model.pair_coeff == ("* *",)
+    assert "plugin load ${dp}" in model.preload
+
+
+def test_bonded_force_model_override_missing_file_is_a_loud_stop(
+        monkeypatch):
+    """A named-but-absent deepmd model stops, never silently falls back."""
+    monkeypatch.setenv("SABSIM_DEEPMD_MODEL", "/no/such/model.pb")
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        _bonded_force_model(
+            {"Si": 1}, {"Si"}, "diamond-cubic", allow_unvalidated=True)
 
 
 def test_pull_rung_paths_are_self_contained(tmp_path):

@@ -126,10 +126,18 @@ class ForceModel:
     classical stand-in and the trained MLIP are two VALUES of this one
     type, so the command generator never branches on which potential is
     in use — it just emits these lines (DESIGN.md §5, §9.8).
+
+    ``preload`` is any command that must run BEFORE ``pair_style`` — for a
+    DeePMD model, the ``plugin load`` that registers the ``deepmd`` pair
+    style (ARCHITECTURE.md §4.4); it is empty for a classical potential
+    whose style is built in. Keeping it on the value, not in the
+    generator, preserves the "force model is a parameter, not a fork"
+    commitment: the generator still emits lines without branching.
     """
 
     pair_style: str
     pair_coeff: tuple[str, ...]
+    preload: tuple[str, ...] = ()
 
 
 def classical_si_stand_in(type_map: dict) -> ForceModel:
@@ -152,11 +160,20 @@ def deepmd_model(model_path: str) -> ForceModel:
 
     The generator emits these lines exactly as it does the classical
     stand-in's; only the value differs. ``pair_coeff * *`` is DeePMD's
-    convention (the type map is baked into the model file).
+    convention (the type map is baked into the model file). The ``preload``
+    registers the ``deepmd`` pair style before it is named: DeePMD ships as
+    a runtime LAMMPS PLUGIN, so the engine must ``plugin load`` it first
+    (proven job 15686597). The plugin's path is read from the environment
+    (``DEEPMD_LMP_PLUGIN``, exported by the deepmd engine module,
+    ARCHITECTURE.md §4.4) rather than hard-coded, so one engine rebuild
+    retargets it in one place; ``getenv`` resolves it inside LAMMPS.
     """
     return ForceModel(
         pair_style=f"deepmd {model_path}",
-        pair_coeff=("* *",))
+        pair_coeff=("* *",),
+        preload=(
+            "variable dp getenv DEEPMD_LMP_PLUGIN",
+            "plugin load ${dp}"))
 
 
 # ---------------------------------------------------------------------
@@ -239,8 +256,15 @@ def preamble_commands(data_file: str, timestep: Quantity) -> list:
 
 
 def force_model_commands(force_model: ForceModel) -> list:
-    """Emit the parameterized force-model lines (classical OR MLIP)."""
-    return [f"pair_style {force_model.pair_style}",
+    """Emit the parameterized force-model lines (classical OR MLIP).
+
+    Any ``preload`` (a DeePMD ``plugin load``) comes FIRST — the pair style
+    it registers cannot be named before it is loaded — then the
+    ``pair_style`` and its ``pair_coeff`` lines. A classical potential has
+    an empty preload, so its two lines are unchanged.
+    """
+    return [*force_model.preload,
+            f"pair_style {force_model.pair_style}",
             *[f"pair_coeff {coeff}" for coeff in force_model.pair_coeff]]
 
 

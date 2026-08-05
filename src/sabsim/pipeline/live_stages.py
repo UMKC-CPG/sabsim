@@ -53,6 +53,7 @@ from sabsim.driver.commands import (
     CascadeGeometry,
     ForceModel,
     _rate_slug,
+    deepmd_model,
     stage_dump_file,
     to_metal,
 )
@@ -269,6 +270,36 @@ def _unvalidated_potentials_allowed() -> bool:
     """Whether this run may use a not-yet-gate-cleared potential."""
     setting = os.environ.get(_UNVALIDATED_POTENTIAL_VARIABLE, "")
     return setting.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# An EXPLICIT deepmd-model override, for validating the trained-MLIP force
+# path through the pipeline BEFORE the §11 bootstrap resolves a committee
+# (the seam the classical stand-in normally fills, §4.5). When set to a
+# frozen model file, the bonded pair presses and pulls under THAT DeePMD
+# model instead of the classical registry entry. It is a validation hook,
+# not the production path — the model it names has NOT cleared the §7
+# potential-quality gate, so anything produced under it is provisional;
+# like the unvalidated-potential flag above, it lives in the environment
+# so a run that used it shows the override in its own record.
+_DEEPMD_MODEL_OVERRIDE_VARIABLE = "SABSIM_DEEPMD_MODEL"
+
+
+def _deepmd_model_override() -> str | None:
+    """The frozen DeePMD model path this run was told to bond under, or None.
+
+    Returns the model file named by ``SABSIM_DEEPMD_MODEL`` after checking
+    it exists — a named-but-absent model is a loud stop, never a silent
+    fall-through to the classical stand-in, because that would quietly run
+    a different experiment than the one the override asked for.
+    """
+    model_path = os.environ.get(_DEEPMD_MODEL_OVERRIDE_VARIABLE, "").strip()
+    if not model_path:
+        return None
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(
+            f"{_DEEPMD_MODEL_OVERRIDE_VARIABLE} names a DeePMD model that "
+            f"does not exist: {model_path}")
+    return model_path
 
 
 def _stage_trajectory(
@@ -587,7 +618,18 @@ def _bonded_force_model(
     ``domain`` is the member's declared regime (DESIGN.md §4.8), and
     passing the SAME one the re-anneal used is what makes the promise
     above literal — anneal and press resolve to one registry entry.
+
+    The one exception is the EXPLICIT deepmd override
+    (:func:`_deepmd_model_override`): when a run names a frozen DeePMD
+    model, the pair presses and pulls under THAT model — the trained-MLIP
+    force path this stand-in is a placeholder for — dropping in behind the
+    very ``pair_style`` seam the docstring promises. This validates the
+    deepmd path end-to-end (job 15686597 proved the engine alone); the
+    §11 bootstrap replaces the override with a resolved committee later.
     """
+    model_path = _deepmd_model_override()
+    if model_path is not None:
+        return deepmd_model(model_path)
     return classical_force_model(
         type_map, substrate, allow_unvalidated=allow_unvalidated,
         domain=domain)

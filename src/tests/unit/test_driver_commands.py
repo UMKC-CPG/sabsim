@@ -103,17 +103,45 @@ def test_classical_stand_in_force_model():
 
 
 def test_deepmd_force_model():
-    """The trained potential is the SAME shape, a different value."""
+    """The trained potential is the SAME shape, a different value.
+
+    Plus a ``preload`` the classical model lacks: DeePMD ships as a runtime
+    plugin, so the model carries the ``plugin load`` that registers its
+    pair style (the path read from the environment, ARCHITECTURE §4.4).
+    """
     model = deepmd_model("committee.pb")
     assert model.pair_style == "deepmd committee.pb"
     assert model.pair_coeff == ("* *",)
+    assert model.preload == (
+        "variable dp getenv DEEPMD_LMP_PLUGIN", "plugin load ${dp}")
 
 
 def test_force_model_commands_emit_both_lines():
-    """One generator emits pair_style + pair_coeff for any ForceModel."""
+    """One generator emits pair_style + pair_coeff for a classical model.
+
+    A classical potential has an empty preload, so nothing precedes the
+    two lines — the pre-plugin behaviour is unchanged.
+    """
     model = ForceModel(pair_style="sw", pair_coeff=("* * Si.sw Si",))
     commands = force_model_commands(model)
     assert commands == ["pair_style sw", "pair_coeff * * Si.sw Si"]
+
+
+def test_force_model_commands_emit_plugin_load_before_pair_style():
+    """A DeePMD model's plugin load MUST precede naming its pair style.
+
+    The ``deepmd`` pair style does not exist until the plugin registers it,
+    so the generator emits the preload first, then the pair_style/coeff.
+    """
+    commands = force_model_commands(deepmd_model("committee.pb"))
+    assert commands == [
+        "variable dp getenv DEEPMD_LMP_PLUGIN",
+        "plugin load ${dp}",
+        "pair_style deepmd committee.pb",
+        "pair_coeff * *"]
+    # And the ordering invariant explicitly: load precedes the style.
+    assert (commands.index("plugin load ${dp}")
+            < commands.index("pair_style deepmd committee.pb"))
 
 
 # ---------------------------------------------------------------------

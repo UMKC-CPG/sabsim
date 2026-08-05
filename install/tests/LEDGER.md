@@ -308,3 +308,134 @@ sabsim -> build -> cascade)?  This is E5, the last open cell.
      deployment rc / prepare have NO memory knob.  FOLLOW-UP: add a memory
      field to the `[usage.*]` schema so prepare emits `#SBATCH --mem`
      (peak was only ~306 MB, so a small default suffices).
+     [RESOLVED 2026-08-05: the memory knob landed (#5); prepare now emits
+     `#SBATCH --mem` from a required `memory` field.]
+
+---
+
+## T-6A-BOND — job 15724578 — 2026-08-05
+
+**Question.** Does the `bond` job kind run end-to-end on the GPU partition
+through the WIRED deployment path — the generated script allocating a GPU
+node, loading the conda-derived deepmd engine module, `srun` carrying the
+venv, RE-READING the activate job's `assembled_pair` across a SEPARATE
+submission, running press->settle->pull, and writing `pull_results`?  This
+is 6a: the deployment PLUMBING, on the classical stand-in — NOT the deepmd
+force model (that is 6b).
+
+- **As-run scripts:** `si-si-reference_bond.slurm` + `deployment_6a.toml`
+  (both in the E5 dir `…/install-tests/e5_prepare_activate/`), spec
+  `jobs/deploy_smoke/sabsim.toml` (trimmed: 20 ps press, single 10 m/s
+  rung).  The script is `sabsim prepare`'s OWN output regenerated with the
+  #5 `--mem` fix, then two HAND-ADDS (see scope 2).
+- **Reuse:** re-read the EXISTING E5 `assembled_pair` (job 15703266) from
+  the member scratch keyed by the E5 job dir — activate NOT re-run.
+- **Environment (self-evident in the run):** conda-derived deepmd engine
+  via `module load cpg_lammps_conda/2024.08.29-deepmd`; venv Python; GPU
+  node g027; 1 node x 2 ranks; `--mem=32G` (from #5); `--gres=gpu:
+  V100-PCIE-32GB:1` + `unset LAMMPS_PLUGIN_PATH` HAND-ADDED; `unset
+  SLURM_MEM_PER_*`.
+- **Exact launch line:** `srun --mpi=pmix -n "${SLURM_NTASKS}" python -m
+  sabsim run …/deploy_smoke/sabsim.toml --bond --only si-si-reference`.
+- **Evidence (verbatim):**
+  - `sabsim run: job 'bond' complete`
+  - `member 'si-si-reference': wrote pull_results`
+  - `15724578|…|COMPLETED|0:0|01:03:40`; `15724578.0|python|COMPLETED|0:0|
+    01:03:38|316052K` (~309 MB peak, well under the 32 GB ceiling)
+  - artifacts written: `pull_results.manifest.toml` (10527 B),
+    `pull_10mps/log.pull`, `log.press`, `settled_reference.data`
+- **Verdict: PASS (6a).**  The bond deployment plumbing works on the
+  conda-derived stack: the generated script allocates a GPU node, the
+  module selects the engine, `srun` carries the venv, the bond job
+  RE-READS the activate job's `assembled_pair` across a separate
+  submission, and press->settle->pull writes `pull_results`.  The
+  activate->bond file handoff (ARCHITECTURE §4.3) is proven on the GPU
+  partition, as separate submissions.
+- **Scope NOT covered (important):**
+  1. **CLASSICAL stand-in only.** `resolve_potential` returned the SW
+     stand-in; the deepmd FORCE MODEL was NOT exercised through the
+     pipeline (`LAMMPS_PLUGIN_PATH` was unset so no plugin loaded).  That
+     is 6b.  E3 (15686597) proved the deepmd engine computes real forces
+     STANDALONE; this does not re-prove it and does not connect it to the
+     pipeline.
+  2. **Two HAND-ADDS.**  `--gres` — prepare emitted none at run time; the
+     GPU knob has SINCE landed (`gpus_per_node`, this same day) so a fresh
+     bond script now carries `--gres=gpu:4`.  `unset LAMMPS_PLUGIN_PATH` —
+     a 6a-only isolation, a 6b question.  (deployment_6a.toml predates the
+     `gpus_per_node` field, so it would need that key added to re-prepare.)
+  3. **Trimmed protocol** (20 ps press, single 10 m/s rung, pull capped at
+     `RunControl.max_chunks=500`) — NOT the full 3-rung ladder; M1/M3 are
+     not converged.  Plumbing, not physics.
+  4. `si-si-reference` only; 2 ranks on 1 GPU (SW does not use the GPU);
+     no multi-GPU deepmd decomposition.
+  5. Benign stderr on g027: PMIx `psec/munge` "component not found"
+     probe warnings + pymatgen CIF rounding — exit 0, run completed.
+
+---
+
+## T-6B-DEEPMD — job 15725126 — 2026-08-05
+
+**Question.** Does a REAL trained DeePMD model drive the pipeline's own
+press/pull — `sabsim run --bond` -> `_bonded_force_model` -> plugin load ->
+`pair_style deepmd` -> GPU force eval — as opposed to only running deepmd
+STANDALONE (which E3, job 15686597, already proved)?  This is 6b: the
+trained-MLIP force path THROUGH the pipeline, via the new
+`SABSIM_DEEPMD_MODEL` override.
+
+- **As-run scripts:** `si-si-reference_bond.slurm` + `deployment_6b.toml`
+  (E5 dir).  The script is `sabsim prepare`'s output (now auto-emitting
+  `--gres=gpu:1` from the new `gpus_per_node` knob), with the gres TYPE
+  refined to the free V100 + two hand-adds: `export
+  SABSIM_DEEPMD_MODEL=…/train_deepmd_si/graph.pb` and `unset
+  LAMMPS_PLUGIN_PATH`.
+- **Model / structure:** Prakash's Si `graph.pb` (type_map ["Si"], ntypes
+  1); reused the E5 `assembled_pair` (1 atom type Si — matches).  1 node x
+  1 rank x 1 V100 (g027).
+- **Evidence — WIRING PROVEN (verbatim, from log.press / .out):**
+  - `variable dp getenv DEEPMD_LMP_PLUGIN`
+  - `plugin load …/envs/sabsim_dev/lib/libdeepmd_lmp.so`
+  - `Loading plugin: deepmd pair style  by Han Wang`
+  - `pair_style deepmd …/train_deepmd_si/graph.pb`
+  - `using   1 model(s): …/graph.pb`; `rcut in model: 6`; `ntypes … 1`
+  - `Created device …/device:GPU:0 … Tesla V100-PCIE-32GB`
+  - deepmd+TF footprint `MaxRSS 862248K` (~842 MB, vs classical ~309 MB
+    in 6a — still far under the 32 GB ceiling)
+- **Evidence — RUN FAILED (verbatim):**
+  - `sabsim: run halted — ERROR: Lost atoms: original 8800 current 8781
+    (src/thermo.cpp:494)`
+  - `15725126|…|FAILED|1:0|00:02:44`; died IN THE PRESS (the pull was
+    never reached — no new `pull_results`; the `pull_10mps/` on disk is
+    6a's, timestamp 07:05, this job ran ~07:46).
+- **Verdict: PARTIAL — wiring PROVEN, run INCOMPLETE.**  The deepmd force
+  model DID drive the pipeline's press on the GPU through the new seam
+  (`_bonded_force_model` -> `deepmd_model` -> `force_model_commands` emits
+  `plugin load` before `pair_style deepmd`), which is 6b's code goal and
+  is now proven on real hardware.  The run then lost 19 atoms in the press
+  and LAMMPS aborted (lost atoms are fatal by default outside the cascade).
+- **Cause: potential MISMATCH, not a code defect.**  The reused
+  `assembled_pair` was activated AND re-annealed under the CLASSICAL
+  potential (E5 activate, job 15703266), then pressed under DeePMD.  The
+  Si deepmd model sees that classically-amorphized surface as
+  out-of-distribution and ejects surface atoms almost immediately (the
+  fatal error hits ~seconds into the press MD).  The `_bonded_force_model`
+  contract is literally "press under the SAME potential the surfaces were
+  annealed under"; the override broke that on purpose (it changed only the
+  bond force model, not `_reanneal_force_model`, and reused a classical
+  pair), so this failure is EXPECTED physics of the shortcut.
+- **Scope NOT covered / caveats:**
+  1. **No deepmd press/pull to completion**; the pull was never reached,
+     so there is NO deepmd `pull_results` and NO deepmd M1/M3.
+  2. **The mismatch is inherent to the REUSE shortcut.**  A faithful
+     deepmd bond must ALSO activate/re-anneal under deepmd (so the pressed
+     structure is deepmd-equilibrated), OR minimize/re-equilibrate the
+     pair under deepmd before pressing.  Both are more than a quick reuse
+     — deferred to the §11 bootstrap wiring or a dedicated longer run.
+  3. **Provenance decoupling** (as forecast): `resolve_potential` is
+     unchanged, so the run's `potential` record still says
+     "classical-stand-in" while the forces were deepmd.  The real fix is
+     wiring `resolve_potential` to the committee so both agree.
+  4. Single rank, 1 V100, Si-only model on a 1-type Si pair; no multi-GPU
+     deepmd decomposition.
+  5. Benign stderr: TF cuFFT/cuDNN/cuBLAS "already registered" +
+     DP/OMP parallelism-thread WARNINGs (TF+torch coexistence).  The
+     fatal line is the lost-atoms; exit 1.
