@@ -814,10 +814,11 @@ a documented fallback, not the primary. **The launcher**
 is `srun --mpi=pmix` (or `mpirun`) after `unset SLURM_MEM_PER_NODE
 SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU` — the allocation exports those
 mutually-exclusive, which otherwise aborts the nested daemon launch, so
-every generated run script bakes in the unset. The recipe is built under a
-DEV name (`sabsim_dev`) alongside the working env and adopted only after
-it passes the engine, activate, and bond checks — never by mutating the
-live env in place.
+every generated run script bakes in the unset. The recipe was built under
+a transitional name (`sabsim_dev`) alongside the older working env and
+adopted — the old env removed and this one renamed to `sabsim` — only
+after it passed the engine, activate, and bond checks (2026-08-05), never
+by mutating the live env in place.
 
 **Resolution: `SABSIM_LOCAL` first, then `SABSIM_SHARE`.** For any
 shared input — a potential, a reference dataset, the deployment config
@@ -1253,7 +1254,7 @@ prefixes.** The engine binary is obtained exactly as before — the run
 loads a module (`module use <cpg modulefiles>` + `module load
 cpg_lammps_conda/<version>`) in the job's bring-up, no source edit — but
 the modules point at the conda-built prefixes and are THIN over the active
-`sabsim_dev` env: because the binary's RPATH already resolves conda
+`sabsim` env: because the binary's RPATH already resolves conda
 `libmpi`/`libstdc++`, a module need only put the ctypes wrapper on
 `PYTHONPATH`, the potentials on `LAMMPS_POTENTIALS`, and (for deepmd) the
 plugin path on `DEEPMD_LMP_PLUGIN`. They declare `family("lammps")`, so

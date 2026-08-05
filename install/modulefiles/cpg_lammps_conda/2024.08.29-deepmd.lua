@@ -16,7 +16,7 @@
 --   DIRECTLY -- a real 2.2.10 graph.pb ran a force step through it with no
 --   conversion (job 15686597).
 --
--- Assumes sabsim_dev is ACTIVE (inherited from ssabsim_dev): the plugin's
+-- Assumes sabsim is ACTIVE (inherited from ssabsim): the plugin's
 --   TF/PyTorch/CUDA backend libraries resolve from that env.  The plugin is
 --   loaded EXPLICITLY by a LAMMPS input line (variable dp getenv
 --   DEEPMD_LMP_PLUGIN; plugin load ${dp}) -- never auto-loaded via
@@ -29,7 +29,7 @@
 help([[
 LAMMPS 29 Aug 2024 (conda-derived), the DeePMD-capable build: source-
 built, conda OpenMPI 5.0.10, deepmd-kit 3.1.3 plugin.  The bond-job engine.
-Load it from a job that has already activated sabsim_dev; then, from a
+Load it from a job that has already activated sabsim; then, from a
 LAMMPS input:
    variable dp getenv DEEPMD_LMP_PLUGIN
    plugin load ${dp}
@@ -52,7 +52,7 @@ local prefix = "/cluster/VAST/rulisp-lab/cpg/programs/lammps/"
 --   libstdc++.  The plugin is exposed as an env var a LAMMPS input loads
 --   explicitly; loading it from its REAL directory lets its own
 --   $ORIGIN-relative dependencies resolve.
-local deepmd_env = "/cluster/VAST/rulisp-lab/cpg/mamba/envs/sabsim_dev"
+local deepmd_env = "/cluster/VAST/rulisp-lab/cpg/mamba/envs/sabsim"
 
 prepend_path("PATH", pathJoin(prefix, "bin"))
 prepend_path("LD_LIBRARY_PATH", pathJoin(prefix, "lib64"))

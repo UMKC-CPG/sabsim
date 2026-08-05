@@ -5,8 +5,8 @@
 # (the override is REQUIRED on the GPU-less login node — see the CUDA note
 # below), then layer the venv on top (see build_venv.sh). The two together
 # ARE the environment. This file is the "how to install SABSIM" record that
-# did not exist before 2026-07-31. DRAFT: build under a DEV name
-# (sabsim_dev), validate, then adopt (§4.1).
+# did not exist before 2026-07-31. (First built under the transitional name
+# `sabsim_dev`, validated, then renamed to `sabsim` — 2026-08-05, §4.1.)
 #
 # MPI DECISION (validated 2026-07-31, job 15551674): the whole stack runs
 #   on CONDA OpenMPI 5.0.10. deepmd-kit forces it into the env, and the
@@ -38,10 +38,11 @@
 #     `libmpi.so.40` ABI.
 # ==========================================================================
 
-# DEV name on purpose: build ALONGSIDE the production `sabsim`, validate,
-#   THEN retire the old one and repoint the rc. Never destroy a working
-#   env before its replacement passes the engine + activate + bond checks.
-name: sabsim_dev
+# The production env name. (It was built under `sabsim_dev` alongside the
+#   older `sabsim`, then — once the engine/activate/bond checks passed —
+#   the old env was removed and this one took the `sabsim` name, 2026-08-05.
+#   Never destroy a working env before its replacement passes those checks.)
+name: sabsim
 
 channels:
   - conda-forge

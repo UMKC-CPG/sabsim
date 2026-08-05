@@ -31,19 +31,19 @@ site-compiled OpenMPI is needed.
 allocation exports those mutually-exclusive, which otherwise aborts the
 nested launch. Bake the `unset` into every run script.
 
-## Build (under a DEV name, alongside the production env)
+## Build the environment
 
 ```bash
 # CONDA_OVERRIDE_CUDA is REQUIRED on the GPU-less login node — without it
 # the solver picks CPU-only deepmd/torch/tf builds the bond stage can't use.
-CONDA_OVERRIDE_CUDA=12.9 mamba env create -f environment.yml   # -> sabsim_dev
-bash build_venv.sh                                             # venv sabsim_dev
+CONDA_OVERRIDE_CUDA=12.9 mamba env create -f environment.yml   # -> sabsim
+bash build_venv.sh                                             # venv sabsim
 ```
 
 After the conda step, confirm the GPU builds landed:
 
 ```bash
-conda list -n sabsim_dev | grep -E '^(deepmd-kit|pytorch|tensorflow) '
+conda list -n sabsim | grep -E '^(deepmd-kit|pytorch|tensorflow) '
 # each build string must contain `cuda`, NOT `cpu_`
 ```
 

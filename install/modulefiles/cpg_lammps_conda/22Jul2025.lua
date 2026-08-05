@@ -3,15 +3,15 @@
 --
 -- The sibling of the site cpg_lammps/22Jul2025 module, but built by
 --   install/build_lammps.sh from source and linked against this project's
---   CONDA OpenMPI 5.0.10 (env sabsim_dev), NOT the site toolchain.  It
+--   CONDA OpenMPI 5.0.10 (env sabsim), NOT the site toolchain.  It
 --   exists because sabsim drives LAMMPS IN-PROCESS and shares one
 --   MPI_COMM_WORLD between mpi4py and liblammps (§4.1), so the engine's
 --   libmpi MUST be the same conda 5.0.10 the Python already forces.  The
 --   site engine (OpenMPI 4.1.5) links the wrong libmpi and cannot share
 --   that communicator; it stays a documented fallback (§4.4).
 --
--- Assumes the sabsim_dev conda+venv environment is ACTIVE (a job inherits
---   it from `ssabsim_dev` / .sabsim/sabsimrc_dev, SLURM --export=ALL): the
+-- Assumes the sabsim conda+venv environment is ACTIVE (a job inherits
+--   it from `ssabsim` / .sabsim/sabsimrc, SLURM --export=ALL): the
 --   binary's RPATH resolves the conda libmpi/libstdc++ from that env, and
 --   the launcher (srun --mpi=pmix, or mpirun) comes from it too.  So this
 --   module does NOT load any site openmpi -- it only puts the engine's
@@ -25,8 +25,8 @@
 
 help([[
 LAMMPS 22 Jul 2025 (classical), conda-derived: source-built, conda
-OpenMPI 5.0.10 (env sabsim_dev).  The SW/ZBL cascade engine for the
-`activate` job.  Load it from a job that has already activated sabsim_dev.
+OpenMPI 5.0.10 (env sabsim).  The SW/ZBL cascade engine for the
+`activate` job.  Load it from a job that has already activated sabsim.
 
 Driving LAMMPS from Python (the sabsim path):
    from lammps import lammps
@@ -49,7 +49,7 @@ whatis("Description : LAMMPS classical engine, source-built + conda-linked")
 local prefix = "/cluster/VAST/rulisp-lab/cpg/programs/lammps/"
                .. "22Jul2025-conda-ompi5.0.10"
 
--- No site openmpi load: conda 5.0.10 comes from the active sabsim_dev env
+-- No site openmpi load: conda 5.0.10 comes from the active sabsim env
 --   (libmpi via the binary's RPATH; mpirun/srun from the env / SLURM).
 
 prepend_path("PATH", pathJoin(prefix, "bin"))

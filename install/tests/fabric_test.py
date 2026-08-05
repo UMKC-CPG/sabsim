@@ -1,4 +1,4 @@
-"""2-node MPI fabric probe for the sabsim_dev environment.
+"""2-node MPI fabric probe for the sabsim environment.
 
 Answers the two questions the environment rebuild hinges on:
 

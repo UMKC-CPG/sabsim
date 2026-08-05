@@ -34,13 +34,13 @@ set -euo pipefail
 
 # --- EDIT for your machine --------------------------------------------
 CONDA_HOOK=/cluster/software/common/mamba/1.4.2/etc/profile.d/conda.sh
-CONDA_ENV=sabsim_dev
+CONDA_ENV=sabsim
 LROOT=/cluster/pixstor/home/rulisp/programs/lammps        # sources + builds
 PREFIX_ROOT=/cluster/VAST/rulisp-lab/cpg/programs/lammps   # install prefixes
 
 # --- Activate the conda toolchain -------------------------------------
 # Sourcing the hook FIRST defines the `conda` function a batch shell lacks;
-# activating sabsim_dev then puts conda gcc/g++, mpicc/mpicxx, cmake and
+# activating sabsim then puts conda gcc/g++, mpicc/mpicxx, cmake and
 # FFTW on PATH and sets the compiler sysroot/flags.
 set +u
 source "$CONDA_HOOK"

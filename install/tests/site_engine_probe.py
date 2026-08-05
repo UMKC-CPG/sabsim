@@ -8,7 +8,7 @@ conda libmpi.  Only one can be right, so we test it directly.
 
 What this driver deliberately does and does NOT do:
 
-  * It runs under the real SABSIM interpreter -- the `sabsim_dev` venv
+  * It runs under the real SABSIM interpreter -- the `sabsim` venv
     Python, which is a symlink to the conda mamba Python.  That is the
     exact interpreter whose DT_RPATH (=$ORIGIN/../lib -> conda lib) is
     the whole basis of the §4.1 "forced conda MPI" claim.  If the site

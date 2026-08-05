@@ -439,3 +439,55 @@ trained-MLIP force path THROUGH the pipeline, via the new
   5. Benign stderr: TF cuFFT/cuDNN/cuBLAS "already registered" +
      DP/OMP parallelism-thread WARNINGs (TF+torch coexistence).  The
      fatal line is the lost-atoms; exit 1.
+
+---
+
+## T-RENAME — job 15726178 — 2026-08-05
+
+**Question.** After renaming the deployment env `sabsim_dev` -> `sabsim`
+(removed the old dead `sabsim`, cloned `sabsim_dev` -> `sabsim`, rebuilt
+the venv, `patchelf`-ed the engine RPATHs, repointed the modulefiles), do
+BOTH conda-derived engines still LOAD and RUN a real MD step under the new
+`sabsim` env — so `sabsim_dev` can be removed safely?
+
+- **As-run scripts:** `install/tests/rename_validate.slurm` +
+  `rename_validate.py`.  GPU node (L40S); self-activates `sabsim` (the
+  two-step conda+venv activation), `module load`s each engine in turn,
+  builds a tiny diamond-Si box from a lattice (no data file), runs.
+- **Evidence (verbatim):**
+  - classical (`cpg_lammps_conda/22Jul2025`):
+    `potential_energy (eV): -933.1183568608094`; `RENAME VALIDATE
+    classical: OK`
+  - deepmd (`cpg_lammps_conda/2024.08.29-deepmd`, plugin from
+    `envs/sabsim`, Prakash `graph.pb`):
+    `potential_energy (eV): -1169.289125433037`; `RENAME VALIDATE
+    deepmd: OK`
+  - `classical exit: 0 ; deepmd exit: 0`; `RENAME VALIDATE: PASS (both
+    engines run under env sabsim)`; `15726178 COMPLETED 0:0 00:00:20`
+- **Verdict: PASS.**  Both engines `import lammps` (so `liblammps.so`
+  loads — which after the patchelf resolves `libmpi` from `envs/sabsim`,
+  not `sabsim_dev`; a broken RPATH would fail the load) and run real MD;
+  the deepmd plugin loads from the module's repointed `envs/sabsim` path
+  and computes forces.  The rename is safe; `sabsim_dev` env + venv were
+  removed after this passed.
+- **What the rename did (for the record):** (1) removed the old dead
+  `sabsim` env + venv; (2) `conda create -n sabsim --clone sabsim_dev`;
+  (3) rebuilt `virtual_envs/sabsim` via `build_venv.sh`; (4) `patchelf
+  --set-rpath` on the 4 engine ELF files (`bin/lmp` +
+  `lib64/liblammps.so.0` per engine), `envs/sabsim_dev/lib` ->
+  `envs/sabsim/lib`; (5) repointed the modulefiles (tracked + published;
+  deepmd's `deepmd_env` -> `envs/sabsim`), the recipe
+  (`environment.yml` / `build_venv.sh` / `build_lammps.sh`),
+  `.sabsim/sabsimrc` (already named `sabsim`), `~/.bashrc` (dropped the
+  `ssabsim_dev` alias), and the docs; (6) removed `sabsim_dev` env + venv
+  + `.sabsim/sabsimrc_dev`.
+- **Scope NOT covered:**
+  1. Engines were `patchelf`-ed, NOT rebuilt from source — valid because
+     `sabsim` is an EXACT clone of `sabsim_dev` (identical libs), so the
+     RPATH swap points at byte-identical `libmpi`/`libstdc++`.  A
+     from-source rebuild (`build_lammps.sh`, now `CONDA_ENV=sabsim`) would
+     reproduce them if ever needed.
+  2. Single rank, one GPU, a tiny lattice box — a functional load+run,
+     not a multi-node or physics check (those are the E-series / 6a).
+  3. The `current` symlink is unchanged (it is version-named, carries no
+     env name).

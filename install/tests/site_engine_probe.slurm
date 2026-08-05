@@ -1,6 +1,6 @@
 #!/bin/bash
 # Decisive probe: does Imago's SITE-toolchain LAMMPS engine (OpenMPI
-# 4.1.5) load and run multi-node IN-PROCESS under the sabsim_dev venv
+# 4.1.5) load and run multi-node IN-PROCESS under the sabsim venv
 # Python -- deepmd included -- now that no competing conda liblammps
 # exists?  A PASS means the conda-OpenMPI-5.0.10 rebuild was NOT required
 # and SABSIM can adopt the proven site module (resolves ARCHITECTURE
@@ -18,7 +18,7 @@
 # engine's real behaviour.
 
 HERE=/mnt/pixstor/data/rulisp/ucx_fabric_test
-VENV_PYTHON=/cluster/VAST/rulisp-lab/cpg/virtual_envs/sabsim_dev/bin/python
+VENV_PYTHON=/cluster/VAST/rulisp-lab/cpg/virtual_envs/sabsim/bin/python
 
 # Bring Lmod into this non-interactive shell, then load Imago's engine
 # module.  cpg_lammps/2024.08.29-deepmd auto-loads openmpi/4.1.5, and

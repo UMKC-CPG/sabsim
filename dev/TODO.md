@@ -179,8 +179,18 @@
       (sibling of #5's memory knob) — `deploy/config.py` + `prepare.py`
       (`--gres=gpu:N` only when >0, plus a login-node GPU-ceiling check),
       template (0/4/0), and the chain (PSEUDOCODE §14.1/§14.4/§14.5, DESIGN
-      §10.6). 293 tests. STILL OPEN: 6b (deepmd through the pipeline);
-      retire the old `sabsim` env + rename `ssabsim_dev`->`ssabsim` (#7).
+      §10.6). 293 tests.
+      ENV RENAMED 2026-08-05 (#7 DONE, T-RENAME job 15726178): the whole
+      deployment env was renamed `sabsim_dev` -> `sabsim` (shorter everyday
+      name; `ssabsim` now launches it, `ssabsim_dev` retired). Removed the
+      old dead `sabsim` env, cloned `sabsim_dev` -> `sabsim`, rebuilt the
+      venv, `patchelf`-ed the 4 engine binaries' RPATH (`envs/sabsim_dev/
+      lib` -> `envs/sabsim/lib` — valid: exact clone, byte-identical libs),
+      repointed the modulefiles (tracked + published) + recipe + docs.
+      Validated: BOTH engines load + run a real MD step under `sabsim`
+      (classical -933.1 eV, deepmd -1169.3 eV). STILL OPEN: 6b (a GREEN
+      deepmd press/pull through the pipeline — the wiring is proven, but a
+      run needs a deepmd-ACTIVATED pair, not the classical one reused).
 
 - [x] **Deployment: add a MEMORY knob to `[usage.*]` (CODE) — DONE
       2026-08-05.** E5 (job 15697360) OOM-killed the activate cascade on

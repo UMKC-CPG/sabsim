@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build_venv.sh — SABSIM venv layer over the conda base (DRAFT, ARCH §4.1)
 # ==========================================================================
-# Builds the venv HALF of the deployment stack on top of the `sabsim_dev`
+# Builds the venv HALF of the deployment stack on top of the `sabsim`
 # conda env created from environment.yml. Run it AFTER:
 #     CONDA_OVERRIDE_CUDA=12.9 mamba env create -f environment.yml
 #
@@ -12,14 +12,15 @@
 # source build. LAMMPS is also NOT here — it is a separate source build
 # against conda OpenMPI 5.0.10 (dev/TODO.md).
 #
-# DEV naming: builds `virtual_envs/sabsim_dev` alongside the production
-# `virtual_envs/sabsim`. Nothing here touches the old env.
+# Builds `virtual_envs/sabsim`, the production venv, over the `sabsim`
+# conda env. (This stack was first built under the transitional name
+# `sabsim_dev`, then renamed to `sabsim` once validated, 2026-08-05.)
 # ==========================================================================
 set -euo pipefail
 
 # --- 0. Layout — EDIT these for your machine --------------------------
-CONDA_ENV="sabsim_dev"
-VENV="/cluster/VAST/rulisp-lab/cpg/virtual_envs/sabsim_dev"
+CONDA_ENV="sabsim"
+VENV="/cluster/VAST/rulisp-lab/cpg/virtual_envs/sabsim"
 # The conda env's interpreter, BY FULL PATH — used to create the venv.
 # Using the path (not `conda activate`) avoids needing the conda shell
 # function, which a non-interactive `bash build_venv.sh` does not have.
@@ -68,5 +69,5 @@ python -m pip install -e "$SABSIM_CLONE" --no-deps
 echo
 echo "venv layer built: $VENV"
 echo "NEXT: build LAMMPS against conda OpenMPI 5.0.10, then validate with"
-echo "      a sabsimrc.dev (activate sabsim_dev + this venv) and a run"
+echo "      the .sabsim/sabsimrc (activate sabsim + this venv) and a run"
 echo "      launched via 'srun --mpi=pmix' after 'unset SLURM_MEM_PER_*'."
