@@ -65,7 +65,18 @@ nodes     = 2
 # the tuned value at this member size (~137-275 atoms/rank in jobs/
 # si_si_e2e); asking for fewer cores also clears the queue faster.
 tasks_per_node = 32
+# GPUs per node. The cascade is classical CPU MD (no accelerator), so this
+# is 0 — stated explicitly, not omitted, so "no GPU" is a choice on record
+# rather than a silent default. With 0, prepare emits no `--gres` line.
+gpus_per_node  = 0
 walltime  = { value = 12.0, unit = "h" }
+# Per-NODE memory ceiling (emitted as `#SBATCH --mem`). A job with no
+# `--mem` inherits the partition's small per-job default, which OOM-killed
+# this very cascade ~44 min in (LEDGER T-E5-ACTIVATE, job 15697360) even
+# though the true peak was only ~306 MB. So this is a comfortable ceiling,
+# NOT a tuned figure — 16 GB leaves generous headroom for the transient
+# build/assemble spike on a ~490 GB node while still clearing the queue.
+memory    = { value = 16.0, unit = "GB" }
 modules   = ["cpg_lammps_conda/22Jul2025"]  # conda-derived classical + ZBL
 
 [usage.bond]
@@ -74,7 +85,16 @@ modules   = ["cpg_lammps_conda/22Jul2025"]  # conda-derived classical + ZBL
 partition = "gpu"
 nodes     = 1
 tasks_per_node = 4    # one MPI rank per GPU on the node (§10.6)
+# GPUs per node — one per rank for the DeePMD committee (§10.2). prepare
+# emits this as `#SBATCH --gres=gpu:4`; it must not exceed the partition's
+# gpus_per_node (the §10.6 login-node ceiling check catches it if it does).
+gpus_per_node  = 4
 walltime  = { value = 18.0, unit = "h" }
+# Per-node ceiling. The deepmd force model pulls in the TensorFlow/torch
+# host runtime on top of LAMMPS, and four ranks share the node, so this
+# sits above the CPU jobs. Provisional (no bond run has profiled it yet —
+# the §6 follow-up); raise it if a bond job trips the OOM killer.
+memory    = { value = 32.0, unit = "GB" }
 # The GPU force model is a DeePMD pair style hosted inside LAMMPS. It is
 # NOT a separate module: the engine here is a version of LAMMPS built to
 # ABI-match the prebuilt DeePMD plugin, and the LAMMPS input loads that
@@ -101,5 +121,10 @@ nodes     = 1
 # the same serial reduction (§10.6; the §8 heavy characterization is
 # Tier-B, ARCHITECTURE.md §4.1).
 tasks_per_node = 1
+gpus_per_node  = 0    # pure-Python CPU measure, no accelerator (§10.2)
 walltime  = { value = 4.0, unit = "h" }
+# Per-node ceiling. Analyze is the pure-Python mechanical measure over the
+# reduced curves (no LAMMPS, one rank), so its footprint is the smallest
+# of the three; 8 GB is ample headroom for the numpy/ASE reduction.
+memory    = { value = 8.0, unit = "GB" }
 modules   = []

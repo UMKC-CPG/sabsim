@@ -16,6 +16,7 @@ from sabsim.deploy import (
     DeploymentConfig,
     DeploymentError,
     Duration,
+    Memory,
     load_deployment,
 )
 
@@ -89,19 +90,25 @@ def test_usage_is_keyed_by_member_job():
     assert activate.resource_class == "cpu"
     assert activate.nodes == 2
     assert activate.tasks_per_node == 32     # tuned, not all 64 cores
+    assert activate.gpus_per_node == 0       # classical CPU cascade
     assert activate.walltime.in_hours() == 12.0
+    assert activate.memory.in_megabytes() == 16 * 1024.0   # 16 GB ceiling
     assert activate.modules == ("cpg_lammps_conda/22Jul2025",)
 
     bond = config.usage["bond"]
     assert bond.resource_class == "gpu"
     assert bond.nodes == 1
     assert bond.tasks_per_node == 4          # one rank per GPU
+    assert bond.gpus_per_node == 4           # one GPU per rank (committee)
     assert bond.walltime.in_hours() == 18.0
+    assert bond.memory.in_megabytes() == 32 * 1024.0       # deepmd + TF/torch
     assert bond.modules == ("cpg_lammps_conda/2024.08.29-deepmd",)
 
     analyze = config.usage["analyze"]
     assert analyze.resource_class == "cpu"
     assert analyze.tasks_per_node == 1       # serial Python measure
+    assert analyze.gpus_per_node == 0        # pure-Python CPU measure
+    assert analyze.memory.in_megabytes() == 8 * 1024.0     # smallest job
     # The v1 analyze job loads NO science module — the mechanical measure
     # is pure Python and the §8 characterization is Tier-B (DESIGN §10.5).
     # An empty list is allowed and MEANINGFUL, but the key is required.
@@ -146,6 +153,31 @@ def test_bare_walltime_without_unit_is_rejected(tmp_path):
         load_deployment(rc_path)
 
 
+def test_missing_memory_field_is_rejected(tmp_path):
+    """Dropping a usage block's memory key stops the load, naming it."""
+    broken = _drop_lines_containing(_template_text(), "memory")
+    rc_path = _write_rc(tmp_path, broken)
+    with pytest.raises(DeploymentError, match="memory"):
+        load_deployment(rc_path)
+
+
+def test_bare_memory_without_unit_is_rejected(tmp_path):
+    """A memory request written as a bare number (no unit) is refused."""
+    broken = _template_text().replace(
+        "{ value = 16.0, unit = \"GB\" }", "16.0")
+    rc_path = _write_rc(tmp_path, broken)
+    with pytest.raises(DeploymentError, match="value, unit"):
+        load_deployment(rc_path)
+
+
+def test_missing_gpus_per_node_field_is_rejected(tmp_path):
+    """Dropping a usage block's gpus_per_node key stops the load."""
+    broken = _drop_lines_containing(_template_text(), "gpus_per_node")
+    rc_path = _write_rc(tmp_path, broken)
+    with pytest.raises(DeploymentError, match="gpus_per_node"):
+        load_deployment(rc_path)
+
+
 # ---------------------------------------------------------------------
 # Rejection rule 2 — reject the un-executable: a usage block routing to a
 # resource class no partition defines cannot run, so it is refused.
@@ -182,3 +214,21 @@ def test_duration_rejects_an_unknown_unit():
     """A walltime unit the consumer does not know is a loud stop."""
     with pytest.raises(DeploymentError, match="fortnight"):
         Duration(1.0, "fortnight").in_hours()
+
+
+# ---------------------------------------------------------------------
+# Memory: the request carries its unit and reduces to megabytes (SLURM's
+# own --mem unit), the same units-travel-with-values rule as Duration.
+# ---------------------------------------------------------------------
+
+def test_memory_reduces_mixed_units_to_megabytes():
+    """Megabytes, gigabytes, and terabytes reduce to the common measure."""
+    assert Memory(512.0, "MB").in_megabytes() == pytest.approx(512.0)
+    assert Memory(16.0, "GB").in_megabytes() == pytest.approx(16 * 1024.0)
+    assert Memory(1.0, "TB").in_megabytes() == pytest.approx(1024.0 * 1024.0)
+
+
+def test_memory_rejects_an_unknown_unit():
+    """A memory unit the consumer does not know is a loud stop."""
+    with pytest.raises(DeploymentError, match="furlong"):
+        Memory(1.0, "furlong").in_megabytes()

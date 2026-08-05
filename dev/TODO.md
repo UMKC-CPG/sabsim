@@ -166,16 +166,41 @@
       (`install/tests/{MATRIX,LEDGER}.md`), incl. a real deepmd 2.2.10/TF
       `graph.pb` running on the 3.1.3 plugin (job 15686597) and a full
       `prepare`->activate green run (job 15703266). Site `cpg_lammps` stays
-      a documented fallback. STILL OPEN: retire the old `sabsim` env; run
-      the `bond` job kind end-to-end.
+      a documented fallback.
+      BOND 6a DONE 2026-08-05 (job 15724578, T-6A-BOND): the `bond` job kind
+      ran end-to-end on the GPU partition through the wired deployment path
+      — generated script -> GPU alloc -> deepmd engine module -> srun venv
+      -> RE-READ the activate job's `assembled_pair` (reused E5's, activate
+      not re-run) -> press/settle/pull -> wrote `pull_results`. On the
+      CLASSICAL stand-in (6a = plumbing); the deepmd force model through the
+      pipeline is 6b (still open — needs the bootstrap or a resolve_potential
+      override onto a real .pb). Surfaced + FIXED a writer gap: prepare
+      emitted no `--gres`, so added a `gpus_per_node` field to `[usage.*]`
+      (sibling of #5's memory knob) — `deploy/config.py` + `prepare.py`
+      (`--gres=gpu:N` only when >0, plus a login-node GPU-ceiling check),
+      template (0/4/0), and the chain (PSEUDOCODE §14.1/§14.4/§14.5, DESIGN
+      §10.6). 293 tests. STILL OPEN: 6b (deepmd through the pipeline);
+      retire the old `sabsim` env + rename `ssabsim_dev`->`ssabsim` (#7).
 
-- [ ] **Deployment: add a MEMORY knob to `[usage.*]` (CODE).** E5 (job
-      15697360) OOM-killed the activate cascade on the partition default;
-      `deployment_rc`/`prepare.py` emit no `#SBATCH --mem`, so E5 only
-      passed with a hand-added `--mem=96G` (actual peak was ~306 MB). Add a
-      `memory` field to the usage schema (`deploy/config.py`) and emit it
-      from `prepare.py` with a sensible default. Record: T-E5-ACTIVATE in
-      `install/tests/LEDGER.md`.
+- [x] **Deployment: add a MEMORY knob to `[usage.*]` (CODE) — DONE
+      2026-08-05.** E5 (job 15697360) OOM-killed the activate cascade on
+      the partition default; `deployment_rc`/`prepare.py` emitted no
+      `#SBATCH --mem`, so E5 only passed with a hand-added `--mem=96G`
+      (actual peak was ~306 MB, T-E5-ACTIVATE). LANDED as a full
+      design-chain change, not just code: a `Memory { value, unit }` record
+      + `_require_memory` loader in `deploy/config.py` (units reduce to MB,
+      SLURM's `--mem` unit; unknown unit is a loud stop), a `memory` field
+      on `UsageBlock`, `_slurm_memory` in `prepare.py` emitting
+      `#SBATCH --mem` (whole GB/TB kept verbatim as `16G`, else MB), the
+      three `[usage.*]` blocks in `dev/templates/deployment_rc.toml`
+      (activate 16 GB / bond 32 GB / analyze 8 GB — comfortable ceilings,
+      NOT tuned), and the propagation up the chain (`PSEUDOCODE.md` §14.1
+      UsageBlock + §14.5 directives, `DESIGN.md` §10.6 sibling paragraph to
+      walltime/ranks). 291 tests pass (4 new: missing/bare-memory rejection,
+      unit reduction, unknown-unit stop). Verified a generated bond script
+      carries `#SBATCH --mem=32G`. NOTE: a machine-local rc now REQUIRES a
+      `memory` field per usage block (no silent default) — regenerate or
+      hand-add it to any existing `deployment.toml` before `prepare`.
 
 - [ ] **General-triclinic support — lift the orthogonal-cell boundary
       (documented 2026-07-29 in `ARCHITECTURE.md`).** The facing-pair

@@ -3611,7 +3611,17 @@ record UsageBlock:                    # one [usage.*], keyed by job kind
                                       # partition -- the atoms-per-rank
                                       # sweet spot is a per-kind tuning
                                       # choice, like walltime
+    gpus_per_node:  integer           # accelerators per node; 0 for a
+                                      # CPU-only job, stated on EVERY block
+                                      # (like modules=[]). Writer emits
+                                      # `--gres=gpu:N` only when positive
     walltime:       duration          # HUMAN-provided (§10.6), not computed
+    memory:         memory_amount     # per-node request, HUMAN-provided
+                                      # (§10.6): a { value, unit } size the
+                                      # writer emits as `--mem`. A job with
+                                      # none inherits the partition's small
+                                      # per-job default, which OOM-killed
+                                      # the activate cascade (T-E5-ACTIVATE)
     modules:        list of text      # module(s) to `module load` (§4.4)
 ```
 `load_deployment` reads the rc into this as a COMPLETE object with no
@@ -3734,10 +3744,13 @@ function prepare(study_spec_path, deployment_rc_path):
         for each job in JOB_REGISTRY:     # activate -> bond -> analyze
             usage     = deployment.usage[job.name]
             partition = deployment.partitions[usage.resource_class]
-            # The one cheap check (§10.6): compare two numbers already
-            # written in the rc. Predict NOTHING about run length.
+            # Two cheap checks (§10.6): compare numbers already written in
+            # the rc. Predict NOTHING about run length or footprint.
             if usage.walltime > partition.max_walltime:
                 STOP on the login node, naming job + ceiling  # §10.6 gate
+            if usage.gpus_per_node > 0 and (
+                    usage.gpus_per_node > partition.gpus_per_node):
+                STOP on the login node, naming job + GPU ceiling  # §10.6
             script = render_job_script(validated, member, job,
                                        usage, partition, deployment, roots)
             path   = semantic_name(member, job)   # "activate" / "bond" /
@@ -3757,8 +3770,13 @@ function render_job_script(study, member, job, usage, partition,
     # the activated install is NOT restated (§10.5).
     return a script with, in order:
       - SCHEDULER DIRECTIVES from (partition.name, usage.nodes,
+        usage.tasks_per_node, usage.gpus_per_node, usage.memory,
         usage.walltime, deployment.default_account) -- the §10.7 field set
-        the throwaway jobs/* scripts already enumerate.
+        the throwaway jobs/* scripts already enumerate. usage.memory is
+        emitted as `--mem`; without it the job takes the partition's small
+        per-job default and can be OOM-killed (§10.6, T-E5-ACTIVATE).
+        usage.gpus_per_node is emitted as `--gres=gpu:N` ONLY when
+        positive, so a CPU job gets no --gres (§10.6).
       - `module use <p>` for each p in deployment.module_paths, THEN
         `module load <m>` for each m in usage.modules (§4.4: the cpg tree
         is not on the default path; bond loads the ONE deepmd engine,

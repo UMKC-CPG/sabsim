@@ -51,6 +51,20 @@ _HOURS_PER_UNIT = {
 }
 
 
+# How many megabytes one unit of a memory figure is worth. The rc writes
+# a per-node memory request as a ``{ value, unit }`` inline table (e.g.
+# 16 gigabytes), the same units-travel-with-values idiom the walltime
+# uses. Megabytes is the common measure because SLURM's own ``--mem``
+# default unit is the megabyte; the reduction here lets a site state the
+# request in whichever of these units reads most naturally.
+_MEGABYTES_PER_UNIT = {
+    "mb": 1.0, "m": 1.0, "megabyte": 1.0, "megabytes": 1.0,
+    "gb": 1024.0, "g": 1024.0, "gigabyte": 1024.0, "gigabytes": 1024.0,
+    "tb": 1024.0 * 1024.0, "t": 1024.0 * 1024.0,
+    "terabyte": 1024.0 * 1024.0, "terabytes": 1024.0 * 1024.0,
+}
+
+
 class DeploymentError(Exception):
     """The deployment rc is incomplete or cannot be executed.
 
@@ -92,6 +106,40 @@ class Duration:
 
 
 @dataclass(frozen=True)
+class Memory:
+    """A per-node memory request paired with the unit it is written in.
+
+    The rc writes a job's memory allotment as a TOML inline table —
+    ``{ value = 16.0, unit = "GB" }`` — the same units-travel-with-values
+    idiom :class:`Duration` uses for a walltime (DESIGN.md §1.5, §10.6).
+    It exists because a job with no ``#SBATCH --mem`` inherits the
+    partition's small per-job default, which OOM-killed the E5 activate
+    cascade (LEDGER T-E5-ACTIVATE); stating a comfortable ceiling here
+    stops that. Frozen and defaulted-free so it cannot be built with a
+    hole in it.
+    """
+
+    value: float
+    unit: str
+
+    def in_megabytes(self) -> float:
+        """This request expressed in megabytes (SLURM's ``--mem`` unit).
+
+        Reduces to the one common measure so a request written in GB or
+        TB still resolves. An unrecognised unit is a loud stop, never a
+        guess — the same no-silent-default rule the loader holds
+        everywhere else.
+        """
+        factor = _MEGABYTES_PER_UNIT.get(self.unit.lower())
+        if factor is None:
+            raise DeploymentError(
+                f"memory unit '{self.unit}' is not one this consumer "
+                f"knows {sorted(set(_MEGABYTES_PER_UNIT))}; state it in "
+                f"megabytes, gigabytes, or terabytes")
+        return self.value * factor
+
+
+@dataclass(frozen=True)
 class Partition:
     """One ``[hardware.partitions.*]`` block — a real machine resource.
 
@@ -116,17 +164,25 @@ class UsageBlock:
     DESIGN.md §10.2), a usage block names the abstract resource
     ``resource_class`` the hardware section resolves to a
     :class:`Partition`, the human-provided ``nodes``, ``tasks_per_node``
-    (MPI ranks per node), and ``walltime`` for the job (PSEUDOCODE.md
-    §14.1 — all chosen, never predicted, DESIGN.md §10.6), and the
-    ``modules`` that job switches on (the
+    (MPI ranks per node), ``gpus_per_node`` (accelerators per node — 0 for
+    a CPU-only job), ``walltime``, and ``memory`` (the per-node request)
+    for the job (PSEUDOCODE.md §14.1 — all chosen, never predicted,
+    DESIGN.md §10.6), and the ``modules`` that job switches on (the
     per-kind tool list, DESIGN.md §10.5; the bond job's one deepmd engine,
     ARCHITECTURE.md §4.4).
+
+    ``gpus_per_node`` is stated on EVERY block, ``0`` included, the same
+    way ``modules = []`` states "no modules" rather than omitting the key
+    — an accelerator request the writer must not guess (DESIGN.md §10.6).
+    The writer emits ``--gres=gpu:N`` only when it is positive.
     """
 
     resource_class: str
     nodes: int
     tasks_per_node: int
+    gpus_per_node: int
     walltime: Duration
+    memory: Memory
     modules: tuple[str, ...]
 
 
@@ -216,6 +272,24 @@ def _require_duration(table: dict, key: str, context: str) -> Duration:
     return Duration(value=float(value), unit=str(unit))
 
 
+def _require_memory(table: dict, key: str, context: str) -> Memory:
+    """Pull a required ``{ value, unit }`` inline table as a Memory.
+
+    A memory request carries its unit exactly as a walltime does
+    (DESIGN.md §1.5), so a bare number, or a table missing ``value`` or
+    ``unit``, is rejected rather than silently read as some assumed unit.
+    """
+    raw = _require(table, key, context)
+    where = f"{context} -> {key}"
+    if not isinstance(raw, dict):
+        raise DeploymentError(
+            f"{where}: expected a {{ value, unit }} table, got a bare "
+            f"value — a memory request carries its unit (§1.5)")
+    value = _require(raw, "value", where)
+    unit = _require(raw, "unit", where)
+    return Memory(value=float(value), unit=str(unit))
+
+
 def _require_str_list(table: dict, key: str, context: str) -> tuple:
     """Pull a required list of strings as a tuple (module lists, roots).
 
@@ -269,7 +343,9 @@ def _usage_from_table(
         resource_class=str(_require(table, "partition", context)),
         nodes=int(_require(table, "nodes", context)),
         tasks_per_node=int(_require(table, "tasks_per_node", context)),
+        gpus_per_node=int(_require(table, "gpus_per_node", context)),
         walltime=_require_duration(table, "walltime", context),
+        memory=_require_memory(table, "memory", context),
         modules=_require_str_list(table, "modules", context),
     )
 

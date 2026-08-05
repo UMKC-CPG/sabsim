@@ -57,6 +57,8 @@ def test_activate_script_directives_and_run_line(roots_set, tmp_path):
     assert "#SBATCH --account=cpg" in text           # default_account
     assert "#SBATCH --nodes=2" in text               # activate nodes
     assert "#SBATCH --ntasks-per-node=32" in text    # activate tasks_per_node
+    assert "#SBATCH --mem=16G" in text               # activate memory 16 GB
+    assert "#SBATCH --gres" not in text              # CPU job: no GPU request
     assert "#SBATCH --time=12:00:00" in text         # activate walltime 12h
     assert "module use /cluster/VAST/rulisp-lab/cpg/modulefiles" in text
     assert "module load cpg_lammps_conda/22Jul2025" in text
@@ -77,6 +79,8 @@ def test_bond_script_is_gpu(roots_set, tmp_path):
 
     assert "#SBATCH --partition=gpu" in text
     assert "#SBATCH --ntasks-per-node=4" in text     # bond tasks_per_node
+    assert "#SBATCH --gres=gpu:4" in text            # one GPU per rank
+    assert "#SBATCH --mem=32G" in text               # bond memory 32 GB
     assert "#SBATCH --time=18:00:00" in text         # bond walltime 18h
     assert "module load cpg_lammps_conda/2024.08.29-deepmd" in text
     assert f"--bond --only {member}" in text
@@ -122,6 +126,19 @@ def test_walltime_over_ceiling_stops_before_writing(roots_set, tmp_path):
     # activate runs on the cpu partition (ceiling 48h); ask for 100h.
     rc_text = open(_RC, encoding="utf-8").read().replace(
         "value = 12.0", "value = 100.0")
+    rc = tmp_path / "deployment.toml"
+    rc.write_text(rc_text, encoding="utf-8")
+
+    with pytest.raises(DeploymentError, match="over the"):
+        prepare(_SPEC, rc, tmp_path)
+    assert not list(tmp_path.glob("*.slurm"))
+
+
+def test_gpus_over_partition_stops_before_writing(roots_set, tmp_path):
+    """A per-kind GPU request over its partition's count is refused (§10.6)."""
+    # bond runs on the gpu partition (4 gpus_per_node); ask for 8.
+    rc_text = open(_RC, encoding="utf-8").read().replace(
+        "gpus_per_node  = 4", "gpus_per_node  = 8")
     rc = tmp_path / "deployment.toml"
     rc.write_text(rc_text, encoding="utf-8")
 

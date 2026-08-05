@@ -91,6 +91,7 @@ def prepare(study_spec_path, deployment_rc_path,
         for job in JOB_REGISTRY:
             usage, partition = _resolve_usage_and_partition(deployment, job)
             _check_walltime_ceiling(job, usage, partition)
+            _check_gpu_ceiling(job, usage, partition)
 
     entries = []
     for member in validated.members:
@@ -143,6 +144,15 @@ def render_job_script(
         f"#SBATCH --account={deployment.default_account}",
         f"#SBATCH --nodes={usage.nodes}",
         f"#SBATCH --ntasks-per-node={usage.tasks_per_node}",
+    ]
+    # A GPU request is emitted ONLY when the job asks for accelerators
+    # (usage.gpus_per_node > 0); a CPU job states 0 and gets no --gres
+    # line, so the scheduler does not route it to a GPU node needlessly.
+    gres = _slurm_gres(usage)
+    if gres is not None:
+        lines.append(f"#SBATCH --gres={gres}")
+    lines += [
+        f"#SBATCH --mem={_slurm_memory(usage)}",
         f"#SBATCH --time={_slurm_walltime(usage)}",
         f"#SBATCH --output={job_directory}/{stem}-%j.out",
         f"#SBATCH --error={job_directory}/{stem}-%j.err",
@@ -250,12 +260,85 @@ def _check_walltime_ceiling(
             f"the partition's max_walltime.")
 
 
+def _slurm_gres(usage: UsageBlock) -> str | None:
+    """Format a usage block's GPU request as a SLURM ``--gres`` value.
+
+    Returns ``"gpu:<count>"`` when the job asks for accelerators, or
+    ``None`` when it asks for none (a CPU-only job), so the caller emits
+    the directive only for a GPU job. The count is what the person wrote
+    in ``gpus_per_node`` — the writer requests it verbatim and predicts
+    nothing, exactly as it does for ranks and walltime (DESIGN.md §10.6).
+    v1 requests GPUs by count only; pinning a device TYPE (e.g. a
+    particular card on a heterogeneous partition) is a later refinement.
+    """
+    if usage.gpus_per_node <= 0:
+        return None
+    return f"gpu:{usage.gpus_per_node}"
+
+
+def _check_gpu_ceiling(
+        job: JobKind, usage: UsageBlock, partition: Partition) -> None:
+    """Refuse a per-kind GPU request its partition cannot satisfy (§10.6).
+
+    The GPU twin of :func:`_check_walltime_ceiling` — another cheap check
+    that predicts nothing, only comparing two numbers already in the rc.
+    A CPU-only job (``gpus_per_node == 0``) needs no accelerator, so it is
+    skipped. A job asking for GPUs from a partition that declares none, or
+    for more per node than the partition has, is bounced here on the login
+    node with a readable reason instead of by the scheduler after submit.
+    """
+    if usage.gpus_per_node <= 0:
+        return
+    available = partition.capacity.get("gpus_per_node")
+    if available is None:
+        raise DeploymentError(
+            f"[usage.{job.name}] asks for {usage.gpus_per_node} GPU(s) per "
+            f"node, but its '{usage.resource_class}' partition "
+            f"('{partition.name}') declares no gpus_per_node. Route it to a "
+            f"partition that has GPUs, or set gpus_per_node = 0.")
+    if usage.gpus_per_node > available:
+        raise DeploymentError(
+            f"[usage.{job.name}] asks for {usage.gpus_per_node} GPU(s) per "
+            f"node, over the '{usage.resource_class}' partition's "
+            f"{int(available)} (partition '{partition.name}'). Lower the "
+            f"request or move to a partition with more GPUs.")
+
+
 def _slurm_walltime(usage: UsageBlock) -> str:
     """Format a usage block's walltime as SLURM ``HH:MM:SS``."""
     total_seconds = int(round(usage.walltime.in_hours() * 3600.0))
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+# SLURM's own single-letter size suffixes for ``--mem``, keyed by the same
+# unit words :data:`~sabsim.deploy.config._MEGABYTES_PER_UNIT` accepts.
+# Kept here, not in the config record, because the letter is a SLURM
+# spelling detail — the walltime split the same way (Duration reduces the
+# unit; this writer formats it for the scheduler).
+_SLURM_MEMORY_SUFFIX = {
+    "mb": "M", "m": "M", "megabyte": "M", "megabytes": "M",
+    "gb": "G", "g": "G", "gigabyte": "G", "gigabytes": "G",
+    "tb": "T", "t": "T", "terabyte": "T", "terabytes": "T",
+}
+
+
+def _slurm_memory(usage: UsageBlock) -> str:
+    """Format a usage block's per-node memory as a SLURM ``--mem`` value.
+
+    A whole request in a unit SLURM spells with a letter (e.g. 16 GB) is
+    emitted verbatim as ``16G`` so the generated script reads the way the
+    rc does. Anything else — a fractional amount, or a unit with no SLURM
+    letter — falls back to whole megabytes (``--mem``'s native unit).
+    Calling ``in_megabytes`` first also makes an unknown unit a loud stop
+    here, the same refusal the loader would already have raised.
+    """
+    megabytes = usage.memory.in_megabytes()
+    suffix = _SLURM_MEMORY_SUFFIX.get(usage.memory.unit.lower())
+    if suffix is not None and usage.memory.value == int(usage.memory.value):
+        return f"{int(usage.memory.value)}{suffix}"
+    return f"{int(round(megabytes))}M"
 
 
 def _semantic_name(member_name: str, job_name: str) -> str:

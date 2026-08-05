@@ -3725,14 +3725,39 @@ filling every core on a node. So each `[usage.*]` block also names a
 `tasks_per_node` (MPI ranks per node); the writer emits it verbatim and
 predicts nothing, exactly as it does for walltime.
 
-**One cheap check earns its place**, precisely because it predicts
-nothing — it only compares two numbers already written in the deployment
-file. Each hardware partition already names a `max_walltime` ceiling (the
-longest job that pool will ever allow). If a requested per-kind walltime
-exceeds its partition's ceiling, `prepare` **stops and says so**, instead
-of letting the scheduler bounce the job after submission. It is symmetric
-with the roots gate of §10.5: a static, login-node refusal with a
-readable reason.
+**The per-node memory request is person-provided in the same spirit**, and
+it earns its own knob for a concrete reason: a job that names no `--mem`
+does not get "all the node's memory" — it inherits the partition's *small
+per-job default*, and that default OOM-killed the activate cascade about
+44 minutes in, even though the run's true peak was a modest ~306 MB
+(recorded as `T-E5-ACTIVATE`, which only went green after a `--mem` was
+added by hand). So each `[usage.*]` block also names a `memory` amount (a
+`{ value, unit }` size, like the walltime), and the writer emits it as
+`#SBATCH --mem`. It is a *ceiling*, not a prediction — the person sets a
+comfortable headroom for the kind of job, and the writer neither models
+the footprint nor fills a default, exactly as with walltime and ranks.
+
+**The accelerator request is person-provided in the same way**, and it is
+stated on *every* job — `0` included — rather than left absent, so "this
+job needs no GPU" is a choice on record and not a silent default (the same
+reasoning as the empty `modules = []`). Each `[usage.*]` block names a
+`gpus_per_node`; the writer emits `#SBATCH --gres=gpu:N` only when it is
+positive, so a CPU job (activate, analyze) gets no `--gres` and is never
+routed to a GPU node, while the bond job asks for its committee's GPUs
+verbatim. As with ranks and walltime, the writer requests what the person
+wrote and predicts nothing.
+
+**Two cheap checks earn their place**, precisely because they predict
+nothing — each only compares two numbers already written in the
+deployment file. The first is walltime: each hardware partition already
+names a `max_walltime` ceiling (the longest job that pool will ever
+allow), and if a requested per-kind walltime exceeds it, `prepare`
+**stops and says so**, instead of letting the scheduler bounce the job
+after submission. The second is its GPU twin: a partition names its
+`gpus_per_node`, and a job asking for more accelerators per node than the
+partition has — or for any GPU from a partition that declares none — is
+refused the same way. Both are symmetric with the roots gate of §10.5: a
+static, login-node refusal with a readable reason.
 
 When a run *does* exhaust its walltime, the response is neither to
 silently shorten the pull — that would report a different measurement as
