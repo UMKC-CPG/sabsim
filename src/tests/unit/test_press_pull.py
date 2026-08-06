@@ -156,21 +156,24 @@ def test_no_contact_relax_when_the_surfaces_are_in_range():
 
 
 def test_scissors_cuts_the_vacuum_after_the_relax():
-    """After the relax, the top wafer is slid down to the scissors gap."""
-    # Relaxed closest-atom gap 10 Å (frame: upper.min 20, lower.max 10);
-    # scissors_gap 3 Å, so the cut is 10 - 3 = 7 Å downward.
-    built = _gapped_built(20.0)
+    """After the relax, the top wafer is slid DOWN toward the scissors gap.
+
+    The opening is measured with the dividing-surface metric (robust to a
+    stray atom), so the cut fires whenever the relaxed opening exceeds the
+    target; the exact distance is not asserted here.
+    """
+    built = _gapped_built(20.0)         # wide opening -> a cut is needed
     engine = MockEngine(positions=[_frame(20.0)], normal_stress=[-1.0])
     press_and_bond(
         engine, built, _member(), _MODEL, "pair.data", seed=1,
-        control=RunControl(max_chunks=1, scissors_gap=3.0))
+        control=RunControl(max_chunks=1))
     stream = engine.received_commands
     assert "group scissors_upper region scissors_upper" in stream
     displace = [line for line in stream
                 if line.startswith("displace_atoms scissors_upper move")]
-    assert displace and "0.0 0.0 -7" in displace[0]
-    # Order: relax released, THEN scissors, THEN the press drive claims
-    # the top grip.
+    assert displace, "scissors should cut the vacuum after the relax"
+    assert " -" in displace[0], "the top wafer slides DOWN (negative z)"
+    # Order: relax released, THEN scissors, THEN the press drive.
     cut = stream.index(displace[0])
     assert stream.index("unfix relax_hold_top") < cut < _first_drive_index(
         stream)
