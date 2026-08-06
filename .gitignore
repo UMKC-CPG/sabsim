@@ -33,6 +33,12 @@ log.cite
 # the RESOLVED scratch path rather than relying on the link.
 /jobs/
 
+# Generated/scratch figures under dev/ — rendered plots, exported
+# diagrams, and other binary artifacts that are reproduced from source,
+# not authored by hand. The design chain references figures by intent,
+# not by tracked bytes.
+/dev/figures/
+
 # The `intermediate` scratch symlink is dropped in WHATEVER directory a
 # run is launched from (the run's home is the CWD), so ignore the reserved
 # link name anywhere — including a stray one from running in the repo root.
