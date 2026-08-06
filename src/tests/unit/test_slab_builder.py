@@ -88,6 +88,31 @@ def test_sisi_match_is_the_identity_null_test():
     assert match.residual_strain < 1.0e-6
 
 
+def test_match_carries_the_tiling_geometry_for_a_mismatch():
+    """A real mismatch keeps each slab's tiling matrix + supercell (§2.3).
+
+    The strained tiling (§2.4) needs the whole-number tilings and both
+    supercells the Zur-McGill search produces; the match must carry them,
+    not just the scalar strain. Built from Si against a stretched Si so the
+    surfaces genuinely differ, without needing a second material's CIF.
+    """
+    si = load_crystal(_SI_CIF)
+    stretched = rescale_crystal_to_cell(
+        si, np.array(si.lattice.matrix) * 1.1)
+    slab_a = build_slab(si, _SI_100)
+    slab_b = build_slab(stretched, _SI_100)
+
+    match = match_surfaces(
+        slab_a, slab_b, max_area=400.0, misfit_tolerance=0.15)
+
+    assert not match.is_identity
+    for tiling in (match.substrate_tiling, match.film_tiling):
+        assert tiling is not None
+        assert all(isinstance(n, int) for row in tiling for n in row)
+    assert match.substrate_cell is not None
+    assert match.film_cell is not None
+
+
 def test_pair_stacks_both_wafers_with_a_gap():
     """The pair has both slabs, tagged, separated by the requested gap."""
     slab_a = build_slab(load_crystal(_SI_CIF), _SI_100)

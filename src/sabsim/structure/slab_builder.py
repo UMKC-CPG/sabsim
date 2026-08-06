@@ -95,6 +95,18 @@ class SurfaceMatch:
     residual_strain: float          # scalar strain magnitude (0 = exact)
     match_area: float               # area of the shared cell, in Å²
     is_identity: bool               # True when the surfaces coincide
+    # The tiling GEOMETRY the strained assembly (§2.4) needs, carried from
+    # the Zur-McGill match rather than thrown away: each slab's whole-number
+    # 2x2 tiling matrix (§2.3's tiling_A / tiling_B) and its supercell's two
+    # in-plane vectors. Defaults are None — the identity path and any match
+    # reconstructed from a manifest/SharedCell do not tile — and the values
+    # are nested tuples (not arrays) so the match stays serialisable and
+    # comparable. The two supercells differ by the misfit strain, which the
+    # tiler splits between the slabs.
+    substrate_tiling: tuple = None  # 2x2 whole-number tiling of slab A
+    film_tiling: tuple = None       # 2x2 whole-number tiling of slab B
+    substrate_cell: tuple = None    # slab A supercell in-plane vectors, Å
+    film_cell: tuple = None         # slab B supercell in-plane vectors, Å
 
 
 @dataclass
@@ -361,7 +373,25 @@ def match_surfaces(
     return SurfaceMatch(
         residual_strain=strain,
         match_area=float(best.match_area),
-        is_identity=(strain <= _IDENTITY_STRAIN_TOLERANCE))
+        is_identity=(strain <= _IDENTITY_STRAIN_TOLERANCE),
+        substrate_tiling=_whole_tuples(best.substrate_transformation),
+        film_tiling=_whole_tuples(best.film_transformation),
+        substrate_cell=_float_tuples(best.substrate_sl_vectors),
+        film_cell=_float_tuples(best.film_sl_vectors))
+
+
+def _whole_tuples(matrix) -> tuple:
+    """A whole-number 2x2 tiling matrix as nested int tuples (§2.3)."""
+    return tuple(
+        tuple(int(round(entry)) for entry in row)
+        for row in np.asarray(matrix))
+
+
+def _float_tuples(vectors) -> tuple:
+    """Supercell vectors as nested float tuples — serialisable, comparable."""
+    return tuple(
+        tuple(float(component) for component in row)
+        for row in np.asarray(vectors))
 
 
 def assemble_facing_pair(
