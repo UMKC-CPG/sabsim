@@ -436,6 +436,71 @@ def grip_hold_and_readback_commands() -> list:
     ]
 
 
+def contact_relax_commands(relax_steps: int) -> list:
+    """Relax the gapped, assembled pair BEFORE the press drives (§5).
+
+    The 'relax' of relax-press-settle-pull. The two amorphized surfaces are
+    assembled a VACUUM GAP apart — wider than the potential cutoff — so each
+    reconstructs as an effectively FREE surface while the joined pair drops
+    into the force model's basin. That is what lets the press then begin
+    from an in-distribution contact instead of a cold, clashing one: the
+    fix for the classical->trained handoff that ejected surface atoms under
+    DeePMD (install/tests/LEDGER.md, 6b).
+
+    Both grips are pinned for the duration so the relax cannot close or
+    widen the gap: the top grip gets its OWN temporary ``setforce`` hold
+    (the bottom grip is already held by
+    :func:`grip_hold_and_readback_commands`), the interior and border relax
+    through a minimize and an optional short hold at the press temperature
+    under the integrator already installed, then the top hold is RELEASED so
+    the press can drive it. ``relax_steps`` is the hold length in MD steps
+    (0 minimizes only). Whether to relax at all is the caller's decision —
+    it issues this only when the assembled gap clears the cutoff.
+    """
+    commands = [
+        # Pin the top grip too, so the minimize/hold preserves the vacuum
+        # gap rather than collapsing or opening it; the bottom grip is
+        # already setforce-held by the shared readback commands.
+        "fix relax_hold_top top_grip setforce 0.0 0.0 0.0",
+        "min_style cg",
+        "minimize 1e-8 1e-8 1000 10000",
+    ]
+    if relax_steps > 0:
+        # A short hold at temperature (the border Langevin bath already
+        # installed) lets each free surface settle thermally after the
+        # minimize; the interior integrates under its own nve.
+        commands.append(f"run {relax_steps}")
+    # Release the top grip so the press drive can move it downward.
+    commands.append("unfix relax_hold_top")
+    return commands
+
+
+def scissors_commands(interface_z: float, delta_z: float) -> list:
+    """Cut vacuum: slide the TOP wafer down by ``delta_z`` Å, no MD (§5).
+
+    After the contact relax heals each free surface across the wide
+    assembly gap, most of that gap is empty space. A LOAD-controlled press
+    driven across it would ACCELERATE the grip into a collision (§9.3), so
+    the vacuum is removed here in one position update with NO dynamics:
+    every atom above the assembly interface plane (``interface_z``, the
+    density dividing midpoint the builder recorded) is translated down by
+    ``delta_z``, leaving the two surfaces the small ``scissors_gap`` apart
+    — the 6a starting separation — ready for the quasi-static press.
+
+    ``displace_atoms`` moves positions only; velocities are untouched, so
+    the top wafer arrives THERMALIZED from the relax, not drifting as a
+    rigid block. The relax kept the two surfaces well apart, so no atom has
+    crossed ``interface_z`` — the region cleanly selects the top wafer.
+    """
+    return [
+        f"region scissors_upper block INF INF INF INF "
+        f"{_lammps_number(interface_z)} INF units box",
+        "group scissors_upper region scissors_upper",
+        f"displace_atoms scissors_upper move 0.0 0.0 "
+        f"{_lammps_number(-delta_z)} units box",
+    ]
+
+
 def pull_drive_commands(rate: Quantity) -> list:
     """Drive the top grip apart at ``rate`` (§9.5).
 

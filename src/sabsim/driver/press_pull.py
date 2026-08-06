@@ -43,6 +43,7 @@ from sabsim.driver.analysis import (
 from sabsim.driver.commands import (
     ForceModel,
     RegionGeometry,
+    contact_relax_commands,
     force_model_commands,
     grip_hold_and_readback_commands,
     integrator_commands,
@@ -54,6 +55,7 @@ from sabsim.driver.commands import (
     recording_commands,
     region_group_commands,
     restart_preamble_commands,
+    scissors_commands,
     timestep_command,
     to_metal,
     trajectory_dump_commands,
@@ -88,6 +90,19 @@ class RunControl:
     max_chunks: int = 500
     stress_window: int = 5
     equilibrate_chunks: int = 20
+    # How many chunks the pre-press contact RELAX holds at temperature
+    # after its minimize (§5, relax-press-settle-pull). Kept short: the
+    # relax only heals the assembly clashes and drops the pair into the
+    # force model's basin, it does not re-anneal. Only runs when the
+    # surfaces are assembled beyond ``separation_cutoff`` (so each is a
+    # genuinely free surface); at a close gap it auto-skips.
+    relax_chunks: int = 5
+    # Target closest-atom gap (Å) the SCISSORS leaves between the two
+    # wafers after the relax: the vacuum the relax needed is cut in one
+    # geometric move down to this separation — the 6a starting gap — so
+    # the load-press begins near contact and at rest, never accelerating
+    # across empty space. Only runs when the relax did (wide assembly gap).
+    scissors_gap: float = 3.0
     separation_cutoff: float = 6.0     # Å, the §4.6 potential cutoff
     density_bin_width: float = 1.0     # Å, dividing-surface profile bin
     # The distance within which two atoms count as still JOINED, which
@@ -190,11 +205,18 @@ def _steps(duration: Quantity, timestep: Quantity) -> int:
 def _press_setup(
         built, member, force_model, data_file, seed, geometry,
         trajectory_file=None, trajectory_stride=None) -> list:
-    """The press command block WITHOUT the runs (the loop issues those).
+    """The press command block WITHOUT the drive or the runs (§9.3).
 
-    Installs the shared grip force gauges here, on the instance the press
-    and settle share, so the settle can read them without redefining a
-    compute (:func:`grip_hold_and_readback_commands`).
+    Reads the structure, loads the force model, carves the driver zones,
+    installs the integrator, and installs the shared grip force gauges —
+    everything the press needs EXCEPT the drive itself. The drive is issued
+    separately by :func:`press_and_bond` so an optional contact relax
+    (:func:`~sabsim.driver.commands.contact_relax_commands`) can run first,
+    while the top grip is still free of a drive fix.
+
+    The grip gauges live here, on the instance the press and settle share,
+    so the settle can read them without redefining a compute
+    (:func:`grip_hold_and_readback_commands`).
 
     A ``trajectory_file`` opens a strided dump that stays open for the
     press AND the settle that follows on this same engine, so the two
@@ -205,13 +227,40 @@ def _press_setup(
         + force_model_commands(force_model)
         + region_group_commands(built, geometry)
         + integrator_commands(member, seed)
-        + press_drive_commands(built, member)
         + grip_hold_and_readback_commands())
     if trajectory_file is not None:
         commands += trajectory_dump_commands(
             trajectory_file,
             trajectory_stride or member.numerical.frame_stride)
     return commands
+
+
+def _assembled_gap(built) -> float:
+    """The closest-atom vertical gap between the two assembled halves (Å).
+
+    Measured as the lowest atom of the TOP wafer minus the highest atom of
+    the BOTTOM wafer, from the builder's per-wafer z-ranges. This is the
+    physical quantity that decides whether the surfaces are free: only when
+    it clears the potential cutoff do the two faces stop interacting, so
+    each can relax as a genuine free surface during the contact relax.
+    """
+    _, lower_high = built.wafer_a_z_range
+    upper_low, _ = built.wafer_b_z_range
+    return float(upper_low - lower_high)
+
+
+def _scissors_delta(engine, tags: np.ndarray, target_gap: float) -> float:
+    """How far to slide the top wafer down to reach ``target_gap`` (Å).
+
+    Reads the CURRENT positions — after the relax, so surface
+    reconstruction is already accounted for — measures the closest-atom
+    vertical gap between the two wafers, and returns how much vacuum to
+    cut so that gap becomes ``target_gap``. Never negative: if the relaxed
+    surfaces already sit within the target, there is nothing to cut.
+    """
+    z_lower, z_upper = _wafer_z(np.asarray(engine.positions()), tags)
+    current_gap = float(z_upper.min() - z_lower.max())
+    return max(0.0, current_gap - target_gap)
 
 
 def press_and_bond(
@@ -240,7 +289,22 @@ def press_and_bond(
         _press_setup(built, member, force_model, data_file, seed, geometry,
                      trajectory_file, trajectory_stride))
 
+    # RELAX the gapped pair before driving, but ONLY when the two surfaces
+    # are assembled beyond the potential cutoff — otherwise a minimize would
+    # collapse an interface that is already in range (the close-gap
+    # classical path is unchanged, so it never relaxes here). The drive is
+    # installed AFTER the relax, so the top grip is free while it runs.
     tags = np.asarray(built.atoms.get_tags())
+    if _assembled_gap(built) > control.separation_cutoff:
+        engine.commands(
+            contact_relax_commands(control.relax_chunks * control.chunk_steps))
+        # Cut the vacuum the relax needed so the load-press starts near
+        # contact at rest, never accelerating the grip across empty space
+        # (mode = load, §9.3). Δz is measured from the RELAXED positions.
+        delta_z = _scissors_delta(engine, tags, control.scissors_gap)
+        if delta_z > 0.0:
+            engine.commands(scissors_commands(built.interface_z, delta_z))
+    engine.commands(press_drive_commands(built, member))
     gap_threshold = to_metal(numerical.contact_gap_threshold, "distance")
     stress_series: list = []
     contact_chunk = None

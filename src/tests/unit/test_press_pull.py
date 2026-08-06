@@ -98,6 +98,77 @@ def test_press_reports_no_contact_within_the_budget():
     assert result.chunks_to_contact is None
 
 
+def _gapped_built(upper_low: float):
+    """A pair whose top wafer's lowest atom sits ``upper_low`` above the
+    origin, so the closest-atom gap is ``upper_low - 10`` (wafer A tops at
+    10). Used to drive the pre-press relax across the cutoff threshold."""
+    tags = np.array([WAFER_A_TAG] * 100 + [WAFER_B_TAG] * 100)
+    cell = np.array([[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 60.0]])
+    atoms = SimpleNamespace(get_tags=lambda: tags, get_cell=lambda: cell)
+    return SimpleNamespace(
+        atoms=atoms, wafer_a_z_range=(0.0, 10.0),
+        wafer_b_z_range=(upper_low, upper_low + 10.0),
+        interface_z=0.5 * (10.0 + upper_low), type_map={"Si": 1})
+
+
+def _first_drive_index(stream):
+    """Index of the first command that installs the press drive."""
+    for index, line in enumerate(stream):
+        if "drive_top" in line:
+            return index
+    raise AssertionError("no press drive was installed")
+
+
+def test_contact_relax_runs_when_the_gap_clears_the_cutoff():
+    """A wide vacuum gap triggers minimize+hold BEFORE the press drive."""
+    built = _gapped_built(20.0)        # closest-atom gap 10 Å > 6 Å cutoff
+    engine = MockEngine(positions=[_frame(20.0)], normal_stress=[-1.0])
+    press_and_bond(
+        engine, built, _member(), _MODEL, "pair.data", seed=1,
+        control=RunControl(max_chunks=1))
+    stream = engine.received_commands
+    assert "fix relax_hold_top top_grip setforce 0.0 0.0 0.0" in stream
+    assert "minimize 1e-8 1e-8 1000 10000" in stream
+    assert "unfix relax_hold_top" in stream
+    # The top grip is released BEFORE the press drive claims it.
+    assert stream.index("unfix relax_hold_top") < _first_drive_index(stream)
+
+
+def test_no_contact_relax_when_the_surfaces_are_in_range():
+    """A close gap (< cutoff) presses cold — no relax, the unchanged path."""
+    built = _gapped_built(13.0)        # closest-atom gap 3 Å < 6 Å cutoff
+    engine = MockEngine(positions=[_frame(13.0)], normal_stress=[-1.0])
+    press_and_bond(
+        engine, built, _member(), _MODEL, "pair.data", seed=1,
+        control=RunControl(max_chunks=1))
+    stream = engine.received_commands
+    assert "fix relax_hold_top top_grip setforce 0.0 0.0 0.0" not in stream
+    assert not any(line.startswith("minimize") for line in stream)
+    # No relax => no scissors either; the close-gap path is untouched.
+    assert not any(line.startswith("displace_atoms") for line in stream)
+
+
+def test_scissors_cuts_the_vacuum_after_the_relax():
+    """After the relax, the top wafer is slid down to the scissors gap."""
+    # Relaxed closest-atom gap 10 Å (frame: upper.min 20, lower.max 10);
+    # scissors_gap 3 Å, so the cut is 10 - 3 = 7 Å downward.
+    built = _gapped_built(20.0)
+    engine = MockEngine(positions=[_frame(20.0)], normal_stress=[-1.0])
+    press_and_bond(
+        engine, built, _member(), _MODEL, "pair.data", seed=1,
+        control=RunControl(max_chunks=1, scissors_gap=3.0))
+    stream = engine.received_commands
+    assert "group scissors_upper region scissors_upper" in stream
+    displace = [line for line in stream
+                if line.startswith("displace_atoms scissors_upper move")]
+    assert displace and "0.0 0.0 -7" in displace[0]
+    # Order: relax released, THEN scissors, THEN the press drive claims
+    # the top grip.
+    cut = stream.index(displace[0])
+    assert stream.index("unfix relax_hold_top") < cut < _first_drive_index(
+        stream)
+
+
 # ---------------------------------------------------------------------
 # settle_reference — the two zero-load gates (§9.4).
 # ---------------------------------------------------------------------
