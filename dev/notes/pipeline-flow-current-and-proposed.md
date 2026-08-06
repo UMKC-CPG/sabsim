@@ -3,7 +3,77 @@
 Working note, 2026-08-05. NOT canonical yet — a reviewable synthesis to
 decide what lands in VISION / ARCHITECTURE / DESIGN and at which level.
 
-## SESSION STATUS (2026-08-05, resume here)
+## SESSION STATUS — LATEST 2026-08-06 (STRUCTURE BUILDER; resume here)
+
+All committed + PUSHED to origin/main. Commit trail this session:
+`cf92d30` bulk_relax wired; `6faf64f` TODO note; `0e5a1ed` matcher Phase A;
+`f4ca97b` Phase B foundation. (Earlier same day: the #8 DeePMD-bond arc —
+`855c508` T-8 + the relax/scissors/clamp commits — and the universal-first
+DESIGN edits `d55a849` etc.) 306 tests green.
+
+**DONE this session (structure builder):**
+- **bulk_relax WIRED (§2.2, `cf92d30`).** New first-class `derive_lattices`
+  stage relaxes each material's cell under the current model (classical
+  seed at cold start; the SAME `classical_force_model` seam takes a
+  universal/committee model later — universal-ready). `build_halves`
+  rescales each crystal to the derived cell before cutting, ANY symmetry
+  (`derive_lattice`, `rescale_crystal_to_cell`, `_coupling_for`
+  iso/aniso/tri). Retired the CIF-lattice cut. `relax_bulk`→`derive_lattice`
+  rename (killed the module/function reversal).
+- **Coincidence matcher PHASE A (`0e5a1ed`).** The real Zur-McGill
+  `match_surfaces` now runs IN the pipeline (before, it ran nowhere — the
+  assembly fabricated an identity match). Runs on the PRIMITIVE surface
+  cells (not the 10x10 dose footprint — matching the tiled slab overflows
+  the area budget). Real match rides the `SharedCell` → the assembly
+  consumes it. Identity path (Si/Si) works end-to-end.
+- **Phase B FOUNDATION (`f4ca97b`).** `SurfaceMatch` now carries the tiling
+  geometry: `substrate_tiling`/`film_tiling` (2x2 int) + `substrate_cell`/
+  `film_cell` (the two supercells), from the pymatgen match (which exposes
+  `*_transformation` + `*_sl_vectors`). Defaults None; identity/manifest
+  paths unchanged.
+
+**DECISIONS for the coincidence matcher (Paul):**
+- Strain ceiling 2% (`misfit_tolerance`, already a spec input); match area
+  budget ~400 Å² (`max_coincidence_area`, already a spec input).
+- Footprint (dose area) = an INPUT knob to TUNE, not hardcoded. Replace the
+  hardcoded 10x10 (`_LATERAL_REPEAT=10` in live_stages) with a target-area
+  spec parameter. Start rough (~400+ Å², probably higher for statistics),
+  converge by testing. Do NOT assume any value is a limit.
+- Even strain split for now (stiffness-weighted later — needs elastic
+  constants we don't compute yet).
+- MATERIAL-AGNOSTIC: works for ANY crystal pair, no Si/SiO2 special-casing.
+
+**KEY DESIGN INSIGHT (settles the tension):** strain and dose are
+DECOUPLED. Strain comes ONLY from the coincidence match (how well the two
+tiles fit the shared cell); tiling that cell UP for dose is strain-neutral
+(more identical copies). So: match FIRST for low strain + few atoms, tile
+SECOND for dose. Footprint is a convergence knob; cascade cost ~ area²
+(impacts ∝ area, per-step cost ∝ atoms ∝ area), so keep it minimal + test.
+Impact physics (grounded in cascade.py): ONE Ar at a time, RANDOM-uniform
+sites (seeded), border thermostat bleeds each shot's energy before the
+next; footprint sets statistics, not impact-fitting.
+
+**PHASE B — NEXT (3 steps):**
+1. `tile_slab_to_shared_cell(slab, tiling, target_cell)` — tile each slab
+   by its integer matrix (the match carries it), strain its supercell into
+   the even-split shared cell. Replaces the `NotImplementedError` at
+   `slab_builder.py` `assemble_facing_pair`.
+2. Footprint = target-area spec knob; tile the shared cell up to it
+   (strain-neutral); retire `_LATERAL_REPEAT=10`.
+3. Wire into `build_halves` so a mismatched pair emerges COMMENSURATE and
+   the assembly's `_assert_commensurate` accepts it.
+Small cleanup (same principle): other hardcoded sizing knobs
+(`_MIN_SLAB_THICKNESS`, `_MIN_VACUUM`, `_BULK_CELLS_PER_AXIS`) should also
+become spec inputs.
+
+**STILL FLAGGED:** the TEMPORARY OOD relax scaffold from #8
+(`contact_relax_commands` cap/damp/wall) stays until a proper
+in-distribution model exists — see its TODO ("REMOVE the TEMPORARY OOD
+relax scaffold"). #8 = plumbing proven, clean green deferred (LEDGER T-8).
+
+---
+
+## SESSION STATUS (2026-08-05)
 
 **Decisions reached with Paul this session:**
 - **Argon:** strip it (atoms AND declared species) at the END of the
