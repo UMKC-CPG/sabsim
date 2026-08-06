@@ -1301,6 +1301,17 @@ foundations, interaction rules. -->
       tolerance + cell-area/atom-count budget, cristobalite-vs-quartz,
       and how many amorphization seeds the bond metric is averaged over
       (`ARCHITECTURE.md` §2.3 structure-builder bullet; `DESIGN.md` §2).
+      CODE STATUS 2026-08-06: the §2.2 BULK RELAX is now WIRED (commit
+      cf92d30) — a first-class `derive_lattices` stage relaxes each
+      material's cell under the current model (classical seed at cold
+      start; the same seam takes the committee later) and the build
+      rescales onto it, any symmetry (`derive_lattice`,
+      `rescale_crystal_to_cell`, `_coupling_for`), retiring the CIF-lattice
+      cut. STILL CODE-OPEN: the matcher is IMPLEMENTED + tested
+      (`match_surfaces`, pymatgen ZSLGenerator) but NOT wired into
+      `build_halves` (it uses a stand-in SharedCell), and the strained
+      real-mismatch assembly is a `NotImplementedError`
+      (`slab_builder.py:388`, `assemble_facing_pair`) — the next task.
 - [ ] Structure-contract schema: the labeled atom groups the builder
       emits (frozen base, thermostat border, NVE interior, activated
       skin, press/pull grips, per-slab id) and consumed across the
