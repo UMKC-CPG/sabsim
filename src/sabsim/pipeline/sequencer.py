@@ -21,6 +21,7 @@ from __future__ import annotations
 from sabsim.pipeline.contracts import (
     ACTIVATED_SLABS_CONTRACT,
     BOND_DEBOND_CONTRACT,
+    DERIVED_LATTICES_CONTRACT,
     MEASURE_VECTOR_CONTRACT,
     POTENTIAL_CONTRACT,
     SLABS_CONTRACT,
@@ -143,13 +144,26 @@ def exec_one_member(
         lambda: stage_set.resolve_potential(member),
         POTENTIAL_CONTRACT)
 
+    # Step 2b (DESIGN.md §2.2): derive each material's WORKING LATTICE by
+    # relaxing a bulk block under the current model, so the slabs are cut
+    # on the model's own equilibrium spacing, not the CIF's published
+    # scale (which leaves the box stressed at step zero). A first-class
+    # compute-node step of its own — the smallest use of the engine —
+    # upstream of the build, which consumes its cells.
+    derived_lattices = run_to_contract(
+        lambda: stage_set.derive_lattices(
+            member, potential, scratch_directory, comm),
+        DERIVED_LATTICES_CONTRACT)
+
     # Steps 3-4-5. Their order is a setting (the builder and activator
     # are order-agnostic behind their contracts, DESIGN.md §5.3); v1
     # uses the only physically sensible order, build -> activate ->
-    # assemble. build writes each standalone half under the member's
-    # scratch and returns the two HANDLES (§7.1, the build->amorphize seam).
+    # assemble. build rescales each crystal to its derived lattice, writes
+    # each standalone half under the member's scratch, and returns the two
+    # HANDLES (§7.1, the build->amorphize seam).
     handle_a, handle_b, shared = run_to_contract(
-        lambda: stage_set.build(member, potential, scratch_directory, comm),
+        lambda: stage_set.build(
+            member, potential, derived_lattices, scratch_directory, comm),
         SLABS_CONTRACT)
 
     # A FAILED activation gate is contract-invalid and halts HERE: the

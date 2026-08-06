@@ -60,7 +60,7 @@ from pymatgen.analysis.interfaces.zsl import ZSLGenerator
 # reader reports as a file containing no structures at all. Reading
 # serially costs nothing at these file sizes: every process simply
 # parses the same few hundred kilobytes for itself.
-from pymatgen.core import Structure
+from pymatgen.core import Lattice, Structure
 from pymatgen.core.surface import SlabGenerator
 from pymatgen.io.ase import AseAtomsAdaptor
 
@@ -576,6 +576,18 @@ def bulk_atoms(crystal: Structure, cells_per_axis: int) -> Atoms:
     return block * (cells_per_axis, cells_per_axis, cells_per_axis)
 
 
+def bulk_type_map(crystal: Structure, cells_per_axis: int) -> dict:
+    """The bulk block's species type map WITHOUT writing it (§2.2).
+
+    The MPI-safe companion to :func:`write_bulk_data`: every rank derives
+    the identical, deterministic type map (to build the matching
+    :class:`~sabsim.driver.commands.ForceModel` under the STRUCTURAL-1a
+    species-order contract), while only ONE rank writes the data file the
+    engine then reads. Same species order as ``write_bulk_data``.
+    """
+    return _type_map_of(bulk_atoms(crystal, cells_per_axis))
+
+
 def write_bulk_data(
         crystal: Structure, cells_per_axis: int, path: str) -> dict:
     """Write a bulk block to a LAMMPS data file; return its type map.
@@ -597,3 +609,28 @@ def write_bulk_data(
         path, atoms, format="lammps-data", parallel=False,
         atom_style="atomic", specorder=species_order, masses=True)
     return type_map
+
+
+def rescale_crystal_to_cell(
+        crystal: Structure, conventional_cell: np.ndarray) -> Structure:
+    """Return the crystal on a model-derived conventional cell (§2.2).
+
+    The working lattice comes from relaxing the bulk under the current
+    model (:func:`sabsim.driver.bulk_relax.derive_lattice`), NOT the CIF's
+    published scale. This sets the crystal onto that derived cell while
+    keeping the FRACTIONAL coordinates, so the basis rides along and the
+    symmetry is preserved. It applies the FULL 3x3 cell, so it works for
+    any shape — cubic through triclinic — carrying whatever tilt the
+    relaxation found. The CIF still fixes the symmetry, basis, and
+    connectivity; only the SCALE (and any relaxed tilt) is replaced.
+
+    NOTE (§2.2 follow-on): this replaces the CELL. A crystal with internal
+    degrees of freedom the symmetry does not pin (e.g. SiO2) also has
+    relaxed INTERNAL coordinates the bulk relaxation found; reading those
+    back is a separate refinement, tracked. For a basis fixed by symmetry
+    (e.g. diamond Si) the fractional coordinates do not move, so the cell
+    is the whole story.
+    """
+    return Structure(
+        Lattice(np.asarray(conventional_cell, dtype=float)),
+        crystal.species, crystal.frac_coords)

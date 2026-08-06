@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from sabsim.pipeline.exec_artifacts import (
     ActivatedSlabs,
     BondDebondResult,
+    DerivedLattices,
     HalfHandle,
     Potential,
     PressOutcome,
@@ -89,18 +90,44 @@ def _placeholder_handle(
         type_map=type_map, identity=wafer.identity, wafer_tag=wafer_tag)
 
 
+def derive_lattices(
+        member: MemberSpecification,
+        potential: Potential,
+        scratch_directory: str | None = None,
+        comm=None) -> DerivedLattices:
+    """Derive each material's working lattice (DESIGN.md §2.2 — W0 stub).
+
+    The real step relaxes a bulk block under the current model to find the
+    lattice the slabs are cut on (retiring the CIF's published scale). W0
+    opens no engine, so it cannot relax — it returns a PLACEHOLDER cell per
+    material identity, enough to exercise the derive->build seam without a
+    compute node. The live body
+    (:func:`sabsim.pipeline.live_stages.derive_lattices_live`) does the
+    real relaxation through this same contract.
+    """
+    placeholder = (
+        (5.43, 0.0, 0.0), (0.0, 5.43, 0.0), (0.0, 0.0, 5.43))
+    identities = {
+        member.material.wafer_a.identity, member.material.wafer_b.identity}
+    return DerivedLattices(
+        cells={identity: placeholder for identity in identities},
+        provenance="walking-skeleton stand-in (no relaxation)")
+
+
 def build_slabs(
         member: MemberSpecification,
         potential: Potential,
+        derived_lattices: DerivedLattices,
         scratch_directory: str,
         comm=None) -> tuple[HalfHandle, HalfHandle, SharedCell]:
     """Build both wafers as standalone half-handles (DESIGN.md §2, §7.1).
 
-    W0 returns PLACEHOLDER handles — no data file is written, and the
-    coincidence matcher stays dormant (a Si/Si pair has no lattice
-    mismatch, wave 3) — so the pipeline's control flow and the
-    build->amorphize handle seam are exercised without a compute node. The
-    real :func:`sabsim.pipeline.live_stages.build_halves` writes two
+    W0 returns PLACEHOLDER handles — no data file is written, ``derived_
+    lattices`` is accepted (the live build rescales each crystal to it) but
+    ignored here, and the coincidence matcher stays dormant (a Si/Si pair
+    has no lattice mismatch, wave 3) — so the pipeline's control flow and
+    the build->amorphize handle seam are exercised without a compute node.
+    The real :func:`sabsim.pipeline.live_stages.build_halves` writes two
     standalone slab files under ``scratch_directory`` and returns real
     handles through this same contract.
     """
@@ -276,7 +303,7 @@ def run_characterization(
 
 @dataclass(frozen=True)
 class StageSet:
-    """The seven stage bodies the sequencer calls, as one swappable set.
+    """The eight stage bodies the sequencer calls, as one swappable set.
 
     Every stage in a set shares a uniform signature so the sequencer's call
     sites do not change between the stub and the live set: ``build`` and
@@ -288,7 +315,8 @@ class StageSet:
     """
 
     resolve_potential: Callable
-    build: Callable                # (member, potential, scratch) -> handles
+    derive_lattices: Callable      # (member, potential, scratch, comm)
+    build: Callable                # (member, pot, lattices, scratch, comm)
     activate: Callable             # (h_a, h_b, member, pot, scratch, comm)
     assemble: Callable             # (activated, shared, member, scratch)
     bond_debond: Callable          # (structure, pot, member, scratch, comm)
@@ -300,6 +328,7 @@ class StageSet:
 # sequencer's default so W0 control-flow tests need no compute node.
 W0_STAGES = StageSet(
     resolve_potential=resolve_potential,
+    derive_lattices=derive_lattices,
     build=build_slabs,
     activate=activate_surfaces,
     assemble=assemble_pair,

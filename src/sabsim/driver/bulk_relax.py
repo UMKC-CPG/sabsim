@@ -49,14 +49,20 @@ class MinimizeSettings:
 class BulkRelaxation:
     """The result of relaxing a bulk block under the current model (§2.2).
 
-    ``lattice_constant`` is the derived, model-consistent value the
-    structure builder then cuts slabs on — NOT the CIF's published
-    scale. ``potential_energy`` is the relaxed bulk energy, which the
+    The derived, model-consistent geometry the structure builder then cuts
+    slabs on — NOT the CIF's published scale. ``conventional_cell`` is the
+    FULL relaxed conventional cell (the replicated block's cell divided by
+    the replication), which supports ANY symmetry — cubic, tetragonal,
+    triclinic — and is what the crystal is rescaled to. ``lattice_
+    constant`` is the cubic convenience value (the cell edge length) kept
+    for the report and the cubic case; it is meaningful only when the cell
+    is cubic. ``potential_energy`` is the relaxed bulk energy, which the
     surface-energy calculation (§2.5) later references per atom.
     """
 
-    relaxed_cell: np.ndarray       # 3x3 relaxed box vectors, Å
-    lattice_constant: float        # derived cubic a, Å
+    relaxed_cell: np.ndarray       # 3x3 relaxed block box vectors, Å
+    conventional_cell: np.ndarray  # 3x3 relaxed conventional cell, Å
+    lattice_constant: float        # cubic convenience edge, Å
     potential_energy: float        # relaxed bulk energy, eV
     atom_count: int
 
@@ -89,20 +95,31 @@ def bulk_relax_commands(
     ]
 
 
-def cubic_lattice_constant(
-        cell: np.ndarray, cells_per_axis: int) -> float:
-    """Derive the cubic lattice constant from a relaxed box (§2.2).
+def conventional_cell(cell: np.ndarray, cells_per_axis: int) -> np.ndarray:
+    """The relaxed conventional cell from a relaxed block (§2.2).
 
     The relaxed block is the conventional cell replicated ``cells_per_
-    axis`` times along each axis, so the lattice constant is the box edge
-    length divided by that replication. Only the cubic case is derived
-    here; a lower-symmetry crystal reports its full relaxed cell and its
-    per-axis constants come with the ``aniso`` relaxation (a §2 follow-on).
+    axis`` times along each axis, and ``box/relax`` deforms it uniformly,
+    so the conventional cell is simply the relaxed block's cell divided by
+    that replication. This is the FULL 3x3 cell — it carries any tilt a
+    lower-symmetry crystal relaxes into, so the caller can rescale a
+    non-cubic crystal to it, not just a cubic edge.
+    """
+    return np.asarray(cell, dtype=float) / cells_per_axis
+
+
+def cubic_lattice_constant(
+        cell: np.ndarray, cells_per_axis: int) -> float:
+    """The cubic lattice constant from a relaxed box (§2.2 convenience).
+
+    The first box edge length over the replication. Meaningful only when
+    the relaxed cell is cubic; the general geometry is
+    :func:`conventional_cell`. Kept for the report and the cubic case.
     """
     return float(np.linalg.norm(cell[0]) / cells_per_axis)
 
 
-def relax_bulk(
+def derive_lattice(
         engine: Engine,
         data_file: str,
         force_model: ForceModel,
@@ -111,17 +128,23 @@ def relax_bulk(
         coupling: str = "iso") -> BulkRelaxation:
     """Relax a bulk block and read the derived lattice back (§2.2).
 
-    Issues the relaxation command stream through the engine seam, then
-    reads the relaxed box, energy, and atom count and derives the cubic
-    lattice constant. Because it talks only to :class:`Engine`, this runs
-    identically against ``MockEngine`` (login node, this slice) and the
-    real LAMMPS adapter (compute node, later).
+    Named for its purpose — deriving the working lattice the structure
+    builder cuts on — not for the mechanism (it was ``relax_bulk``, a near
+    reversal of this module's name). Issues the relaxation command stream
+    through the engine seam, then reads the relaxed box, energy, and atom
+    count and derives BOTH the full conventional cell (any symmetry) and
+    the cubic-convenience constant. ``coupling`` should match the crystal's
+    symmetry — ``iso`` cubic, ``aniso`` orthogonal, ``tri`` general — and
+    is the caller's choice. Because it talks only to :class:`Engine`, this
+    runs identically against ``MockEngine`` (login node) and the real
+    LAMMPS adapter (compute node).
     """
     engine.commands(
         bulk_relax_commands(data_file, force_model, settings, coupling))
     cell = np.asarray(engine.box(), dtype=float)
     return BulkRelaxation(
         relaxed_cell=cell,
+        conventional_cell=conventional_cell(cell, cells_per_axis),
         lattice_constant=cubic_lattice_constant(cell, cells_per_axis),
         potential_energy=engine.energy(),
         atom_count=engine.atom_count())

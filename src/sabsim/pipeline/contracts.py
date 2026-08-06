@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from sabsim.pipeline.exec_artifacts import (
     ActivatedSlabs,
     BondDebondResult,
+    DerivedLattices,
     HalfHandle,
     Potential,
     SharedCell,
@@ -87,6 +88,22 @@ def _validate_potential(artifact: object) -> str | None:
         return "potential is not loadable"
     if not artifact.pair_style:
         return "potential has no pair_style interface"
+    return None
+
+
+def _validate_derived_lattices(artifact: object) -> str | None:
+    """A model-relaxed cell per material (DERIVED_LATTICES_CONTRACT, §2.2).
+
+    The lattice-derivation step feeds the build the conventional cell each
+    material relaxed to under the current model; the build cuts slabs on it
+    rather than the CIF's published scale. The contract only checks the
+    handoff is well-formed and non-empty — which material each cell belongs
+    to is the build's lookup, and physical fidelity is the §7 gate's.
+    """
+    if not isinstance(artifact, DerivedLattices):
+        return "expected a DerivedLattices artifact"
+    if not artifact.cells:
+        return "no derived lattice for any material"
     return None
 
 
@@ -155,6 +172,8 @@ def _validate_measure_vector(artifact: object) -> str | None:
 
 
 POTENTIAL_CONTRACT = Contract("POTENTIAL_CONTRACT", _validate_potential)
+DERIVED_LATTICES_CONTRACT = Contract(
+    "DERIVED_LATTICES_CONTRACT", _validate_derived_lattices)
 SLABS_CONTRACT = Contract("SLABS_CONTRACT", _validate_slabs)
 ACTIVATED_SLABS_CONTRACT = Contract(
     "ACTIVATED_SLABS_CONTRACT", _validate_activated)

@@ -100,6 +100,28 @@ class SharedCell:
 
 
 @dataclass(frozen=True)
+class DerivedLattices:
+    """Per-material conventional cells relaxed under the model (§2.2).
+
+    The handoff from the lattice-derivation step to the build: each wafer's
+    material identity maps to the conventional cell the current model
+    relaxed the bulk to — NOT the CIF's published scale, which §2.2
+    forbids. Cells are nested tuples of floats (JSON-friendly for
+    provenance, and numpy-free so the walking-skeleton import stays light);
+    ``rescale_crystal_to_cell`` accepts them directly. Keyed by identity so
+    a same-material pair (Si/Si) derives the lattice once and shares it.
+    ``provenance`` records the model the cells were relaxed under.
+    """
+
+    cells: dict          # identity -> 3x3 conventional cell, nested tuples
+    provenance: str
+
+    def cell_for(self, identity: str):
+        """The relaxed conventional cell for one material (a 3x3 of floats)."""
+        return self.cells[identity]
+
+
+@dataclass(frozen=True)
 class Slab:
     """One wafer's slab, built to the shared cell (DESIGN §2).
 

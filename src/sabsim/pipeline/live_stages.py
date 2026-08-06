@@ -48,6 +48,7 @@ from sabsim.driver.cascade import (
     activate_surface,
     derive_seeds,
 )
+from sabsim.driver.bulk_relax import derive_lattice
 from sabsim.driver.cascade_potential import classical_force_model
 from sabsim.driver.commands import (
     CascadeGeometry,
@@ -59,6 +60,7 @@ from sabsim.driver.commands import (
 )
 from sabsim.pipeline.activation_adapter import activated_slabs_from_results
 from sabsim.pipeline.exec_artifacts import (
+    DerivedLattices,
     HalfHandle,
     SharedCell,
     Slab,
@@ -76,8 +78,11 @@ from sabsim.structure.slab_builder import (
     WAFER_B_TAG,
     SurfaceMatch,
     build_standalone_half,
+    bulk_type_map,
     load_crystal,
     read_standalone_half,
+    rescale_crystal_to_cell,
+    write_bulk_data,
     write_lammps_data,
     write_standalone_half,
 )
@@ -103,6 +108,10 @@ _BOND_CUTOFF = 2.8   # Å: Si first-g(r)-minimum stand-in (§6.3, TODO)
 _MIN_SLAB_THICKNESS = 55.0     # Å: frozen base + border + undamaged bulk
 _MIN_VACUUM = 30.0             # Å: room above the surface for the beam spawn
 _LATERAL_REPEAT = 10           # tile n x n so one impact does not dominate
+# How many conventional cells per axis the §2.2 bulk block spans. A
+# numerical knob (its influence vanishes as it grows): a few cells give the
+# uniform box/relax a stable block while staying the smallest engine use.
+_BULK_CELLS_PER_AXIS = 3
 
 
 def _publish_file(comm, write_action) -> None:
@@ -174,20 +183,97 @@ def _member_species_union(member: MemberSpecification) -> frozenset:
     return frozenset(symbols)
 
 
+def _coupling_for(crystal) -> str:
+    """The ``box/relax`` cell coupling matched to the crystal's symmetry.
+
+    ``iso`` for a cubic cell (one uniform scale keeps it cubic), ``aniso``
+    for an orthogonal but non-cubic cell (each axis relaxes independently),
+    ``tri`` for anything with a non-right angle (all six cell DOF relax).
+    Choosing by symmetry keeps a high-symmetry crystal from picking up a
+    spurious tilt while still supporting the general, non-cubic case (§2.2).
+    """
+    a, b, c = crystal.lattice.abc
+    orthogonal = all(
+        abs(angle - 90.0) < 1.0 for angle in crystal.lattice.angles)
+    if not orthogonal:
+        return "tri"
+    if abs(a - b) < 1.0e-4 and abs(b - c) < 1.0e-4:
+        return "iso"
+    return "aniso"
+
+
+def derive_lattices_live(
+        member: MemberSpecification,
+        potential,
+        scratch_directory: str,
+        comm=None) -> DerivedLattices:
+    """Derive each material's working lattice under the model (§2.2, step 2b).
+
+    The FIRST use of the force engine and the smallest: for each UNIQUE
+    material in the pair (a Si/Si pair derives once), it replicates the
+    crystal into a periodic bulk block, relaxes the box to zero pressure
+    under the current model, and reads the equilibrium conventional cell
+    back — the cell the build then cuts slabs on, retiring the CIF's
+    published scale (which would leave the box stressed at step zero,
+    §2.2). At cold start "the current model" is the classical/seed form
+    resolved from the SAME registry the quiet stages use
+    (:func:`~sabsim.driver.cascade_potential.classical_force_model`), so
+    when a universal MLIP or a trained committee enters that registry the
+    derivation follows it unchanged. Compute-node work: the ``LammpsEngine``
+    import is lazy, and the bulk data file is written by one rank.
+    """
+    from sabsim.driver.lammps_engine import LammpsEngine
+
+    cells: dict = {}
+    provenance: list = []
+    for wafer in (member.material.wafer_a, member.material.wafer_b):
+        if wafer.identity in cells:
+            continue                     # same material: derive once
+        crystal = load_crystal(_resolve_cif(wafer.cif_source))
+        type_map = bulk_type_map(crystal, _BULK_CELLS_PER_AXIS)
+        bulk_file = os.path.join(
+            str(scratch_directory), f"bulk_{wafer.identity}.data")
+        _publish_file(comm, lambda: write_bulk_data(
+            crystal, _BULK_CELLS_PER_AXIS, bulk_file))
+        seed = classical_force_model(
+            type_map, frozenset(type_map), domain=member.material_domain,
+            allow_unvalidated=_unvalidated_potentials_allowed())
+        log_file = os.path.join(
+            str(scratch_directory), f"log.derive_{wafer.identity}")
+        engine = LammpsEngine(
+            command_line_args=["-screen", "none", "-log", log_file],
+            comm=comm)
+        result = derive_lattice(
+            engine, bulk_file, seed, _BULK_CELLS_PER_AXIS,
+            coupling=_coupling_for(crystal))
+        engine.close()
+        cells[wafer.identity] = tuple(
+            tuple(float(component) for component in row)
+            for row in result.conventional_cell)
+        provenance.append(
+            f"{wafer.identity}: a~{result.lattice_constant:.4f} A, "
+            f"classical seed")
+    return DerivedLattices(cells=cells, provenance="; ".join(provenance))
+
+
 def _build_one_half(
         wafer,
         member: MemberSpecification,
+        derived_lattices: DerivedLattices,
         scratch_directory: str,
         wafer_tag: int,
         declared_species: frozenset,
         comm=None) -> HalfHandle:
     """Cut ONE wafer alone, write its data file, return its handle (§7.1).
 
-    Loads the wafer's crystal, builds a standalone half in vacuum with the
-    beam species declared, writes it to a LAMMPS data file under the
-    member's scratch, and hands back the :class:`HalfHandle` the
-    amorphization stage re-reads it from. ``wafer_tag`` fixes the assembly
-    role (bottom A / top B) that rides on the handle.
+    Loads the wafer's crystal, RESCALES it to the model-derived lattice for
+    its material (:func:`rescale_crystal_to_cell`, §2.2 — so the slab is
+    cut on the model's own spacing, not the CIF's), builds a standalone
+    half in vacuum with the beam species declared, writes it to a LAMMPS
+    data file under the member's scratch, and hands back the
+    :class:`HalfHandle` the amorphization stage re-reads it from.
+    ``wafer_tag`` fixes the assembly role (bottom A / top B) that rides on
+    the handle.
 
     ``declared_species`` are the elements this half must DECLARE whether
     or not it contains any — the beam, plus every element the other wafer
@@ -196,6 +282,8 @@ def _build_one_half(
     never contains at build time.
     """
     crystal = load_crystal(_resolve_cif(wafer.cif_source))
+    crystal = rescale_crystal_to_cell(
+        crystal, derived_lattices.cell_for(wafer.identity))
     half = build_standalone_half(
         crystal, wafer.surface_face, wafer.identity,
         declared_species,
@@ -215,16 +303,19 @@ def _build_one_half(
 def build_halves(
         member: MemberSpecification,
         potential,
+        derived_lattices: DerivedLattices,
         scratch_directory: str,
         comm=None) -> tuple[HalfHandle, HalfHandle, SharedCell]:
     """Build both wafers as standalone half files (step 3, §4.3, §7.1).
 
-    The real build stage: each wafer is cut ALONE in vacuum and written to
-    its own data file under the member's scratch, returned as a
-    :class:`HalfHandle` the activation stage loads on its own engine — the
-    build->amorphize file handoff. Wafer A is the bottom half, B the top
-    (the assembly invariant, DESIGN.md §2.6). This is login-node work: no
-    engine is opened here.
+    The real build stage: each wafer is cut ALONE in vacuum — on the
+    model-derived lattice ``derive_lattices_live`` produced (§2.2), not the
+    CIF's scale — and written to its own data file under the member's
+    scratch, returned as a :class:`HalfHandle` the activation stage loads
+    on its own engine (the build->amorphize file handoff). Wafer A is the
+    bottom half, B the top (the assembly invariant, DESIGN.md §2.6). This
+    stays login-node work: the engine already ran upstream in the
+    lattice-derivation step, so no engine is opened here — only geometry.
 
     The shared cell is a STAND-IN: the wave-3 coincidence matcher (§7.6) is
     not built, so each half is cut on its own lattice. That is exact for
@@ -239,11 +330,11 @@ def build_halves(
     declared_species = frozenset(
         _projectile_species(member)) | _member_species_union(member)
     handle_a = _build_one_half(
-        member.material.wafer_a, member, scratch_directory, WAFER_A_TAG,
-        declared_species, comm)
+        member.material.wafer_a, member, derived_lattices,
+        scratch_directory, WAFER_A_TAG, declared_species, comm)
     handle_b = _build_one_half(
-        member.material.wafer_b, member, scratch_directory, WAFER_B_TAG,
-        declared_species, comm)
+        member.material.wafer_b, member, derived_lattices,
+        scratch_directory, WAFER_B_TAG, declared_species, comm)
     shared = SharedCell(
         note="Si/Si identity shared cell (wave-3 matcher dormant, §7.6)")
     return handle_a, handle_b, shared
@@ -834,6 +925,7 @@ from sabsim.pipeline.skeleton_stages import (        # noqa: E402
 
 LIVE_STAGES = StageSet(
     resolve_potential=resolve_potential,
+    derive_lattices=derive_lattices_live,
     build=build_halves,
     activate=activate_surfaces_live,
     assemble=assemble_pair_live,

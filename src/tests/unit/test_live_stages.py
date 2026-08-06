@@ -18,6 +18,7 @@ from ase.io import read as ase_read
 
 from types import SimpleNamespace
 
+from sabsim.pipeline.exec_artifacts import DerivedLattices
 from sabsim.pipeline.live_stages import (
     _bonded_force_model,
     _publish_file,
@@ -31,6 +32,7 @@ from sabsim.spec.records import Quantity
 from sabsim.structure.slab_builder import (
     WAFER_A_TAG,
     WAFER_B_TAG,
+    load_crystal,
     read_standalone_half,
 )
 
@@ -44,6 +46,43 @@ def _si_si_member():
         if member.name == "si-si-reference":
             return member
     raise AssertionError("si-si-reference member not found in template")
+
+
+def _derived_lattices(member):
+    """Model-derived cells for the login-node build test.
+
+    ``derive_lattices_live`` (the engine step) produces these upstream; the
+    build only rescales to them, so the login-node build test supplies them
+    directly. It uses each material's OWN CIF conventional cell — an
+    identity rescale — so the cut geometry is unchanged and every material
+    in the member (Si, or Si and silica) is covered.
+    """
+    cells = {}
+    for wafer in (member.material.wafer_a, member.material.wafer_b):
+        if wafer.identity in cells:
+            continue
+        crystal = load_crystal(_resolve_cif(wafer.cif_source))
+        cells[wafer.identity] = tuple(
+            tuple(float(x) for x in row)
+            for row in crystal.lattice.matrix)
+    return DerivedLattices(cells=cells, provenance="test (CIF cells)")
+
+
+def _crystal_with(abc, angles):
+    """A stand-in crystal with just the lattice fields _coupling_for reads."""
+    return SimpleNamespace(
+        lattice=SimpleNamespace(abc=abc, angles=angles))
+
+
+def test_coupling_for_matches_the_cell_symmetry():
+    """box/relax coupling follows the crystal: iso / aniso / tri (§2.2)."""
+    from sabsim.pipeline.live_stages import _coupling_for
+    cubic = _crystal_with((5.43, 5.43, 5.43), (90.0, 90.0, 90.0))
+    tetragonal = _crystal_with((4.0, 4.0, 6.0), (90.0, 90.0, 90.0))
+    trigonal = _crystal_with((5.0, 5.0, 5.4), (90.0, 90.0, 120.0))
+    assert _coupling_for(cubic) == "iso"       # one uniform scale
+    assert _coupling_for(tetragonal) == "aniso"  # orthogonal, axes free
+    assert _coupling_for(trigonal) == "tri"      # a non-right angle
 
 
 def test_bonded_force_model_is_classical_without_override(monkeypatch):
@@ -139,7 +178,9 @@ def test_build_halves_writes_two_handles(tmp_path):
     """Both wafers become standalone data files with real handles."""
     member = _si_si_member()
     handle_a, handle_b, shared = build_halves(
-        member, potential=None, scratch_directory=str(tmp_path))
+        member, potential=None,
+        derived_lattices=_derived_lattices(member),
+        scratch_directory=str(tmp_path))
 
     # Two handles, tagged bottom A / top B, each naming a written file.
     assert handle_a.wafer_tag == WAFER_A_TAG
@@ -157,7 +198,9 @@ def test_built_half_declares_the_beam_and_is_orthogonal(tmp_path):
     """The written half declares the Ar type and has a tilt-free cell."""
     member = _si_si_member()
     handle_a, _, _ = build_halves(
-        member, potential=None, scratch_directory=str(tmp_path))
+        member, potential=None,
+        derived_lattices=_derived_lattices(member),
+        scratch_directory=str(tmp_path))
 
     text = (tmp_path / handle_a.data_file.split("/")[-1]).read_text()
     assert "2 atom types" in text          # Si + the declared beam Ar
@@ -179,7 +222,9 @@ def test_read_standalone_half_round_trips_species(tmp_path):
     """read_standalone_half recovers positions and species from disk."""
     member = _si_si_member()
     handle_a, _, _ = build_halves(
-        member, potential=None, scratch_directory=str(tmp_path))
+        member, potential=None,
+        derived_lattices=_derived_lattices(member),
+        scratch_directory=str(tmp_path))
 
     half = read_standalone_half(
         handle_a.data_file, handle_a.type_map, handle_a.identity)
@@ -382,7 +427,9 @@ def test_both_halves_declare_the_member_species_union(tmp_path):
     """
     member = _dissimilar_member()
     handle_a, handle_b, _ = build_halves(
-        member, potential=None, scratch_directory=str(tmp_path))
+        member, potential=None,
+        derived_lattices=_derived_lattices(member),
+        scratch_directory=str(tmp_path))
 
     # Identical maps on both sides — same elements, same id for each.
     assert handle_a.type_map == handle_b.type_map
@@ -402,5 +449,7 @@ def test_both_halves_declare_the_member_species_union(tmp_path):
 def test_same_material_member_declares_only_its_own_species(tmp_path):
     """The union changes nothing for a same-material pair (no bloat)."""
     handle_a, _, _ = build_halves(
-        _si_si_member(), potential=None, scratch_directory=str(tmp_path))
+        _si_si_member(), potential=None,
+        derived_lattices=_derived_lattices(_si_si_member()),
+        scratch_directory=str(tmp_path))
     assert set(handle_a.type_map) == {"Ar", "Si"}

@@ -2,9 +2,9 @@
 
 Slice 4's logic is written against the engine seam, so these run it end
 to end against MockEngine with no LAMMPS: the command stream is a
-periodic-box, box/relax minimization; the lattice constant is DERIVED
-from the relaxed box (not the CIF's scale, DESIGN §2.2); and relax_bulk
-reads the mock's preset box/energy back into a BulkRelaxation.
+periodic-box, box/relax minimization; the lattice is DERIVED from the
+relaxed box (not the CIF's scale, DESIGN §2.2); and derive_lattice reads
+the mock's preset box/energy back into a BulkRelaxation.
 """
 
 import numpy as np
@@ -12,8 +12,9 @@ import numpy as np
 from sabsim.driver.bulk_relax import (
     MinimizeSettings,
     bulk_relax_commands,
+    conventional_cell,
     cubic_lattice_constant,
-    relax_bulk,
+    derive_lattice,
 )
 from sabsim.driver.commands import classical_si_stand_in
 from sabsim.driver.engine import MockEngine
@@ -46,8 +47,17 @@ def test_cubic_lattice_constant_divides_out_the_replication():
     assert cubic_lattice_constant(box, cells_per_axis=2) == 5.43
 
 
-def test_relax_bulk_derives_the_lattice_from_the_relaxed_box():
-    """relax_bulk reads the mock's box/energy into a BulkRelaxation."""
+def test_conventional_cell_divides_a_general_box_by_replication():
+    """The full cell — with tilt — divides out the replication (non-cubic)."""
+    # A tetragonal, tilted block: a != c and a non-zero xy tilt survive.
+    block = np.array([[8.0, 0.4, 0.0], [0.0, 8.0, 0.0], [0.0, 0.0, 10.0]])
+    derived = conventional_cell(block, cells_per_axis=2)
+    assert np.allclose(
+        derived, [[4.0, 0.2, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 5.0]])
+
+
+def test_derive_lattice_reads_the_relaxed_box_into_a_relaxation():
+    """derive_lattice reads the mock's box/energy into a BulkRelaxation."""
     # The mock pretends the relaxation reached a=5.4309 (SW Si), a value
     # DIFFERENT from the CIF's 5.43 starting scale — the point of §2.2.
     edge = 5.4309 * 2
@@ -55,9 +65,11 @@ def test_relax_bulk_derives_the_lattice_from_the_relaxed_box():
         energy=-296.0, box=np.diag([edge, edge, edge]), atom_count=64)
     model = classical_si_stand_in({"Si": 1})
 
-    result = relax_bulk(engine, "bulk.data", model, cells_per_axis=2)
+    result = derive_lattice(engine, "bulk.data", model, cells_per_axis=2)
 
     assert result.lattice_constant == 5.4309
+    # The full conventional cell is derived too (the non-cubic path).
+    assert np.allclose(result.conventional_cell, np.diag([5.4309] * 3))
     assert result.potential_energy == -296.0
     assert result.atom_count == 64
     # The orchestration really issued the relaxation stream to the engine.

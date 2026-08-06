@@ -11,6 +11,7 @@ serves any crystal, so nothing here is silicon-specific but the CIF.
 
 import os
 
+import numpy as np
 import pytest
 from ase.io import read as ase_read
 
@@ -22,8 +23,10 @@ from sabsim.structure.slab_builder import (
     build_facing_pair,
     build_slab,
     bulk_atoms,
+    bulk_type_map,
     load_crystal,
     match_surfaces,
+    rescale_crystal_to_cell,
     write_bulk_data,
     write_lammps_data,
 )
@@ -34,6 +37,28 @@ _SI_CIF = os.path.join(
     os.path.dirname(sabsim.structure.__file__), "data", "si_diamond.cif")
 
 _SI_100 = (1, 0, 0)
+
+
+def test_rescale_crystal_to_cell_applies_the_model_cell():
+    """The crystal takes the derived cell; fractional coords ride along."""
+    crystal = load_crystal(_SI_CIF)
+    # A 1% isotropic expansion plus a small xy tilt — a non-cubic target,
+    # to prove the full 3x3 is applied, not a cubic scalar.
+    target = np.array(crystal.lattice.matrix) * 1.01
+    target[1][0] += 0.05
+    rescaled = rescale_crystal_to_cell(crystal, target)
+
+    assert np.allclose(rescaled.lattice.matrix, target)
+    # The basis rides along untouched (fractional coords, species, count).
+    assert np.allclose(rescaled.frac_coords, crystal.frac_coords)
+    assert rescaled.species == crystal.species
+
+
+def test_bulk_type_map_matches_the_written_block(tmp_path):
+    """bulk_type_map (all ranks) equals write_bulk_data's map (rank 0)."""
+    crystal = load_crystal(_SI_CIF)
+    path = str(tmp_path / "bulk.data")
+    assert bulk_type_map(crystal, 2) == write_bulk_data(crystal, 2, path)
 
 
 def _data_file(name: str) -> str:

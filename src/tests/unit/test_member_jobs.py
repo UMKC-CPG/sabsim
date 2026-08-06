@@ -26,6 +26,7 @@ from sabsim.deploy.registry import (
 from sabsim.pipeline.exec_artifacts import (
     ActivatedSlabs,
     BondDebondResult,
+    DerivedLattices,
     HalfHandle,
     Potential,
     PressOutcome,
@@ -106,6 +107,10 @@ def _fake_stage_set() -> StageSet:
     return StageSet(
         resolve_potential=lambda member: Potential(
             kind="classical-stand-in", pair_style="sw", loadable=True),
+        derive_lattices=lambda *a, **k: DerivedLattices(
+            cells={"Si": ((5.43, 0.0, 0.0), (0.0, 5.43, 0.0),
+                          (0.0, 0.0, 5.43))},
+            provenance="stub"),
         build=lambda *a, **k: (
             HalfHandle("a.data", {"Si": 1}, "Si", WAFER_A_TAG),
             HalfHandle("b.data", {"Si": 1}, "Si", WAFER_B_TAG),
