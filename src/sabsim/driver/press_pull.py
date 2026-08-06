@@ -105,6 +105,15 @@ class RunControl:
     # surface roughness — a safe near-contact start where the two faces
     # already interact (< the cutoff). Only runs when the relax did.
     scissors_gap: float = 7.0
+    # Hard SAFETY floor (Å) on the closest-ATOM separation the scissors may
+    # leave. The dividing-surface opening can be corrupted when a violent
+    # out-of-distribution relax depletes the interface density (it read
+    # ~45 A on an ~11 A gap, bond job 15876342, and the cut drove one wafer
+    # into the other). This clamps the cut against the actual facing atoms
+    # so the nearest pair never closes within this floor, whatever the
+    # opening says. Below the scissors_gap's ~3 A closest-atom target, so
+    # it binds only when the opening overshoots.
+    scissors_min_gap: float = 2.5
     separation_cutoff: float = 6.0     # Å, the §4.6 potential cutoff
     density_bin_width: float = 1.0     # Å, dividing-surface profile bin
     # The distance within which two atoms count as still JOINED, which
@@ -253,22 +262,32 @@ def _assembled_gap(built) -> float:
 
 def _scissors_delta(
         engine, tags: np.ndarray, target_gap: float,
-        bin_width: float) -> float:
+        bin_width: float, min_atom_gap: float) -> float:
     """How far to slide the top wafer down to reach ``target_gap`` (Å).
 
     Reads the CURRENT positions — after the relax, so surface
-    reconstruction is already accounted for — and measures the surface-to-
-    surface OPENING with the SAME density dividing-surface metric the press
-    uses for contact (:func:`interface_opening`), NOT the single closest
-    atom. That robustness matters: a lone out-of-distribution atom that
-    wanders into the gap during the relax must not fool the cut into
-    thinking the surfaces already touch (it did, bond job 15876243).
-    Returns how much vacuum to remove so the opening becomes
-    ``target_gap``; never negative.
+    reconstruction is already accounted for — and asks the SAME density
+    dividing-surface metric the press uses for contact
+    (:func:`interface_opening`), NOT the single closest atom, how much
+    vacuum to cut so the opening becomes ``target_gap``. Using the density
+    metric keeps a lone atom that wanders into the gap from fooling the cut
+    into thinking the surfaces already touch (it did, bond job 15876243).
+
+    That density opening is then CLAMPED by a hard safety ceiling from the
+    actual facing atoms: the cut may never bring the nearest atom of one
+    wafer within ``min_atom_gap`` of the other. A violent out-of-
+    distribution relax can deplete the interface density and inflate the
+    opening (it read ~45 A on an ~11 A gap, bond job 15876342), and without
+    this clamp the cut drove one wafer straight into the other. Never
+    negative: if the surfaces already sit within the target, nothing is
+    cut.
     """
     z_lower, z_upper = _wafer_z(np.asarray(engine.positions()), tags)
-    current_gap = interface_opening(z_lower, z_upper, bin_width)
-    return max(0.0, current_gap - target_gap)
+    wanted = interface_opening(z_lower, z_upper, bin_width) - target_gap
+    # The real nearest-atom separation is the ceiling the cut cannot cross.
+    closest_atom_gap = float(z_upper.min() - z_lower.max())
+    ceiling = closest_atom_gap - min_atom_gap
+    return max(0.0, min(wanted, ceiling))
 
 
 def press_and_bond(
@@ -313,7 +332,8 @@ def press_and_bond(
         # contact at rest, never accelerating the grip across empty space
         # (mode = load, §9.3). Δz is measured from the RELAXED positions.
         delta_z = _scissors_delta(
-            engine, tags, control.scissors_gap, control.density_bin_width)
+            engine, tags, control.scissors_gap, control.density_bin_width,
+            control.scissors_min_gap)
         if delta_z > 0.0:
             engine.commands(scissors_commands(built.interface_z, delta_z))
     engine.commands(press_drive_commands(built, member))

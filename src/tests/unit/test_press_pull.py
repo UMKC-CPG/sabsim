@@ -18,6 +18,7 @@ from sabsim.driver.commands import RegionGeometry, classical_si_stand_in
 from sabsim.driver.engine import MockEngine
 from sabsim.driver.press_pull import (
     RunControl,
+    _scissors_delta,
     begin_or_resume_pull,
     press_and_bond,
     pull_at_rate,
@@ -177,6 +178,33 @@ def test_scissors_cuts_the_vacuum_after_the_relax():
     cut = stream.index(displace[0])
     assert stream.index("unfix relax_hold_top") < cut < _first_drive_index(
         stream)
+
+
+def test_scissors_delta_is_clamped_against_wafer_overlap():
+    """A corrupted opening can't drive the top wafer into the bottom.
+
+    The bulk surfaces read ~20 Å apart by the density metric, but a few
+    atoms poke into the gap so the nearest facing atoms are 6 Å apart. The
+    cut must be clamped to the atom-level ceiling (6 - min_atom_gap), NOT
+    the density opening, or one wafer is driven into the other (the failure
+    of bond job 15876342).
+    """
+    # Wafer A: a bulk slab 0..10 plus two atoms poking up to 12.
+    z_a = np.concatenate([np.linspace(0.0, 10.0, 100), [11.0, 12.0]])
+    # Wafer B: a bulk slab 30..40 plus two atoms reaching down to 18.
+    z_b = np.concatenate([np.linspace(30.0, 40.0, 100), [19.0, 18.0]])
+    positions = np.zeros((z_a.size + z_b.size, 3))
+    positions[:z_a.size, 2] = z_a
+    positions[z_a.size:, 2] = z_b
+    tags = np.array([WAFER_A_TAG] * z_a.size + [WAFER_B_TAG] * z_b.size)
+    engine = MockEngine(positions=[positions])
+
+    delta = _scissors_delta(
+        engine, tags, target_gap=7.0, bin_width=1.0, min_atom_gap=2.5)
+
+    # Density opening ~20 would want a ~13 Å cut; the closest atoms (18-12)
+    # cap it at 6 - 2.5 = 3.5.
+    assert delta == pytest.approx(3.5, abs=1e-6)
 
 
 # ---------------------------------------------------------------------
