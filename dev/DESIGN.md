@@ -482,8 +482,9 @@ for us, the residual strain we *record* would then be wrong by the
 potential's own lattice error, and that number is a deliverable.
 
 So SABSIM derives each lattice constant from a **bulk relaxation under
-the current production potential** — the same committee that will run
-steps 4, 6 and 7. Two consequences follow:
+the current production potential** — the same committee that will run the
+re-anneal in step 4 and all of steps 6 and 7 (the cascade in step 4 is
+the exception — see below). Two consequences follow:
 
 - The lattice is re-derived **once per potential generation**. Each ALF
   round that changes the committee can change the equilibrium lattice,
@@ -515,6 +516,37 @@ LAMMPS execution layer (`ARCHITECTURE.md` §4.1) — a few-atom bulk relax —
 and that is exactly the moment the walking skeleton's hardcoded stand-in
 lattice is retired: not smuggled into the plumbing-only skeleton before a
 force engine exists, and not left hardcoded once one does.
+
+**One in-plane footprint, several potentials.** A run visits three force
+models with three slightly different equilibrium lattices — the classical
++ ZBL potential of the cascade (§3.3), the production committee of the
+re-anneal and press/pull (§3.4, §5), and (for a material with no
+classical form) a foundation model in the cascade's place (§4.7). They
+cannot each own the cell, because the two halves must share **one
+in-plane footprint** to be joined (§2.3): that footprint is a single
+choice for the whole per-material chain. It is fixed from the
+**committee-relaxed** bulk lattices — the committee, not the cascade
+potential, because the final measurement runs under the committee, so the
+joined system must sit unstressed at *its* spacing. A dissimilar pair
+carries a small, recorded in-plane residual strain from matching two
+materials (§2.4); the same-material reference carries none.
+
+What re-relaxes at each **force-model handoff** is therefore not the
+footprint — that stays fixed — but the **internal atom positions and the
+out-of-plane spacing**, under whichever potential is about to run. Per
+half: (1) build at the committee footprint; (2) before the cascade, relax
+internals + out-of-plane under the cascade potential, so the bombardment
+is not run in a slab stressed by the committee↔cascade lattice
+difference; (3) bombard (§3.3); (4) strip the projectile (§3.4); (5)
+re-relax internals + out-of-plane under the committee — the re-anneal
+itself. Only the model changes; the footprint does not. The in-plane
+residual of a dissimilar pair is deliberate and cannot be relaxed away
+without un-joining the pair; whether the small out-of-plane stress during
+the cascade materially biases the amorphization is a §3.6 check to run,
+not an assumption. At **cold start** the committee steps do not exist
+yet, so both re-relaxations fall back to the cascade/seed potential and
+the footprint is re-derived under the committee once it exists — the same
+fidelity-ladder refinement the cold-start note above already makes.
 
 ### 2.3 Matching two surface lattices
 
@@ -965,6 +997,20 @@ correction happens; validation (§3.5) runs *after* the re-anneal. Its
 temperature, duration, and ensemble are design parameters; a kinetically
 trapped glass will not fully rearrange, so the classical start must be a
 reasonable basin (the STRUCTURAL 1b safeguards).
+
+**Stripping the projectile precedes the re-anneal.** The cascade embeds
+the beam species (argon in v1); the re-anneal runs under the production
+committee, whose species map is only {Si, O} (§4.3) and which is never
+handed the projectile. So the projectile is removed at the **end of the
+cascade, before the re-anneal opens** — and not only its atoms but its
+*declared species*: the element must leave the cell's type list, not
+merely be emptied of atoms. A committee whose vocabulary is {Si, O}
+cannot re-equilibrate a cell that still declares argon, even with no
+argon atoms left in it. This strip is a correctness precondition for the
+handoff, distinct from the ejecta cleanup at assembly (§2.6), which later
+drops disconnected *substrate* fragments from the finished half — that
+one is housekeeping on {Si, O}; this one is what makes the {Si, O}-only
+committee runnable at all.
 
 ### 3.5 The validation gate (pass/fail, not a report)
 
@@ -1438,10 +1484,12 @@ The generator seam admits, in order:
 - **Tier 1 — a curated classical form + ZBL** (the registry above); the
   v1 path for materials that have a good one.
 - **Tier 2 — a foundation (universal) MLIP + ZBL** for the violent part.
-  A foundation model covers the periodic table, so it *dissolves* the
-  per-material search entirely, at higher cost; it still needs the ZBL
-  cores, because universal models are not trained deep in the repulsive
-  regime the cascade visits. This is the general answer to "include any
+  Here "universal" means an off-the-shelf, already-trained foundation
+  model — the MACE-MP / CHGNet family — that covers the periodic table
+  with no per-material fitting, so it *dissolves* the per-material search
+  entirely, at higher runtime cost. It still needs the ZBL cores,
+  because universal models are not trained deep in the repulsive regime
+  the cascade visits. This is the general answer to "include any
   alternative material," and — being a different model run only for the
   cascade — it does not violate the STRUCTURAL 1b separation that keeps
   the *production* MLIP off cascade distortion.
@@ -1450,6 +1498,21 @@ The generator seam admits, in order:
 
 v1 designs this ladder but builds only Tier 1 (silicon); Tiers 2 and 3
 are drop-in generator implementations behind the same resolver seam.
+
+**Why not a bespoke amorphization model per material?** A tempting
+alternative is to train an extra machine-learned potential for each
+material, fused with ZBL, dedicated to the cascade — turning the
+project's one committee into three models. The ladder deliberately does
+not, for two reasons. The cascade potential is only ever asked to be
+scaffold-grade — to land the surface in a reasonable amorphous basin the
+re-anneal and §3.5 gate then judge — so spending a full committee's
+training cost to clear that low bar buys nothing a foundation model does
+not already give for free across the whole periodic table. And
+STRUCTURAL 1b forbids training the *production* committee on
+cascade-level distortion or on the projectile species, so the committee
+we do train could not be the amorphization model in any case. The
+fallback for a hard material is therefore Tier 2, not a third bespoke
+fit.
 
 **Two per-form hazards the caveat field must carry.** First, the short
 substrate-substrate ZBL core changes *role* by form: for Stillinger-Weber
@@ -1553,10 +1616,13 @@ student can read the file and know what was manufactured.
    computed accurately before anything else: the perfect crystals of
    every phase in the declared domain, their clean surfaces, the
    STRUCTURAL-4 strained substrates, moderate-temperature rattled
-   snapshots, and — new here — uniformly stretched, compressed and
-   sheared cells of each bulk phase at several magnitudes, carried PAST
-   the reversible range into the regime where bonds begin to fail. Two
-   reasons the strained entries are load-bearing rather than optional.
+   snapshots, short warm runs of each crystal in the NVT and NPT
+   ensembles at modestly elevated temperature, and uniformly stretched,
+   compressed and sheared cells of each bulk phase at several
+   magnitudes, carried PAST the reversible range into the regime where
+   bonds begin to fail. Two families here are load-bearing rather than
+   optional — the strained cells and the warm runs — for the reasons
+   below.
    The potential-quality gate (§7.2) already checks elastic stiffness
    against references, so a model taught only relaxed and rattled cells
    would be gated on a property it was never shown — an inconsistency
@@ -1564,7 +1630,17 @@ student can read the file and know what was manufactured.
    is compression, the pull is tension, a mismatched interface under
    load carries shear, and a pull that fails through the crystal rather
    than along the interface is an outcome §6 must tell apart from the
-   other. For each family the recipe states how many and how produced.
+   other. The warm runs earn their place for a separate reason. A
+   rattled snapshot is a set of uncorrelated static kicks around the
+   cold cell; it never shows the model correlated thermal motion or the
+   volume a crystal actually takes at temperature. Yet every stage the
+   trained model owns — the re-settle, the press, the settle, the pull
+   — runs hot. A committee taught only cold and rattled structures
+   reports large, meaningless disagreement the instant a warm run
+   begins, spending the uncertainty signal exactly where §4.4 needs it
+   to mean something. NPT here is what supplies thermal expansion; NVT
+   supplies the correlated motion at fixed volume. For each family the
+   recipe states how many and how produced.
    The purpose is stated out loud, because it is easy to over-invest:
    this collection exists so the seed committee does not fly apart, not
    to make it accurate.
