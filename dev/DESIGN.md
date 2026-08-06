@@ -1379,23 +1379,26 @@ designed" must not be read as "the MLIP runs."
   `E_en_bias_weight` stay tunable knobs; pinning their real values is a
   STRUCTURAL 1b/3 DESIGN follow-on, not fixed here.
 
-### 4.7 The classical cascade generator: selection, acceptance, fallback
+### 4.7 The cascade-potential generator: selection, acceptance, fallback
 
-Sections §3.3 and `PSEUDOCODE.md` §10 run the surface-activation cascade on a
-*classical* potential spliced with ZBL, deliberately not the MLIP (STRUCTURAL
-1b: the production MLIP must never be trained on cascade-level distortion or on
-the projectile species). That classical potential is the one genuinely
-per-material piece of an otherwise chemistry-agnostic cascade — everything
-else already generalizes across materials without change: the
-species-derived ZBL channels (§3.2), the fluence dose, the
+Sections §3.3 and `PSEUDOCODE.md` §10 run the surface-activation cascade
+on a *rough* potential spliced with ZBL, deliberately not the production
+MLIP (STRUCTURAL 1b: the production MLIP must never be trained on
+cascade-level distortion or on the projectile species). The DEFAULT rough
+potential is a universal foundation model (the ladder below), which is
+chemistry-agnostic and so needs no per-material work — matching the rest
+of the cascade, which already generalizes across materials without
+change: the species-derived ZBL channels (§3.2), the fluence dose, the
 frozen-base / border / interior heat sink (§3.3), the MLIP re-anneal
-(§3.4), and the species-derived gate metrics (§3.5). This section designs
-how that per-material potential is chosen, what "good enough" means for
-it, and what to do when no acceptable classical potential exists. The
-silicon answer — Stillinger-Weber — is one *instance* of the pattern, not
-the pattern itself: Stillinger-Weber is a tetrahedral-semiconductor form,
-and is simply the wrong functional shape for silica, gallium nitride, or
-lithium niobate.
+(§3.4), and the species-derived gate metrics (§3.5). A curated CLASSICAL
+form is retained as an OPTIONAL per-material optimization — cheaper to run
+where a good one exists — not a requirement anyone must satisfy to bring
+up a new material. This section designs how the rough potential is
+chosen, what "good enough" means for it, and how the two paths relate.
+Silicon plus Stillinger-Weber is one classical *instance*, not the
+pattern: Stillinger-Weber is a tetrahedral-semiconductor form, simply the
+wrong shape for silica, gallium nitride, or lithium niobate — which is
+exactly why the default cannot be classical.
 
 **The generator is a seam, exactly as activation is a seam (§3.1).** A
 single resolver takes the slab's species set (substrate ∪ projectile) and
@@ -1418,22 +1421,25 @@ Each entry records: the species set it covers, the `pair_style` and
 parameter file, the literature source for those parameters, the
 equilibrium lattice and density that form produces (needed by the
 acceptance check below and by the structure builder's lattice matching,
-§2.2), and a caveat field for per-form hazards. v1 populates exactly one
-entry — silicon, Stillinger-Weber — and leaves the other named materials
-as *documented but untested* entries: a recorded candidate and its
-source, marked not-yet-validated, so the shape is honest and a future
-contributor starts from a pointer rather than a blank page. The documented
-candidates are Vashishta or a Munetoh-style Tersoff for silica; a
-cascade-validated Tersoff / bond-order form for gallium nitride (several
-were parameterized *with* a ZBL splice precisely for radiation damage —
-the ideal kind of source); and, for lithium niobate, a shell-model or
-bond-valence Morse form with reduced charges, because a rigid-ion
-Buckingham runs to −∞ under bombardment (the "Buckingham catastrophe,"
-the exact failure recorded in `PRIOR_ART.md` §1.9). None of these three is
-validated here; they are starting points, not decisions.
+§2.2), and a caveat field for per-form hazards. The registry holds both
+classical and universal entries; v1 populates exactly one — silicon,
+Stillinger-Weber — and leaves the other named materials as *documented
+but untested* entries: a recorded candidate and its source, marked
+not-yet-validated, so the shape is honest and a future contributor starts
+from a pointer rather than a blank page. The documented classical
+candidates are listed with the classical option in the ladder below.
+
+**A universal entry pins the model version.** A classical entry's
+provenance is a citation plus a frozen parameter file that never changes.
+A universal foundation model is a large network that shifts between
+releases (MACE-MP-0, its successors), so its registry entry must record
+the exact model NAME AND VERSION — not merely "MACE" — or reproducibility
+erodes silently as upstream re-trains. The version is part of the entry's
+provenance exactly as the parameter-file citation is for a classical
+form.
 
 **Acceptance: "good enough for a scaffold," certified by the gate.** The
-classical potential is scaffolding, not the product. Its only job is to
+cascade potential is scaffolding, not the product. Its only job is to
 drive the surface into a *reasonable amorphous basin*; the MLIP re-anneal
 (§3.4) then corrects the structure toward MLIP/DFT quality, and the §3.5
 gate judges the result. So "acceptable" is defined cheap-to-expensive,
@@ -1476,28 +1482,47 @@ evidence exists, and because it must be set in the job script the choice
 stays in the run's own permanent record. Anything produced under it is
 EXPLORATORY, and both the run and any report drawn from it must say so.
 
-**A fallback ladder when no acceptable classical potential exists.** Some
-materials — lithium niobate may already be one, and arbitrary future
-materials certainly will be — have no classical form that clears the bar.
-The generator seam admits, in order:
+**The cascade-potential ladder: universal by default, classical by
+choice.** The generator seam admits three forms; the default is the one
+that needs no per-material work:
 
-- **Tier 1 — a curated classical form + ZBL** (the registry above); the
-  v1 path for materials that have a good one.
-- **Tier 2 — a foundation (universal) MLIP + ZBL** for the violent part.
-  Here "universal" means an off-the-shelf, already-trained foundation
-  model — the MACE-MP / CHGNet family — that covers the periodic table
-  with no per-material fitting, so it *dissolves* the per-material search
-  entirely, at higher runtime cost. It still needs the ZBL cores,
-  because universal models are not trained deep in the repulsive regime
-  the cascade visits. This is the general answer to "include any
-  alternative material," and — being a different model run only for the
-  cascade — it does not violate the STRUCTURAL 1b separation that keeps
-  the *production* MLIP off cascade distortion.
-- **Tier 3 — a DFT melt-quench** — last resort, expensive, for a material
-  with neither a classical form nor a trustworthy foundation model.
+- **Default — a universal (foundation) MLIP + ZBL.** "Universal" means
+  an off-the-shelf, already-trained foundation model — the MACE-MP /
+  CHGNet family — covering the periodic table with no per-material
+  fitting, so it *dissolves* the per-material search entirely, at higher
+  runtime cost (and it makes the activate job GPU work — see
+  `ARCHITECTURE.md` §4.1). It still needs the ZBL cores, because universal
+  models are not trained deep in the repulsive regime the cascade visits,
+  and it must be treated as out-of-distribution there: the scaffold-grade
+  acceptance above, not blind trust, is what licenses it. The intended
+  mechanism is a universal model run inside LAMMPS (MACE carries a
+  `pair_style`) composed with the ZBL cores through
+  `pair_style hybrid/overlay`. Being a different model run only for the
+  cascade, it does not violate the STRUCTURAL 1b separation that keeps the
+  production MLIP off cascade distortion.
+- **Option — a curated classical form + ZBL.** Where a material has a
+  well-tested classical form (silicon's Stillinger-Weber, a
+  cascade-validated Tersoff for gallium nitride), it is far cheaper per
+  step and runs the activate job on CPU. It is opt-in, not required;
+  silicon/SW is the v1 instance and the pipeline's regression anchor. The
+  documented classical candidates — Vashishta or a Munetoh-style Tersoff
+  for silica; a cascade-validated Tersoff / bond-order form for gallium
+  nitride (several were parameterized *with* a ZBL splice precisely for
+  radiation damage); and, for lithium niobate, a shell-model or
+  bond-valence Morse form with reduced charges, because a rigid-ion
+  Buckingham runs to −∞ under bombardment (the "Buckingham catastrophe,"
+  `PRIOR_ART.md` §1.9) — are starting points, not decisions.
+- **Last resort — a DFT melt-quench.** For a material with neither a
+  trustworthy universal model nor a classical form: expensive, rarely
+  needed.
 
-v1 designs this ladder but builds only Tier 1 (silicon); Tiers 2 and 3
-are drop-in generator implementations behind the same resolver seam.
+v1 builds only the classical silicon (Stillinger-Weber) instance — the
+sole working cascade today and the regression baseline — while the
+universal default and the DFT last resort are drop-in generator
+implementations behind the same resolver seam. The DESIGN default is
+universal-first; the BUILT default stays silicon/SW until the universal
+path is implemented *and* has cleared the acceptance rungs above on a
+real material.
 
 **Why not a bespoke amorphization model per material?** A tempting
 alternative is to train an extra machine-learned potential for each
@@ -1525,14 +1550,17 @@ step, which complicates the persistent-driver and adaptive-timestep design of
 `PSEUDOCODE.md` §10.2 and costs extra per-step work. Neither is a showstopper;
 both must be recorded so a future contributor is not surprised.
 
-**Frozen for v1 (scope decision (a), 2026-07-18).** The generator resolver
-and the registry schema are built now; the registry is populated with
-silicon (Stillinger-Weber) only; silica, gallium nitride, and lithium
-niobate are recorded as documented, untested candidates; and the Tier-2 /
-Tier-3 fallbacks are designed here but not implemented. Pinning the
+**Frozen for v1 (scope decision (a), 2026-07-18; default inverted
+2026-08-06).** The generator resolver and the registry schema are built
+now. v1 builds only the classical silicon (Stillinger-Weber) instance —
+the sole working cascade today and the regression baseline; the universal
+default and the DFT last resort are designed here but not yet implemented
+behind the same resolver seam. The DESIGN default is universal-first; the
+BUILT default stays silicon/SW until the universal path is implemented and
+has cleared the acceptance rungs on a real material. Pinning the
 acceptance-check tolerances (the lattice/density band, the probe-cascade
-stability criterion) and validating any non-silicon candidate are DESIGN
-follow-ons, logged in `TODO.md`.
+stability criterion) and validating any non-silicon candidate (classical
+or universal) are DESIGN follow-ons, logged in `TODO.md`.
 
 ### 4.8 The force-model recipe, and the settings it fixes once
 

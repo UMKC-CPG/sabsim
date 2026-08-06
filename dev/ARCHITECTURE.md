@@ -940,27 +940,34 @@ Settings / deployment-separation module (§2.3), and is emphatically
 **not** the prior-art anti-pattern of baking partition names and site
 details into emitted scripts (`PRIOR_ART.md` §1.2 item 7). Routing is
 **per job, not per step**, because the pipeline is CPU/GPU-heterogeneous
-and one step can straddle both — step 4 runs a classical + ZBL cascade on
-CPU and then a gentle MLIP anneal on GPU:
+and step 4 in particular can straddle both — its cascade runs on a
+universal MLIP (GPU, the default) or a classical form (CPU, opt-in), with
+the gentle re-anneal riding along after:
 
 | Work                                   | Resource class |
 |----------------------------------------|----------------|
 | VASP labeling (step 1 / inside ALF)    | CPU (MPI)      |
 | DeePMD training (inside ALF)           | GPU            |
-| Classical + ZBL Ar cascade (step 4)    | CPU            |
-| MLIP re-anneal + press / separate      | GPU (`deepmd`) |
+| Ar cascade — universal MLIP + ZBL (default) | GPU       |
+| Ar cascade — classical + ZBL (opt-in)  | CPU            |
+| MLIP re-anneal (step 4)                 | rides activate |
+| Press / settle / pull (bond)           | GPU (`deepmd`) |
 | Imago (step 8)                         | CPU            |
 
-**OPEN — URGENT (this table ↔ `DESIGN.md` §10.2): where the MLIP
-re-anneal's resource falls.** This table marks the MLIP re-anneal as GPU
-work, but §10.2 folds it into the CPU `activate` job (the violent cascade
-dominates that job, and at cold start the re-anneal runs on the classical
-STAND-IN, so v1 activate is CPU throughout). Once a trained MLIP makes the
-re-anneal genuinely GPU-flavoured, this must be settled: either the
-re-anneal splits out of the CPU activate job onto GPU, or the activate job
-gains GPU for that phase, or the re-anneal is accepted as cheap enough to
-stay on CPU. Not blocking v1, but to be resolved SOON — tracked URGENT in
-`TODO.md`.
+**Settled (this table ↔ `DESIGN.md` §10.2): the activate job's class
+follows the cascade potential.** Step 4's cascade dominates the activate
+job, so the job is routed by whichever cascade form it uses — the default
+universal MLIP makes activate GPU work; an opt-in classical form makes it
+CPU. The gentle MLIP re-anneal is a small tail that rides the same job and
+inherits its class; it is NOT grouped with the press/pull bond job,
+because the §3.5 activation gate — a human-inspected checkpoint before
+scarce GPU is spent on the bond — must fall between them. Because the
+default cascade is universal, activate is GPU by default; a deployment
+opts an individual member down to CPU only by choosing a validated
+classical form for that material, through the per-usage `gpus_per_node`
+knob — a config choice, not a code change. (Resolved 2026-08-06,
+superseding the earlier CPU-only-activate assumption, which held only
+while the cascade was classical.)
 
 **Structure of the deployment config — two concerns, one file.** The
 config separates *what the machine has* from *how each kind of work uses

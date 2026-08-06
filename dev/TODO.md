@@ -622,17 +622,17 @@ so they are not discovered late (two touch non-negotiable goals). -->
       what makes the (A) scripts self-sufficient. Optional later: a
       tasks_per_node<=capacity ceiling check (like the walltime one);
       per-study walltime override on prepare (§10.7 follow-on).
-- [ ] **URGENT (ARCHITECTURE ↔ DESIGN): the MLIP re-anneal's resource
-      class.** `ARCHITECTURE.md` §4.1's resource table marks the MLIP
-      re-anneal as GPU work, but `DESIGN.md` §10.2 folds it into the CPU
-      `activate` job. v1 is unaffected (the cascade dominates activate, and
-      the cold-start re-anneal runs on the classical STAND-IN = CPU), but
-      once a trained MLIP makes the re-anneal genuinely GPU-flavoured this
-      must be settled: split the re-anneal out of the CPU activate job onto
-      GPU, give the activate job GPU for that phase, or accept it as cheap
-      enough for CPU. Surfaced by the 2026-07-30 usage-key reconciliation;
-      flagged URGENT (resolve before the MLIP goes live, not after). Note
-      landed at `ARCHITECTURE.md` §4.1 (after the resource table).
+- [x] **RESOLVED 2026-08-06 (ARCHITECTURE ↔ DESIGN): the MLIP re-anneal's
+      resource class.** Settled by the universal-first cascade pivot: the
+      activate job's resource class FOLLOWS the cascade potential's tier —
+      the default universal MLIP makes activate GPU (so the re-anneal
+      riding along is GPU too, no tension), and an opt-in classical form
+      makes it CPU, chosen per-member via the `gpus_per_node` knob. The
+      §3.5 activation gate still forces the re-anneal onto the activate
+      side (not the bond job). `ARCHITECTURE.md` §4.1 rewritten (table +
+      "Settled" block replacing "OPEN — URGENT"); `DESIGN.md` §4.7
+      reframed "universal-first, classical optional." Was: §4.1 marked the
+      re-anneal GPU while §10.2 folded it into the CPU activate job.
 - [x] **PSEUDOCODE for `DESIGN.md` §11 (resume) — DONE 2026-07-27 as
       `PSEUDOCODE.md` §13** ("Resuming an interrupted run"). A dedicated
       top-level section (chosen over folding into §9) so resume stays
