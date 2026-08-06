@@ -188,9 +188,19 @@
       lib` -> `envs/sabsim/lib` — valid: exact clone, byte-identical libs),
       repointed the modulefiles (tracked + published) + recipe + docs.
       Validated: BOTH engines load + run a real MD step under `sabsim`
-      (classical -933.1 eV, deepmd -1169.3 eV). STILL OPEN: 6b (a GREEN
-      deepmd press/pull through the pipeline — the wiring is proven, but a
-      run needs a deepmd-ACTIVATED pair, not the classical one reused).
+      (classical -933.1 eV, deepmd -1169.3 eV).
+      6b/#8 PLUMBING DONE 2026-08-06 (LEDGER T-8, jobs 15876062 activate +
+      15876145/243/342/690 bond): the DeePMD force model DRIVES the
+      pipeline's relax + press on the GPU end-to-end (relax -> scissors ->
+      press wired via `contact_relax_commands`/`scissors_commands`), and
+      scissors is verified (fires/cuts/clamps). A clean GREEN
+      (settled_reference + pull_results) is DEFERRED: all four bond runs
+      failed on OOD artifacts — the bulk Si model corrupts the amorphized
+      surfaces (relax self-heats ~500 K), which no gap measure survives.
+      Real fix = the trained COMMITTEE / per-slab re-anneal under DeePMD
+      (DESIGN §3.4), after which the TEMPORARY OOD relax scaffold is
+      removed (its own TODO above). Provenance still says
+      `classical-stand-in` (resolve_potential unwired).
 
 - [ ] **REMOVE the TEMPORARY OOD relax scaffold once the seam is green
       (CODE).** `commands.contact_relax_commands` currently does damped,

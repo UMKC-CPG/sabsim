@@ -491,3 +491,64 @@ BOTH conda-derived engines still LOAD and RUN a real MD step under the new
      not a multi-node or physics check (those are the E-series / 6a).
   3. The `current` symlink is unchanged (it is version-named, carries no
      env name).
+
+---
+
+## T-8 — jobs 15876062 (activate) + 15876145/243/342/690 (bond) — 2026-08-06
+
+**Question.** Does a real trained DeePMD model drive a GREEN bond THROUGH
+the SABSIM pipeline — activate (classical) -> assemble -> relax -> scissors
+-> press -> settle -> pull — end to end, on a deepmd-consistent pair (not
+6b's reused classically-activated pair)?
+
+- **As-run:** `jobs/si_si_deepmd/` (gitignored) — `sabsim prepare` output,
+  hand-edited bond (partition `gpu,requeue`, account `general`, typed V100
+  gres, `SABSIM_DEEPMD_MODEL=.../train_deepmd_si/graph.pb`, `unset
+  LAMMPS_PLUGIN_PATH`). Study spec `initial_gap=15 A`. Model: Prakash Si
+  `graph.pb` (type_map ["Si"], rcut 6). The pipeline code under test is
+  COMMITTED: 41aad23 (relax+scissors), e51be05 (OOD-safe relax),
+  22d44f6 (dividing-surface gap), bbd9f31 (overlap clamp).
+- **Activate (job 15876062): PASS.** Classical cascade -> re-anneal ->
+  §3.5 gate -> assemble wrote a Si-only `assembled_pair` at a closest-atom
+  gap of 11.04 A (`wafer_b[0]-wafer_a[1] = 81.63-70.60`) — free surfaces
+  for the relax. Gate passed (the blocking gate only writes the pair on
+  success).
+- **Bond — four runs, each a distinct finding (all verbatim from
+  `log.press`), all ultimately the SAME out-of-distribution cause:**
+  1. **15876145** — relax was a plain minimize: `ERROR: Lost atoms:
+     original 8799 current 8782` (17) IN THE RELAX MINIMIZE. The bulk-Si
+     model sees the classically-amorphized surface OOD; an unconstrained
+     minimize ejects loose atoms. -> e51be05: capped/damped/wall relax.
+  2. **15876243** — capped relax SURVIVED (`run 5000`, 8799 intact), but
+     scissors was SKIPPED (min/max closest-atom measure fooled by an atom
+     that wandered into the gap during the ~500 K self-heated relax);
+     press faced the vacuum: `Lost atoms ... current 8798` (1).
+     -> 22d44f6: measure the gap by the dividing surface.
+  3. **15876342** — scissors FIRED: `displace_atoms scissors_upper move
+     0.0 0.0 -38.03 units box` — but 38 A into an ~11 A gap
+     (`interface_opening` read ~45 A: the OOD relax depleted the interface
+     density), driving the wafers together: `Lost atoms ... 8798`.
+     -> bbd9f31: clamp the cut by the actual nearest atoms.
+  4. **15876690** — the clamp PREVENTED the overshoot, but scissors was
+     SKIPPED again (atom-ceiling -> 0: a stray atom within 2.5 A of the
+     other wafer); press faced the vacuum: `Lost atoms ... current 8797`
+     (2).
+- **Verdict: PLUMBING PROVEN; a clean end-to-end GREEN is DEFERRED.** What
+  is proven: the deepmd plugin loads and DRIVES both the relax AND the
+  press on the GPU through the wired pipeline (`plugin load` ->
+  `pair_style deepmd` -> `Tesla V100`), and the relax->scissors->press
+  sequence executes. The SCISSORS mechanism is verified — it fires, cuts,
+  and clamps (301 unit tests incl. `test_scissors_delta_is_clamped_
+  against_wafer_overlap`, and it fired live in 15876342). What is NOT
+  achieved: no `settled_reference.data`, no `pull_results`.
+- **Scope NOT covered / why deferred.** Every failure is an artifact of an
+  INADEQUATE model — a bulk-crystal Si potential run on amorphous surfaces
+  is OOD, so the relax self-heats (~500 K) and sprays interface atoms,
+  CORRUPTING the surface geometry that any gap measure must read (the
+  density metric over-reads on depletion; the atom metric under-reads on a
+  stray). No amount of measure-robustification fixes a corrupted
+  structure. The real fix is a model that knows these surfaces — the
+  trained COMMITTEE / per-slab re-anneal under DeePMD (DESIGN §3.4) — after
+  which the TEMPORARY OOD relax scaffold (capped/damped/wall) is removed
+  (see the TODO). Also: single rank / 1 V100 / Si-only; provenance still
+  labels `classical-stand-in` (resolve_potential unwired).

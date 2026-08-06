@@ -85,28 +85,22 @@ GPU proof run (activate classical @gap10 → bond deepmd) + ledger T-8.
 DEFERRED DESIGN (§3.4/§2.6): whether this joint relax should REPLACE the
 per-slab re-anneal, and where the gate then runs — kept BOTH for now.
 
-**RUN IN FLIGHT (resume monitoring here).** #8 proof in
-`jobs/si_si_deepmd/` (spec @ initial_gap 15 A; prepared + hand-edited
-scripts; `jobs/` is gitignored so this lives on disk only).
-- ACTIVATE re-run **job 15876062** COMPLETED (gate passed, Si-only,
-  closest-atom gap 11.04 A — free for the relax). Good pair on scratch.
-- BOND **job 15876145** FAILED (6:08): `Lost atoms 8799->8782` in the
-  RELAX minimize. Diagnosis: the surfaces are CLASSICALLY amorphized, so
-  the first bulk Si `.pb` sees them OUT OF DISTRIBUTION and a plain
-  minimize ejects ~17 loose surface atoms. Same root cause as 6b
-  (classical->trained OOD), caught earlier (before scissors/press).
-- FIX (committed after this note): `contact_relax_commands` is now
-  damped + displacement-CAPPED dynamics + reflecting wall instead of a
-  minimize. **THIS IS A TEMPORARY SCAFFOLD** to exercise the plumbing on
-  an inadequate model — flagged in the docstring, `_RELAX_DISPLACE_CAP`,
-  the call site, and a TODO ("REMOVE the TEMPORARY OOD relax scaffold").
-  The real fix is activation under the trained COMMITTEE (DESIGN §3.4,
-  deferred per-slab re-anneal under DeePMD); then the scaffold is deleted.
-NEXT: re-submit `si-si-reference_bond.slurm` (code auto-picks up via the
-editable venv). GREEN = `plugin load` -> `pair_style deepmd` ->
-`relax_cap_i ... nve/limit` + `relax_wall` (capped settle, no ejection)
--> `displace_atoms scissors_upper` -> press -> NO `Lost atoms` ->
-`settled_reference.data` -> `pull_results`. Then ledger T-8.
+**#8 DONE (plumbing) 2026-08-06 — see LEDGER T-8.** The DeePMD-bond seam
+is PROVEN as plumbing; a clean end-to-end GREEN is DEFERRED to a proper
+model. Four bond runs (15876145/243/342/690, all V100) each surfaced a
+distinct issue and each fix was committed: relax lost atoms in a plain
+minimize -> OOD-safe capped/damped/wall relax (e51be05); scissors skipped
+on a min/max gap fooled by a stray atom -> dividing-surface measure
+(22d44f6); scissors cut 38 A into an 11 A gap on a depleted-density
+opening -> clamp by the nearest atoms (bbd9f31). Root cause of ALL of it:
+the bulk-crystal Si model is OUT OF DISTRIBUTION on the amorphized
+surfaces, so the relax self-heats (~500 K) and corrupts the geometry any
+gap measure reads. PROVEN: deepmd drives relax + press on GPU through the
+wired pipeline; scissors fires/cuts/clamps (301 tests + live in 15876342).
+NOT achieved: settled_reference / pull_results. The TEMPORARY OOD relax
+scaffold stays flagged for removal (TODO) when the trained COMMITTEE /
+per-slab re-anneal under DeePMD (DESIGN §3.4) makes surfaces in-
+distribution. `jobs/si_si_deepmd/` (gitignored) holds the run harness.
 
 **Older follow-up still open:** wire the multi-step handoff relaxation +
 the currently-unwired `bulk_relax` (DESIGN §2.2).
