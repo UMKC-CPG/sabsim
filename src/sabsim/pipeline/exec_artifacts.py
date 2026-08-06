@@ -91,12 +91,21 @@ class Potential:
 class SharedCell:
     """The coincidence cell both slabs are built to share (DESIGN §2.3).
 
-    A placeholder in W0 — a Si/Si pair has no mismatch, so the shared
-    cell is trivial and the real coincidence matcher stays dormant until
-    the Si/SiO2 milestone (ARCHITECTURE.md §5, wave 3).
+    Carries the real Zur-McGill match's provenance so it travels to the
+    assembly and the report: ``residual_strain`` (the rotation-invariant
+    misfit magnitude, ~0 for an exact match), ``match_area`` (the shared
+    cell area in Å²), and ``is_identity`` (the null case — the two lattices
+    already coincide, as for a same-material pair). The fields default to
+    the identity case so the W0 stub and any same-material build need not
+    restate them; the live build fills them from ``match_surfaces``. The
+    numeric fields are plain floats/bool so this artifact stays free of the
+    matcher's pymatgen import.
     """
 
     note: str
+    residual_strain: float = 0.0
+    match_area: float = 0.0
+    is_identity: bool = True
 
 
 @dataclass(frozen=True)

@@ -80,6 +80,7 @@ from sabsim.structure.slab_builder import (
     build_standalone_half,
     bulk_type_map,
     load_crystal,
+    match_surfaces,
     read_standalone_half,
     rescale_crystal_to_cell,
     write_bulk_data,
@@ -256,39 +257,37 @@ def derive_lattices_live(
     return DerivedLattices(cells=cells, provenance="; ".join(provenance))
 
 
-def _build_one_half(
-        wafer,
-        member: MemberSpecification,
-        derived_lattices: DerivedLattices,
-        scratch_directory: str,
-        wafer_tag: int,
-        declared_species: frozenset,
-        comm=None) -> HalfHandle:
-    """Cut ONE wafer alone, write its data file, return its handle (§7.1).
+def _standalone_half(
+        wafer, member, derived_lattices, declared_species,
+        lateral_repeat=_LATERAL_REPEAT):
+    """Cut ONE wafer's standalone half in memory (no file yet, §2.2/§7.1).
 
     Loads the wafer's crystal, RESCALES it to the model-derived lattice for
     its material (:func:`rescale_crystal_to_cell`, §2.2 — so the slab is
-    cut on the model's own spacing, not the CIF's), builds a standalone
-    half in vacuum with the beam species declared, writes it to a LAMMPS
-    data file under the member's scratch, and hands back the
-    :class:`HalfHandle` the amorphization stage re-reads it from.
-    ``wafer_tag`` fixes the assembly role (bottom A / top B) that rides on
-    the handle.
+    cut on the model's own spacing, not the CIF's), and builds the
+    standalone half in vacuum with the beam species declared. Split out
+    from the write so :func:`build_halves` can hold both slabs at once.
 
-    ``declared_species`` are the elements this half must DECLARE whether
-    or not it contains any — the beam, plus every element the other wafer
-    contributes (:func:`_member_species_union`). Declaring a type with no
-    atoms is the mechanism already used for the beam, which the half also
-    never contains at build time.
+    ``lateral_repeat`` defaults to the dose-spreading footprint tiling; a
+    caller passes 1 to get the PRIMITIVE surface cell for the coincidence
+    match (§2.3), which operates on primitive lattices, not the tiled dose
+    footprint. ``declared_species`` are the elements this half must DECLARE
+    whether or not it contains any — the beam, plus every element the other
+    wafer contributes (:func:`_member_species_union`) — the mechanism
+    already used for the beam, which the half also never contains at build.
     """
     crystal = load_crystal(_resolve_cif(wafer.cif_source))
     crystal = rescale_crystal_to_cell(
         crystal, derived_lattices.cell_for(wafer.identity))
-    half = build_standalone_half(
+    return build_standalone_half(
         crystal, wafer.surface_face, wafer.identity,
         declared_species,
         min_slab_thickness=_MIN_SLAB_THICKNESS,
-        min_vacuum=_MIN_VACUUM, lateral_repeat=_LATERAL_REPEAT)
+        min_vacuum=_MIN_VACUUM, lateral_repeat=lateral_repeat)
+
+
+def _write_half(half, wafer, scratch_directory, wafer_tag, comm):
+    """Write a built half to its data file and return its handle (§7.1)."""
     role = "a" if wafer_tag == WAFER_A_TAG else "b"
     data_file = os.path.join(
         str(scratch_directory), f"half_{role}_{wafer.identity}.data")
@@ -317,11 +316,13 @@ def build_halves(
     stays login-node work: the engine already ran upstream in the
     lattice-derivation step, so no engine is opened here — only geometry.
 
-    The shared cell is a STAND-IN: the wave-3 coincidence matcher (§7.6) is
-    not built, so each half is cut on its own lattice. That is exact for
-    the Si/Si identity case (the two halves already share a lateral cell);
-    a genuine mismatch (Si/SiO2) would produce two halves the assembly's
-    commensurability assert correctly REFUSES until the matcher lands.
+    The two surface lattices are MATCHED with the real Zur-McGill search
+    (:func:`match_surfaces`, §2.3) and the result travels forward on the
+    :class:`SharedCell`. For a same-material pair the match is the identity
+    (zero strain), so the halves already share a lateral cell and the
+    assembly proceeds. A genuine mismatch resolves to a non-identity match
+    whose strained tiling is a follow-on; until it lands the assembly's
+    commensurability assert correctly REFUSES two differently-cut halves.
     """
     # Both halves declare the SAME types: the beam, plus every element
     # either wafer contributes (§4.3's one global type map). A half whose
@@ -329,14 +330,40 @@ def build_halves(
     # that type — exactly how the beam is already carried.
     declared_species = frozenset(
         _projectile_species(member)) | _member_species_union(member)
-    handle_a = _build_one_half(
-        member.material.wafer_a, member, derived_lattices,
-        scratch_directory, WAFER_A_TAG, declared_species, comm)
-    handle_b = _build_one_half(
-        member.material.wafer_b, member, derived_lattices,
-        scratch_directory, WAFER_B_TAG, declared_species, comm)
+    # Build BOTH footprint halves in memory first (the dose tiling), so
+    # neither is written until the match is known.
+    half_a = _standalone_half(
+        member.material.wafer_a, member, derived_lattices, declared_species)
+    half_b = _standalone_half(
+        member.material.wafer_b, member, derived_lattices, declared_species)
+    # The coincidence match runs on the PRIMITIVE surface cells (lateral
+    # repeat 1), not the tiled dose footprint — the matcher's budget
+    # (max_coincidence_area) is for the primitive cell. Reconciling that
+    # coincidence cell WITH the dose footprint is the strained-tiling
+    # follow-on; for the identity case they agree.
+    primitive_a = _standalone_half(
+        member.material.wafer_a, member, derived_lattices, declared_species,
+        lateral_repeat=1)
+    primitive_b = _standalone_half(
+        member.material.wafer_b, member, derived_lattices, declared_species,
+        lateral_repeat=1)
+    match = match_surfaces(
+        primitive_a.atoms, primitive_b.atoms,
+        max_area=to_metal(member.numerical.max_coincidence_area, "area"),
+        misfit_tolerance=member.numerical.misfit_tolerance)
+    handle_a = _write_half(
+        half_a, member.material.wafer_a, scratch_directory, WAFER_A_TAG,
+        comm)
+    handle_b = _write_half(
+        half_b, member.material.wafer_b, scratch_directory, WAFER_B_TAG,
+        comm)
     shared = SharedCell(
-        note="Si/Si identity shared cell (wave-3 matcher dormant, §7.6)")
+        note=(f"{half_a.identity}/{half_b.identity} coincidence match "
+              f"(strain {match.residual_strain:.4f}, "
+              f"{'identity' if match.is_identity else 'mismatch'})"),
+        residual_strain=match.residual_strain,
+        match_area=match.match_area,
+        is_identity=match.is_identity)
     return handle_a, handle_b, shared
 
 
@@ -634,8 +661,9 @@ def assemble_pair_live(
     publishes the written file to every rank.
     """
     rank = comm.Get_rank() if comm is not None else 0
-    structure = (_assemble_on_one_rank(activated, member, scratch_directory)
-                 if rank == 0 else None)
+    structure = (
+        _assemble_on_one_rank(activated, shared, member, scratch_directory)
+        if rank == 0 else None)
     if comm is not None:
         structure = comm.bcast(structure, root=0)
     return structure
@@ -643,6 +671,7 @@ def assemble_pair_live(
 
 def _assemble_on_one_rank(
         activated,
+        shared: SharedCell,
         member: MemberSpecification,
         scratch_directory: str) -> Structure:
     """The assembly itself, executed by a single rank (see above)."""
@@ -655,14 +684,16 @@ def _assemble_on_one_rank(
     half_b = ase_read(
         activated.slab_b.data_file, format="extxyz", parallel=False)
 
-    lateral_cell = np.asarray(half_a.get_cell())
-    match_area = float(np.linalg.norm(
-        np.cross(lateral_cell[0], lateral_cell[1])))
-    identity_match = SurfaceMatch(
-        residual_strain=0.0, match_area=match_area, is_identity=True)
+    # The real coincidence match rides forward on the SharedCell (§2.3),
+    # rebuilt here as the SurfaceMatch the assembler reads — no longer
+    # fabricated from one half's cell.
+    match = SurfaceMatch(
+        residual_strain=shared.residual_strain,
+        match_area=shared.match_area,
+        is_identity=shared.is_identity)
 
     built = assemble_amorphized_pair(
-        half_a, half_b, identity_match,
+        half_a, half_b, match,
         bond_cutoff=_BOND_CUTOFF,
         initial_gap=to_metal(member.protocol.initial_gap, "distance"),
         clash_floor=to_metal(member.numerical.clash_floor, "distance"))

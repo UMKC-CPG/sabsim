@@ -59,6 +59,8 @@ _METAL_UNITS = {
     "eV/angstrom": ("force", 1.0),  # already the metal force unit
     "eV": ("energy", 1.0),
     "eV/atom": ("energy_per_atom", 1.0),
+    "angstrom^2": ("area", 1.0),
+    "nm^2": ("area", 100.0),        # 1 nm^2 = 100 Å²
 }
 
 # 1 bar expressed in eV/Å³ (metal energy density), so a pressure times an

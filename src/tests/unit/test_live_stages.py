@@ -191,7 +191,10 @@ def test_build_halves_writes_two_handles(tmp_path):
         # The beam species (Ar) is declared in the type map, though the
         # pristine slab contains none of it.
         assert "Ar" in handle.type_map and "Si" in handle.type_map
-    assert shared is not None
+    # The real Zur-McGill matcher ran: Si/Si is the identity null case.
+    assert shared.is_identity
+    assert shared.residual_strain < 1.0e-6
+    assert shared.match_area > 0.0
 
 
 def test_built_half_declares_the_beam_and_is_orthogonal(tmp_path):
