@@ -120,7 +120,11 @@ def _first_drive_index(stream):
 
 
 def test_contact_relax_runs_when_the_gap_clears_the_cutoff():
-    """A wide vacuum gap triggers minimize+hold BEFORE the press drive."""
+    """A wide vacuum gap triggers the capped settle BEFORE the drive.
+
+    (The relax is a temporary OOD scaffold: displacement-capped damped
+    dynamics, NOT a minimize — see contact_relax_commands.)
+    """
     built = _gapped_built(20.0)        # closest-atom gap 10 Å > 6 Å cutoff
     engine = MockEngine(positions=[_frame(20.0)], normal_stress=[-1.0])
     press_and_bond(
@@ -128,7 +132,10 @@ def test_contact_relax_runs_when_the_gap_clears_the_cutoff():
         control=RunControl(max_chunks=1))
     stream = engine.received_commands
     assert "fix relax_hold_top top_grip setforce 0.0 0.0 0.0" in stream
-    assert "minimize 1e-8 1e-8 1000 10000" in stream
+    # The displacement cap is what keeps OOD forces from ejecting atoms.
+    assert any(line.startswith("fix relax_cap_i interior nve/limit")
+               for line in stream)
+    assert "fix relax_wall all wall/reflect zlo EDGE zhi EDGE" in stream
     assert "unfix relax_hold_top" in stream
     # The top grip is released BEFORE the press drive claims it.
     assert stream.index("unfix relax_hold_top") < _first_drive_index(stream)
@@ -143,7 +150,7 @@ def test_no_contact_relax_when_the_surfaces_are_in_range():
         control=RunControl(max_chunks=1))
     stream = engine.received_commands
     assert "fix relax_hold_top top_grip setforce 0.0 0.0 0.0" not in stream
-    assert not any(line.startswith("minimize") for line in stream)
+    assert not any("nve/limit" in line for line in stream)
     # No relax => no scissors either; the close-gap path is untouched.
     assert not any(line.startswith("displace_atoms") for line in stream)
 

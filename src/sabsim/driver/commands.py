@@ -436,43 +436,82 @@ def grip_hold_and_readback_commands() -> list:
     ]
 
 
-def contact_relax_commands(relax_steps: int) -> list:
+# TEMPORARY SCAFFOLD (see contact_relax_commands): max distance (Å) any
+# atom may move per step during the capped settle. Exists only to keep an
+# out-of-distribution model from ejecting loose surface atoms; goes away
+# with the rest of the workaround once the seam is proven.
+_RELAX_DISPLACE_CAP = 0.05
+
+
+def contact_relax_commands(
+        member: MemberSpecification, seed: int, settle_steps: int) -> list:
     """Relax the gapped, assembled pair BEFORE the press drives (§5).
+
+    ================================================================
+    TEMPORARY SCAFFOLD — REMOVE once the classical->trained seam is
+    proven end to end (task #8). The damped/capped/wall dance below
+    exists ONLY to keep a NOT-yet-in-distribution model (a first bulk
+    Si potential run on classically-amorphized surfaces) from ejecting
+    atoms, so the PLUMBING can be exercised on real DeePMD. It is NOT
+    the intended physics. The real design activates each surface under
+    the trained COMMITTEE (DESIGN §3.4, the deferred per-slab re-anneal
+    under DeePMD), which removes the out-of-distribution mismatch and
+    with it the need for any capping, damping, or wall here — a normal
+    relax then suffices. Do NOT build on this or treat it as the way
+    the relax should work; delete it when the seam test is green.
+    ================================================================
 
     The 'relax' of relax-press-settle-pull. The two amorphized surfaces are
     assembled a VACUUM GAP apart — wider than the potential cutoff — so each
     reconstructs as an effectively FREE surface while the joined pair drops
-    into the force model's basin. That is what lets the press then begin
-    from an in-distribution contact instead of a cold, clashing one: the
-    fix for the classical->trained handoff that ejected surface atoms under
-    DeePMD (install/tests/LEDGER.md, 6b).
+    into the force model's basin, letting the press begin from an in-
+    distribution contact instead of a cold, clashing one.
 
-    Both grips are pinned for the duration so the relax cannot close or
-    widen the gap: the top grip gets its OWN temporary ``setforce`` hold
-    (the bottom grip is already held by
-    :func:`grip_hold_and_readback_commands`), the interior and border relax
-    through a minimize and an optional short hold at the press temperature
-    under the integrator already installed, then the top hold is RELEASED so
-    the press can drive it. ``relax_steps`` is the hold length in MD steps
-    (0 minimizes only). Whether to relax at all is the caller's decision —
-    it issues this only when the assembled gap clears the cutoff.
+    The surfaces were shaped by the CLASSICAL cascade, so the trained model
+    sees them OUT OF DISTRIBUTION: a few loosely-bound surface atoms carry
+    large forces, and an unconstrained minimize hurls them clean out of the
+    box (install/tests/LEDGER.md: "Lost atoms" in the relax). So — AS A
+    STOPGAP — the relax is DAMPED, displacement-CAPPED dynamics rather than
+    a minimize: no atom moves more than ``_RELAX_DISPLACE_CAP`` Å per step,
+    a Langevin bath bleeds the excess energy, and a reflecting wall backs
+    the box faces, which walks each free surface into the model's basin at
+    the press temperature without losing atoms. The later settle (after
+    contact) is what minimizes; the relax only has to make the pair
+    press-ready.
+
+    Runs on the engine the press setup already prepared: the plain interior
+    and border integrators are swapped for capped ones for the settle and
+    restored afterwards. Both grips are pinned (the bottom is already
+    setforce-held) so the vacuum gap is held; the top grip is released at
+    the end for the press drive.
     """
-    commands = [
-        # Pin the top grip too, so the minimize/hold preserves the vacuum
-        # gap rather than collapsing or opening it; the bottom grip is
-        # already setforce-held by the shared readback commands.
+    temperature = to_metal(member.protocol.press_temperature, "temperature")
+    damping = to_metal(member.numerical.langevin_damping, "time")
+    cap = _lammps_number(_RELAX_DISPLACE_CAP)
+    return [
+        # Pin the top grip and back the box faces with a reflecting wall so
+        # nothing can leave while the OOD forces bleed off.
         "fix relax_hold_top top_grip setforce 0.0 0.0 0.0",
-        "min_style cg",
-        "minimize 1e-8 1e-8 1000 10000",
+        "fix relax_wall all wall/reflect zlo EDGE zhi EDGE",
+        # Swap the plain nve integrators for displacement-CAPPED ones and
+        # damp the interior, so the force spikes dissipate without ejection.
+        "unfix nve_interior",
+        "unfix nve_border",
+        f"fix relax_cap_i interior nve/limit {cap}",
+        f"fix relax_cap_b border nve/limit {cap}",
+        f"fix relax_damp_i interior langevin {_lammps_number(temperature)} "
+        f"{_lammps_number(temperature)} {_lammps_number(damping)} {seed}",
+        f"run {max(1, settle_steps)}",
+        # Tear the capped settle down and restore the press integrators.
+        "unfix relax_cap_i",
+        "unfix relax_cap_b",
+        "unfix relax_damp_i",
+        "unfix relax_wall",
+        "fix nve_interior interior nve",
+        "fix nve_border border nve",
+        # Release the top grip so the press drive can move it downward.
+        "unfix relax_hold_top",
     ]
-    if relax_steps > 0:
-        # A short hold at temperature (the border Langevin bath already
-        # installed) lets each free surface settle thermally after the
-        # minimize; the interior integrates under its own nve.
-        commands.append(f"run {relax_steps}")
-    # Release the top grip so the press drive can move it downward.
-    commands.append("unfix relax_hold_top")
-    return commands
 
 
 def scissors_commands(interface_z: float, delta_z: float) -> list:

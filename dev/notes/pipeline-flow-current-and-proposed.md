@@ -85,20 +85,28 @@ GPU proof run (activate classical @gap10 → bond deepmd) + ledger T-8.
 DEFERRED DESIGN (§3.4/§2.6): whether this joint relax should REPLACE the
 per-slab re-anneal, and where the gate then runs — kept BOTH for now.
 
-**RUN IN FLIGHT (resume monitoring here).** The #8 proof run is
-materialized in `jobs/si_si_deepmd/` (spec @ initial_gap 10 A;
-`deployment.toml`; prepared + hand-edited scripts). ACTIVATE submitted
-2026-08-06 = SLURM **job 15875659** (CPU, rulisp-lab, classical cascade
--> re-anneal -> gate -> assemble @ 10 A). It runs independent of any
-terminal. RESUME: `sacct -j 15875659 -o JobID,State,Elapsed,ExitCode -X`
-and read `jobs/si_si_deepmd/si-si-reference_activate-*.out` for the
-activation-gate verdict. IF activate COMPLETED + gate PASSED ->
-`cd jobs/si_si_deepmd && sbatch si-si-reference_bond.slurm` (GPU, general
-acct, V100, deepmd override already baked). GREEN bond = `plugin load` ->
-`pair_style deepmd` -> `fix relax_hold_top`+`minimize` BEFORE the drive
--> NO `Lost atoms` -> contact -> settle -> `pull_results`. Then ledger
-T-8. Uncommitted: the press_pull/commands/test code (299 tests) + this
-note + the whole `jobs/si_si_deepmd/` dir.
+**RUN IN FLIGHT (resume monitoring here).** #8 proof in
+`jobs/si_si_deepmd/` (spec @ initial_gap 15 A; prepared + hand-edited
+scripts; `jobs/` is gitignored so this lives on disk only).
+- ACTIVATE re-run **job 15876062** COMPLETED (gate passed, Si-only,
+  closest-atom gap 11.04 A — free for the relax). Good pair on scratch.
+- BOND **job 15876145** FAILED (6:08): `Lost atoms 8799->8782` in the
+  RELAX minimize. Diagnosis: the surfaces are CLASSICALLY amorphized, so
+  the first bulk Si `.pb` sees them OUT OF DISTRIBUTION and a plain
+  minimize ejects ~17 loose surface atoms. Same root cause as 6b
+  (classical->trained OOD), caught earlier (before scissors/press).
+- FIX (committed after this note): `contact_relax_commands` is now
+  damped + displacement-CAPPED dynamics + reflecting wall instead of a
+  minimize. **THIS IS A TEMPORARY SCAFFOLD** to exercise the plumbing on
+  an inadequate model — flagged in the docstring, `_RELAX_DISPLACE_CAP`,
+  the call site, and a TODO ("REMOVE the TEMPORARY OOD relax scaffold").
+  The real fix is activation under the trained COMMITTEE (DESIGN §3.4,
+  deferred per-slab re-anneal under DeePMD); then the scaffold is deleted.
+NEXT: re-submit `si-si-reference_bond.slurm` (code auto-picks up via the
+editable venv). GREEN = `plugin load` -> `pair_style deepmd` ->
+`relax_cap_i ... nve/limit` + `relax_wall` (capped settle, no ejection)
+-> `displace_atoms scissors_upper` -> press -> NO `Lost atoms` ->
+`settled_reference.data` -> `pull_results`. Then ledger T-8.
 
 **Older follow-up still open:** wire the multi-step handoff relaxation +
 the currently-unwired `bulk_relax` (DESIGN §2.2).

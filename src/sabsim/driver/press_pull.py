@@ -296,8 +296,11 @@ def press_and_bond(
     # installed AFTER the relax, so the top grip is free while it runs.
     tags = np.asarray(built.atoms.get_tags())
     if _assembled_gap(built) > control.separation_cutoff:
-        engine.commands(
-            contact_relax_commands(control.relax_chunks * control.chunk_steps))
+        # NOTE: contact_relax_commands is a TEMPORARY out-of-distribution
+        # scaffold (see its docstring) — remove once the classical->trained
+        # seam is proven and surfaces are activated under the committee.
+        engine.commands(contact_relax_commands(
+            member, seed, control.relax_chunks * control.chunk_steps))
         # Cut the vacuum the relax needed so the load-press starts near
         # contact at rest, never accelerating the grip across empty space
         # (mode = load, §9.3). Δz is measured from the RELAXED positions.

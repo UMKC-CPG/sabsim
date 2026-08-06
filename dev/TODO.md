@@ -192,6 +192,21 @@
       deepmd press/pull through the pipeline — the wiring is proven, but a
       run needs a deepmd-ACTIVATED pair, not the classical one reused).
 
+- [ ] **REMOVE the TEMPORARY OOD relax scaffold once the seam is green
+      (CODE).** `commands.contact_relax_commands` currently does damped,
+      displacement-CAPPED dynamics + a reflecting wall INSTEAD OF a
+      minimize, purely so a not-yet-in-distribution model (the first bulk
+      Si `.pb` run on classically-amorphized surfaces) does not eject
+      atoms ("Lost atoms" in the relax, bond job 15876145). This is
+      SCAFFOLDING to exercise the classical->trained PLUMBING, NOT the
+      intended physics. The real fix is activation under the trained
+      COMMITTEE (DESIGN §3.4, the deferred per-slab re-anneal under
+      DeePMD): once surfaces are in-distribution, the cap/damp/wall come
+      out and a normal relax suffices. Delete `_RELAX_DISPLACE_CAP`, the
+      nve/limit + wall/reflect dance, and revert to a plain minimize (or
+      drop the joint relax entirely if the per-slab re-anneal replaces it)
+      when task #8's seam test is proven. Do NOT build on this.
+
 - [x] **Deployment: add a MEMORY knob to `[usage.*]` (CODE) — DONE
       2026-08-05.** E5 (job 15697360) OOM-killed the activate cascade on
       the partition default; `deployment_rc`/`prepare.py` emitted no
