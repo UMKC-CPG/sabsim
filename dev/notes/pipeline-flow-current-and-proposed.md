@@ -3,13 +3,73 @@
 Working note, 2026-08-05. NOT canonical yet — a reviewable synthesis to
 decide what lands in VISION / ARCHITECTURE / DESIGN and at which level.
 
-## SESSION STATUS — LATEST 2026-08-06 (STRUCTURE BUILDER; resume here)
+## SESSION STATUS — LATEST 2026-08-06b (MATCHER PHASE B; resume here)
 
-All committed + PUSHED to origin/main. Commit trail this session:
-`cf92d30` bulk_relax wired; `6faf64f` TODO note; `0e5a1ed` matcher Phase A;
-`f4ca97b` Phase B foundation. (Earlier same day: the #8 DeePMD-bond arc —
-`855c508` T-8 + the relax/scissors/clamp commits — and the universal-first
-DESIGN edits `d55a849` etc.) 306 tests green.
+Phase B is ~3/4 done. **UNPUSHED** — 3 commits ahead of origin/main:
+`75e0690` strained-tiling core, `3deaf55` mismatched build wired (both
+this session), and `c9f9a14` (last session's working-note update). **One
+`git push` when back.** 311 tests green (306 + 5 new).
+
+**DONE this session (matcher Phase B, steps 1-3 of 4):**
+- **Strained-tiling core (`75e0690`).** Two pure-geometry functions in
+  `slab_builder.py`: `even_split_shared_cell(substrate_cell, film_cell)` —
+  the §2.4 EVEN-split shared cell, TWIST-GENERAL (recovers the in-plane
+  rotation by a polar decomposition `_polar_rotation`, de-rotates the film
+  into the substrate frame, THEN takes the midpoint, so orientation never
+  leaks into size); and `tile_slab_to_shared_cell(slab, tiling, shared)` —
+  tiles by the whole-number matrix (`ase.build.make_supercell`, so
+  NON-diagonal tilings work where `repeat` can't) and strains onto the
+  shared cell (`set_cell scale_atoms`, in-plane only; z/vacuum untouched).
+  4 unit tests. VALIDATED empirically first (twist recovered exactly;
+  make_supercell = tiling@primitive; set_cell keeps every atom's z).
+- **Mismatched build wired (`3deaf55`).** `build_standalone_half` gains
+  optional `coincidence_tiling`+`shared_cell`: a real mismatch is tiled +
+  strained onto the shared cell BEFORE the dose tiling (strain at build,
+  §2.4). `build_halves` now matches FIRST (primitive cells), then for a
+  non-identity match derives the even-split shared cell + each wafer's
+  tiling (slab A = matcher's 'film', slab B = 'substrate') and cuts both
+  footprint halves strained onto that one cell. A Si/silica pair now
+  emerges COMMENSURATE — the §2.6 `_assert_commensurate` accepts it
+  instead of refusing. New test `test_dissimilar_halves_emerge_commensurate`.
+
+**KEY API GOTCHA (honor this):** `ZSLGenerator.__call__(film, substrate)` —
+FILM is the FIRST arg. `match_surfaces(slab_a, slab_b)` calls
+`generator(vectors_a, vectors_b)`, so **slab_a = 'film', slab_b =
+'substrate'**. So slab A takes `match.film_tiling`, slab B takes
+`match.substrate_tiling`; `even_split_shared_cell(match.substrate_cell,
+match.film_cell)` returns the cell in slab_A's (film's) frame... no — in
+the SUBSTRATE frame (align film onto substrate). Both slabs `set_cell` to
+that ONE shared cell → commensurate by construction.
+
+**PHASE B — STEP 4 REMAINING (task #12, was in progress, NO edits made):**
+Footprint = a TUNABLE input, retire hardcoded `_LATERAL_REPEAT=10`.
+Plan (all mapped, ready to code):
+1. Add `target_footprint_area: Quantity` to `NumericalKnobs`
+   (`spec/records.py`), read it in `spec/loader.py` via `_require_quantity`,
+   add it to `[numerical]` in `dev/templates/study_spec.toml` (angstrom^2).
+   ONLY the template needs the value — all tests load it (no test builds
+   NumericalKnobs directly; `test_spec_loader` has no exhaustive-field
+   assert that bites).
+2. In `build_halves`: base cell area = `abs(det(shared_cell))` for a
+   mismatch, else `abs(det(primitive_a in-plane))`; `footprint_repeat =
+   max(1, round(sqrt(target_area / base_area)))`; pass as `lateral_repeat`
+   to BOTH `_standalone_half` calls; delete `_LATERAL_REPEAT`.
+3. THEN (same task, 2nd commit): lift `_MIN_SLAB_THICKNESS` (55),
+   `_MIN_VACUUM` (30), `_BULK_CELLS_PER_AXIS` (3) to spec knobs too
+   ("same principle" — Paul). Same recipe: records + loader + template.
+`to_metal(qty, "area")` already handles angstrom^2 (max_coincidence_area
+uses it). Decisions locked: strain 2% (misfit_tolerance), area budget ~400
+Å² (max_coincidence_area), footprint tunable, EVEN split, twist-general,
+MATERIAL-AGNOSTIC.
+
+---
+
+## SESSION STATUS — 2026-08-06 (STRUCTURE BUILDER)
+
+Commit trail: `cf92d30` bulk_relax wired; `6faf64f` TODO note; `0e5a1ed`
+matcher Phase A; `f4ca97b` Phase B foundation. (Earlier same day: the #8
+DeePMD-bond arc — `855c508` T-8 + the relax/scissors/clamp commits — and
+the universal-first DESIGN edits `d55a849` etc.)
 
 **DONE this session (structure builder):**
 - **bulk_relax WIRED (§2.2, `cf92d30`).** New first-class `derive_lattices`
