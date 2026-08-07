@@ -3,11 +3,59 @@
 Working note, 2026-08-05. NOT canonical yet — a reviewable synthesis to
 decide what lands in VISION / ARCHITECTURE / DESIGN and at which level.
 
-## SESSION STATUS — LATEST 2026-08-06b (MATCHER PHASE B; resume here)
+## SESSION STATUS — LATEST 2026-08-07 (MATCHER PHASE B COMPLETE)
 
-Phase B is ~3/4 done. **UNPUSHED** — 3 commits ahead of origin/main:
-`75e0690` strained-tiling core, `3deaf55` mismatched build wired (both
-this session), and `c9f9a14` (last session's working-note update). **One
+Phase B is DONE (4/4). Two commits this session (Paul pushes his own):
+`1127d81` footprint = tunable `target_footprint_area`, retiring the 10x10
+`_LATERAL_REPEAT` hardcode; `b823133` the §2.5 thickness criterion wired +
+the last three sizing constants lifted to spec knobs. 314 tests green.
+
+**STEP 4 — footprint knob (`1127d81`).** `target_footprint_area`
+(NumericalKnobs, default 1475 Å²) replaces `_LATERAL_REPEAT=10`.
+`build_halves` sizes the per-axis tiling with `_footprint_repeat =
+round(sqrt(target / base))` — base = the shared cell for a mismatch, the
+primitive surface cell for identity — and passes it to both halves. The
+default reproduces the §3.6-pinned 38.4 Å Si cell exactly
+(round(sqrt(1475/14.75))=10). Strain-neutral, so the §2.4 decoupling
+holds: match once for low strain/few atoms, grow the footprint for dose.
+
+**STEP 4b — slab sizing to spec + §2.5 thickness (`b823133`).** The three
+remaining hardcodes (`_MIN_SLAB_THICKNESS`, `_MIN_VACUUM`,
+`_BULK_CELLS_PER_AXIS`) became `slab_thickness` / `expected_activated_depth`
+/ `slab_vacuum` / `bulk_cells_per_axis` knobs, and thickness is now the
+§2.5 CRITERION not a constant. DESIGN DECISION (Paul, this session, after I
+flagged the level shift): wire it as a FLOOR — `_effective_slab_thickness =
+max(slab_thickness, expected_activated_depth + minimum_bulk_thickness)` —
+NOT a pure equality. Rationale: the build runs BEFORE §3.5 measures the
+skin, so `expected_activated_depth` (default 7 Å) is the build-time
+estimate; the previously-DEAD `minimum_bulk_thickness` knob goes live, set
+to 30 Å (Paul's call). Si default = max(55, 7+30) = 55, so the §3.6
+measurement-anchored cell (and the 7 Å depth threshold measured on it) is
+PRESERVED, not shrunk to 37. Rejected pure-equality (would give 27 Å and
+invalidate the anchor) and gate-reference-depth (would couple the
+login-node build to per-material reference data). `build_halves` records
+the achieved bulk margin on the SharedCell note. Propagated to DESIGN §2.5
+(concrete floor wiring) + V1_VALUES (sizing knobs) + module docstring.
+
+**NEXT (Phase B is closed — these are the natural follow-ons, none started):**
+- §2.4 out-of-plane relaxation: after the in-plane strain, relax z at fixed
+  lateral cell under the model. `tile_slab_to_shared_cell` leaves z as cut
+  ("the out-of-plane relaxation §2.4 calls for happens later"); confirm
+  where that lands (build vs activation) and whether it's wired.
+- Validate the mismatched build on a real compute node (Si/silica emerges
+  commensurate in tests; the activation+assembly chain past it is
+  node-only).
+- `expected_activated_depth` is a build-time ESTIMATE; the §2.5 loop that
+  feeds §3.5's MEASURED depth back to re-check the margin is still a study
+  convergence step, not automated.
+
+---
+(historical entries below)
+
+## SESSION STATUS — 2026-08-06b (MATCHER PHASE B, steps 1-3)
+
+Phase B was ~3/4 done here. Commits: `75e0690` strained-tiling core,
+`3deaf55` mismatched build wired, `c9f9a14` (last session's note). **One
 `git push` when back.** 311 tests green (306 + 5 new).
 
 **DONE this session (matcher Phase B, steps 1-3 of 4):**
