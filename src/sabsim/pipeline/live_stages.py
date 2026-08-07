@@ -79,6 +79,7 @@ from sabsim.structure.slab_builder import (
     SurfaceMatch,
     build_standalone_half,
     bulk_type_map,
+    even_split_shared_cell,
     load_crystal,
     match_surfaces,
     read_standalone_half,
@@ -259,7 +260,8 @@ def derive_lattices_live(
 
 def _standalone_half(
         wafer, member, derived_lattices, declared_species,
-        lateral_repeat=_LATERAL_REPEAT):
+        lateral_repeat=_LATERAL_REPEAT,
+        coincidence_tiling=None, shared_cell=None):
     """Cut ONE wafer's standalone half in memory (no file yet, §2.2/§7.1).
 
     Loads the wafer's crystal, RESCALES it to the model-derived lattice for
@@ -271,10 +273,14 @@ def _standalone_half(
     ``lateral_repeat`` defaults to the dose-spreading footprint tiling; a
     caller passes 1 to get the PRIMITIVE surface cell for the coincidence
     match (§2.3), which operates on primitive lattices, not the tiled dose
-    footprint. ``declared_species`` are the elements this half must DECLARE
-    whether or not it contains any — the beam, plus every element the other
-    wafer contributes (:func:`_member_species_union`) — the mechanism
-    already used for the beam, which the half also never contains at build.
+    footprint. ``coincidence_tiling`` and ``shared_cell`` carry the §2.4
+    strained-tiling geometry for a real mismatch (the whole-number matrix
+    and the shared cell both wafers are strained onto); they stay ``None``
+    for the identity case, which needs neither. ``declared_species`` are the
+    elements this half must DECLARE whether or not it contains any — the
+    beam, plus every element the other wafer contributes
+    (:func:`_member_species_union`) — the mechanism already used for the
+    beam, which the half also never contains at build.
     """
     crystal = load_crystal(_resolve_cif(wafer.cif_source))
     crystal = rescale_crystal_to_cell(
@@ -283,7 +289,8 @@ def _standalone_half(
         crystal, wafer.surface_face, wafer.identity,
         declared_species,
         min_slab_thickness=_MIN_SLAB_THICKNESS,
-        min_vacuum=_MIN_VACUUM, lateral_repeat=lateral_repeat)
+        min_vacuum=_MIN_VACUUM, lateral_repeat=lateral_repeat,
+        coincidence_tiling=coincidence_tiling, shared_cell=shared_cell)
 
 
 def _write_half(half, wafer, scratch_directory, wafer_tag, comm):
@@ -319,10 +326,12 @@ def build_halves(
     The two surface lattices are MATCHED with the real Zur-McGill search
     (:func:`match_surfaces`, §2.3) and the result travels forward on the
     :class:`SharedCell`. For a same-material pair the match is the identity
-    (zero strain), so the halves already share a lateral cell and the
-    assembly proceeds. A genuine mismatch resolves to a non-identity match
-    whose strained tiling is a follow-on; until it lands the assembly's
-    commensurability assert correctly REFUSES two differently-cut halves.
+    (zero strain), so the halves already share a lateral cell and are cut on
+    their own lattice. A genuine mismatch resolves to a non-identity match,
+    and each footprint half is then tiled by its whole-number matrix and
+    strained onto the EVEN-split shared cell (§2.4) so the pair emerges
+    commensurate — exactly what the assembly's commensurability assert
+    demands (§2.6).
     """
     # Both halves declare the SAME types: the beam, plus every element
     # either wafer contributes (§4.3's one global type map). A half whose
@@ -330,17 +339,10 @@ def build_halves(
     # that type — exactly how the beam is already carried.
     declared_species = frozenset(
         _projectile_species(member)) | _member_species_union(member)
-    # Build BOTH footprint halves in memory first (the dose tiling), so
-    # neither is written until the match is known.
-    half_a = _standalone_half(
-        member.material.wafer_a, member, derived_lattices, declared_species)
-    half_b = _standalone_half(
-        member.material.wafer_b, member, derived_lattices, declared_species)
-    # The coincidence match runs on the PRIMITIVE surface cells (lateral
-    # repeat 1), not the tiled dose footprint — the matcher's budget
-    # (max_coincidence_area) is for the primitive cell. Reconciling that
-    # coincidence cell WITH the dose footprint is the strained-tiling
-    # follow-on; for the identity case they agree.
+    # The coincidence match runs FIRST, on the PRIMITIVE surface cells
+    # (lateral repeat 1), because the matcher's area budget
+    # (max_coincidence_area) is for the primitive cell and — for a mismatch
+    # — the footprint halves cannot be cut until the tiling is known.
     primitive_a = _standalone_half(
         member.material.wafer_a, member, derived_lattices, declared_species,
         lateral_repeat=1)
@@ -351,6 +353,26 @@ def build_halves(
         primitive_a.atoms, primitive_b.atoms,
         max_area=to_metal(member.numerical.max_coincidence_area, "area"),
         misfit_tolerance=member.numerical.misfit_tolerance)
+    # For a real mismatch, derive the shared cell and each wafer's tiling
+    # so the footprint halves are cut strained onto ONE commensurate cell
+    # (§2.4). Slab A is the matcher's 'film', slab B its 'substrate', so
+    # each takes its own whole-number matrix. Identity needs neither.
+    if match.is_identity:
+        shared_cell = None
+        tiling_a = tiling_b = None
+    else:
+        shared_cell = even_split_shared_cell(
+            match.substrate_cell, match.film_cell)
+        tiling_a = match.film_tiling
+        tiling_b = match.substrate_tiling
+    # Now build BOTH footprint halves (the dose tiling), on the shared cell
+    # for a mismatch; neither is written until both exist.
+    half_a = _standalone_half(
+        member.material.wafer_a, member, derived_lattices, declared_species,
+        coincidence_tiling=tiling_a, shared_cell=shared_cell)
+    half_b = _standalone_half(
+        member.material.wafer_b, member, derived_lattices, declared_species,
+        coincidence_tiling=tiling_b, shared_cell=shared_cell)
     handle_a = _write_half(
         half_a, member.material.wafer_a, scratch_directory, WAFER_A_TAG,
         comm)

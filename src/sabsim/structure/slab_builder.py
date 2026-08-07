@@ -274,7 +274,9 @@ def build_standalone_half(
         min_slab_thickness: float = 8.0,
         min_vacuum: float = 10.0,
         lateral_repeat: int = 1,
-        termination_index: int = 0) -> StandaloneHalf:
+        termination_index: int = 0,
+        coincidence_tiling=None,
+        shared_cell=None) -> StandaloneHalf:
     """Cut ONE wafer alone in vacuum, beam species declared (§4.3, §7.1).
 
     The step-3 builder for a single bonding partner. It cleaves the slab
@@ -296,17 +298,26 @@ def build_standalone_half(
     from the protocol record and directly testable. ``identity`` is the
     material label carried for provenance and the report.
 
-    STAND-IN (retired at wave 3, DESIGN.md §2.4): this cuts each half on
-    the crystal's own lattice and does NOT yet tile it to a shared
-    coincidence cell or apply the split misfit strain — the Si/Si identity
-    case needs neither, and the strained dissimilar assembly lands with the
-    coincidence matcher (§7.6). The seam is the same: a later wave threads
-    the shared cell and strain through here without changing the half's
-    shape.
+    **The strained coincidence cell (§2.4).** When ``coincidence_tiling``
+    and ``shared_cell`` are given — a genuine lattice mismatch — the freshly
+    cut slab is first tiled by its whole-number Zur-McGill matrix and
+    strained onto the shared cell (:func:`tile_slab_to_shared_cell`) BEFORE
+    the dose tiling, so both wafers of a dissimilar pair emerge on one
+    commensurate cell. Strain is applied here, at build, because amorphous
+    material has no lattice to strain cleanly (§2.4). For the Si/Si identity
+    case both are left ``None`` and the half is cut on its own lattice, as
+    before — that case needs neither tiling nor strain. In both paths the
+    ``lateral_repeat`` dose tiling then multiplies whatever cell resulted,
+    which is strain-neutral (identical copies).
     """
     slab = build_slab(
         crystal, miller_face, min_slab_thickness, min_vacuum,
         termination_index)
+    # A real mismatch: tile to the whole-number matched supercell and strain
+    # it onto the shared cell (§2.4) before any dose tiling. Identity leaves
+    # both None and cuts on the crystal's own lattice.
+    if coincidence_tiling is not None and shared_cell is not None:
+        slab = tile_slab_to_shared_cell(slab, coincidence_tiling, shared_cell)
     if lateral_repeat > 1:
         slab = slab.repeat((lateral_repeat, lateral_repeat, 1))
     slab = orthogonalize_in_plane(slab)

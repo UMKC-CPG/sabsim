@@ -456,3 +456,36 @@ def test_same_material_member_declares_only_its_own_species(tmp_path):
         derived_lattices=_derived_lattices(_si_si_member()),
         scratch_directory=str(tmp_path))
     assert set(handle_a.type_map) == {"Ar", "Si"}
+
+
+def test_dissimilar_halves_emerge_commensurate(tmp_path):
+    """A real mismatch is tiled onto ONE shared cell, ready to assemble.
+
+    The point of Phase B (§2.4): a genuine lattice mismatch (Si against
+    silica) is strained onto a single commensurate cell at build, so the
+    two halves share a lateral cell — exactly what the assembly's §2.6
+    commensurability assert (``_assert_commensurate``) demands. Read both
+    written halves back the way the assembly will and compare their in-plane
+    cells, and confirm the match is a real, non-identity one carrying a
+    small residual strain.
+    """
+    member = _dissimilar_member()
+    handle_a, handle_b, shared = build_halves(
+        member, potential=None,
+        derived_lattices=_derived_lattices(member),
+        scratch_directory=str(tmp_path))
+
+    # A genuine mismatch, not the identity null case, with real strain.
+    assert not shared.is_identity
+    assert shared.residual_strain > 1.0e-6
+    assert shared.match_area > 0.0
+
+    # Both halves share a lateral cell to numerical noise — the assembly's
+    # commensurability assertion would accept this pair.
+    half_a = read_standalone_half(
+        handle_a.data_file, handle_a.type_map, handle_a.identity)
+    half_b = read_standalone_half(
+        handle_b.data_file, handle_b.type_map, handle_b.identity)
+    cell_a = np.asarray(half_a.atoms.get_cell())[:2, :2]
+    cell_b = np.asarray(half_b.atoms.get_cell())[:2, :2]
+    assert np.allclose(cell_a, cell_b, atol=1.0e-6)
