@@ -268,6 +268,11 @@ noise_floor          = { value = 0.05, unit = "eV/angstrom" }
 misfit_tolerance     = 0.02       # max strain component in the match (§2.3)
 max_coincidence_area = { value = 400.0, unit = "angstrom^2" }
 # ^ atom-area budget bounding atoms per layer (§7.6); provisional.
+target_footprint_area = { value = 1475.0, unit = "angstrom^2" }
+# ^ dose-spreading footprint (§3.6): the matched cell is tiled up to
+#   ~this in-plane area so no single impact dominates the areal dose.
+#   1475 Å² ~ the pinned 38.4 Å Si cell (the old 10x10). A convergence
+#   knob, NOT a limit — raise it for more impact statistics.
 minimum_bulk_thickness = { value = 20.0, unit = "angstrom" }
 # ^ undamaged-substrate floor; the §2.5 convergence study refines it.
 clash_floor          = { value = 1.8, unit = "angstrom" }   # §2.6 min gap

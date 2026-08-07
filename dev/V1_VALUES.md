@@ -122,6 +122,12 @@ Propose-and-move-on unless the PI objects; converge later:
   "force returned to zero," peak resolution) stay relative to thermal RMS.
 - **`minimum_bulk_thickness`:** stays a §2.5 convergence study, NOT a
   fixed number here.
+- **`target_footprint_area`:** the in-plane area the matched coincidence
+  cell is tiled up to, so an areal dose spreads over many impacts rather
+  than concentrating on few (§3.6). Default ~1475 Å² reproduces the
+  pinned 38.4 Å Si cell (the old 10×10 hardcode); a convergence knob for
+  impact statistics, NOT a limit — cost grows with area, so keep it
+  minimal and raise it only as the spread demands.
 
 ## Calibration target (reference DATA, not a knob)
 

@@ -98,18 +98,20 @@ _BOND_CUTOFF = 2.8   # Å: Si first-g(r)-minimum stand-in (§6.3, TODO)
 # no longer smoke-test stand-ins. This is the cell that produced 20 clean
 # activation points — zero sputtered atoms at every energy and dose tried
 # — so it is the geometry the measured 7 Å depth threshold refers to, and
-# changing any of the three invalidates that threshold.
+# changing these invalidates that threshold.
 #
-# WIDTH is the one that bit us: a narrow cell concentrates a given AREAL
+# WIDTH was the one that bit us: a narrow cell concentrates a given AREAL
 # dose onto few impacts, over-deepening the skin and making the result an
-# artifact of the box rather than of the beam. Ten tiles (~38 Å) spreads
-# the dose the way a broad beam does. THICKNESS must hold the frozen base
-# and the thermostatted border AND still leave undamaged bulk beneath the
-# skin (the §2.5 criterion, depth + bulk); 55 Å leaves ~45 Å of bulk under
-# a 10 Å skin. VACUUM only has to clear the spawn height for the beam.
+# artifact of the box rather than of the beam. That width is now the
+# study's ``target_footprint_area`` (:func:`_footprint_repeat`), whose
+# default reproduces the pinned ~38 Å cell (the old ten tiles). THICKNESS
+# must hold the frozen base and the thermostatted border AND still leave
+# undamaged bulk beneath the skin (the §2.5 criterion, depth + bulk); 55 Å
+# leaves ~45 Å of bulk under a 10 Å skin. VACUUM only has to clear the
+# spawn height for the beam. These two remain pinned constants for now;
+# lifting them to spec knobs is the same-task follow-on.
 _MIN_SLAB_THICKNESS = 55.0     # Å: frozen base + border + undamaged bulk
 _MIN_VACUUM = 30.0             # Å: room above the surface for the beam spawn
-_LATERAL_REPEAT = 10           # tile n x n so one impact does not dominate
 # How many conventional cells per axis the §2.2 bulk block spans. A
 # numerical knob (its influence vanishes as it grows): a few cells give the
 # uniform box/relax a stable block while staying the smallest engine use.
@@ -258,9 +260,34 @@ def derive_lattices_live(
     return DerivedLattices(cells=cells, provenance="; ".join(provenance))
 
 
+def _footprint_repeat(base_area: float, target_area: float) -> int:
+    """How many times to tile the matched cell per axis for the dose (§3.6).
+
+    The coincidence match fixes the SHAPE of the shared cell but not its
+    SIZE for the beam: a single matched cell is far too small to spread an
+    areal dose without one impact dominating (§3.6). So the matched cell is
+    tiled ``n x n`` up to a target in-plane area the study chooses
+    (``target_footprint_area``), the dose-spreading footprint. This returns
+    that ``n``.
+
+    Crucially, this tiling is STRAIN-NEUTRAL — it lays down identical copies
+    of the already-matched cell — so it is decoupled from the match: the
+    match is solved once for low strain and few atoms, and the footprint is
+    grown independently for statistics (the key §2.4 insight). Because the
+    footprint is square in cell counts, ``n = round(sqrt(target / base))``,
+    where ``base`` is one tile's area; it is a knob to converge, not a
+    limit, so overshoot from rounding is harmless. At least one tile is
+    always laid down, even if the base cell already exceeds the target.
+    """
+    if base_area <= 0.0:
+        return 1
+    repeat = int(round(float(np.sqrt(target_area / base_area))))
+    return max(1, repeat)
+
+
 def _standalone_half(
         wafer, member, derived_lattices, declared_species,
-        lateral_repeat=_LATERAL_REPEAT,
+        lateral_repeat=1,
         coincidence_tiling=None, shared_cell=None):
     """Cut ONE wafer's standalone half in memory (no file yet, §2.2/§7.1).
 
@@ -270,10 +297,12 @@ def _standalone_half(
     standalone half in vacuum with the beam species declared. Split out
     from the write so :func:`build_halves` can hold both slabs at once.
 
-    ``lateral_repeat`` defaults to the dose-spreading footprint tiling; a
-    caller passes 1 to get the PRIMITIVE surface cell for the coincidence
-    match (§2.3), which operates on primitive lattices, not the tiled dose
-    footprint. ``coincidence_tiling`` and ``shared_cell`` carry the §2.4
+    ``lateral_repeat`` defaults to 1 — the PRIMITIVE surface cell the
+    coincidence match (§2.3) operates on, since that runs on primitive
+    lattices, not the tiled dose footprint. :func:`build_halves` passes the
+    dose-spreading footprint tiling explicitly, sized from the study's
+    ``target_footprint_area`` (:func:`_footprint_repeat`, §3.6).
+    ``coincidence_tiling`` and ``shared_cell`` carry the §2.4
     strained-tiling geometry for a real mismatch (the whole-number matrix
     and the shared cell both wafers are strained onto); they stay ``None``
     for the identity case, which needs neither. ``declared_species`` are the
@@ -360,18 +389,33 @@ def build_halves(
     if match.is_identity:
         shared_cell = None
         tiling_a = tiling_b = None
+        # Identity: no tiling to the shared cell, so one dose tile IS one
+        # primitive surface cell — use its in-plane area as the base.
+        base_cell = np.asarray(primitive_a.atoms.get_cell())[:2, :2]
     else:
         shared_cell = even_split_shared_cell(
             match.substrate_cell, match.film_cell)
         tiling_a = match.film_tiling
         tiling_b = match.substrate_tiling
+        # Mismatch: both halves are first strained onto the shared cell, so
+        # one dose tile IS the shared cell — its area is the footprint base.
+        base_cell = np.asarray(shared_cell)[:, :2]
+    # Size the dose-spreading footprint from the study's target area (§3.6),
+    # retiring the hardcoded 10x10. BOTH halves take the SAME tiling so they
+    # stay commensurate; the tiling is strain-neutral (identical copies), so
+    # growing the footprint for statistics never touches the match strain.
+    base_area = abs(float(np.linalg.det(base_cell)))
+    footprint_repeat = _footprint_repeat(
+        base_area, to_metal(member.numerical.target_footprint_area, "area"))
     # Now build BOTH footprint halves (the dose tiling), on the shared cell
     # for a mismatch; neither is written until both exist.
     half_a = _standalone_half(
         member.material.wafer_a, member, derived_lattices, declared_species,
+        lateral_repeat=footprint_repeat,
         coincidence_tiling=tiling_a, shared_cell=shared_cell)
     half_b = _standalone_half(
         member.material.wafer_b, member, derived_lattices, declared_species,
+        lateral_repeat=footprint_repeat,
         coincidence_tiling=tiling_b, shared_cell=shared_cell)
     handle_a = _write_half(
         half_a, member.material.wafer_a, scratch_directory, WAFER_A_TAG,

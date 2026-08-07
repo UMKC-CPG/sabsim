@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from sabsim.pipeline.exec_artifacts import DerivedLattices
 from sabsim.pipeline.live_stages import (
     _bonded_force_model,
+    _footprint_repeat,
     _publish_file,
     _pull_note,
     _pull_rung_paths,
@@ -195,6 +196,58 @@ def test_build_halves_writes_two_handles(tmp_path):
     assert shared.is_identity
     assert shared.residual_strain < 1.0e-6
     assert shared.match_area > 0.0
+
+
+def test_footprint_repeat_sizes_the_dose_and_floors_at_one():
+    """_footprint_repeat tiles up to the target area, never below one (§3.6)."""
+    # The Si identity tile (~14.75 Å²) grown to 1475 Å² reproduces the
+    # retired 10x10 hardcode — the default preserves the pinned cell.
+    assert _footprint_repeat(14.75, 1475.0) == 10
+    # A matched cell tiled up to four times its area is a 2x2 footprint.
+    assert _footprint_repeat(300.0, 1200.0) == 2
+    # At least one tile is laid down even when the base already exceeds the
+    # target, so a large matched cell is never dropped to zero copies.
+    assert _footprint_repeat(500.0, 100.0) == 1
+    # A degenerate (zero) base area is guarded, never a divide-by-zero.
+    assert _footprint_repeat(0.0, 1475.0) == 1
+
+
+def _member_with_footprint(area):
+    """The Si/Si member with its dose footprint retargeted (frozen copy)."""
+    member = _si_si_member()
+    numerical = replace(
+        member.numerical,
+        target_footprint_area=Quantity(value=area, unit="angstrom^2"))
+    return replace(member, numerical=numerical)
+
+
+def test_target_footprint_area_scales_the_built_cell(tmp_path):
+    """A larger target_footprint_area builds a wider, more-populated half."""
+    # A small target spreads over few tiles; the default spreads over many.
+    small_member = _member_with_footprint(100.0)
+    large_member = _member_with_footprint(1475.0)
+    small_dir = tmp_path / "small"
+    large_dir = tmp_path / "large"
+    os.makedirs(small_dir)
+    os.makedirs(large_dir)
+
+    handle_small, _, _ = build_halves(
+        small_member, potential=None,
+        derived_lattices=_derived_lattices(small_member),
+        scratch_directory=str(small_dir))
+    handle_large, _, _ = build_halves(
+        large_member, potential=None,
+        derived_lattices=_derived_lattices(large_member),
+        scratch_directory=str(large_dir))
+
+    atoms_small = len(read_standalone_half(
+        handle_small.data_file, handle_small.type_map,
+        handle_small.identity).atoms)
+    atoms_large = len(read_standalone_half(
+        handle_large.data_file, handle_large.type_map,
+        handle_large.identity).atoms)
+    # The knob is honored end to end: more target area => more atoms.
+    assert atoms_large > atoms_small
 
 
 def test_built_half_declares_the_beam_and_is_orthogonal(tmp_path):
