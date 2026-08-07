@@ -671,8 +671,11 @@ so they are not discovered late (two touch non-negotiable goals). -->
       completeness+provenance unchanged; 13.7 bottoms-out/delegates.
       `checkpoint_cadence` is a `RunControl` engineering setting (beside
       `chunk_steps`), value a §5.9 task.
-- [ ] **CODE follow-on for `DESIGN.md` §11 / `PSEUDOCODE.md` §13
-      (resume).** Design and pseudocode are done; the code is not.
+- [x] **CODE follow-on for `DESIGN.md` §11 / `PSEUDOCODE.md` §13
+      (resume) — DONE (2026-07-29).** Design, pseudocode, AND code are all
+      done; the compute-node smoke passed (`RESUME SMOKE: PASS`, the SMOKE
+      RUN note below in this item). Kept in place for its detailed record;
+      checkbox reconciled 2026-08-07.
       Concrete pieces §13 pins: (a) in `driver/press_pull.py`, key the
       pull's `displacement` to the engine's ABSOLUTE step count, not the
       `chunk` counter (today `elapsed = (chunk+1)*chunk_steps*timestep`
@@ -1321,7 +1324,15 @@ foundations, interaction rules. -->
 - [ ] Slab-thickness convergence: `DESIGN.md` §2.5 sets the criterion
       `slab_thickness >= activated_depth + minimum_bulk_thickness`,
       where `activated_depth` is measured by the §3.5 depth profile.
-      Pin `minimum_bulk_thickness` and run the convergence study.
+      WIRED 2026-08-07 (commit `b823133`) as a FLOOR in the build —
+      `_effective_slab_thickness = max(slab_thickness,
+      expected_activated_depth + minimum_bulk_thickness)`, all three now
+      spec knobs and the achieved margin recorded on the shared cell — so
+      the criterion is now ENFORCED. What REMAINS is the physics: pin the
+      provisional values (`minimum_bulk_thickness` = 30 A,
+      `expected_activated_depth` = 7 A, `slab_thickness` = 55 A) by running
+      the convergence study, and close the loop that feeds §3.5's MEASURED
+      depth back to re-check the build-time estimate (today a manual step).
 - [ ] Minimum amorphous-skin thickness — a work-of-separation convergence
       (design discussion 2026-07-20; the user wants the skin as THIN as the
       physics allows, for a cheaper DFT cell). The bond is an INTERFACE
@@ -1346,6 +1357,17 @@ foundations, interaction rules. -->
       companion to the energy sweep is a DOSE sweep measuring W_sep. Ties
       `DESIGN.md` §2.5 (thickness criterion), §3.5/§3.6 (depth/dose), §8
       (bond metric).
+- [ ] §3.6 depth-anchor RE-CHECK after the pre-cascade minimize (opened
+      2026-08-07, from the §2.4 out-of-plane relax landing, commit
+      `b92418f`). The §2.4/§2.7 pre-cascade relaxation now runs
+      UNCONDITIONALLY (`cascade_prerelax_commands`), so the Si/Si run
+      bombards a surface-RELAXED start, whereas the 20-point sweep that
+      pinned the 7 A operating depth used an un-relaxed start. On the next
+      sweep, confirm the measured depth / gate metrics are unchanged (the
+      frozen base is anchored, so the change is a small near-surface
+      settle) or re-pin the threshold. Cheap; the threshold was always
+      flagged measurement-anchored, not physics-derived. Ties `DESIGN.md`
+      §2.4 / §3.6.
 - [ ] **RESUME HERE (2026-07-21). ONE DECISION IS OPEN AND IT IS THE
       USER'S: where the work-of-separation integral STOPS.** The whole
       chain now runs end to end and produces a number, so this is the
@@ -2030,7 +2052,13 @@ foundations, interaction rules. -->
       integration (the two that need LAMMPS). The Wave-4 knob follow-on
       (three §2 NumericalKnobs) is tracked in the PSEUDOCODE section
       above.
-- [ ] Phase-sequence press + settle + pulls into a `BondDebondResult`
+- [x] Phase-sequence press + settle + pulls into a `BondDebondResult` —
+      DONE (`run_bond_debond_md_live`, `pipeline/live_stages.py`): it
+      presses, settles (writing the reference data file), then pulls each
+      rung on a FRESH engine restored from that file. The per-rung-filename
+      follow-on at the end of this note is also resolved — `_pull_rung_paths`
+      gives each rung its own `pull_<slug>/` with its own log, trajectory,
+      and `checkpoints/`. Checkbox reconciled 2026-08-07. Original note:
       (promoted 2026-07-15 from a slice-5 sub-note so it is not lost when
       slice 5 is ticked). `driver/press_pull.py` has the three §9 control
       loops as separate functions, but nothing yet drives them in order
@@ -2068,14 +2096,16 @@ foundations, interaction rules. -->
       `contact_area_fraction`, `DESIGN.md` §6.4) that is not built yet.
       Ties to the §8 characterization build (Wave 4); tracked separately
       here so the grade is not forgotten inside the press/pull ledger.
-- [ ] Apply the atom-count conservation gate in the pull (`/refine` #4).
-      `PSEUDOCODE.md` §9.6 makes `atom_count_conserved` a GATE on the
-      Trajectory — an atom escaping the open-z box voids the run (§5.6) —
-      and `driver/analysis.py` has the function (tested), but
-      `pull_at_rate` (`driver/press_pull.py`) never calls it and
-      `PullResult` omits it. Read `engine.atom_count()` before/after the
-      pull and carry the verdict. Ties to the real-adapter wiring, which
-      is where a live before/after count exists.
+- [x] Apply the atom-count conservation gate in the pull (`/refine` #4) —
+      DONE (verified in code 2026-08-07). `pull_at_rate`
+      (`driver/press_pull.py`) captures `starting_atom_count` into the
+      ledger at pull start (the §5.6 baseline, resume-safe), reads the
+      final count at the end, calls `atom_count_conserved`
+      (`driver/analysis.py`), and carries the verdict as
+      `PullResult.atoms_conserved`; the analyzer (`run_analyzer_live`)
+      then refuses to integrate a pull that lost atoms (§9.6). The original
+      note ("pull_at_rate never calls it and PullResult omits it") is now
+      stale.
 - [x] Labeled-group ownership (`/refine` #3) — RESOLVED option C
       (2026-07-15). The DRIVER carves the four depth zones (a frozen base
       OR two grips, the thermostat border, the NVE interior) from the
@@ -2151,6 +2181,37 @@ foundations, interaction rules. -->
       source with `ast` and fails any ASE call lacking `parallel=False`,
       which is what protects call sites nobody has written yet — the
       real risk, since this bug is INVISIBLE to single-process tests.
+
+- [x] **Coincidence matcher PHASE B + §2.4 pre-cascade relax — DONE
+      (2026-08-07).** The dissimilar-pair build is complete: a mismatched
+      pair now emerges on ONE commensurate cell and is bombarded relaxed.
+      Landings across `pipeline/live_stages.py`, `structure/slab_builder.py`,
+      and `driver/{cascade,commands}.py`:
+      (1) strained-tiling core — `even_split_shared_cell` (twist-general,
+          polar decomposition) + `tile_slab_to_shared_cell` (non-diagonal
+          `make_supercell` + in-plane strain), commits `75e0690` / `3deaf55`;
+      (2) footprint = TUNABLE `target_footprint_area` knob, retiring the
+          hardcoded `_LATERAL_REPEAT=10` (`_footprint_repeat`; the default
+          reproduces the pinned 10x10 Si cell), commit `1127d81`;
+      (3) §2.5 thickness wired as a FLOOR + the last three sizing hardcodes
+          (`_MIN_SLAB_THICKNESS` / `_MIN_VACUUM` / `_BULK_CELLS_PER_AXIS`)
+          lifted to spec knobs, commit `b823133` (see the slab-thickness
+          convergence item in DESIGN);
+      (4) §2.4 out-of-plane relax — `cascade_prerelax_commands` (a fixed-
+          cell `minimize` under the cascade potential) issued before the
+          first impact, so a strained slab takes its Poisson response at
+          fixed lateral cell, commit `b92418f`.
+      316 tests. Retires the `_LATERAL_REPEAT` / `_MIN_SLAB_THICKNESS`
+      stand-ins the "Run ONE Si/Si member" item above still names as
+      constants.
+- [ ] Node-validate the MISMATCHED build end to end (opened 2026-08-07,
+      from Phase B above). Si/silica emerges commensurate in unit tests,
+      but the coincidence matcher's real output has only run the
+      activate -> assemble -> bond chain node-side for Si/Si (identity). Run
+      a genuine mismatch (Si/SiO2) on a compute node — the first exercise
+      of the strained build + pre-cascade relax on real LAMMPS. Gated on
+      the `si-sio2` CIF fix and silica activation references (both open
+      items above).
 
 ---
 
