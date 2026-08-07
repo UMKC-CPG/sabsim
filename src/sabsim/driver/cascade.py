@@ -48,6 +48,7 @@ from sabsim.driver.commands import (
     cascade_fixed_timestep_commands,
     cascade_halt_commands,
     cascade_halt_release_commands,
+    cascade_prerelax_commands,
     cascade_setup_commands,
     force_model_commands,
     insert_projectile_commands,
@@ -292,6 +293,14 @@ def run_cascade_to_fluence(
     engine.commands(cascade_setup_commands(
         member, force_model, data_file, base_low, surface_high, seed,
         geometry))
+
+    # Relax the freshly-read slab under the cascade potential before the
+    # first impact (§2.4 / §2.7 step 2): a strained mismatched slab takes
+    # its out-of-plane Poisson response at fixed lateral cell here, rather
+    # than being bombarded while still stressed. The frozen base stays put
+    # (setforce), so only the surface settles. Issued before the dump opens
+    # so the recorded movie stays about the bombardment, not this settle.
+    engine.commands(cascade_prerelax_commands())
 
     # Opened once, before the first impact, and deliberately never closed
     # here: the re-anneal that follows runs on this same engine, so

@@ -21,6 +21,7 @@ from sabsim.driver.commands import (
     cascade_fixed_timestep_commands,
     cascade_halt_commands,
     cascade_integrator_commands,
+    cascade_prerelax_commands,
     cascade_region_group_commands,
     cascade_setup_commands,
     insert_projectile_commands,
@@ -156,3 +157,18 @@ def test_cascade_setup_opens_the_top_and_defines_elapsed_time():
     assert "pair_style hybrid/overlay sw zbl 0.5 2 zbl 0.5 1.2" in commands
     assert "fix nve_all all nve" in commands
     assert "fix freeze_base frozen_base setforce 0.0 0.0 0.0" in commands
+
+
+def test_prerelax_minimizes_at_fixed_cell_before_the_first_impact():
+    """The §2.4 pre-cascade relax is a plain position minimize (fixed box)."""
+    commands = cascade_prerelax_commands()
+    # A conjugate-gradient minimize with the same tolerances as the §10.5
+    # re-anneal — positions only, so the box (the shared lateral cell) is
+    # untouched and the frozen base's setforce keeps the bulk anchored.
+    assert commands == [
+        "min_style cg",
+        "minimize 1e-8 1e-8 1000 10000",
+    ]
+    # No box/relax here: the lateral cell must NOT move (that would undo the
+    # coincidence match), unlike the §2.2 bulk lattice derivation.
+    assert not any("box/relax" in line for line in commands)

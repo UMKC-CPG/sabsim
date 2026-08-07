@@ -202,6 +202,27 @@ def test_loop_orders_cascade_before_relax_within_each_impact():
     assert halt < release < restore
 
 
+def test_slab_is_prerelaxed_before_the_first_impact():
+    """The §2.4 pre-cascade minimize runs once, ahead of any projectile."""
+    engine = MockEngine()
+    built = _cascade_built()
+    run_cascade_to_fluence(
+        engine, built, _template_member(),
+        resolve_cascade_generator(built.type_map, projectile_species={"Ar"}),
+        data_file="slab.data", spec=_small_spec(), seed=99)
+
+    stream = engine.received_commands
+    # The relaxation is issued exactly once (the one-time setup, not per
+    # impact) and BEFORE the first projectile is ever created, so a strained
+    # slab settles out of plane before it is bombarded (§2.4 / §2.7 step 2).
+    assert stream.count("minimize 1e-8 1e-8 1000 10000") == 1
+    minimize_at = stream.index("minimize 1e-8 1e-8 1000 10000")
+    first_impact = next(
+        index for index, line in enumerate(stream)
+        if line.startswith("create_atoms 2 single"))
+    assert minimize_at < first_impact
+
+
 # ---------------------------------------------------------------------
 # The MLIP re-anneal (§10.5).
 # ---------------------------------------------------------------------

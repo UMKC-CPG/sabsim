@@ -37,11 +37,29 @@ login-node build to per-material reference data). `build_halves` records
 the achieved bulk margin on the SharedCell note. Propagated to DESIGN §2.5
 (concrete floor wiring) + V1_VALUES (sizing knobs) + module docstring.
 
-**NEXT (Phase B is closed — these are the natural follow-ons, none started):**
-- §2.4 out-of-plane relaxation: after the in-plane strain, relax z at fixed
-  lateral cell under the model. `tile_slab_to_shared_cell` leaves z as cut
-  ("the out-of-plane relaxation §2.4 calls for happens later"); confirm
-  where that lands (build vs activation) and whether it's wired.
+**§2.4 OUT-OF-PLANE RELAX — WIRED this session (post-Phase-B).** The gap
+was real: `tile_slab_to_shared_cell` applies only the in-plane strain
+(set_cell scale_atoms leaves z as-cut), and activation ran the cascade
+with NO pre-relax. Fixed cheaply in the SAME activation run (Paul's
+steer — no separate file step): `cascade_prerelax_commands()` (a plain
+`min_style cg` + `minimize 1e-8 1e-8 1000 10000`) is issued in
+`run_cascade_to_fluence` right after `cascade_setup_commands`, before the
+impact loop. Correct WITHOUT plumbing because the frozen base is held by
+`setforce 0 0 0` (minimize HONORS setforce → base stays put, bulk lattice
+anchored) and minimize never touches the box → genuinely "relax z at
+FIXED lateral cell"; nve/langevin are time-integration fixes minimize
+ignores. DECISION (Paul): UNCONDITIONAL (every half, matches §2.7 step 2
+literally), NOT gated on strain. **ANCHOR CAVEAT:** the Si/Si run now
+bombards a surface-relaxed start, so the §3.6-measured 7 Å depth
+threshold should be RE-CHECKED on the next sweep (it was already flagged
+as measurement-anchored, not physics-derived; the base is anchored so the
+change is a small near-surface settle). DESIGN §2.4 already stated this
+behavior ("strains the lateral cell, then relaxes the out-of-plane
+coordinates ... at fixed lateral cell"), so code now MATCHES design — no
+DESIGN edit needed. Tests: builder unit test + driver-flow test (minimize
+issued once, before the first `create_atoms`).
+
+**NEXT (Phase B closed; natural follow-ons, none started):**
 - Validate the mismatched build on a real compute node (Si/silica emerges
   commensurate in tests; the activation+assembly chain past it is
   node-only).

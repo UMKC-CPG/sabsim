@@ -1048,3 +1048,33 @@ def cascade_setup_commands(
     commands += cascade_region_group_commands(base_low, surface_high, geometry)
     commands += cascade_integrator_commands(member, seed)
     return commands
+
+
+def cascade_prerelax_commands() -> list:
+    """Relax the slab under the cascade potential BEFORE the first impact.
+
+    DESIGN.md §2.4 / §2.7 step 2. A dissimilar pair is strained in-plane
+    onto the shared coincidence cell at build (:func:`sabsim.structure.
+    slab_builder.tile_slab_to_shared_cell`), which scales the atoms in the
+    plane but leaves their OUT-OF-PLANE spacing exactly as cut — the Poisson
+    response to that strain has not been taken. This energy-minimizes the
+    slab once, under the already-loaded cascade force model, so the
+    bombardment is not run on a slab still stressed by that un-relaxed
+    out-of-plane response (and, once a committee exists, by the
+    committee<->cascade lattice difference the same handoff introduces).
+
+    It is genuinely "relax the out-of-plane coordinates at FIXED lateral
+    cell": ``minimize`` never changes the box, and the frozen base is held
+    put by its ``setforce 0 0 0`` (which minimization honours), so only the
+    border and interior atoms settle while the bulk lattice stays anchored.
+    The ballistic ``nve`` and Langevin fixes are time-integration fixes that
+    minimization simply ignores, so they are harmless left in place. Same
+    tolerances as the §10.5 re-anneal minimize, for one consistent
+    relaxation criterion everywhere. For an unstrained (same-material) slab
+    it is a cheap near-no-op — a small surface settle — so it can run
+    unconditionally rather than being gated on the match.
+    """
+    return [
+        "min_style cg",
+        "minimize 1e-8 1e-8 1000 10000",
+    ]
