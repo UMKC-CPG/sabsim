@@ -153,7 +153,11 @@ class NumericalKnobs:
     misfit_tolerance: float          # coincidence-match strain cutoff
     max_coincidence_area: Quantity   # atom-area budget for the match
     target_footprint_area: Quantity  # in-plane dose-spreading area (§3.6)
-    minimum_bulk_thickness: Quantity  # undamaged-substrate floor (§2.5)
+    minimum_bulk_thickness: Quantity  # undamaged-crystal cushion (§2.5)
+    slab_thickness: Quantity         # chosen total slab thickness (§2.5)
+    expected_activated_depth: Quantity  # build-time skin-depth est. (§2.5)
+    slab_vacuum: Quantity            # vacuum above the face for the beam
+    bulk_cells_per_axis: int         # §2.2 bulk-relax block, per axis
     clash_floor: Quantity            # minimum cross-slab distance (§2.6)
     contact_grid_spacing: Quantity   # cell size for contact fraction
     contact_gap_threshold: Quantity  # gap that, with stress, marks contact

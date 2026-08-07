@@ -24,12 +24,16 @@ imports the binding lazily inside its constructor — so the login node can
 build halves and review the whole chain; only the activation stage's
 ``LammpsEngine(...)`` call needs a compute node.
 
-SIZING is a documented STAND-IN. How big a slab and how much vacuum a half
-needs is the open slab-size <-> bombardment-energy <-> DFT-cost three-way
-accommodation (DESIGN.md §3.6, and the TODO follow-on): the constants below
-make a workable Si cell for the smoke integration, they are NOT pinned
-physical v1 values. Only ``minimum_bulk_thickness`` is read from the spec
-today; the rest are pinned together once the DFT budget is known.
+SIZING is carried by the study's ``[numerical]`` spec block, not pinned in
+this module. Slab thickness is the §2.5 CRITERION — enough undamaged
+crystal beneath the amorphized skin — enforced as a floor over the chosen
+``slab_thickness``, the build-time ``expected_activated_depth`` estimate,
+and the ``minimum_bulk_thickness`` cushion (:func:`_effective_slab_thickness`).
+The lateral dose footprint (``target_footprint_area``), the ``slab_vacuum``,
+and the §2.2 ``bulk_cells_per_axis`` are likewise spec inputs. The template
+defaults reproduce the §3.6-pinned Si cell, so the measured 7 Å depth
+threshold that cell anchors is preserved; a new material re-tunes them
+against the same slab-size <-> bombardment-energy <-> DFT-cost trade.
 """
 
 from __future__ import annotations
@@ -94,28 +98,18 @@ _GEOMETRY = CascadeGeometry()           # 4 Å base + 6 Å border + 10 Å spawn
 _CONTROL = CascadeControl(cascade_step_cap=20000)   # halt backstop
 _BOND_CUTOFF = 2.8   # Å: Si first-g(r)-minimum stand-in (§6.3, TODO)
 
-# Sizing PINNED from the 2026-07-21 energy x dose sweep (DESIGN.md §3.6),
-# no longer smoke-test stand-ins. This is the cell that produced 20 clean
-# activation points — zero sputtered atoms at every energy and dose tried
-# — so it is the geometry the measured 7 Å depth threshold refers to, and
-# changing these invalidates that threshold.
-#
-# WIDTH was the one that bit us: a narrow cell concentrates a given AREAL
-# dose onto few impacts, over-deepening the skin and making the result an
-# artifact of the box rather than of the beam. That width is now the
-# study's ``target_footprint_area`` (:func:`_footprint_repeat`), whose
-# default reproduces the pinned ~38 Å cell (the old ten tiles). THICKNESS
-# must hold the frozen base and the thermostatted border AND still leave
-# undamaged bulk beneath the skin (the §2.5 criterion, depth + bulk); 55 Å
-# leaves ~45 Å of bulk under a 10 Å skin. VACUUM only has to clear the
-# spawn height for the beam. These two remain pinned constants for now;
-# lifting them to spec knobs is the same-task follow-on.
-_MIN_SLAB_THICKNESS = 55.0     # Å: frozen base + border + undamaged bulk
-_MIN_VACUUM = 30.0             # Å: room above the surface for the beam spawn
-# How many conventional cells per axis the §2.2 bulk block spans. A
-# numerical knob (its influence vanishes as it grows): a few cells give the
-# uniform box/relax a stable block while staying the smallest engine use.
-_BULK_CELLS_PER_AXIS = 3
+# Slab SIZING now lives in the spec's [numerical] block, no longer pinned
+# here (§2.5, §3.6). Four inputs shape each half: the total
+# ``slab_thickness`` (the §3.6 convergence value), the build-time
+# ``expected_activated_depth`` estimate and the ``minimum_bulk_thickness``
+# cushion that together form the §2.5 thickness FLOOR
+# (:func:`_effective_slab_thickness`), the ``slab_vacuum`` above the face
+# for the beam spawn, and the §2.2 ``bulk_cells_per_axis`` relax-block
+# size. The width that once "bit us" — a narrow cell over-deepening the
+# skin — is likewise the study's ``target_footprint_area``
+# (:func:`_footprint_repeat`). The defaults reproduce the §3.6-pinned Si
+# cell (55 Å thick, ~38 Å wide), so the measured 7 Å depth threshold that
+# cell anchors is preserved.
 
 
 def _publish_file(comm, write_action) -> None:
@@ -230,15 +224,17 @@ def derive_lattices_live(
 
     cells: dict = {}
     provenance: list = []
+    # The §2.2 bulk-relax block size is a spec knob (numerical), not pinned.
+    bulk_cells = member.numerical.bulk_cells_per_axis
     for wafer in (member.material.wafer_a, member.material.wafer_b):
         if wafer.identity in cells:
             continue                     # same material: derive once
         crystal = load_crystal(_resolve_cif(wafer.cif_source))
-        type_map = bulk_type_map(crystal, _BULK_CELLS_PER_AXIS)
+        type_map = bulk_type_map(crystal, bulk_cells)
         bulk_file = os.path.join(
             str(scratch_directory), f"bulk_{wafer.identity}.data")
         _publish_file(comm, lambda: write_bulk_data(
-            crystal, _BULK_CELLS_PER_AXIS, bulk_file))
+            crystal, bulk_cells, bulk_file))
         seed = classical_force_model(
             type_map, frozenset(type_map), domain=member.material_domain,
             allow_unvalidated=_unvalidated_potentials_allowed())
@@ -248,7 +244,7 @@ def derive_lattices_live(
             command_line_args=["-screen", "none", "-log", log_file],
             comm=comm)
         result = derive_lattice(
-            engine, bulk_file, seed, _BULK_CELLS_PER_AXIS,
+            engine, bulk_file, seed, bulk_cells,
             coupling=_coupling_for(crystal))
         engine.close()
         cells[wafer.identity] = tuple(
@@ -258,6 +254,32 @@ def derive_lattices_live(
             f"{wafer.identity}: a~{result.lattice_constant:.4f} A, "
             f"classical seed")
     return DerivedLattices(cells=cells, provenance="; ".join(provenance))
+
+
+def _effective_slab_thickness(numerical) -> float:
+    """The §2.5 thickness FLOOR: enough bulk beneath the damaged skin.
+
+    A cut slab must keep enough undamaged crystal under the amorphized skin
+    to behave like a real substrate, which §2.5 states as the criterion
+    ``thickness >= expected_activated_depth + minimum_bulk_thickness``. The
+    skin depth is only MEASURED after bombardment (§3.5), but the slab is
+    cut before that, so ``expected_activated_depth`` is the build-time
+    estimate (the §3.6 operating depth).
+
+    v1 does NOT derive the thickness from that sum — it FIXES the thickness
+    by the §3.6 convergence study (``slab_thickness``, the measurement-
+    anchored 55 Å Si cell) and uses the criterion as a floor: the larger of
+    the chosen thickness and the required minimum. So the anchored cell is
+    preserved wherever it already satisfies the criterion (55 > 7 + 30 for
+    the Si default), while any material whose estimated skin is deeper than
+    the chosen thickness allows automatically gets a thicker slab. The
+    caller records the resulting margin (:func:`build_halves`).
+    """
+    chosen = to_metal(numerical.slab_thickness, "distance")
+    required = (
+        to_metal(numerical.expected_activated_depth, "distance")
+        + to_metal(numerical.minimum_bulk_thickness, "distance"))
+    return max(chosen, required)
 
 
 def _footprint_repeat(base_area: float, target_area: float) -> int:
@@ -317,8 +339,9 @@ def _standalone_half(
     return build_standalone_half(
         crystal, wafer.surface_face, wafer.identity,
         declared_species,
-        min_slab_thickness=_MIN_SLAB_THICKNESS,
-        min_vacuum=_MIN_VACUUM, lateral_repeat=lateral_repeat,
+        min_slab_thickness=_effective_slab_thickness(member.numerical),
+        min_vacuum=to_metal(member.numerical.slab_vacuum, "distance"),
+        lateral_repeat=lateral_repeat,
         coincidence_tiling=coincidence_tiling, shared_cell=shared_cell)
 
 
@@ -423,10 +446,18 @@ def build_halves(
     handle_b = _write_half(
         half_b, member.material.wafer_b, scratch_directory, WAFER_B_TAG,
         comm)
+    # Record the §2.5 thickness margin actually achieved: how much undamaged
+    # crystal sits beneath the estimated skin, above the required cushion.
+    thickness = _effective_slab_thickness(member.numerical)
+    required = (
+        to_metal(member.numerical.expected_activated_depth, "distance")
+        + to_metal(member.numerical.minimum_bulk_thickness, "distance"))
     shared = SharedCell(
         note=(f"{half_a.identity}/{half_b.identity} coincidence match "
               f"(strain {match.residual_strain:.4f}, "
-              f"{'identity' if match.is_identity else 'mismatch'})"),
+              f"{'identity' if match.is_identity else 'mismatch'}); "
+              f"slab {thickness:.1f} A, §2.5 bulk margin "
+              f"{thickness - required:.1f} A"),
         residual_strain=match.residual_strain,
         match_area=match.match_area,
         is_identity=match.is_identity)

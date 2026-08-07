@@ -706,6 +706,16 @@ of §3.5. This makes step 3 and step 4 mutually dependent, so v1 fixes
 thickness by a short convergence study (prior art's one genuinely good
 idea here) and records the margin actually achieved.
 
+In code the criterion is a FLOOR, not a formula that sets thickness: the
+build takes the larger of the chosen `slab_thickness` and
+`expected_activated_depth + minimum_bulk_thickness`, where — because the
+build runs before §3.5 measures anything — `expected_activated_depth` is
+the build-time stand-in for the not-yet-measured depth (default: the §3.6
+operating depth), and it records the resulting margin on the shared-cell
+provenance. All four terms are study inputs (`[numerical]`), so a new
+material re-sizes with no code change, and the silicon defaults preserve
+the §3.6-anchored 55 Å cell (55 > 7 + 30) rather than shrinking it.
+
 **Termination is chosen by surface energy.** Prior art takes
 `sym_slabs[0]` with the comment "first candidate is sufficient" — the
 first entry of a list, in list order. Where a face admits several

@@ -273,8 +273,28 @@ target_footprint_area = { value = 1475.0, unit = "angstrom^2" }
 #   ~this in-plane area so no single impact dominates the areal dose.
 #   1475 Å² ~ the pinned 38.4 Å Si cell (the old 10x10). A convergence
 #   knob, NOT a limit — raise it for more impact statistics.
-minimum_bulk_thickness = { value = 20.0, unit = "angstrom" }
-# ^ undamaged-substrate floor; the §2.5 convergence study refines it.
+# --- Slab sizing (§2.5): thickness is a CRITERION, not a bare constant.
+# A cut slab must keep enough undamaged crystal beneath the damaged skin
+# to still act like a substrate: thickness >= expected_activated_depth +
+# minimum_bulk_thickness. v1 FIXES the thickness by the §3.6 convergence
+# study (slab_thickness) and enforces the criterion as a FLOOR, recording
+# the margin actually achieved. The damage depth is only MEASURED after
+# bombardment (§3.5), so at cut time expected_activated_depth stands in as
+# the build-time estimate (the §3.6 operating depth).
+minimum_bulk_thickness = { value = 30.0, unit = "angstrom" }
+# ^ undamaged-crystal cushion beneath the skin (§2.5).
+slab_thickness         = { value = 55.0, unit = "angstrom" }
+# ^ chosen total slab thickness (the §3.6-pinned 55 Å cell). The floor
+#   max(slab_thickness, expected_activated_depth + minimum_bulk_thickness)
+#   guarantees the §2.5 criterion for any material; here 55 > 7 + 30 = 37.
+expected_activated_depth = { value = 7.0, unit = "angstrom" }
+# ^ build-time skin-depth estimate (§3.6 operating depth); the §3.5 gate
+#   MEASURES the real depth once activation runs.
+slab_vacuum            = { value = 30.0, unit = "angstrom" }
+# ^ vacuum above the face so the beam has room to spawn (§3.6).
+bulk_cells_per_axis    = 3
+# ^ §2.2 bulk-relax block size per axis; a numerical knob whose influence
+#   vanishes as it grows, kept small for the cheapest stable relax.
 clash_floor          = { value = 1.8, unit = "angstrom" }   # §2.6 min gap
 contact_grid_spacing = { value = 5.0, unit = "angstrom" }   # ~cutoff/cell
 contact_gap_threshold = { value = 2.5, unit = "angstrom" }  # §9.3 contact

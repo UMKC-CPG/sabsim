@@ -245,6 +245,13 @@ def _numerical_from_table(table: dict, context: str) -> NumericalKnobs:
             table, "target_footprint_area", context),
         minimum_bulk_thickness=_require_quantity(
             table, "minimum_bulk_thickness", context),
+        slab_thickness=_require_quantity(
+            table, "slab_thickness", context),
+        expected_activated_depth=_require_quantity(
+            table, "expected_activated_depth", context),
+        slab_vacuum=_require_quantity(table, "slab_vacuum", context),
+        bulk_cells_per_axis=int(_require(
+            table, "bulk_cells_per_axis", context)),
         clash_floor=_require_quantity(table, "clash_floor", context),
         contact_grid_spacing=_require_quantity(
             table, "contact_grid_spacing", context),

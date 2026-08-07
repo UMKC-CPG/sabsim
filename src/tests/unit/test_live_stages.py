@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from sabsim.pipeline.exec_artifacts import DerivedLattices
 from sabsim.pipeline.live_stages import (
     _bonded_force_model,
+    _effective_slab_thickness,
     _footprint_repeat,
     _publish_file,
     _pull_note,
@@ -210,6 +211,20 @@ def test_footprint_repeat_sizes_the_dose_and_floors_at_one():
     assert _footprint_repeat(500.0, 100.0) == 1
     # A degenerate (zero) base area is guarded, never a divide-by-zero.
     assert _footprint_repeat(0.0, 1475.0) == 1
+
+
+def test_effective_slab_thickness_is_a_floor_over_the_criterion():
+    """Thickness holds the chosen value but never dips below §2.5's sum."""
+    numerical = _si_si_member().numerical
+    # Silicon default: 55 chosen vs 7 + 30 = 37 required, so 55 wins and the
+    # §3.6-anchored cell is preserved.
+    assert _effective_slab_thickness(numerical) == pytest.approx(55.0)
+    # A material whose estimated skin is deep enough forces a thicker slab:
+    # 60 + 30 = 90 now exceeds the chosen 55, so the criterion lifts it.
+    deep = replace(
+        numerical,
+        expected_activated_depth=Quantity(value=60.0, unit="angstrom"))
+    assert _effective_slab_thickness(deep) == pytest.approx(90.0)
 
 
 def _member_with_footprint(area):

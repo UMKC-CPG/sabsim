@@ -120,8 +120,17 @@ Propose-and-move-on unless the PI objects; converge later:
   pull peak identically across the rate ladder, while a time window
   would smear each rate differently. Noise floors (reference PE drift,
   "force returned to zero," peak resolution) stay relative to thermal RMS.
-- **`minimum_bulk_thickness`:** stays a §2.5 convergence study, NOT a
-  fixed number here.
+- **Slab sizing (§2.5), all study inputs:** thickness is a CRITERION, not
+  a bare constant. `slab_thickness` (default 55 Å) is the §3.6
+  convergence value; the build enforces `max(slab_thickness,
+  expected_activated_depth + minimum_bulk_thickness)` as a floor and
+  records the margin. `expected_activated_depth` (default 7 Å) is the
+  build-time skin-depth estimate, since the real depth is only MEASURED
+  after bombardment (§3.5). `minimum_bulk_thickness` (30 Å) is the
+  undamaged-crystal cushion. `slab_vacuum` (30 Å) clears the beam-spawn
+  height. `bulk_cells_per_axis` (3) sizes the §2.2 bulk-relax block, a
+  numerical knob whose influence vanishes as it grows. The silicon
+  defaults reproduce the §3.6-anchored 55 Å cell (55 > 7 + 30).
 - **`target_footprint_area`:** the in-plane area the matched coincidence
   cell is tiled up to, so an areal dose spreads over many impacts rather
   than concentrating on few (§3.6). Default ~1475 Å² reproduces the
