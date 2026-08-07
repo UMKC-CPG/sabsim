@@ -24,9 +24,11 @@ from sabsim.structure.slab_builder import (
     build_slab,
     bulk_atoms,
     bulk_type_map,
+    even_split_shared_cell,
     load_crystal,
     match_surfaces,
     rescale_crystal_to_cell,
+    tile_slab_to_shared_cell,
     write_bulk_data,
     write_lammps_data,
 )
@@ -111,6 +113,87 @@ def test_match_carries_the_tiling_geometry_for_a_mismatch():
         assert all(isinstance(n, int) for row in tiling for n in row)
     assert match.substrate_cell is not None
     assert match.film_cell is not None
+
+
+def test_even_split_is_the_plain_midpoint_without_a_twist():
+    """With no twist the shared cell is just the two cells' midpoint (§2.4)."""
+    substrate = np.array([[5.5, 0.0], [0.0, 5.5]])
+    film = np.array([[5.0, 0.0], [0.0, 5.0]])       # aligned, only stretched
+    shared = even_split_shared_cell(substrate, film)
+    assert np.allclose(shared, np.array([[5.25, 0.0], [0.0, 5.25]]))
+
+
+def test_even_split_undoes_the_twist_before_averaging():
+    """A rotated film is de-rotated first, so the split stays EVEN (§2.4).
+
+    If the twist were not removed, averaging a rotated cell with an
+    unrotated one would leak orientation into the size. The check: the
+    point reflected across the shared cell from the substrate must be a
+    RIGID rotation of the film cell — same metric tensor (dot products),
+    which a pure rotation leaves unchanged. That is exactly "each slab is
+    the same distance from the shared cell", i.e. the split is even.
+    """
+    substrate = np.array([[5.5, 0.0], [0.0, 5.5]])
+    angle = np.deg2rad(9.0)
+    rotation = np.array([[np.cos(angle), -np.sin(angle)],
+                         [np.sin(angle), np.cos(angle)]])
+    film = (rotation @ (np.array([[5.0, 0.0], [0.0, 5.0]]).T)).T
+
+    shared = even_split_shared_cell(substrate, film)
+
+    # Reflect the substrate across the shared cell to recover the film's
+    # aligned image, and compare metric tensors (rotation-invariant).
+    film_aligned = 2.0 * shared - substrate
+    assert np.allclose(
+        film_aligned @ film_aligned.T, film @ film.T, atol=1.0e-9)
+
+
+def test_tile_slab_to_shared_cell_tiles_and_strains():
+    """A non-diagonal tiling grows the atom count and lands on the cell."""
+    slab = build_slab(load_crystal(_SI_CIF), _SI_100)
+    tiling = np.array([[2, 1], [0, 2]])             # det 4, off-diagonal
+    shared = np.array([[7.9, 0.1], [-0.1, 7.9]])
+    z_before = slab.get_positions()[:, 2]
+
+    tiled = tile_slab_to_shared_cell(slab, tiling, shared)
+
+    # The whole-number matrix sets the atom count by its determinant.
+    assert len(tiled) == len(slab) * 4
+    # The in-plane cell is exactly the shared one; the slab is commensurate.
+    assert np.allclose(np.asarray(tiled.get_cell())[:2, :2], shared)
+    # Straining is purely in-plane: the z (vacuum) vector is untouched, and
+    # so is the span of atom z-heights (scale_atoms holds fractional coords).
+    assert np.allclose(
+        np.asarray(tiled.get_cell())[2], np.asarray(slab.get_cell())[2])
+    span_before = z_before.max() - z_before.min()
+    z_after = tiled.get_positions()[:, 2]
+    assert abs((z_after.max() - z_after.min()) - span_before) < 1.0e-9
+
+
+def test_mismatched_halves_emerge_commensurate():
+    """Matched, tiled, and strained, two mismatched slabs share one cell.
+
+    The whole point of the strained tiling (§2.4): a genuine lattice
+    mismatch is carried into ONE shared cell, so the assembly's
+    commensurability assertion (§2.6) accepts the pair. Slab A is the
+    matcher's 'film', slab B its 'substrate', so each takes its own tiling.
+    """
+    si = load_crystal(_SI_CIF)
+    stretched = rescale_crystal_to_cell(
+        si, np.array(si.lattice.matrix) * 1.1)
+    slab_a = build_slab(si, _SI_100)
+    slab_b = build_slab(stretched, _SI_100)
+    match = match_surfaces(
+        slab_a, slab_b, max_area=400.0, misfit_tolerance=0.15)
+
+    shared = even_split_shared_cell(match.substrate_cell, match.film_cell)
+    tiled_a = tile_slab_to_shared_cell(slab_a, match.film_tiling, shared)
+    tiled_b = tile_slab_to_shared_cell(
+        slab_b, match.substrate_tiling, shared)
+
+    cell_a = np.asarray(tiled_a.get_cell())[:2, :2]
+    cell_b = np.asarray(tiled_b.get_cell())[:2, :2]
+    assert np.allclose(cell_a, cell_b, atol=1.0e-6)
 
 
 def test_pair_stacks_both_wafers_with_a_gap():

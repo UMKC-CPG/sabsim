@@ -40,6 +40,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from ase import Atoms
+from ase.build import make_supercell
 from ase.data import atomic_numbers
 from ase.io import read as ase_read
 from ase.io import write as ase_write
@@ -392,6 +393,110 @@ def _float_tuples(vectors) -> tuple:
     return tuple(
         tuple(float(component) for component in row)
         for row in np.asarray(vectors))
+
+
+def _polar_rotation(deformation: np.ndarray) -> np.ndarray:
+    """The rotation part of a 2x2 deformation's polar decomposition.
+
+    Any 2x2 deformation splits UNIQUELY into a pure rotation followed by a
+    symmetric stretch (the polar decomposition ``M = rotation @ stretch``).
+    When ``M`` carries one matched supercell onto the other (§2.3), that
+    rotation IS the discovered twist and the stretch IS the misfit strain,
+    so peeling the rotation off is exactly how we separate "the two slabs
+    sit turned relative to each other" from "the two slabs are stretched
+    relative to each other". The rotation is read from the singular-value
+    decomposition (``rotation = U @ Vᵀ``), and a reflection — which a raw
+    SVD can return when the deformation nearly flips an axis — is corrected
+    back to a proper rotation so we never accidentally mirror a slab.
+    """
+    left_vectors, _stretch, right_vectors = np.linalg.svd(deformation)
+    rotation = left_vectors @ right_vectors
+    if np.linalg.det(rotation) < 0.0:
+        # A negative determinant means SVD handed back a reflection; flip
+        # the last left singular vector to turn it into a true rotation.
+        left_vectors = left_vectors.copy()
+        left_vectors[:, -1] *= -1.0
+        rotation = left_vectors @ right_vectors
+    return rotation
+
+
+def even_split_shared_cell(
+        substrate_cell: np.ndarray,
+        film_cell: np.ndarray) -> np.ndarray:
+    """The shared in-plane cell that splits the misfit EVENLY (§2.4).
+
+    The Zur-McGill match (§2.3) returns each slab's own matched supercell —
+    ``substrate_cell`` for slab B and ``film_cell`` for slab A — and the two
+    are almost never identical: they differ by the misfit strain and,
+    because the slabs may sit rotated in the plane, by a twist. Both slabs
+    must end up in ONE shared cell, and §2.4 asks WHERE between their two
+    natural sizes that cell should sit. This computes the EVEN split — the
+    cell halfway between them — which is §2.4's baseline (the
+    stiffness-and-thickness weighting comes later, once the elastic
+    constants exist).
+
+    Averaging the two supercells naively would be wrong when there is a
+    twist: adding a rotated cell to an unrotated one mixes orientation into
+    the size. So we first undo the twist. The deformation ``substrate_cell @
+    inverse(film_cell)`` carries the film supercell onto the substrate one;
+    its rotation part (:func:`_polar_rotation`) is the twist. We rotate the
+    film cell into the substrate's frame with that twist, and only THEN take
+    the midpoint. The result lives in the substrate's frame; each slab is
+    later strained onto it (:func:`tile_slab_to_shared_cell`), the film
+    absorbing the twist as part of its map. Because the midpoint is
+    equidistant from both aligned cells, each slab feels half the misfit —
+    the even split. Only the in-plane (first two components) of each vector
+    is used; any vacuum z-component is ignored.
+    """
+    substrate = np.asarray(substrate_cell, dtype=float)[:, :2]
+    film = np.asarray(film_cell, dtype=float)[:, :2]
+    # Carry the film supercell onto the substrate one; the rotation part of
+    # that map is the twist between the two slabs (§2.3).
+    film_to_substrate = substrate @ np.linalg.inv(film)
+    twist = _polar_rotation(film_to_substrate)
+    # Rotate the film cell into the substrate frame (rows are vectors, so
+    # the rotation acts on the right as ``film @ twistᵀ``), then split the
+    # misfit evenly by taking the midpoint of the two aligned cells.
+    film_aligned = film @ twist.T
+    return 0.5 * (substrate + film_aligned)
+
+
+def tile_slab_to_shared_cell(
+        slab: Atoms,
+        tiling: np.ndarray,
+        shared_cell: np.ndarray) -> Atoms:
+    """Tile a slab by its match matrix and strain it onto the shared cell.
+
+    The geometric heart of the strained-coincidence assembly (§2.3, §2.4).
+    ``tiling`` is the slab's whole-number 2x2 matrix from the Zur-McGill
+    match — how many primitive surface cells, combined which way, make its
+    matched supercell. It can be NON-diagonal (the off-diagonal whole
+    numbers are exactly what let the search find a small shared cell, §2.3),
+    which a plain axis-by-axis repeat cannot express, so the tiling is
+    applied with ``make_supercell`` on the full 3x3 transform (identity
+    along z, so the vacuum direction is untouched).
+
+    The tiled supercell is then STRAINED onto ``shared_cell`` — the single
+    in-plane cell both slabs share (:func:`even_split_shared_cell`) — by
+    replacing the in-plane cell and rescaling the atoms with it
+    (``scale_atoms=True`` holds every atom's fractional position, so the
+    basis rides along and the layer spacing along z is left exactly as cut;
+    the out-of-plane relaxation §2.4 calls for happens later, under the
+    force model). Because BOTH slabs are set to the identical
+    ``shared_cell`` here, they emerge commensurate to numerical noise, which
+    is precisely what the assembly's commensurability assertion checks
+    (:func:`sabsim.structure.amorphized_assembly._assert_commensurate`).
+    """
+    transform = np.eye(3)
+    transform[:2, :2] = np.asarray(tiling, dtype=float)
+    tiled = make_supercell(slab, transform)
+    # Replace ONLY the in-plane cell with the shared one, keeping the slab's
+    # own z (vacuum) vector and flattening any z-leak in the in-plane rows.
+    strained_cell = np.asarray(tiled.get_cell()).copy()
+    strained_cell[:2, :2] = np.asarray(shared_cell, dtype=float)[:, :2]
+    strained_cell[:2, 2] = 0.0
+    tiled.set_cell(strained_cell, scale_atoms=True)
+    return tiled
 
 
 def assemble_facing_pair(
