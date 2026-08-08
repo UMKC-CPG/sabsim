@@ -4,29 +4,108 @@ Working note, 2026-08-07. Tracks the effort to close the "runs on real
 physics" gap (TODO L1788): wire a universal foundation MLIP for the
 CASCADE and the bespoke DeePMD for the BOND-DEBOND. NOT canonical yet.
 
-## RESUME HERE (2026-08-07)
+## RESUME HERE (2026-08-08, LATEST — read this first)
 
-**Decision (Paul): a universal foundation MLIP drives the CASCADE /
-amorphization ONLY; the bespoke DeePMD (a trained committee later) drives
-the BOND-DEBOND (re-anneal + press/pull).** No allegiance to a specific
-universal MLIP — the only requirement is that it is genuinely universal so
-cascades run with NO bespoke additional training.
+**Decision (Paul): a universal foundation MLIP drives the CASCADE only;
+bespoke DeePMD drives the BOND-DEBOND.** Genuinely universal (no bespoke
+training); do NOT fall back to classical.
 
-**Where we landed: DPA-3.1-3M (deepmd) is the universal cascade model,
-pending a speed check.** We PIVOTED here from MACE (see "MACE — parked").
+**DECISION 2026-08-08: ADOPT the deepmd-official bundle as the cascade
+engine, run it on CPU for now.** GPU-LAMMPS is blocked (see below) but that
+is a performance gap, not a correctness one — the universal model is PROVEN
+to run in LAMMPS. Deeper GPU routes (C, E below) are DEFERRED; revisit if
+CPU throughput is insufficient.
 
-**IN FLIGHT: GPU benchmark job `15960373`** (resubmitted; earlier
-`15960072` failed only on a trivial `ase` import — see below). Results
-land in:
-`/cluster/VAST/rulisp-lab/cpg/share/models/dpa3.1-3m/bench/dpa3-bench-15960373.out`
-Check on return: `sacct -j 15960373 --format=JobID,State,Elapsed,ExitCode`
-then read that `.out`. It answers the two open questions:
-1. **Runnability** — does our conda `libdeepmd_lmp.so` actually RUN a DPA-3
-   (message-passing) model in LAMMPS (`pair_style deepmd frozen_mptraj.pth`)?
-   This is the last real unknown (the DPA custom-op question).
-2. **Speed** — `ms/step` on ~4096 Si atoms (≈ cascade box) on a V100. Is a
-   3.27M-param message-passing model fast enough to drive a full-dose
-   cascade? If too slow → fallback ladder: DPA-2, then DPA-1.
+**WHAT WORKS (proven):** DPA-2.4-7M and DPA-3.1-3M (both FULL periodic
+table, H->Og, via the `MP_traj_v024_alldata_mixu` branch) run in **LAMMPS
+on CPU** (DPA-2.4 completed a run; DPA-3.1 computed forces E_pair=-1166 eV
+then only OOM'd on a 16GB cap) AND in **Python eager on CPU+GPU**
+(DeepPot.eval: DPA-3 -43.2 eV, DPA-2.4 -52.1 eV on the V100). The models,
+coverage, and concept are validated.
+
+**THE ENGINE:** deepmd's OFFICIAL self-contained offline-installer bundle
+(NOT our conda-forge/torch-2.11/custom-LAMMPS stack). Two installed:
+- CPU: `/home/rulisp/data/scratch/deepmd_official/dp313cpu` (deepmd 3.1.3 +
+  torch 2.10; SCRATCH/disposable — the proven CPU engine).
+- GPU: `/cluster/VAST/rulisp-lab/cpg/programs/deepmd-kit-3.1.3-cuda129`
+  (deepmd 3.1.3 + torch 2.10, cuda129, py312) and
+  `.../deepmd-kit-3.2.0b0-cuda129` (v3.2.0b0 beta, torch 2.11, has the
+  AOTInductor path). Both are self-contained conda envs.
+ACTIVATE (per-stage, ISOLATED from sabsim): fully reset the env first
+(`unset` all `CONDA_*`, `CONDA_SHLVL=0`, `PATH=/usr/bin:/bin`) THEN
+`source $PREFIX/etc/profile.d/conda.sh; conda activate $PREFIX`. Hard-verify
+`python` is the bundle's. GOTCHA: if the sabsim env (torch 2.11) leaks in,
+LAMMPS loads 2.11 and crashes the same way — isolation is mandatory.
+
+**GPU-LAMMPS IS BLOCKED (why we run CPU):** two SEPARATE beta/upstream
+issues, neither CLI-fixable:
+- deepmd 3.1.3 (torch 2.10): the C++ **TorchScript** force path crashes on
+  the V100 — DPA-3 at `custom_silu`, DPA-2 after load. (Works on CPU +
+  Python-eager; V100 arch IS supported: sm_70 in torch arch_list.)
+- deepmd 3.2.0b0 (torch 2.11): the new **AOTInductor `.pt2`** path (the
+  intended fix, native compiled C++ inference, NOT TorchScript) can't
+  EXPORT these models: `dp --pt freeze -o .pth --model-branch` works (must
+  pass `--pt` else it defaults to TF), `dp convert-backend .pth .dp` works
+  (17-26 MB `.dp`), but `.dp -> .pt2` fails in `torch.export` on an
+  UNBACKED-SYMINT / data-dependent-shape guard (`u0` symbol — common in
+  GNN neighbor handling). Not fixable from `convert-backend` (no dynamo
+  knobs). `dp --pt-expt freeze` also can't prune the multitask branch.
+
+**DEFERRED GPU routes (return here if CPU too slow):**
+- **C — Python-level AOTInductor export.** Bypass `convert-backend`: in
+  Python, set `torch._dynamo.config.capture_scalar_outputs=True` +
+  `capture_dynamic_output_shape_ops=True` (the standard cures for the `u0`
+  unbacked-symint error), then drive deepmd's `.pt2` export. Needs digging
+  into deepmd's export internals; a code investigation, not a quick job.
+- **E — ASE-on-GPU MD (LAMMPS-independent).** The models run in eager
+  PyTorch on GPU (proven), so ASE's MD integrators + deepmd's ASE
+  calculator can run the cascade ON GPU, bypassing LAMMPS/TorchScript
+  entirely. BUT SABSIM's whole cascade+bond-debond driver is LAMMPS-based
+  (ZBL cores, frozen base + border thermostat, adaptive dt, projectile
+  spawn, §3.5 gate) — using ASE means REIMPLEMENTING that. Big change.
+- Also worth a later re-check: a NEWER GPU (A100/H100) on the 3.1.3
+  TorchScript path, and a stable deepmd >3.2.0 once released.
+
+**NEXT (adopt-and-wire, CPU):**
+1. Formalize the cascade engine: a `cpg` modulefile for the deepmd-official
+   CPU/GPU bundle + wire it as the activate-stage engine (deployment
+   per-stage env, isolated as above); a `mace_model`-style `ForceModel`
+   emitting `pair_style deepmd <frozen.pth>` behind
+   `_assemble_hybrid_overlay`/`resolve_cascade_generator`.
+2. Freeze the chosen model's MP-traj branch (`dp --pt freeze -c <ckpt> -o
+   <out.pth> --model-branch MP_traj_v024_alldata_mixu`) as the production
+   cascade model (pick DPA-2.4-7M — fully proven; DPA-3.1-3M if preferred).
+3. DP-ZBL (native, `dp_zbl_model`) for cascade close-range still to wire;
+   DESIGN §4.7 "universal + native ZBL" update.
+4. Benchmark actual CPU cascade throughput on a real box to judge whether C
+   or E is needed.
+Bench/test scripts live in `$CPG_SHARE/share/models/dpa_gpu_bench/`
+(cputest.slurm proved CPU; v320_gpu_test.slurm has the .pt2 workflow).
+
+### The debugging saga (why deepmd-official-bundle, ruled-out paths)
+
+Our stack = conda-forge deepmd-kit 3.1.3 (pins **torch 2.11**, bleeding
+edge) + our custom-built LAMMPS + runtime plugin. Both universal DPA
+models freeze fine + run in EAGER Python, but crash in the LAMMPS C++
+TorchScript path: DPA-3 at `custom_silu` (SiLUT), DPA-2 at
+`task_deriv_one -> torch.autograd.grad` (the force derivative in
+`forward_lower`). RULED OUT (with evidence): `atom_modify map yes` (no
+help); `dp freeze` activation/precision flags (none exist, only
+`--model-branch`); the `pytorch-exportable`/`.pte` export (C++
+`libdeepmd_cc` only loads `.pth` TorchScript — "Unsupported model file
+format"); conda-forge older-torch (cuda torch floor is 2.11; deepmd 3.1.3
+pins 2.11); conda-forge `lammps` package (downgrades to deepmd 2.2.7 — NO
+conda-forge lammps for deepmd 3.x; the plugin IS the only 3.x mechanism, so
+our setup was standard). An "other LLM" suggested fixes 1&3 were fabricated
+(nonexistent flags); fix 2 accidentally pointed at the real (dead-for-
+LAMMPS) pt-expt backend. The offline installer was the pivot: deepmd ships
+`.sh` bundles for every release (`deepmd-kit-3.1.3-{cpu,cuda129}`), self-
+contained with THEIR tested torch (2.10) + LAMMPS — and it works.
+
+GOTCHA: system `/usr/bin/curl` has NO https (use `wget`). GPU installer =
+3 split parts, `cat` them together. Staging: installer + CPU test bundle in
+`/home/rulisp/data/scratch/deepmd_official/` (scratch, purgeable — the CPU
+bundle `dp313cpu` is disposable; the 5GB installer `.sh` can be deleted).
 
 ## What is already CONFIRMED for DPA (all positive)
 
