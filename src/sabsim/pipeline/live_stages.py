@@ -691,9 +691,17 @@ def _activate_one_half_subprocess(
 
     role = "a" if handle.wafer_tag == WAFER_A_TAG else "b"
     dump_path = os.path.join(output_directory, f"activated_{role}.dump")
+    # Honour the invocation's trajectory switch (run_options): with frames
+    # on, the out-of-process cascade records the WHOLE bombardment as a
+    # movie, the same as the in-process stages — so a universal activate can
+    # be watched, not only the classical one.
+    trajectory_file, trajectory_stride = _stage_trajectory(
+        output_directory, member, f"activate_{role}")
     script = build_activate_script(
         built, member, cascade_force_model, handle.data_file, spec,
-        seed, projectile_types, dump_path, _GEOMETRY, _CONTROL)
+        seed, projectile_types, dump_path, _GEOMETRY, _CONTROL,
+        trajectory_file=trajectory_file,
+        trajectory_stride=trajectory_stride)
 
     # Only the primary rank drives the one-GPU subprocess and writes the
     # shared files; peers wait at the barrier, then every rank reads the

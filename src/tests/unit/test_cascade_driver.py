@@ -267,6 +267,42 @@ def test_build_activate_script_emits_setup_impacts_cleanup_and_handoff():
         "write_dump all custom activated.dump id type x y z modify sort id")
 
 
+def test_activate_script_records_a_trajectory_when_asked():
+    """An opt-in trajectory_file opens ONE strided movie, off by default.
+
+    The dump is opened after the §2.4 prerelax and BEFORE the first impact,
+    so the whole bombardment is one continuous movie; it is ABSENT unless a
+    trajectory_file is given — the frames are expensive, so a run nobody
+    watches pays nothing (`run_options`).
+    """
+    built = _cascade_built()
+    member = _template_member()
+    spec = _small_spec()
+    cascade = resolve_cascade_generator(
+        built.type_map, projectile_species={"Ar"}, use_classical=True)
+
+    quiet = build_activate_script(
+        built, member, cascade, data_file="slab.data", spec=spec,
+        seed=99, projectile_types=[2],
+        output_structure_file="activated.dump")
+    assert not any(line.startswith("dump traj") for line in quiet)
+
+    movie = build_activate_script(
+        built, member, cascade, data_file="slab.data", spec=spec,
+        seed=99, projectile_types=[2],
+        output_structure_file="activated.dump",
+        trajectory_file="cascade.dump", trajectory_stride=250)
+    dump_lines = [index for index, line in enumerate(movie)
+                  if line.startswith("dump traj")]
+    assert len(dump_lines) == 1
+    assert movie[dump_lines[0]] == (
+        "dump traj all custom 250 cascade.dump id type x y z")
+    # Opened BEFORE the first impact, so the movie covers every collision.
+    first_impact = next(index for index, line in enumerate(movie)
+                        if line.startswith("create_atoms 2 single"))
+    assert dump_lines[0] < first_impact
+
+
 def test_activate_script_matches_the_live_command_stream():
     """The script runs the SAME commands the in-process path issues.
 

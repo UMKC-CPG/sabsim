@@ -490,7 +490,9 @@ def build_activate_script(
         projectile_types,
         output_structure_file: str,
         geometry: CascadeGeometry = CascadeGeometry(),
-        control: CascadeControl = CascadeControl()) -> list:
+        control: CascadeControl = CascadeControl(),
+        trajectory_file: str | None = None,
+        trajectory_stride: int = 200) -> list:
     """Assemble the CASCADE-ONLY activate run as one self-contained script.
 
     This is the out-of-process twin of :func:`run_cascade_to_fluence` plus
@@ -517,6 +519,13 @@ def build_activate_script(
     structure to ``output_structure_file`` as a sorted custom dump
     (``id type x y z``), the handoff the §3.5 gate (now in the bond flow) and
     the amorphized-half snapshot read back.
+
+    An optional ``trajectory_file`` records the WHOLE bombardment as one
+    strided movie — a frame every ``trajectory_stride`` steps, opened after
+    the prerelax and held open across every impact and the cleanup — so a
+    universal (out-of-process) cascade can be watched end to end, exactly as
+    the in-process path allows. It is off (``None``) by default because the
+    frames cost wall clock in the hot cascade loop (`run_options`).
     """
     positions = np.asarray(built.atoms.get_positions())
     base_low = float(positions[:, 2].min())
@@ -528,6 +537,14 @@ def build_activate_script(
         seed, geometry)
     # The §2.4 out-of-plane relax before the first impact (same as live).
     script += cascade_prerelax_commands()
+
+    # Optional cascade MOVIE: opened here (after the prerelax, before the
+    # first impact) and held open across every impact and the cleanup, so
+    # the whole bombardment reads as one continuous trajectory — the SAME
+    # placement the in-process `run_cascade_to_fluence` uses.
+    if trajectory_file is not None:
+        script += trajectory_dump_commands(
+            trajectory_file, trajectory_stride)
 
     relax_steps = max(1, round(
         spec.between_impact_relaxation
