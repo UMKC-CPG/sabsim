@@ -54,30 +54,41 @@ module_paths    = ["/cluster/VAST/rulisp-lab/cpg/modulefiles"]
 # cascade-md / bond-md / vasp / sequence; DESIGN §10 replaced that axis.)
 # ---------------------------------------------------------------------
 [usage.activate]
-# Build both wafers, roughen both surfaces with the classical + ZBL
-# cascade (§3), and bring them together — CPU-bound LAMMPS. The cheap
-# build-and-assemble glue rides along with the heavy cascade (§10.2).
-partition = "cpu"
-nodes     = 2
-# MPI ranks per node — the atoms-per-rank sweet spot for the cascade
-# (DESIGN.md §10.6), NOT all 64 cores: too many ranks and each rank's
-# ghost-atom halo dwarfs the atoms it owns, so the run is slower. 32 is
-# the tuned value at this member size (~137-275 atoms/rank in jobs/
-# si_si_e2e); asking for fewer cores also clears the queue faster.
-tasks_per_node = 32
-# GPUs per node. The cascade is classical CPU MD (no accelerator), so this
-# is 0 — stated explicitly, not omitted, so "no GPU" is a choice on record
-# rather than a silent default. With 0, prepare emits no `--gres` line.
-gpus_per_node  = 0
+# Build both wafers, roughen both surfaces with the cascade (§3), and bring
+# them together. The DEFAULT cascade is the universal foundation MLIP, which
+# runs OUT-OF-PROCESS on a GPU under the deepmd bundle (ARCHITECTURE §4.4;
+# §4.1: the activate class FOLLOWS the cascade potential). Activation is
+# CASCADE-ONLY (§3.4) — the heal and the §3.5 gate moved to the bond job — so
+# this job needs no classical potential and carries NO LAMMPS_POTENTIALS.
+# For a validated CLASSICAL (CPU) cascade instead, set
+# SABSIM_CASCADE_CLASSICAL, route this to a CPU class with gpus_per_node = 0
+# and tasks_per_node = 32, and load a classical engine module (e.g.
+# "cpg_lammps_conda/22Jul2025").
+partition = "gpu"
+nodes     = 1
+# One rank: sabsim builds the slab and spawns ONE deepmd-bundle `lmp`
+# subprocess that uses the GPU (the universal cascade is single-GPU here).
+tasks_per_node = 1
+# One accelerator for the out-of-process cascade (§4.1: activate GPU by
+# default, since the default cascade is the universal MLIP).
+gpus_per_node  = 1
 walltime  = { value = 12.0, unit = "h" }
-# Per-NODE memory ceiling (emitted as `#SBATCH --mem`). A job with no
-# `--mem` inherits the partition's small per-job default, which OOM-killed
-# this very cascade ~44 min in (LEDGER T-E5-ACTIVATE, job 15697360) even
-# though the true peak was only ~306 MB. So this is a comfortable ceiling,
-# NOT a tuned figure — 16 GB leaves generous headroom for the transient
-# build/assemble spike on a ~490 GB node while still clearing the queue.
-memory    = { value = 16.0, unit = "GB" }
-modules   = ["cpg_lammps_conda/22Jul2025"]  # conda-derived classical + ZBL
+# A comfortable per-NODE ceiling — the DPA model wants generous RAM (a 16 GB
+# cap OOM-killed a DPA run mid-way), not a tuned figure.
+memory    = { value = 48.0, unit = "GB" }
+# NO in-process LAMMPS module on the universal path: the engine is the
+# deepmd bundle, reached out-of-process by prefix below, not `module load`.
+modules   = []
+# Machine-specific engine knobs the out-of-process cascade needs (§4.4).
+# [ADAPT] every path to this cluster.
+[usage.activate.environment]
+# The deepmd bundle (its own torch/LAMMPS/MPI) that runs the universal
+# cascade, and the GPU-architecture-specific `.pt2` model it loads.
+SABSIM_CASCADE_ENGINE_PREFIX = "/cluster/VAST/rulisp-lab/cpg/programs/deepmd-kit-3.2.0b0-cuda129"
+SABSIM_CASCADE_MLIP_MODEL = "/cluster/VAST/rulisp-lab/cpg/share/models/dpa2.4-7m/DPA-2.4-7M.pt2"
+# DPA-2.4-7M has not yet cleared the §3.5 gate, so the default cascade is
+# EXPLORATORY until it does; drop this once validated=True (DESIGN §4.7).
+SABSIM_ALLOW_UNVALIDATED_POTENTIAL = "1"
 
 [usage.bond]
 # Press, settle, and pull on the MLIP committee (§5): GPU-accelerated

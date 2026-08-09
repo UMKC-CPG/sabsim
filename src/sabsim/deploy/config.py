@@ -175,6 +175,16 @@ class UsageBlock:
     way ``modules = []`` states "no modules" rather than omitting the key
     — an accelerator request the writer must not guess (DESIGN.md §10.6).
     The writer emits ``--gres=gpu:N`` only when it is positive.
+
+    ``environment`` is per-kind environment the prepared job exports before
+    the launch — the machine-specific knobs a job needs that are NOT science
+    settings: e.g. the universal-cascade activate job points
+    ``SABSIM_CASCADE_ENGINE_PREFIX`` at the deepmd bundle and
+    ``SABSIM_CASCADE_MLIP_MODEL`` at its ``.pt2`` (ARCHITECTURE §4.4). It is
+    stored as a sorted tuple of ``(name, value)`` pairs so the emitted script
+    is deterministic. Unlike the fields above it is OPTIONAL — plumbing, not
+    a physics knob — so a block that needs no extra environment simply omits
+    it (an empty map, no exports emitted).
     """
 
     resource_class: str
@@ -184,6 +194,7 @@ class UsageBlock:
     walltime: Duration
     memory: Memory
     modules: tuple[str, ...]
+    environment: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -304,6 +315,26 @@ def _require_str_list(table: dict, key: str, context: str) -> tuple:
     return tuple(str(item) for item in raw)
 
 
+def _optional_str_map(table: dict, key: str, context: str) -> tuple:
+    """Pull an OPTIONAL string->string map as a sorted tuple of pairs.
+
+    Used for the per-kind ``environment`` (deployment plumbing, not a
+    physics knob), so unlike :func:`_require_str_list` the key MAY be
+    absent — an omitted map means "no extra environment". When present it
+    must be a table of string values; the pairs are sorted by name so the
+    emitted job script is deterministic.
+    """
+    raw = table.get(key)
+    if raw is None:
+        return ()
+    if not isinstance(raw, dict):
+        raise DeploymentError(
+            f"{context} -> {key}: expected a table of name = \"value\", "
+            f"got {raw!r}")
+    return tuple(
+        (str(name), str(value)) for name, value in sorted(raw.items()))
+
+
 # ---------------------------------------------------------------------
 # Deserialize: map the on-disk TOML layout onto the §14.1 records. This
 # is where the concrete file shape meets the schema field names, so the
@@ -347,6 +378,7 @@ def _usage_from_table(
         walltime=_require_duration(table, "walltime", context),
         memory=_require_memory(table, "memory", context),
         modules=_require_str_list(table, "modules", context),
+        environment=_optional_str_map(table, "environment", context),
     )
 
 

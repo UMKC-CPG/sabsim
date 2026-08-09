@@ -53,15 +53,25 @@ def test_activate_script_directives_and_run_line(roots_set, tmp_path):
     member = _members()[0]
     text = (tmp_path / f"{member}_activate.slurm").read_text()
 
-    assert "#SBATCH --partition=general" in text     # cpu partition name
-    assert "#SBATCH --account=cpg" in text           # default_account
-    assert "#SBATCH --nodes=2" in text               # activate nodes
-    assert "#SBATCH --ntasks-per-node=32" in text    # activate tasks_per_node
-    assert "#SBATCH --mem=16G" in text               # activate memory 16 GB
-    assert "#SBATCH --gres" not in text              # CPU job: no GPU request
-    assert "#SBATCH --time=12:00:00" in text         # activate walltime 12h
+    # The DEFAULT activate is the universal cascade — a GPU job that runs the
+    # deepmd bundle out-of-process (§4.1, §3.4 cascade-only).
+    assert "#SBATCH --partition=gpu" in text          # gpu partition name
+    assert "#SBATCH --account=cpg" in text            # default_account
+    assert "#SBATCH --nodes=1" in text                # activate nodes
+    assert "#SBATCH --ntasks-per-node=1" in text      # one rank, one GPU
+    assert "#SBATCH --mem=48G" in text                # activate memory 48 GB
+    assert "#SBATCH --gres=gpu:1" in text             # one accelerator
+    assert "#SBATCH --time=12:00:00" in text          # activate walltime 12h
     assert "module use /cluster/VAST/rulisp-lab/cpg/modulefiles" in text
-    assert "module load cpg_lammps_conda/22Jul2025" in text
+    # NO in-process LAMMPS module: the engine is the deepmd bundle, reached
+    # out-of-process by the env below, not `module load`.
+    assert "module load cpg_lammps" not in text
+    # The per-kind [usage.activate.environment] rides as `export` lines; NO
+    # LAMMPS_POTENTIALS (activate is cascade-only, §3.4).
+    assert "export SABSIM_CASCADE_ENGINE_PREFIX=" in text
+    assert "export SABSIM_CASCADE_MLIP_MODEL=" in text
+    assert 'export SABSIM_ALLOW_UNVALIDATED_POTENTIAL="1"' in text
+    assert "LAMMPS_POTENTIALS" not in text
     assert 'export SABSIM_SHARE="/cluster/VAST/rulisp-lab/cpg"' in text
     # The launcher clears the mutually-exclusive memory exports first, or
     # the nested daemon launch aborts (ARCHITECTURE §4.1).
@@ -110,6 +120,34 @@ def test_scripts_are_lean_no_transitional_env(roots_set, tmp_path):
     text = (tmp_path / f"{member}_activate.slurm").read_text()
     assert "PYTHONPATH" not in text
     assert "LAMMPS_POTENTIALS" not in text
+
+
+def test_per_kind_environment_is_exported_in_sorted_order(
+        roots_set, tmp_path):
+    """An [usage.<kind>.environment] table becomes `export` lines (§4.4).
+
+    This is how the universal-cascade activate job points
+    SABSIM_CASCADE_ENGINE_PREFIX at the deepmd bundle. The template ends in
+    the analyze block, so the env table appended here lands on analyze; the
+    exports appear in that job's script, sorted for a deterministic script.
+    """
+    with open(_RC, encoding="utf-8") as rc_file:
+        rc_text = rc_file.read()
+    rc_text += '\n[usage.analyze.environment]\nZED = "z"\nALPHA = "a"\n'
+    rc_path = tmp_path / "rc_with_env.toml"
+    rc_path.write_text(rc_text, encoding="utf-8")
+
+    prepare(_SPEC, str(rc_path), tmp_path)
+    text = (tmp_path / f"{_members()[0]}_analyze.slurm").read_text()
+
+    assert 'export ALPHA="a"' in text
+    assert 'export ZED="z"' in text
+    # Sorted: ALPHA before ZED, so the emitted script is stable.
+    assert text.index('export ALPHA="a"') < text.index('export ZED="z"')
+    # A block with no environment table emits no such block: the activate
+    # script (no environment here) carries none of these.
+    activate = (tmp_path / f"{_members()[0]}_activate.slurm").read_text()
+    assert "export ALPHA=" not in activate
 
 
 def test_roots_gate_stops_before_writing(monkeypatch, tmp_path):

@@ -48,6 +48,38 @@ def _drop_lines_containing(text: str, needle: str) -> str:
 
 
 # ---------------------------------------------------------------------
+# The per-kind environment map (ARCHITECTURE §4.4): optional, and parsed
+# to a deterministic sorted tuple so the emitted job script is stable.
+# ---------------------------------------------------------------------
+
+def test_usage_environment_is_optional_and_sorted(tmp_path):
+    """An environment table parses to sorted pairs; absent gives ()."""
+    text = _template_text() + (
+        '\n[usage.analyze.environment]\n'
+        'ZED = "z"\nALPHA = "a"\n')
+    config = load_deployment(_write_rc(tmp_path, text))
+
+    # Present: sorted (name, value) pairs, whatever order they were written.
+    assert config.usage["analyze"].environment == (("ALPHA", "a"), ("ZED", "z"))
+    # The template's activate block carries the cascade engine env, sorted.
+    activate_env = config.usage["activate"].environment
+    assert activate_env == tuple(sorted(activate_env))
+    assert dict(activate_env)["SABSIM_CASCADE_ENGINE_PREFIX"]
+    # Absent on a block with no environment table: the empty map, not a guess.
+    assert config.usage["bond"].environment == ()
+
+
+def test_usage_environment_rejects_a_non_table(tmp_path):
+    """A non-table environment is a loud stop, not a silent skip."""
+    # The template ends inside the [usage.analyze] block, so this appended
+    # key lands there as a STRING environment — which the parser must reject
+    # as not a name -> value table.
+    text = _template_text() + '\nenvironment = "oops"\n'
+    with pytest.raises(DeploymentError):
+        load_deployment(_write_rc(tmp_path, text))
+
+
+# ---------------------------------------------------------------------
 # Happy path: the real template loads and the values land where §14.1
 # says, keyed by member job (activate / bond / analyze).
 # ---------------------------------------------------------------------
@@ -87,13 +119,18 @@ def test_usage_is_keyed_by_member_job():
     assert set(config.usage) == {"activate", "bond", "analyze"}
 
     activate = config.usage["activate"]
-    assert activate.resource_class == "cpu"
-    assert activate.nodes == 2
-    assert activate.tasks_per_node == 32     # tuned, not all 64 cores
-    assert activate.gpus_per_node == 0       # classical CPU cascade
+    assert activate.resource_class == "gpu"  # universal cascade -> GPU (§4.1)
+    assert activate.nodes == 1
+    assert activate.tasks_per_node == 1      # one rank, one GPU
+    assert activate.gpus_per_node == 1       # out-of-process deepmd cascade
     assert activate.walltime.in_hours() == 12.0
-    assert activate.memory.in_megabytes() == 16 * 1024.0   # 16 GB ceiling
-    assert activate.modules == ("cpg_lammps_conda/22Jul2025",)
+    assert activate.memory.in_megabytes() == 48 * 1024.0   # 48 GB ceiling
+    assert activate.modules == ()            # engine is the bundle, no module
+    # The per-kind environment points at the deepmd bundle + model; NO
+    # LAMMPS_POTENTIALS (activate is cascade-only, §3.4).
+    activate_env = dict(activate.environment)
+    assert activate_env["SABSIM_CASCADE_ENGINE_PREFIX"]
+    assert "LAMMPS_POTENTIALS" not in activate_env
 
     bond = config.usage["bond"]
     assert bond.resource_class == "gpu"
@@ -119,7 +156,7 @@ def test_partition_for_joins_usage_to_hardware():
     """A member job resolves to its real partition through the class seam."""
     config = load_deployment(_TEMPLATE_PATH)
 
-    assert config.partition_for("activate").name == "general"
+    assert config.partition_for("activate").name == "gpu"
     assert config.partition_for("bond").name == "gpu"
     assert config.partition_for("analyze").name == "general"
 
@@ -164,7 +201,7 @@ def test_missing_memory_field_is_rejected(tmp_path):
 def test_bare_memory_without_unit_is_rejected(tmp_path):
     """A memory request written as a bare number (no unit) is refused."""
     broken = _template_text().replace(
-        "{ value = 16.0, unit = \"GB\" }", "16.0")
+        "{ value = 48.0, unit = \"GB\" }", "48.0")
     rc_path = _write_rc(tmp_path, broken)
     with pytest.raises(DeploymentError, match="value, unit"):
         load_deployment(rc_path)

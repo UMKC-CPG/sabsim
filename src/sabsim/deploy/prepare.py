@@ -182,6 +182,18 @@ def render_job_script(
         lines.append(f'export SABSIM_LOCAL="{roots.local}"')
     lines.append("")
 
+    # (3b) Per-kind environment from the rc's [usage.<kind>.environment]
+    # (ARCHITECTURE §4.4): machine-specific knobs the job needs but that are
+    # not science settings — e.g. the universal-cascade activate job points
+    # SABSIM_CASCADE_ENGINE_PREFIX at the deepmd bundle. Emitted before the
+    # launch, in the block's own (sorted) order, so the script is
+    # deterministic. A block with no environment emits nothing here.
+    if usage.environment:
+        lines.append("# Per-kind environment, frozen from the rc (§4.4).")
+        lines += [f'export {name}="{value}"'
+                  for name, value in usage.environment]
+        lines.append("")
+
     # (4) The run's home is where it is launched (CWD, §14.3), then the
     # launcher INSIDE the allocation (§4.1) — python + mpirun on PATH from
     # the activated install.
