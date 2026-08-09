@@ -136,22 +136,56 @@ pair_coeff * * Si              # map LAMMPS types -> element symbols
   sm_70). Newer GPUs (A100/H100) are untested here and worth trying for the
   GPU path below.
 - **KNOWN STATUS (this system: V100 + deepmd 3.1.3/3.2.0b0, 2026-08):**
-  - **CPU LAMMPS: WORKS** (both DPA models run, forces correct). This is
-    the adopted production path.
-  - **GPU LAMMPS: BLOCKED** — deepmd 3.1.3's C++ TorchScript path crashes
-    on the V100 (works CPU + Python-eager, so it's a TorchScript-on-CUDA
-    bug). deepmd 3.2.0b0 adds an AOTInductor `.pt2` path (compiled, not
-    TorchScript) meant to fix this, but exporting these GNN models to
-    `.pt2` fails in `torch.export` on an unbacked-symint (data-dependent
-    shape). Re-test on newer GPUs / a stable deepmd >3.2.0.
+  - **CPU LAMMPS: WORKS** (both DPA models run, forces correct).
+  - **GPU LAMMPS via AOTInductor `.pt2`: WORKS for DPA-2.4-7M** (deepmd
+    3.2.0b0). 4096-atom Si NVE, 100 steps on a V100: energy conserved,
+    ~0.29 s/step, ~28x the CPU throughput. See §7 for the two fixes it
+    needs. This is the adopted GPU production path.
+  - **GPU LAMMPS via TorchScript (deepmd 3.1.3): BLOCKED** — the C++
+    TorchScript force path crashes on the V100 (works CPU + Python-eager,
+    so it is a TorchScript-on-CUDA bug). The `.pt2` route above sidesteps
+    it. Worth a re-test on newer GPUs / a stable deepmd >3.2.0.
+  - **DPA-3.1-3M `.pt2` export: BLOCKED (source-level).** Its repflow
+    graph-index builder casts a data-dependent edge count to a Python
+    `int` (`deepmd/dpmodel/utils/network.py`, `get_graph_index`), which
+    `torch.export` cannot specialize (`GuardOnDataDependentSymNode`, the
+    `u0` symbol). The `torch._dynamo` capture flags do NOT cure it — a
+    deepmd source patch would (mark the count size-like, or bound it by
+    `nloc*nnei`). DPA-2.4-7M has no such cast and is also the faster
+    model, so it is preferred regardless.
 - **Models run in Python eager on GPU regardless** — so an ASE-based MD
   driver (deepmd's ASE calculator) can use the GPU without LAMMPS, if a
   LAMMPS-free MD path is acceptable.
+
+## 7. GPU `.pt2` (AOTInductor) path — the two fixes it needs
+
+The compiled `.pt2` path (deepmd 3.2.0b0) runs the universal model on the
+GPU without TorchScript. Freeze to the backend-agnostic `.dp`, then export
+`.dp -> .pt2` on the GPU node. Two site-specific fixes are required:
+
+- **The `-lcuda` link error.** AOTInductor links the compiled model against
+  the CUDA DRIVER API (`-lcuda`), but the driver ships only the versioned
+  `libcuda.so.1`; the linker wants a bare `libcuda.so`, and the bundle's
+  `targets/.../lib/stubs/` has the math libs but no driver stub. Symlink
+  the node's real driver and put it on `LIBRARY_PATH` (link-time search,
+  distinct from the runtime `LD_LIBRARY_PATH` kept clean for isolation)
+  **[ADAPT: driver path]**:
+  ```bash
+  DRV=$(/sbin/ldconfig -p | awk '/libcuda\.so\.1/{print $NF; exit}')
+  mkdir -p drvstub && ln -sf "$DRV" drvstub/libcuda.so
+  export LIBRARY_PATH="$PWD/drvstub:${LIBRARY_PATH:-}"
+  ```
+- **The `.dp -> .pt2` export.** `dp convert-backend IN.dp OUT.pt2` performs
+  it. deepmd's `_deserialize_to_file_pt2` already sets the CUDA-only
+  `realize_opcount_threshold=0` that avoids a fusion-induced NaN in the
+  force backward. Then run in LAMMPS with `pair_style deepmd OUT.pt2`.
+
+A worked job is `$CPG_SHARE/share/models/dpa_gpu_bench/v320_gpu_fix.slurm`.
 
 ## Provenance (what was installed here, 2026-08-08)
 
 - `$CPG_SHARE/programs/deepmd-kit-3.1.3-cuda129` — production cascade engine
   (deepmd 3.1.3, torch 2.10, py312).
-- `$CPG_SHARE/programs/deepmd-kit-3.2.0b0-cuda129` — for the deferred
-  AOTInductor (GPU) experiment; removable (reinstall from this recipe).
+- `$CPG_SHARE/programs/deepmd-kit-3.2.0b0-cuda129` — the GPU production
+  engine (AOTInductor `.pt2` path, §7); proven with DPA-2.4-7M on a V100.
 - Models: `$CPG_SHARE/share/models/dpa{3.1-3m,2.4-7m}/`.
