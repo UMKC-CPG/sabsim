@@ -211,9 +211,14 @@ hold_duration    = { value = 2.0,   unit = "ps" }  # sweep-pinned
 ensemble         = "nvt"                            # constant-volume hold
 
 [protocol.assembly]
-# Slab separation at first contact (§2.6): the gap before the press
-# closes. A knob (§2), distinct from the derived cell geometry (§1.3).
-initial_gap = { value = 3.0, unit = "angstrom" }
+# Slab separation at assembly (§2.6). Revised 2026-08-08 (§3.4): this MUST
+# exceed the MLIP interaction cutoff (the bond flow's separation_cutoff,
+# ~6 Å), because the bond flow HEALS the two surfaces at this gap BEFORE
+# pressing — a gap beyond the cutoff is what lets each heal as an
+# effectively-free surface, never co-activated. The bond flow then scissors
+# the vacuum down to the press start distance. A knob (§2), distinct from
+# the derived cell geometry (§1.3).
+initial_gap = { value = 10.0, unit = "angstrom" }
 
 [protocol.press]
 mode        = "load"           # load- vs displacement-controlled press

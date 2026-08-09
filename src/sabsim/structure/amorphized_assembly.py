@@ -87,9 +87,31 @@ def snapshot_amorphized_half(
     simulated. Assembly re-solves the z-box once both halves are placed;
     the lateral cell is what the commensurability assertion checks.
     """
-    positions = np.asarray(engine.positions(), dtype=float)
-    type_ids = np.asarray(engine.types(), dtype=int)
-    box = np.asarray(engine.box(), dtype=float)
+    return amorphized_half_from_arrays(
+        engine.positions(), engine.types(), engine.box(),
+        type_map, wafer_tag)
+
+
+def amorphized_half_from_arrays(
+        positions,
+        type_ids,
+        box,
+        type_map: dict,
+        wafer_tag: int) -> Atoms:
+    """Reconstitute one amorphized half from raw arrays (§6, §4.3).
+
+    The array-only core of :func:`snapshot_amorphized_half`, split out so
+    the SAME reconstruction serves both activate paths: the in-process one
+    passes the live engine's read-backs, the out-of-process one passes the
+    positions and type ids parsed from the subprocess's dump file plus the
+    slab's own cell (:func:`sabsim.driver.cascade_subprocess.read_dump_
+    structure`). The type ids are mapped back to chemical symbols through
+    ``type_map`` (inverted here), and the whole half is tagged ``wafer_tag``
+    so its provenance survives into the assembled pair.
+    """
+    positions = np.asarray(positions, dtype=float)
+    type_ids = np.asarray(type_ids, dtype=int)
+    box = np.asarray(box, dtype=float)
 
     # Invert the symbol->type map so a survivor's type id names its
     # species. The map may still carry the projectile (it was built for

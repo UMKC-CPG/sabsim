@@ -39,6 +39,7 @@ Two design points make this module general rather than silicon-only:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,6 +64,101 @@ _SHORT_CORE_OUTER_STANDIN = 1.2     # Å: below the bond, so bonding is kept
 # ``pair_coeff`` line; the long core is listed first, the short second.
 _LONG_CORE_INDEX = 1
 _SHORT_CORE_INDEX = 2
+
+
+# The environment variable that names the universal cascade model's ON-DISK
+# AOTInductor ``.pt2`` artifact. The registry entry below PINS the model's
+# identity (name, branch, version) for reproducibility, but the concrete
+# ``.pt2`` package is compiled for a specific GPU architecture and is
+# therefore a DEPLOY-TIME build, not a checked-in file — so its path is
+# supplied at run time here, the same override-by-environment discipline the
+# bespoke committee model uses (``SABSIM_DEEPMD_MODEL``).
+_UNIVERSAL_MODEL_PATH_VARIABLE = "SABSIM_CASCADE_MLIP_MODEL"
+
+
+@dataclass(frozen=True)
+class UniversalCascadeModel:
+    """The universal foundation MLIP used as the DEFAULT cascade potential.
+
+    Unlike a per-material :class:`CascadeGeneratorEntry`, a universal model
+    is chemistry-agnostic — one already-trained foundation network covers
+    the whole periodic table with no per-material fitting — so it carries NO
+    species key and serves every material behind the same resolver seam
+    (DESIGN §4.7). It is the DESIGN default: the cascade only ever needs a
+    scaffold-grade potential to land the surface in a reasonable amorphous
+    basin, and a foundation model gives that for free across all species,
+    dissolving the per-material potential search entirely.
+
+    What a universal entry must pin INSTEAD of a species key is the exact
+    model IDENTITY. A foundation network shifts between upstream releases,
+    so reproducibility depends on recording the model ``name``, the
+    multitask ``model_branch`` frozen out of it, and a ``version`` tag — the
+    universal analogue of a classical form's frozen parameter-file citation
+    (DESIGN §4.7, "a universal entry pins the model version").
+
+    ``validated`` follows the SAME gate-not-warn discipline as the classical
+    registry: it stays ``False`` until a full activation under this model has
+    cleared the §3.5 gate on a real material, and until then the resolver
+    refuses unless the run opts in with ``SABSIM_ALLOW_UNVALIDATED_POTENTIAL``
+    — the on-the-record path §4.7 defines for bringing up any new material.
+    """
+
+    name: str                 # e.g. "DPA-2.4-7M"
+    model_branch: str         # the multitask fitting branch frozen out
+    version: str              # upstream release / provenance tag
+    source: str               # literature / repository provenance
+    caveat: str               # per-model hazards
+    validated: bool           # has it cleared the §3.5 activation gate?
+
+
+# The universal cascade model v1: DPA-2.4-7M. Proven to RUN in LAMMPS on a
+# V100 via the deepmd-kit 3.2.0b0 AOTInductor ``.pt2`` path (2026-08-08), but
+# NOT yet run through a full activation + §3.5 gate — hence ``validated=
+# False``. It is the faster of the two DPA foundation models benchmarked and
+# the one that exports cleanly to ``.pt2`` (DPA-3.1-3M hits an unbacked-symint
+# export failure), which is why it is the v1 universal choice.
+UNIVERSAL_CASCADE_MODEL = UniversalCascadeModel(
+    name="DPA-2.4-7M",
+    model_branch="MP_traj_v024_alldata_mixu",
+    version="deepmodelingcommunity/DPA-2.4-7M-patched-mt (CC-BY-4.0); "
+            "frozen + AOTInductor .pt2 under deepmd-kit 3.2.0b0",
+    source="DPA-2 universal foundation model (Zhang et al.), covering the "
+           "full periodic table H->Og via the MP_traj_v024_alldata_mixu "
+           "multitask branch. HuggingFace deepmodelingcommunity/DPA-2.4-7M.",
+    caveat="Universal foundation MLIP: OUT-OF-DISTRIBUTION deep in the "
+           "repulsive regime the cascade visits, so it is spliced with the "
+           "two ZBL cores and treated as scaffold-grade (DESIGN §4.7), never "
+           "trusted there. It has RUN in LAMMPS (V100, .pt2) but has NOT yet "
+           "cleared the §3.5 activation gate on any material, so validated "
+           "stays False — a default cascade refuses unless the run sets "
+           "SABSIM_ALLOW_UNVALIDATED_POTENTIAL, and results obtained that way "
+           "are EXPLORATORY. The .pt2 is GPU-architecture-specific and built "
+           "at deploy time; its path is given via SABSIM_CASCADE_MLIP_MODEL.",
+    validated=False)
+
+
+def resolve_universal_model_path(
+        model: UniversalCascadeModel = UNIVERSAL_CASCADE_MODEL) -> str:
+    """Resolve the on-disk ``.pt2`` artifact for the universal cascade model.
+
+    The registry pins the model IDENTITY (name/branch/version); the concrete
+    AOTInductor ``.pt2`` is GPU-architecture-specific and built at deploy
+    time, so its path is supplied at run time via the
+    ``SABSIM_CASCADE_MLIP_MODEL`` environment variable rather than checked
+    in. A missing path is a LOUD failure naming the variable and the model —
+    the same no-hidden-defaults discipline as the rest of the pipeline, so a
+    cascade never silently runs under the wrong (or no) model.
+    """
+    model_path = os.environ.get(_UNIVERSAL_MODEL_PATH_VARIABLE)
+    if not model_path:
+        raise RuntimeError(
+            f"the universal cascade model '{model.name}' needs its "
+            f"AOTInductor .pt2 path, but {_UNIVERSAL_MODEL_PATH_VARIABLE} is "
+            f"unset. That package is GPU-architecture-specific and built at "
+            f"deploy time (DESIGN §4.7), so point the variable at the .pt2 "
+            f"compiled for this machine, or request a classical potential "
+            f"explicitly.")
+    return model_path
 
 
 @dataclass(frozen=True)
@@ -366,48 +462,68 @@ def resolve_cascade_generator(
         short_core: tuple = (_SHORT_CORE_INNER_STANDIN,
                             _SHORT_CORE_OUTER_STANDIN),
         allow_unvalidated: bool = False,
-        domain: str | None = None) -> ForceModel:
-    """Assemble the classical + two-ZBL cascade potential (§4.7, §10.2/3).
+        domain: str | None = None,
+        use_classical: bool = False) -> ForceModel:
+    """Assemble the cascade potential — universal by default (§4.7, §10.2/3).
 
     ``type_map`` maps every element symbol present in the cascade cell —
     substrate AND projectile — to its LAMMPS type id (the projectile type
     must already be declared so the cascade can create those atoms). The
     substrate species are inferred as ``type_map`` minus
-    ``projectile_species``, and the registry is looked up by that
-    substrate set.
+    ``projectile_species``.
 
-    ``domain`` names the structural/chemical regime (DESIGN §4.8) and is
-    the other half of the registry key. It may be omitted when the
-    substrate species carry exactly one registered domain, which covers
-    every material in v1 except silicon-and-oxygen.
+    **Universal-first (DESIGN §4.7).** By default the cascade runs on the
+    chemistry-agnostic universal foundation MLIP
+    (:data:`UNIVERSAL_CASCADE_MODEL`) spliced with the two ZBL cores — it
+    needs no per-material work and covers every species, so it is the
+    default for ALL materials, silicon included. A CLASSICAL form is used
+    only on explicit request (``use_classical=True``), which is why silicon
+    no longer silently resolves to Stillinger-Weber: the validated classical
+    silicon path is opt-in, the universal path is the default (§4.7,
+    "universal by default, classical by choice").
 
-    The refusals that keep the pipeline honest all live in
-    :func:`_resolve_registry_entry` (DESIGN §4.7, §4.8): unregistered
-    species, species registered under several domains with none named,
-    and a documented-but-untested entry run without the deliberate
-    ``allow_unvalidated`` opt-in.
+    ``domain`` names the structural/chemical regime (DESIGN §4.8) and is the
+    other half of the CLASSICAL registry key. It is consulted only when
+    ``use_classical=True``; a universal model has no species/domain key.
 
     ``allow_unvalidated`` is the deliberate escape hatch for EXPLORATORY
-    work — the first run of a new material, whose whole purpose is to
-    produce the evidence the §3.5 gate would judge. It is a caller-side
-    decision, never a default, and it exists so that bringing up a new
-    material does not tempt anyone to edit ``validated=True`` in the
-    registry before the evidence exists. Anything it returns is a
-    PROVISIONAL result and must be reported as such; the registry flag
-    stays ``False`` until the gate is genuinely cleared.
+    work — the first run of a new material (or, for the universal model, its
+    first activation), whose whole purpose is to produce the evidence the
+    §3.5 gate would judge. It is a caller-side decision, never a default. The
+    universal model has RUN but not yet cleared that gate, so a DEFAULT
+    cascade refuses unless this is set — the same on-the-record opt-in the
+    classical registry uses. Anything returned under it is PROVISIONAL.
 
-    On success it returns a :class:`~sabsim.driver.commands.ForceModel`
-    the driver emits through ``force_model_commands`` unchanged — the
-    classical form provides the bonding, ZBL core #1 (longer range) the
-    projectile-substrate collisions, and ZBL core #2 (short) a hard wall
-    on every substrate-substrate pair (DESIGN §3.3).
+    On success it returns a :class:`~sabsim.driver.commands.ForceModel` the
+    driver emits through ``force_model_commands`` unchanged — the base form
+    (universal MLIP or classical) provides the bonding, ZBL core #1 (longer
+    range) the projectile-substrate collisions, and ZBL core #2 (short) a
+    hard wall on every substrate-substrate pair (DESIGN §3.3).
     """
     projectile = frozenset(projectile_species)
+
+    if not use_classical:
+        # The DESIGN default: the universal foundation MLIP + ZBL, for every
+        # material. It follows the same gate-not-warn refusal as the classical
+        # registry — unvalidated until it clears the §3.5 gate on a real run.
+        model = UNIVERSAL_CASCADE_MODEL
+        if not model.validated and not allow_unvalidated:
+            raise NotImplementedError(
+                f"the universal cascade model '{model.name}' is the default "
+                f"(DESIGN §4.7) but has NOT yet cleared the §3.5 activation "
+                f"gate: {model.caveat} To run it as EXPLORATORY bring-up — "
+                f"whose results are provisional and must be reported as such "
+                f"— set SABSIM_ALLOW_UNVALIDATED_POTENTIAL. Or request a "
+                f"validated classical form explicitly (use_classical=True).")
+        return _assemble_universal_overlay(
+            model, type_map, projectile, long_core, short_core)
+
+    # Explicit classical request (DESIGN §4.7, "classical by choice"): the
+    # per-material registry, keyed by (substrate species, domain).
     substrate = frozenset(type_map) - projectile
     entry = _resolve_registry_entry(
         substrate, domain, allow_unvalidated, "cascade generator")
-
-    return _assemble_hybrid_overlay(
+    return _assemble_classical_overlay(
         entry, type_map, projectile, long_core, short_core)
 
 
@@ -469,46 +585,33 @@ def classical_force_model(
         pair_coeff=(classical_coeff, "* * zero"))
 
 
-def _assemble_hybrid_overlay(
-        entry: CascadeGeneratorEntry,
+def _zbl_overlay(
         type_map: dict,
         projectile: frozenset,
         long_core: tuple,
-        short_core: tuple) -> ForceModel:
-    """Build the ``hybrid/overlay`` ForceModel from a validated entry.
+        short_core: tuple) -> tuple[str, list]:
+    """The ZBL half of the ``hybrid/overlay``, derived from the species set.
 
-    The classical sub-style bonds only the substrate atoms — each
-    projectile type is passed to it as ``NULL`` so the classical form
-    ignores the projectile (which interacts purely through ZBL, the
-    neutral-projectile choice of DESIGN §3.2). Every element pair then
-    gets exactly one ZBL core: the long one (#1) if the pair involves the
-    projectile, the short one (#2) if it is substrate-substrate. The ZBL
-    ``pair_coeff`` carries the two atomic numbers, looked up from the
-    element symbols so ANY element works without a hand-maintained table.
+    Returns the ZBL ``pair_style`` FRAGMENT (the two ``zbl`` sub-styles, long
+    core first) and one ``pair_coeff`` line per element pair. Every pair gets
+    exactly one core: the long one (#1) if it involves the projectile, the
+    short one (#2) if it is substrate-substrate (DESIGN §3.3). The two atomic
+    numbers are looked up from the element symbols, so ANY element works
+    without a hand-maintained table — the same derivation whether the base
+    sub-style underneath is a classical form or the universal MLIP, which is
+    why it lives here shared by both assemblers.
     """
     long_inner, long_outer = long_core
     short_inner, short_outer = short_core
 
-    # Element symbols in LAMMPS type-id order (1, 2, ...).
-    symbols_in_order = sorted(type_map, key=lambda symbol: type_map[symbol])
-
-    # The classical pair_coeff: each type's element label, or NULL for a
-    # projectile type the classical form must not see.
-    classical_labels = " ".join(
-        "NULL" if symbol in projectile else symbol
-        for symbol in symbols_in_order)
-    classical_coeff = (
-        f"* * {entry.classical_style} "
-        f"{resolve_parameter_file(entry.classical_param_file)} "
-        f"{classical_labels}")
-
-    pair_style = (
-        f"hybrid/overlay {entry.classical_style} "
+    style_fragment = (
         f"zbl {_lammps_number(long_inner)} {_lammps_number(long_outer)} "
         f"zbl {_lammps_number(short_inner)} {_lammps_number(short_outer)}")
 
-    pair_coeff = [classical_coeff]
+    # Element symbols in LAMMPS type-id order (1, 2, ...).
+    symbols_in_order = sorted(type_map, key=lambda symbol: type_map[symbol])
 
+    coeffs = []
     # One ZBL pair_coeff per element pair (upper triangle in type id), the
     # core chosen by whether the projectile is involved.
     for first_symbol in symbols_in_order:
@@ -524,9 +627,82 @@ def _assemble_hybrid_overlay(
                 else _SHORT_CORE_INDEX)
             first_z = atomic_numbers[first_symbol]
             second_z = atomic_numbers[second_symbol]
-            pair_coeff.append(
+            coeffs.append(
                 f"{first_id} {second_id} zbl {core_index} "
                 f"{_lammps_number(float(first_z))} "
                 f"{_lammps_number(float(second_z))}")
 
-    return ForceModel(pair_style=pair_style, pair_coeff=tuple(pair_coeff))
+    return style_fragment, coeffs
+
+
+def _assemble_classical_overlay(
+        entry: CascadeGeneratorEntry,
+        type_map: dict,
+        projectile: frozenset,
+        long_core: tuple,
+        short_core: tuple) -> ForceModel:
+    """Build the classical-form ``hybrid/overlay`` ForceModel (§4.7 option).
+
+    The classical sub-style bonds only the substrate atoms — each projectile
+    type is passed to it as ``NULL`` so the classical form ignores the
+    projectile (which interacts purely through ZBL, the neutral-projectile
+    choice of DESIGN §3.2). The two ZBL cores (:func:`_zbl_overlay`) are then
+    overlaid on top. A classical form is built into LAMMPS, so the ForceModel
+    needs no ``preload`` and no atom map.
+    """
+    # Element symbols in LAMMPS type-id order; NULL for a projectile type the
+    # classical form must not see.
+    symbols_in_order = sorted(type_map, key=lambda symbol: type_map[symbol])
+    classical_labels = " ".join(
+        "NULL" if symbol in projectile else symbol
+        for symbol in symbols_in_order)
+    classical_coeff = (
+        f"* * {entry.classical_style} "
+        f"{resolve_parameter_file(entry.classical_param_file)} "
+        f"{classical_labels}")
+
+    zbl_style, zbl_coeffs = _zbl_overlay(
+        type_map, projectile, long_core, short_core)
+
+    return ForceModel(
+        pair_style=f"hybrid/overlay {entry.classical_style} {zbl_style}",
+        pair_coeff=(classical_coeff, *zbl_coeffs))
+
+
+def _assemble_universal_overlay(
+        model: UniversalCascadeModel,
+        type_map: dict,
+        projectile: frozenset,
+        long_core: tuple,
+        short_core: tuple) -> ForceModel:
+    """Build the universal-MLIP ``hybrid/overlay`` ForceModel (§4.7 default).
+
+    The base sub-style is ``deepmd <model.pt2>``, and EVERY LAMMPS type is
+    mapped to its real element — the universal model covers the whole
+    periodic table, projectile included, and deepmd's element map has no
+    ``NULL`` slot the way a classical form does. The near-equilibrium MLIP is
+    still wrong deep in the collision, but the LONG ZBL core (#1) overlaid on
+    every projectile pair dominates there, so the projectile is handled by
+    ZBL exactly as in the classical path — the model merely also sees it at
+    long range, which is scaffold-grade acceptable (DESIGN §4.7).
+
+    Two things distinguish this ForceModel from the classical one. It needs
+    the global atom map (``needs_atom_map``) because the graph network
+    gathers per-atom features across the neighbor graph; and it carries no
+    ``preload``, because the deepmd LAMMPS engine used for the cascade ships
+    the ``deepmd`` pair style built in (no runtime ``plugin load``).
+    """
+    # Every type mapped to its REAL element (no NULL): the universal model
+    # covers the projectile too, and the long ZBL core dominates the collision.
+    symbols_in_order = sorted(type_map, key=lambda symbol: type_map[symbol])
+    element_labels = " ".join(symbols_in_order)
+    model_path = resolve_universal_model_path(model)
+    deepmd_coeff = f"* * deepmd {element_labels}"
+
+    zbl_style, zbl_coeffs = _zbl_overlay(
+        type_map, projectile, long_core, short_core)
+
+    return ForceModel(
+        pair_style=f"hybrid/overlay deepmd {model_path} {zbl_style}",
+        pair_coeff=(deepmd_coeff, *zbl_coeffs),
+        needs_atom_map=True)

@@ -135,11 +135,21 @@ class ForceModel:
     whose style is built in. Keeping it on the value, not in the
     generator, preserves the "force model is a parameter, not a fork"
     commitment: the generator still emits lines without branching.
+
+    ``needs_atom_map`` records whether the model requires LAMMPS to keep a
+    global atom map (``atom_modify map yes``). A message-passing MLIP (the
+    DPA graph-network cascade potential) gathers per-atom features across
+    the neighbor graph and cannot run without it, whereas a classical
+    pair form never needs it. Because ``atom_modify`` must be issued BEFORE
+    the structure is read, this flag is consulted by the preamble
+    generator (not :func:`force_model_commands`), which is why it rides on
+    the value here — still a parameter, not a branch in the generator.
     """
 
     pair_style: str
     pair_coeff: tuple[str, ...]
     preload: tuple[str, ...] = ()
+    needs_atom_map: bool = False
 
 
 def classical_si_stand_in(type_map: dict) -> ForceModel:
@@ -216,7 +226,7 @@ def _cell_cross_section_area(built) -> float:
 # strings; the two assemblers at the bottom stitch them in order.
 # ---------------------------------------------------------------------
 
-def restart_preamble_commands() -> list:
+def restart_preamble_commands(force_model: ForceModel | None = None) -> list:
     """The units and box declarations that precede a read (§9.2, §13.3).
 
     ``metal`` units, ``atomic`` style (charge-free at this fidelity,
@@ -225,12 +235,24 @@ def restart_preamble_commands() -> list:
     lines lead BOTH a fresh ``read_data`` and a resumed ``read_restart``,
     so they live in one place; the structure and masses (and, on a
     restart, the saved timestep) come after the read.
+
+    When ``force_model`` is a message-passing MLIP (``needs_atom_map``),
+    ``atom_modify map yes`` is inserted right after ``atom_style`` — it
+    MUST precede the read that creates the atoms, which is why it lives in
+    the preamble rather than beside the ``pair_style`` lines. A classical
+    force model (or no force model) leaves the three lines untouched, so
+    the classical command block is unchanged.
     """
-    return [
+    lines = [
         "units metal",
         "atom_style atomic",
         "boundary p p f",
     ]
+    if force_model is not None and force_model.needs_atom_map:
+        # After atom_style, before the read: the global atom map the GNN
+        # neighbor gather needs must exist when the atoms are created.
+        lines.insert(2, "atom_modify map yes")
+    return lines
 
 
 def timestep_command(timestep: Quantity) -> list:
@@ -244,15 +266,19 @@ def timestep_command(timestep: Quantity) -> list:
     return [f"timestep {_lammps_number(to_metal(timestep, 'time'))}"]
 
 
-def preamble_commands(data_file: str, timestep: Quantity) -> list:
+def preamble_commands(
+        data_file: str,
+        timestep: Quantity,
+        force_model: ForceModel | None = None) -> list:
     """Units, box style, the structure, and the MD timestep (§9.2).
 
     Opens with :func:`restart_preamble_commands` (the units and z-open
-    boundary), reads the structure the builder wrote, then sets the MD
-    timestep (:func:`timestep_command`).
+    boundary, plus ``atom_modify map yes`` when ``force_model`` is a
+    message-passing MLIP), reads the structure the builder wrote, then sets
+    the MD timestep (:func:`timestep_command`).
     """
     return (
-        restart_preamble_commands()
+        restart_preamble_commands(force_model)
         + [f"read_data {data_file}"]
         + timestep_command(timestep))
 
@@ -1033,7 +1059,8 @@ def cascade_setup_commands(
     up; this returns only the shared preamble every impact builds on.
     """
     commands = []
-    commands += preamble_commands(data_file, member.numerical.cascade_timestep)
+    commands += preamble_commands(
+        data_file, member.numerical.cascade_timestep, force_model)
     # Sputtered atoms LEAVE through the open `p p f` top (§10.4), so a
     # SHRINKING atom count is expected physics, not an error — warn on a
     # lost atom rather than aborting (LAMMPS aborts by default).

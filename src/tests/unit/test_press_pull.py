@@ -16,10 +16,12 @@ import pytest
 
 from sabsim.driver.commands import RegionGeometry, classical_si_stand_in
 from sabsim.driver.engine import MockEngine
+from sabsim.driver.activation_gate import ActivationVerdict
 from sabsim.driver.press_pull import (
     RunControl,
     _scissors_delta,
     begin_or_resume_pull,
+    gate_healed_surfaces,
     press_and_bond,
     pull_at_rate,
     settle_reference,
@@ -33,6 +35,25 @@ from sabsim.driver.resume import (
 from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import Quantity
 from sabsim.structure.slab_builder import WAFER_A_TAG, WAFER_B_TAG
+
+
+@pytest.fixture
+def passing_gate(monkeypatch):
+    """Stub the bond-flow activation gate (§3.4) to PASS both surfaces.
+
+    The wide-gap press tests below exercise the relax + scissors mechanics
+    that run AFTER the gate; the gate itself — including the wafer-B mirror —
+    is covered by ``test_gate_healed_surfaces_gates_each_wafer_by_tag``. So
+    here the gate is stubbed to pass, letting the press proceed on the toy
+    structures these tests use (which are not real amorphous surfaces).
+    """
+    import sabsim.driver.press_pull as press_pull_module
+
+    passed = ActivationVerdict(
+        passed=True, activated_depth=10.0, per_metric={}, reason="stubbed")
+    monkeypatch.setattr(
+        press_pull_module, "gate_healed_surfaces",
+        lambda engine, built: (passed, passed))
 
 _TEMPLATE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
@@ -120,7 +141,7 @@ def _first_drive_index(stream):
     raise AssertionError("no press drive was installed")
 
 
-def test_contact_relax_runs_when_the_gap_clears_the_cutoff():
+def test_contact_relax_runs_when_the_gap_clears_the_cutoff(passing_gate):
     """A wide vacuum gap triggers the capped settle BEFORE the drive.
 
     (The relax is a temporary OOD scaffold: displacement-capped damped
@@ -156,7 +177,7 @@ def test_no_contact_relax_when_the_surfaces_are_in_range():
     assert not any(line.startswith("displace_atoms") for line in stream)
 
 
-def test_scissors_cuts_the_vacuum_after_the_relax():
+def test_scissors_cuts_the_vacuum_after_the_relax(passing_gate):
     """After the relax, the top wafer is slid DOWN toward the scissors gap.
 
     The opening is measured with the dividing-surface metric (robust to a
@@ -523,3 +544,48 @@ def test_input_hash_tracks_the_reference_content(tmp_path):
     reference.write_text("structure B")
     after = input_hash(_member(), str(reference), _PULL_RATE)
     assert before != after
+
+
+# ---------------------------------------------------------------------
+# The per-wafer activation gate, now in the bond flow (§3.4, §3.5).
+# ---------------------------------------------------------------------
+
+def _si_diamond_block(n_lateral, n_depth, lattice=5.43):
+    """A silicon diamond block and its cell, for gating (§3.5)."""
+    basis = [(0, 0, 0), (0, .5, .5), (.5, 0, .5), (.5, .5, 0),
+             (.25, .25, .25), (.25, .75, .75), (.75, .25, .75),
+             (.75, .75, .25)]
+    points = np.array([
+        ((i + x) * lattice, (j + y) * lattice, (k + z) * lattice)
+        for i in range(n_lateral) for j in range(n_lateral)
+        for k in range(n_depth) for (x, y, z) in basis])
+    cell = np.diag([n_lateral * lattice, n_lateral * lattice,
+                    n_depth * lattice])
+    return points, cell
+
+
+def test_gate_healed_surfaces_gates_each_wafer_by_tag():
+    """Each wafer of the assembled pair is gated separately (§3.4, §3.5).
+
+    The atoms split by wafer tag, wafer B is mirrored to present its free
+    surface up, and each surface yields an ActivationVerdict over all four
+    §3.5 metrics — the plumbing the bond flow reads to halt before pressing.
+    """
+    points, cell = _si_diamond_block(n_lateral=3, n_depth=8)
+    median_z = float(np.median(points[:, 2]))
+    tags = np.where(points[:, 2] < median_z, WAFER_A_TAG, WAFER_B_TAG)
+    engine = MockEngine(positions=[points])
+    built = SimpleNamespace(
+        atoms=SimpleNamespace(get_tags=lambda: tags,
+                              get_cell=lambda: cell),
+        type_map={"Si": 1})
+
+    verdict_a, verdict_b = gate_healed_surfaces(engine, built)
+
+    assert isinstance(verdict_a, ActivationVerdict)
+    assert isinstance(verdict_b, ActivationVerdict)
+    # Both surfaces are judged over the full §3.5 metric set.
+    metrics = {"radial_distribution", "coordination", "ring_statistics",
+               "amorphization_depth"}
+    assert set(verdict_a.per_metric) == metrics
+    assert set(verdict_b.per_metric) == metrics

@@ -27,28 +27,26 @@ which metric fell short and by how much.
 
 from __future__ import annotations
 
-from sabsim.driver.cascade import ActivationResult
+from sabsim.driver.activation_gate import ActivationVerdict
 from sabsim.pipeline.exec_artifacts import ActivatedSlabs, Slab, Verdict
 
 
-def verdict_from_activation(result: ActivationResult) -> Verdict:
-    """Distil one surface's activation result to a contract Verdict (§10.1).
+def verdict_from_activation(gate: ActivationVerdict) -> Verdict:
+    """Distil one surface's §3.5 gate verdict to a report Verdict (§6, §3.5).
 
-    ``result`` is what :func:`sabsim.driver.cascade.activate_surface`
-    returns: the gate's :class:`ActivationVerdict` plus the cascade note
-    (how many impacts were delivered). We map it to the simple
-    :class:`Verdict` the ``ACTIVATED_SLABS_CONTRACT`` reads, preserving in
-    the reason the measured skin depth and — on a failure — the failing
-    metric that the gate already named (measured value vs threshold).
+    Revised 2026-08-08 (§3.4): the gate moved to the bond flow, which
+    produces an :class:`ActivationVerdict` per HEALED surface (all metrics,
+    the measured skin depth, a named failure). This maps it to the simple
+    :class:`Verdict` the report reads, preserving the measured skin depth
+    and — on a failure — the failing metric the gate already named. (The
+    bond flow halts on a failure, so the report only ever sees a PASS; the
+    failure branch is kept so the distiller is total and diagnosable.)
 
-    On a PASS the reason records the depth and the delivered dose, so a
-    reader sees at a glance how thick a skin this activation authored and
-    under how many impacts. On a FAILURE the gate's own reason is carried
-    verbatim behind the depth, because it already spells out which metric
-    fell short and by how much (or that no reference resolved, or that
-    there were no atoms to judge — every non-pass path the gate can take).
+    On a PASS the reason records the depth and that every metric passed, so a
+    reader sees at a glance how thick a skin this activation authored. On a
+    FAILURE the gate's own reason is carried verbatim behind the depth,
+    because it already spells out which metric fell short and by how much.
     """
-    gate = result.verdict
     depth = gate.activated_depth
     if gate.passed:
         metric_count = len(gate.per_metric)
@@ -56,7 +54,7 @@ def verdict_from_activation(result: ActivationResult) -> Verdict:
             passed=True,
             reason=(
                 f"activated: {depth:.1f} Å skin, all {metric_count} "
-                f"metrics passed ({result.cascade.note})"))
+                f"metrics passed"))
     return Verdict(
         passed=False,
         reason=(
@@ -65,21 +63,15 @@ def verdict_from_activation(result: ActivationResult) -> Verdict:
 
 def activated_slabs_from_results(
         slab_a: Slab,
-        slab_b: Slab,
-        result_a: ActivationResult,
-        result_b: ActivationResult) -> ActivatedSlabs:
+        slab_b: Slab) -> ActivatedSlabs:
     """Assemble the ACTIVATED_SLABS artifact from both surfaces (§10.1).
 
-    Each surface is activated INDEPENDENTLY in its own engine, before the
-    two ever face each other (DESIGN.md §3.1); this gathers the two driver
-    results into the single :class:`ActivatedSlabs` the contract checks,
-    mapping each surface's rich gate verdict to its contract
-    :class:`Verdict`. A failed verdict on EITHER surface makes the artifact
-    contract-invalid, so the pipeline halts at this seam rather than
-    carrying an un-activated slab downstream (DESIGN.md §10.1).
+    Revised 2026-08-08 (§3.4): activation is cascade-only, so this just
+    gathers the two amorphized slabs into the single :class:`ActivatedSlabs`
+    the contract checks — no verdict. The §3.5 gate moved to the bond flow,
+    which gates each healed surface before pressing;
+    :func:`verdict_from_activation` is the distillation the bond flow reuses
+    there. Each surface was activated INDEPENDENTLY in its own engine, before
+    the two ever face each other (DESIGN.md §3.1).
     """
-    return ActivatedSlabs(
-        slab_a=slab_a,
-        slab_b=slab_b,
-        verdict_a=verdict_from_activation(result_a),
-        verdict_b=verdict_from_activation(result_b))
+    return ActivatedSlabs(slab_a=slab_a, slab_b=slab_b)

@@ -166,18 +166,19 @@ def exec_one_member(
             member, potential, derived_lattices, scratch_directory, comm),
         SLABS_CONTRACT)
 
-    # A FAILED activation gate is contract-invalid and halts HERE: the
-    # ACTIVATED_SLABS_CONTRACT checks both verdicts passed (§10.1). Each
-    # call re-reads its half from the handle's data file, amorphizes it,
-    # and writes the amorphized half back for assembly to read.
+    # Cascade-only (§3.4, revised 2026-08-08): activation just amorphizes
+    # each half, and the ACTIVATED_SLABS_CONTRACT checks only that both
+    # amorphized slabs are present (§10.1). The §3.5 gate moved to the bond
+    # flow, so the pass/fail activation HALT now falls there, not here. Each
+    # call re-reads its half from the handle's data file, amorphizes it, and
+    # writes the amorphized half back for assembly to read.
     activated = run_to_contract(
         lambda: stage_set.activate(
             handle_a, handle_b, member, potential, scratch_directory, comm),
         ACTIVATED_SLABS_CONTRACT)
 
     # Assembly reads both amorphized halves back and stacks them; it
-    # consumes the ActivatedSlabs directly (the verdicts rode the contract
-    # check above).
+    # consumes the ActivatedSlabs (both amorphized slabs) directly.
     structure = run_to_contract(
         lambda: stage_set.assemble(
             activated, shared, member, scratch_directory, comm),

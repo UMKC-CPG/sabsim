@@ -317,6 +317,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from sabsim.driver.activation_gate import ActivationVerdict, MetricVerdict
 from sabsim.pipeline.exec_artifacts import (
     BondDebondResult,
     PressOutcome,
@@ -372,6 +373,60 @@ def test_analyzer_unresolved_when_no_rung_separates():
     assert mechanical.status is MeasureStatus.UNRESOLVED
     assert mechanical.value is None
     assert measures.verdicts.bonded is False
+
+
+def _passing_gate(depth):
+    """A passing §3.5 verdict at the given measured skin depth."""
+    return ActivationVerdict(
+        passed=True, activated_depth=depth, reason="",
+        per_metric={
+            "radial_distribution": MetricVerdict(
+                "radial_distribution", 2.37, "Si stand-in", 0.30, True),
+            "amorphization_depth": MetricVerdict(
+                "amorphization_depth", depth, "Si stand-in", 5.0, True)})
+
+
+def test_analyzer_surfaces_the_per_surface_activation_gate():
+    """The §3.5 gate verdict rides the report as a per-surface depth measure.
+
+    The gate moved to the bond flow (§3.4), so its verdict arrives on the
+    BondDebondResult; the analyzer surfaces each surface's MEASURED skin
+    depth (closing the §2.5 estimate) with the gate's summary as the method.
+    """
+    member = _si_si_member()
+    pull = PullOutcome(
+        rate_value=1.0, rate_unit="m/s", note="", complete=True,
+        separation_index=2, grip_displacement=(0.0, 1.0, 2.0),
+        force_vs_grip=(0.0, 1.0, 0.0))
+    bond = BondDebondResult(
+        press=PressOutcome(bonded=True, note=""), reference_ok=True,
+        pulls=(pull,),
+        activation_a=_passing_gate(8.5), activation_b=_passing_gate(7.2))
+
+    measures = run_analyzer_live(_structure_with_area(), bond, member)
+
+    depth_a = measures.by_name("activated_depth_a")
+    assert depth_a.value == pytest.approx(8.5)
+    assert depth_a.status is MeasureStatus.OK
+    assert depth_a.unit_native == "angstrom"
+    assert "8.5 Å skin" in depth_a.method
+    assert "all 2 metrics passed" in depth_a.method
+    assert measures.by_name("activated_depth_b").value == pytest.approx(7.2)
+
+
+def test_analyzer_omits_activation_when_the_bond_never_gated():
+    """No activation verdict (skeleton / narrow-gap path) -> no such measure."""
+    member = _si_si_member()
+    incomplete = PullOutcome(
+        rate_value=1.0, rate_unit="m/s", note="", complete=False)
+    bond = BondDebondResult(
+        press=PressOutcome(bonded=False, note=""), reference_ok=False,
+        pulls=(incomplete,))                     # activation_a/b default None
+
+    measures = run_analyzer_live(_structure_with_area(), bond, member)
+    names = {measure.name for measure in measures.measures}
+    assert "activated_depth_a" not in names
+    assert "activated_depth_b" not in names
 
 
 # ---------------------------------------------------------------------

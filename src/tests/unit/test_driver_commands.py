@@ -157,6 +157,31 @@ def test_preamble_sets_metal_units_and_open_z_box():
     assert "timestep 0.001" in commands
 
 
+def test_preamble_adds_atom_map_only_for_a_message_passing_model():
+    """``atom_modify map yes`` appears for a GNN model, before the read (D4).
+
+    A message-passing MLIP gathers per-atom features across the neighbor
+    graph and cannot run without a global atom map, which LAMMPS must be
+    told to keep BEFORE the atoms are created — so the preamble injects it
+    right after ``atom_style`` and ahead of ``read_data``. A classical
+    force model (or none) leaves the preamble untouched.
+    """
+    gnn = ForceModel(
+        pair_style="deepmd model.pt2", pair_coeff=("* * Si",),
+        needs_atom_map=True)
+    with_map = preamble_commands("pair.data", Quantity(1.0, "fs"), gnn)
+    assert "atom_modify map yes" in with_map
+    # Ordering: after atom_style, before the read that creates the atoms.
+    assert (with_map.index("atom_style atomic")
+            < with_map.index("atom_modify map yes")
+            < with_map.index("read_data pair.data"))
+
+    # A classical model never asks for it, so the block is unchanged.
+    classical = classical_si_stand_in({"Si": 1})
+    without_map = preamble_commands("pair.data", Quantity(1.0, "fs"), classical)
+    assert "atom_modify map yes" not in without_map
+
+
 def test_region_groups_carve_by_z_position():
     """Grips, borders, and interior come from the per-wafer z-ranges."""
     commands = region_group_commands(_fake_pair(), RegionGeometry())
@@ -266,10 +291,11 @@ def test_press_script_is_ordered_and_runs_the_hold():
     assert commands[0] == "units metal"
     assert "pair_style sw" in commands
     assert "fix drive_top top_grip aveforce 0.0 0.0 v_press_fz" in commands
-    # Two runs: approach (gap 3 Å at 0.01 Å/ps = 300 ps / 0.001 ps =
-    # 300000 steps) then the 150 ps hold (150000 steps).
+    # Two runs: approach (gap 10 Å at 0.01 Å/ps = 1000 ps / 0.001 ps =
+    # 1000000 steps — the template initial_gap is now WIDE, §2.6/§3.4) then
+    # the 150 ps hold (150000 steps).
     runs = [c for c in commands if c.startswith("run ")]
-    assert runs == ["run 300000", "run 150000"]
+    assert runs == ["run 1000000", "run 150000"]
 
 
 def test_pull_script_records_and_runs_the_distance(tmp_path):

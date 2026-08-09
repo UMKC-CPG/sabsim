@@ -144,7 +144,7 @@ def test_cascade_setup_opens_the_top_and_defines_elapsed_time():
     """Setup uses the open p p f box and defines the halt's time variable."""
     member = _template_member()
     force_model = resolve_cascade_generator(
-        {"Si": 1, "Ar": 2}, projectile_species={"Ar"})
+        {"Si": 1, "Ar": 2}, projectile_species={"Ar"}, use_classical=True)
     commands = cascade_setup_commands(
         member, force_model, data_file="slab.data",
         base_low=10.0, surface_high=40.0, seed=7)

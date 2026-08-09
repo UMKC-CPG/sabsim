@@ -34,7 +34,6 @@ from sabsim.pipeline.exec_artifacts import (
     SharedCell,
     Slab,
     Structure,
-    Verdict,
 )
 from sabsim.pipeline.handoff import HandoffError
 from sabsim.pipeline.measures import (
@@ -116,8 +115,7 @@ def _fake_stage_set() -> StageSet:
             HalfHandle("b.data", {"Si": 1}, "Si", WAFER_B_TAG),
             SharedCell(note="identity")),
         activate=lambda *a, **k: ActivatedSlabs(
-            slab_a=Slab("Si", "a"), slab_b=Slab("Si", "b"),
-            verdict_a=Verdict(True, "ok"), verdict_b=Verdict(True, "ok")),
+            slab_a=Slab("Si", "a"), slab_b=Slab("Si", "b")),
         assemble=lambda *a, **k: Structure(
             note="pair", labeled_groups=("interface_z",),
             data_file=None, built=_built_pair()),

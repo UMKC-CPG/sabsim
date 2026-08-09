@@ -48,12 +48,22 @@ from ase.io import write as ase_write
 
 from sabsim.driver.cascade import (
     CascadeControl,
+    CascadeOutcome,
     _projectile_species,
     activate_surface,
+    build_activate_script,
+    derive_bombardment_spec,
     derive_seeds,
 )
 from sabsim.driver.bulk_relax import derive_lattice
-from sabsim.driver.cascade_potential import classical_force_model
+from sabsim.driver.cascade_potential import (
+    classical_force_model,
+    resolve_cascade_generator,
+)
+from sabsim.driver.cascade_subprocess import (
+    read_dump_structure,
+    run_activate_subprocess,
+)
 from sabsim.driver.commands import (
     CascadeGeometry,
     ForceModel,
@@ -62,7 +72,10 @@ from sabsim.driver.commands import (
     stage_dump_file,
     to_metal,
 )
-from sabsim.pipeline.activation_adapter import activated_slabs_from_results
+from sabsim.pipeline.activation_adapter import (
+    activated_slabs_from_results,
+    verdict_from_activation,
+)
 from sabsim.pipeline.exec_artifacts import (
     DerivedLattices,
     HalfHandle,
@@ -74,6 +87,7 @@ from sabsim.pipeline.run_options import trajectory_options
 from sabsim.spec.references import resolve_crystal_file
 from sabsim.spec.records import MemberSpecification
 from sabsim.structure.amorphized_assembly import (
+    amorphized_half_from_arrays,
     assemble_amorphized_pair,
     snapshot_amorphized_half,
 )
@@ -487,6 +501,23 @@ def _unvalidated_potentials_allowed() -> bool:
     return setting.strip().lower() in {"1", "true", "yes", "on"}
 
 
+# The cascade potential is UNIVERSAL by default (DESIGN §4.7): the
+# chemistry-agnostic foundation MLIP drives every material's amorphization.
+# A curated classical form (silicon's Stillinger-Weber, a cascade-validated
+# Tersoff) is the OPTION, chosen only on explicit request. Like the flags
+# above it lives in the environment so the choice to depart from the
+# universal default stays visible in the run's own record. The classical
+# form still needs its (species, domain) registry key, which comes from the
+# member's ``material_domain`` as before — this flag only flips WHICH path.
+_CASCADE_CLASSICAL_VARIABLE = "SABSIM_CASCADE_CLASSICAL"
+
+
+def _classical_cascade_requested() -> bool:
+    """Whether this run cascades under a classical form, not universal."""
+    setting = os.environ.get(_CASCADE_CLASSICAL_VARIABLE, "")
+    return setting.strip().lower() in {"1", "true", "yes", "on"}
+
+
 # An EXPLICIT deepmd-model override, for validating the trained-MLIP force
 # path through the pipeline BEFORE the §11 bootstrap resolves a committee
 # (the seam the classical stand-in normally fills, §4.5). When set to a
@@ -624,6 +655,79 @@ def _reanneal_force_model(
         domain=domain)
 
 
+def _activate_one_half_subprocess(
+        handle: HalfHandle,
+        member: MemberSpecification,
+        seed: int,
+        output_directory: str,
+        comm=None) -> tuple:
+    """Amorphize ONE half OUT-OF-PROCESS, under the universal cascade engine.
+
+    The default cascade runs on the universal foundation MLIP, which lives
+    in deepmd's own self-contained bundle and cannot load into this process
+    (ARCHITECTURE §4.1/§4.4). So the cascade half of the activate stage —
+    assembled by :func:`~sabsim.driver.cascade.build_activate_script` — is
+    run as the bundle's ``lmp -in <script>`` in ONE subprocess, and its
+    AMORPHIZED structure is read back from a dump file (the §4.3 file
+    handoff). Cascade-only (§3.4): the heal and the §3.5 gate moved to the
+    bond flow, so nothing gates here — the slab build runs before and the
+    amorphized-half snapshot reads the FILE after. Returns the same
+    ``(CascadeOutcome, amorphized_file)`` pair as the in-process path.
+    """
+    built = read_standalone_half(
+        handle.data_file, handle.type_map, handle.identity)
+    # The universal cascade force model (deepmd + ZBL); it refuses unless the
+    # run opted into the not-yet-gate-cleared model (§4.7).
+    cascade_force_model = resolve_cascade_generator(
+        built.type_map, _projectile_species(member),
+        allow_unvalidated=_unvalidated_potentials_allowed(),
+        domain=member.material_domain, use_classical=False)
+
+    spec = derive_bombardment_spec(built, member)
+    projectile_types = [
+        built.type_map[species]
+        for species in _projectile_species(member)
+        if species in built.type_map]
+
+    role = "a" if handle.wafer_tag == WAFER_A_TAG else "b"
+    dump_path = os.path.join(output_directory, f"activated_{role}.dump")
+    script = build_activate_script(
+        built, member, cascade_force_model, handle.data_file, spec,
+        seed, projectile_types, dump_path, _GEOMETRY, _CONTROL)
+
+    # Only the primary rank drives the one-GPU subprocess and writes the
+    # shared files; peers wait at the barrier, then every rank reads the
+    # handoff back (deterministic, so the gate agrees across ranks).
+    rank = comm.Get_rank() if comm is not None else 0
+    if rank == 0:
+        run_activate_subprocess(
+            script, output_directory, dump_path,
+            script_name=f"activate_{role}.in",
+            log_name=f"log.activation_{role}")
+    if comm is not None:
+        comm.Barrier()
+
+    positions, type_ids = read_dump_structure(dump_path)
+    cell = built.atoms.get_cell()
+    cascade_outcome = CascadeOutcome(
+        impacts_run=spec.impact_count,
+        note=f"delivered {spec.impact_count} impacts of "
+             f"{spec.projectile_symbol} at "
+             f"{spec.impact_energy:.0f} eV out-of-process (§10.4, §4.3)")
+    # Cascade-only (§3.4): NO gate here — it moved to the bond flow. The
+    # dump is the amorphized, substrate-only surface; reconstitute the half.
+    amorphized_atoms = amorphized_half_from_arrays(
+        positions, type_ids, cell, handle.type_map, handle.wafer_tag)
+    amorphized_file = os.path.join(
+        output_directory, f"amorphized_{role}.extxyz")
+    if rank == 0:
+        ase_write(amorphized_file, amorphized_atoms,
+                  format="extxyz", parallel=False)
+    if comm is not None:
+        comm.Barrier()
+    return cascade_outcome, amorphized_file
+
+
 def activate_one_half(
         handle: HalfHandle,
         member: MemberSpecification,
@@ -634,22 +738,29 @@ def activate_one_half(
 
     Opens a ``LammpsEngine`` (compute node), RE-READS the pristine half
     from its handle's data file (never a warm object), runs the driver's
-    cascade -> re-anneal -> §3.5 gate, then SNAPSHOTS the re-annealed
-    surface out of the still-open engine and writes it back as the
-    amorphized half (an extended-XYZ file, which round-trips the wafer tag
-    the assembly reads). Returns the driver's rich
-    :class:`~sabsim.driver.cascade.ActivationResult` and the amorphized
-    file's path. The ``LammpsEngine`` import inside is lazy, so this module
-    still loads with no LAMMPS present.
+    CASCADE (cascade-only, §3.4 — the heal and the §3.5 gate moved to the
+    bond flow), then SNAPSHOTS the amorphized, substrate-only surface out of
+    the still-open engine and writes it back as the amorphized half (an
+    extended-XYZ file, which round-trips the wafer tag the assembly reads).
+    Returns the driver's :class:`~sabsim.driver.cascade.CascadeOutcome`
+    (provenance) and the amorphized file's path. The ``LammpsEngine`` import
+    inside is lazy, so this module still loads with no LAMMPS present.
+
+    The DEFAULT universal-MLIP cascade cannot run in this process (its
+    deepmd bundle has its own torch/MPI, ARCHITECTURE §4.1/§4.4), so that
+    path is dispatched to :func:`_activate_one_half_subprocess`, which runs
+    the whole LAMMPS half out-of-process and hands the structure back
+    through a file. Only an explicit classical cascade takes the in-process
+    path below.
     """
+    if not _classical_cascade_requested():
+        return _activate_one_half_subprocess(
+            handle, member, seed, output_directory, comm)
+
     from sabsim.driver.lammps_engine import LammpsEngine
 
     built = read_standalone_half(
         handle.data_file, handle.type_map, handle.identity)
-    substrate = frozenset(handle.type_map) - _projectile_species(member)
-    mlip = _reanneal_force_model(
-        handle.type_map, substrate, member.material_domain,
-        allow_unvalidated=_unvalidated_potentials_allowed())
 
     role = "a" if handle.wafer_tag == WAFER_A_TAG else "b"
     log_file = os.path.join(output_directory, f"log.activation_{role}")
@@ -657,12 +768,14 @@ def activate_one_half(
         command_line_args=["-screen", "none", "-log", log_file], comm=comm)
     trajectory_file, stride = _stage_trajectory(
         output_directory, member, f"activation_{role}")
-    result = activate_surface(
-        engine, built, member, mlip, handle.data_file, seed,
+    cascade_outcome = activate_surface(
+        engine, built, member, handle.data_file, seed,
         _GEOMETRY, _CONTROL,
         allow_unvalidated_potential=_unvalidated_potentials_allowed(),
+        use_classical_cascade=_classical_cascade_requested(),
         trajectory_file=trajectory_file, trajectory_stride=stride)
-    # Snapshot BEFORE closing: the re-annealed state is still live here.
+    # Snapshot BEFORE closing: the amorphized (substrate-only, re-numbered)
+    # state is still live here — the cascade cleanup left it ready.
     amorphized_atoms = snapshot_amorphized_half(
         engine, handle.type_map, handle.wafer_tag)
     engine.close()
@@ -687,7 +800,7 @@ def activate_one_half(
                   format="extxyz", parallel=False)
     if comm is not None:
         comm.Barrier()
-    return result, amorphized_file
+    return cascade_outcome, amorphized_file
 
 
 def activate_surfaces_live(
@@ -697,21 +810,20 @@ def activate_surfaces_live(
         potential,
         scratch_directory: str,
         comm=None):
-    """Amorphize BOTH halves independently, gate each (step 4, §10.1).
+    """Amorphize BOTH halves independently (step 4, §10.1).
 
     Each half is activated on its OWN engine, SERIALLY (ARCHITECTURE.md
     §4.3 — serial slabs), from a reproducible per-half seed derived from
-    the member's one master seed. The two rich verdicts are distilled to
-    the contract :class:`~sabsim.pipeline.exec_artifacts.Verdict` through
-    the adapter, and the amorphized-half file paths ride on the returned
-    slabs' ``data_file`` for the assembly to read. A failed gate on either
-    half makes the returned ``ActivatedSlabs`` contract-invalid, so the
-    sequencer halts at this seam (§10.1).
+    the member's one master seed. Cascade-only (§3.4): each half yields an
+    amorphized slab (no verdict — the §3.5 gate moved to the bond flow); the
+    amorphized-half file paths ride on the returned slabs' ``data_file`` for
+    the assembly to read. The returned ``ActivatedSlabs`` is contract-valid
+    when both slabs are present; the pass/fail halt is now in the bond flow.
     """
     half_seeds = derive_seeds(member.ensemble.master_seed, 2)
-    result_a, amorphized_a = activate_one_half(
+    _outcome_a, amorphized_a = activate_one_half(
         handle_a, member, half_seeds[0], scratch_directory, comm)
-    result_b, amorphized_b = activate_one_half(
+    _outcome_b, amorphized_b = activate_one_half(
         handle_b, member, half_seeds[1], scratch_directory, comm)
 
     slab_a = Slab(
@@ -720,7 +832,7 @@ def activate_surfaces_live(
     slab_b = Slab(
         identity=handle_b.identity, note="amorphized half B (top)",
         data_file=amorphized_b)
-    return activated_slabs_from_results(slab_a, slab_b, result_a, result_b)
+    return activated_slabs_from_results(slab_a, slab_b)
 
 
 # ---------------------------------------------------------------------
@@ -922,7 +1034,9 @@ def run_bond_debond_md_live(
             for rate in ladder)
         return BondDebondResult(
             press=PressOutcome(bonded=False, note=press.note),
-            reference_ok=False, pulls=pulls)
+            reference_ok=False, pulls=pulls,
+            activation_a=press.activation_a,
+            activation_b=press.activation_b)
 
     # One fresh engine per pull rung, each in its OWN directory so it can
     # be resumed from its own checkpoints without touching another rung
@@ -958,7 +1072,9 @@ def run_bond_debond_md_live(
         press=PressOutcome(
             bonded=True, note="contact reached and held (§9.3)"),
         reference_ok=reference.settled,
-        pulls=tuple(pulls))
+        pulls=tuple(pulls),
+        activation_a=press.activation_a,
+        activation_b=press.activation_b)
 
 
 # ---------------------------------------------------------------------
@@ -1031,8 +1147,31 @@ def run_analyzer_live(
         unit_native="eV/angstrom^2", unit_si="J/m^2",
         fidelity="mlip", method="not computed in v1 (wave 2)",
         status=MeasureStatus.UNRESOLVED)
+
+    # Surface the §3.5 activation gate result for each HEALED surface (§3.4:
+    # the gate moved to the bond flow, so its verdict rides bond_debond).
+    # Only a PASS reaches here — a failed gate halted the bond before this —
+    # so this reports the MEASURED skin depth (closing the §2.5 estimate)
+    # with the gate's own summary as the method. Absent on the retired
+    # narrow-gap path or a skeleton stub, in which case nothing is emitted.
+    activation_measures = []
+    for surface, verdict in (("a", bond_debond.activation_a),
+                             ("b", bond_debond.activation_b)):
+        if verdict is None:
+            continue
+        report = verdict_from_activation(verdict)
+        activation_measures.append(Measure(
+            name=f"activated_depth_{surface}",
+            value=verdict.activated_depth, uncertainty=0.0,
+            realization_count=seeds,
+            unit_native="angstrom", unit_si="m",
+            fidelity="structural-metric (§3.5)",
+            method=report.reason,
+            status=(MeasureStatus.OK if verdict.passed
+                    else MeasureStatus.UNRESOLVED)))
+
     return MeasureVector(
-        measures=(mechanical, thermodynamic),
+        measures=(mechanical, thermodynamic, *activation_measures),
         verdicts=Verdicts(
             bonded=bond_debond.press.bonded, contact_quality=None))
 

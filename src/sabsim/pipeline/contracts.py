@@ -131,13 +131,17 @@ def _validate_slabs(artifact: object) -> str | None:
 
 
 def _validate_activated(artifact: object) -> str | None:
-    """Both slabs amorphized AND past the gate (ACTIVATED, §10.1)."""
+    """Both slabs amorphized (ACTIVATED, §10.1, revised 2026-08-08).
+
+    The §3.5 gate no longer rides this seam — it moved to the bond flow
+    (DESIGN §3.4), which gates each healed surface before pressing. So this
+    checks only that the artifact carries both amorphized slabs; the
+    pass/fail halt is now in the bond flow.
+    """
     if not isinstance(artifact, ActivatedSlabs):
         return "expected an ActivatedSlabs artifact"
-    if not artifact.verdict_a.passed:
-        return f"slab A failed activation: {artifact.verdict_a.reason}"
-    if not artifact.verdict_b.passed:
-        return f"slab B failed activation: {artifact.verdict_b.reason}"
+    if artifact.slab_a is None or artifact.slab_b is None:
+        return "an activated slab is missing"
     return None
 
 
@@ -151,9 +155,19 @@ def _validate_structure(artifact: object) -> str | None:
 
 
 def _validate_bond_debond(artifact: object) -> str | None:
-    """A press outcome plus at least one pull (BOND_DEBOND, §9.1)."""
+    """A gated press plus at least one pull (BOND_DEBOND, §9.1, §3.4)."""
     if not isinstance(artifact, BondDebondResult):
         return "expected a BondDebondResult artifact"
+    # The §3.5 activation gate moved into the bond flow (§3.4, revised
+    # 2026-08-08): a failed healed-surface verdict halts HERE, before the
+    # press is trusted. Checked FIRST so the halt reason is the gate's own,
+    # not a downstream symptom. When absent (the retired narrow-gap path or a
+    # skeleton stub that never gated) it is simply not enforced.
+    for surface, verdict in (("A", artifact.activation_a),
+                             ("B", artifact.activation_b)):
+        if verdict is not None and not verdict.passed:
+            return (f"surface {surface} failed the §3.5 activation gate: "
+                    f"{verdict.reason}")
     if artifact.press is None:
         return "no press outcome recorded"
     if not artifact.pulls:

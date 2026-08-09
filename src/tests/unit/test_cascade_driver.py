@@ -18,15 +18,17 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from sabsim.driver.activation_gate import ActivationVerdict
 from sabsim.driver.cascade import (
-    ActivationResult,
     BombardmentSpec,
     CascadeControl,
+    CascadeOutcome,
     activate_surface,
+    build_activate_script,
+    cascade_cleanup_commands,
     derive_bombardment_spec,
     derive_seeds,
     mlip_reanneal,
+    reanneal_commands,
     run_cascade_to_fluence,
     sample_impact_position,
     sample_impact_velocity,
@@ -158,7 +160,7 @@ def test_loop_opens_the_driver_then_runs_each_impact():
     built = _cascade_built()
     member = _template_member()
     force_model = resolve_cascade_generator(
-        built.type_map, projectile_species={"Ar"})
+        built.type_map, projectile_species={"Ar"}, use_classical=True)
 
     outcome = run_cascade_to_fluence(
         engine, built, member, force_model, data_file="slab.data",
@@ -188,7 +190,8 @@ def test_loop_orders_cascade_before_relax_within_each_impact():
     built = _cascade_built()
     run_cascade_to_fluence(
         engine, built, _template_member(),
-        resolve_cascade_generator(built.type_map, projectile_species={"Ar"}),
+        resolve_cascade_generator(
+            built.type_map, projectile_species={"Ar"}, use_classical=True),
         data_file="slab.data", spec=_small_spec(), seed=99)
 
     stream = engine.received_commands
@@ -208,7 +211,8 @@ def test_slab_is_prerelaxed_before_the_first_impact():
     built = _cascade_built()
     run_cascade_to_fluence(
         engine, built, _template_member(),
-        resolve_cascade_generator(built.type_map, projectile_species={"Ar"}),
+        resolve_cascade_generator(
+            built.type_map, projectile_species={"Ar"}, use_classical=True),
         data_file="slab.data", spec=_small_spec(), seed=99)
 
     stream = engine.received_commands
@@ -221,6 +225,79 @@ def test_slab_is_prerelaxed_before_the_first_impact():
         index for index, line in enumerate(stream)
         if line.startswith("create_atoms 2 single"))
     assert minimize_at < first_impact
+
+
+# ---------------------------------------------------------------------
+# The out-of-process activate script (§10.1, ARCHITECTURE §4.3): the whole
+# LAMMPS half emitted as one self-contained script for the universal-MLIP
+# cascade engine, which cannot share this process's LAMMPS.
+# ---------------------------------------------------------------------
+
+def test_build_activate_script_emits_setup_impacts_cleanup_and_handoff():
+    """The script is setup -> prerelax -> impacts -> cleanup -> a dump.
+
+    Cascade-only (§3.4): the heal and gate are NOT in the script — it ends
+    with the cascade cleanup (strip + renumber) and the structure handoff.
+    """
+    built = _cascade_built()
+    member = _template_member()
+    spec = _small_spec()
+    cascade = resolve_cascade_generator(
+        built.type_map, projectile_species={"Ar"}, use_classical=True)
+
+    script = build_activate_script(
+        built, member, cascade, data_file="slab.data", spec=spec,
+        seed=99, projectile_types=[2],
+        output_structure_file="activated.dump")
+
+    # It is one flat list of command strings, no engine involved.
+    assert all(isinstance(line, str) for line in script)
+    # The box is opened once and the cascade + ZBL model is loaded (setup).
+    assert "boundary p p f" in script
+    assert "pair_style hybrid/overlay sw zbl 0.5 2 zbl 0.5 1.2" in script
+    # One projectile is created per impact (the small spec delivers two).
+    assert sum(1 for line in script
+               if line.startswith("create_atoms 2 single")) == spec.impact_count
+    # The cleanup renumbers survivors; NO heal (the anneal's nvt fix) is
+    # present — only the §2.4 prerelax minimize, which is not the heal.
+    assert "reset_atoms id" in script
+    assert not any("fix reanneal" in line for line in script)
+    # ...and the LAST line is the amorphized-structure handoff.
+    assert script[-1] == (
+        "write_dump all custom activated.dump id type x y z modify sort id")
+
+
+def test_activate_script_matches_the_live_command_stream():
+    """The script runs the SAME commands the in-process path issues.
+
+    The out-of-process path must be identical physics to the live one — it
+    only moves execution to another engine. So the script's cascade prefix
+    is exactly what run_cascade_to_fluence issues, and its cleanup tail is
+    exactly what cascade_cleanup_commands returns (cascade-only, §3.4).
+    """
+    built = _cascade_built()
+    member = _template_member()
+    spec = _small_spec()
+    cascade = resolve_cascade_generator(
+        built.type_map, projectile_species={"Ar"}, use_classical=True)
+
+    engine = MockEngine()
+    run_cascade_to_fluence(
+        engine, built, member, cascade, data_file="slab.data", spec=spec,
+        seed=99, geometry=CascadeGeometry(), control=CascadeControl())
+    live_cascade = engine.received_commands
+
+    script = build_activate_script(
+        built, member, cascade, data_file="slab.data", spec=spec,
+        seed=99, projectile_types=[2],
+        output_structure_file="activated.dump")
+
+    # The script opens with exactly the live cascade stream...
+    assert script[:len(live_cascade)] == live_cascade
+    # ...and its remainder is exactly the cleanup block plus the handoff.
+    tail = script[len(live_cascade):]
+    assert tail[:-1] == cascade_cleanup_commands([2])
+    assert tail[-1].startswith("write_dump all custom activated.dump")
 
 
 # ---------------------------------------------------------------------
@@ -280,40 +357,35 @@ def _crystal_slab(spacing=2.5, n_lateral=4, n_layers=8):
 # Activating one surface end to end (§10.1).
 # ---------------------------------------------------------------------
 
-def test_activate_surface_runs_cascade_reanneal_then_gates():
-    """One surface: bombard, re-anneal, and gate — a real verdict falls out."""
-    points, cell = _crystal_slab()
-    surface = points[:, 2].max()
-    scrambled = points.copy()
-    top = scrambled[:, 2] > surface - 6.0
-    generator = np.random.default_rng(1)
-    scrambled[top] += generator.uniform(-1.2, 1.2, size=(int(top.sum()), 3))
+def test_activate_surface_runs_cascade_only():
+    """One surface: bombard, then cleanup — cascade-only (§3.4).
 
-    # The engine plays back the amorphized frame for the gate's read.
-    engine = MockEngine(positions=[scrambled])
+    Revised 2026-08-08: activate_surface no longer re-anneals or gates (both
+    moved to the bond flow). It returns the CascadeOutcome; the amorphized,
+    substrate-only surface is left live in the engine for the caller.
+    """
+    points, cell = _crystal_slab()
+    engine = MockEngine()
     built = SimpleNamespace(
         atoms=SimpleNamespace(
             get_cell=lambda: cell,
             get_positions=lambda: points),
         type_map={"Si": 1, "Ar": 2})
     member = _template_member()
-    mlip = classical_si_stand_in({"Si": 1})
 
-    result = activate_surface(
-        engine, built, member, mlip, data_file="slab.data", seed=5)
+    outcome = activate_surface(
+        engine, built, member, data_file="slab.data", seed=5,
+        use_classical_cascade=True)
 
-    assert isinstance(result, ActivationResult)
+    # It returns the cascade provenance, not a gate verdict.
+    assert isinstance(outcome, CascadeOutcome)
     # Bombarded to the dose: the areal fluence over this toy cell's small
     # lateral area works out to 2 impacts (see the spec test above).
-    assert result.cascade.impacts_run == 2
-    # The real §3.5 gate ran against the share/ Si references and produced a
-    # verdict over all four metrics (pass/fail depends on the stand-in
-    # thresholds, which this thin toy slab need not satisfy).
-    assert isinstance(result.verdict, ActivationVerdict)
-    assert set(result.verdict.per_metric) == {
-        "radial_distribution", "coordination", "ring_statistics",
-        "amorphization_depth"}
-    # The command stream shows all three phases.
+    assert outcome.impacts_run == 2
+    # The command stream shows the cascade then the cleanup (strip + renumber);
+    # NO heal (the anneal's nvt fix) is issued.
     stream = engine.received_commands
     assert any(line.startswith("create_atoms 2 single") for line in stream)
     assert "delete_atoms group cascade_projectiles compress yes" in stream
+    assert "reset_atoms id" in stream
+    assert not any("fix reanneal" in line for line in stream)

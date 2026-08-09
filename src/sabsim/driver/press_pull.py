@@ -60,6 +60,11 @@ from sabsim.driver.commands import (
     to_metal,
     trajectory_dump_commands,
 )
+from sabsim.driver.activation_gate import (
+    ActivationVerdict,
+    activation_gate,
+    load_activation_references,
+)
 from sabsim.driver.engine import Engine
 from sabsim.driver.resume import (
     Ledger,
@@ -131,11 +136,20 @@ class RunControl:
 
 @dataclass(frozen=True)
 class PressResult:
-    """Whether the press reached contact, and when (§9.3)."""
+    """Whether the press reached contact, and when (§9.3).
+
+    ``activation_a`` / ``activation_b`` carry the §3.5 gate verdict for each
+    HEALED surface, judged in the bond flow after the joint heal and before
+    the press (§3.4, revised 2026-08-08). They are ``None`` on the retired
+    narrow-gap path, which never heals or gates; on the wide-gap path a
+    FAILED gate returns early (no press) with them set, so the caller halts.
+    """
 
     contact_reached: bool
     chunks_to_contact: int | None
     note: str
+    activation_a: ActivationVerdict | None = None
+    activation_b: ActivationVerdict | None = None
 
 
 @dataclass(frozen=True)
@@ -205,6 +219,40 @@ def _wafer_z(positions: np.ndarray, tags: np.ndarray) -> tuple:
     z_lower = positions[tags == WAFER_A_TAG][:, 2]
     z_upper = positions[tags == WAFER_B_TAG][:, 2]
     return z_lower, z_upper
+
+
+def gate_healed_surfaces(engine: Engine, built) -> tuple:
+    """Gate each HEALED surface of the assembled pair (§3.5, in the bond flow).
+
+    Revised 2026-08-08 (§3.4): the §3.5 activation gate moved here, run AFTER
+    the bond flow's joint heal, on the assembled+healed pair — one verdict per
+    wafer. The atoms are split by wafer tag, and each wafer is judged as its
+    own free surface against the share/ references (keyed by the pair's
+    species; the projectile was already stripped as cascade cleanup, so the
+    pair is substrate-only).
+
+    Wafer B was flipped face-DOWN at assembly (:func:`~sabsim.structure.
+    amorphized_assembly.flip_in_z`), so its free (gap-facing) surface sits at
+    its BOTTOM. Every gate metric assumes the free surface is at the TOP — the
+    depth metric reads the highest populated bin as the surface — so wafer B's
+    z is mirrored here before gating, presenting it exactly as a standalone
+    activated slab. Returns ``(verdict_a, verdict_b)``; the caller halts the
+    bond before the press if either failed.
+    """
+    positions = np.asarray(engine.positions(), dtype=float)
+    tags = np.asarray(built.atoms.get_tags())
+    cell = np.asarray(built.atoms.get_cell(), dtype=float)
+    references = load_activation_references(frozenset(built.type_map))
+
+    # Wafer A is bottom, its activated surface already facing up (+z).
+    verdict_a = activation_gate(
+        positions[tags == WAFER_A_TAG], cell, references)
+    # Wafer B faces down — mirror its z so the free surface is at the top.
+    positions_b = positions[tags == WAFER_B_TAG].copy()
+    z_b = positions_b[:, 2]
+    positions_b[:, 2] = (z_b.max() + z_b.min()) - z_b
+    verdict_b = activation_gate(positions_b, cell, references)
+    return verdict_a, verdict_b
 
 
 def _steps(duration: Quantity, timestep: Quantity) -> int:
@@ -316,18 +364,34 @@ def press_and_bond(
         _press_setup(built, member, force_model, data_file, seed, geometry,
                      trajectory_file, trajectory_stride))
 
-    # RELAX the gapped pair before driving, but ONLY when the two surfaces
-    # are assembled beyond the potential cutoff — otherwise a minimize would
-    # collapse an interface that is already in range (the close-gap
-    # classical path is unchanged, so it never relaxes here). The drive is
-    # installed AFTER the relax, so the top grip is free while it runs.
+    # HEAL the gapped pair, then GATE each healed surface (§3.4): both moved
+    # into the bond flow. The heal runs ONLY when the two surfaces are
+    # assembled beyond the potential cutoff — a wide gap is what lets each
+    # heal as an effectively-free surface (§2.6); production always assembles
+    # wide (initial_gap > separation_cutoff), and the narrow-gap `else` is the
+    # retired classical direct-contact path, which never heals or gates. The
+    # drive is installed AFTER, so the top grip is free while the relax runs.
     tags = np.asarray(built.atoms.get_tags())
+    activation_a = None
+    activation_b = None
     if _assembled_gap(built) > control.separation_cutoff:
         # NOTE: contact_relax_commands is a TEMPORARY out-of-distribution
         # scaffold (see its docstring) — remove once the classical->trained
         # seam is proven and surfaces are activated under the committee.
         engine.commands(contact_relax_commands(
             member, seed, control.relax_chunks * control.chunk_steps))
+        # The §3.5 activation gate, now HERE (§3.4): judge each healed
+        # surface. A FAILED gate halts the bond BEFORE the press, so its
+        # scarce GPU is never spent on an un-activated surface (§9.1). The
+        # gate is READ-ONLY — it issues no commands.
+        activation_a, activation_b = gate_healed_surfaces(engine, built)
+        if not (activation_a.passed and activation_b.passed):
+            failing = (activation_a if not activation_a.passed
+                       else activation_b)
+            return PressResult(
+                contact_reached=False, chunks_to_contact=None,
+                note=f"activation gate failed (§3.5): {failing.reason}",
+                activation_a=activation_a, activation_b=activation_b)
         # Cut the vacuum the relax needed so the load-press starts near
         # contact at rest, never accelerating the grip across empty space
         # (mode = load, §9.3). Δz is measured from the RELAXED positions.
@@ -354,13 +418,15 @@ def press_and_bond(
     if contact_chunk is None:
         return PressResult(
             contact_reached=False, chunks_to_contact=None,
-            note="no contact within the chunk budget (§9.3)")
+            note="no contact within the chunk budget (§9.3)",
+            activation_a=activation_a, activation_b=activation_b)
 
     hold_steps = _steps(member.protocol.press_duration, numerical.md_timestep)
     engine.commands([f"run {hold_steps}"])
     return PressResult(
         contact_reached=True, chunks_to_contact=contact_chunk,
-        note="contact on the dual criterion, held at temperature (§9.3)")
+        note="contact on the dual criterion, held at temperature (§9.3)",
+        activation_a=activation_a, activation_b=activation_b)
 
 
 def settle_reference(

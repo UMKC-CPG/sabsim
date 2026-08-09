@@ -21,6 +21,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass, is_dataclass
 
+from sabsim.driver.activation_gate import ActivationVerdict
 from sabsim.pipeline.measures import MeasureVector
 from sabsim.spec.records import MemberSpecification
 
@@ -175,17 +176,18 @@ class Verdict:
 
 @dataclass(frozen=True)
 class ActivatedSlabs:
-    """Both amorphized slabs AND both activation verdicts (§10.1).
+    """Both amorphized slabs (§10.1, revised 2026-08-08).
 
-    The activation gate (DESIGN.md §3.5) is enforced at this seam: the
-    ACTIVATED_SLABS_CONTRACT checks both verdicts passed, so a failed
-    amorphization halts the pipeline here rather than downstream.
+    Revised: activation is cascade-only, so this seam carries just the two
+    amorphized slabs. The §3.5 gate no longer rides here — it moved to the
+    bond flow (DESIGN.md §3.4), which heals the assembled pair and gates
+    each healed surface before pressing. The ACTIVATED_SLABS_CONTRACT here
+    checks only that both slabs are present and amorphized; the pass/fail
+    verdict is a bond-flow artifact now.
     """
 
     slab_a: Slab
     slab_b: Slab
-    verdict_a: Verdict
-    verdict_b: Verdict
 
 
 @dataclass(frozen=True)
@@ -265,6 +267,12 @@ class BondDebondResult:
     press: PressOutcome
     reference_ok: bool             # the §5.3 gated zero-load reference
     pulls: tuple[PullOutcome, ...]
+    # The §3.5 activation gate moved into the bond flow (§3.4, revised
+    # 2026-08-08): each HEALED surface is judged after the joint heal, before
+    # the press. A failed verdict makes this artifact contract-invalid, so
+    # the pipeline halts before the press's scarce GPU is spent (§9.1).
+    activation_a: ActivationVerdict | None = None
+    activation_b: ActivationVerdict | None = None
 
 
 @dataclass(frozen=True)
