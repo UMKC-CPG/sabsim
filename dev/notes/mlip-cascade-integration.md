@@ -6,6 +6,24 @@ CASCADE and the bespoke DeePMD for the BOND-DEBOND. NOT canonical yet.
 
 ## RESUME HERE (2026-08-08, LATEST — read this first)
 
+**★ (g) DONE — T-9 NODE-VALIDATED 2026-08-09 (jobs 16306379 + 16306381).**
+The re-architected split runs end-to-end on a V100: cascade-ONLY universal
+activate (DPA-2.4-7M `.pt2` subprocess) hands back a SUBSTRATE-ONLY half
+(128 Si, Ar stripped) ×2 → assemble at a 7.606 Å WIDE gap → bond flow
+HEALS under a COMMITTEE OF ONE (Prakash Si `graph.pb`, in-process
+`cpg_lammps_conda/2024.08.29-deepmd`) → GATES each surface PER WAFER TAG →
+HALTS on the failed gate before scissor/press (halt-on-fail seam works).
+Committed reproducible harness: `install/tests/t9_universal_split/`
+(2 py + 2 slurm + submit.sh + README, self-logging); LEDGER entry **T-9**.
+PLUMBING PASS; the gate did NOT pass (radial_distribution 0.475/0.725 vs
+0.3 — a 128-atom/1-impact/short-heal surface is under-activated; the 0.3
+`share/activation/Si.toml` ref is a stand-in). **NEXT = (h):** get a first
+gate-PASSING activation (more impacts/fluence and/or tune the RDF ref) →
+flip DPA-2.4-7M `validated=True` and drop `SABSIM_ALLOW_UNVALIDATED_
+POTENTIAL`. Follow-on: the `sabsim prepare` deployment path for the
+GPU-universal activate (E5 only covered classical). All UNCOMMITTED before
+this session's T-9 commit (Paul pushes own).
+
 **★ SESSION HANDOFF 2026-08-09 — CODE phase steps (a)+(b) DONE + GREEN
 (333 tests); NEXT = bond-flow heal+gate (d) + wide gap (c).**
 DONE this session: DESIGN+PSEUDOCODE re-arch + /refine (all consistent), then

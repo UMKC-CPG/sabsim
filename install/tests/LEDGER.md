@@ -552,3 +552,83 @@ the SABSIM pipeline — activate (classical) -> assemble -> relax -> scissors
   which the TEMPORARY OOD relax scaffold (capped/damped/wall) is removed
   (see the TODO). Also: single rank / 1 V100 / Si-only; provenance still
   labels `classical-stand-in` (resolve_potential unwired).
+
+---
+
+## T-9 — jobs 16306379 (activate) + 16306381 (bond) — 2026-08-09
+
+**Question.** Does the RE-ARCHITECTED activate->bond split (DESIGN §3.4/
+§3.5/§4.7) run end-to-end on the GPU: a cascade-ONLY universal-MLIP
+activate (no re-anneal, no gate — substrate-only), assemble at the WIDE
+gap, then the bond flow's HEAL -> per-wafer §3.5 GATE -> halt/scissor/press
+in-process under a single frozen bespoke DeePMD model (a "committee of
+one")?  This is the split's plumbing on real hardware — distinct from T-8
+(pre-re-arch: classical activate, gate at the activate seam).
+
+- **As-run scripts (committed):**
+  `install/tests/t9_universal_split/` —
+  `t9a_activate_assemble.{py,slurm}` (Job A),
+  `t9b_bond_press.{py,slurm}` (Job B), `submit.sh`, `README.md`.
+  Both drivers self-log their environment as their first output.
+- **Structure / models:** a small 2x2x4 diamond-Si slab per half, ONE Ar
+  impact each, `cascade_step_cap=300`. Cascade = universal **DPA-2.4-7M**
+  `.pt2` (`v320fix/dpa24.pt2`) + ZBL, out-of-process in the deepmd bundle.
+  Bond = **committee of one**: the group's Si `graph.pb` (type_map ["Si"],
+  rcut 6), in-process via `cpg_lammps_conda/2024.08.29-deepmd`.
+- **Environment (self-logged in each .out):** Job A — sabsim venv +
+  `SABSIM_CASCADE_ENGINE_PREFIX`/`_MLIP_MODEL`/
+  `_ALLOW_UNVALIDATED_POTENTIAL=1`, NO engine module (the bundle is
+  spawned isolated); Job B — sabsim venv + the deepmd module,
+  `SABSIM_DEEPMD_MODEL=.../train_deepmd_si/graph.pb`, `unset
+  LAMMPS_PLUGIN_PATH` + `SLURM_MEM_PER_*`. Both 1 node / 1 rank / 1 V100.
+- **Exact launch lines:** `bash install/tests/t9_universal_split/
+  submit.sh` -> `sbatch t9a_activate_assemble.slurm`;
+  `sbatch --dependency=afterok:16306379 t9b_bond_press.slurm`; Job B runs
+  `srun --mpi=pmix -n 1 <venv python> t9b_bond_press.py`.
+- **Evidence — Job A (verbatim, `t9-activate-16306379.out`):**
+  - cascade force model: `hybrid/overlay deepmd .../v320fix/dpa24.pt2
+    zbl 0.5 2 zbl 0.5 1.2`
+  - `[half a] readback atoms: 128  surviving types: [1]` (and half b) —
+    Si only, the Ar projectile stripped as cascade cleanup
+  - `assembled pair atoms: 255  closest-atom gap: 7.606 A` (clears the
+    6 A separation cutoff -> free-surface heal)
+  - `T9A ACTIVATE+ASSEMBLE OK`; `16306379  COMPLETED  0:0  00:03:08`
+- **Evidence — Job B (verbatim, `t9-bond-16306381.out`):**
+  - `using   1 model(s): .../train_deepmd_si/graph.pb`; `rcut in model: 6`;
+    `Tesla V100-PCIE-32GB`
+  - `loaded pair atoms: 255 | type_map: {'Si': 1}`;
+    `bond pair_style: deepmd .../graph.pb`
+  - `note: activation gate failed (§3.5): radial_distribution: measured
+    0.475 vs 0.3 (.../share/activation/Si.toml)`
+  - `activation_a : passed=False  reason=radial_distribution: 0.475 vs
+    0.3`; `activation_b : passed=False  reason=... 0.725 vs 0.3`
+  - `GATE RAN PER WAFER TAG (a and b) — new bond-flow seam engaged`;
+    `contact_reached : False`
+  - `T9B BOND HEAL+GATE+PRESS OK`; `16306381  COMPLETED  0:0  00:00:14`
+- **Verdict: PASS (plumbing).** The re-architected split runs end-to-end
+  on the GPU: cascade-ONLY universal activate hands back a substrate-only
+  amorphized half (projectile stripped), two halves assemble at a
+  7.6 A wide gap, and the bond flow HEALS the combined cell under the
+  committee-of-one, GATES each healed surface PER WAFER TAG, and HALTS on
+  the failed gate before any scissor/press — carrying both verdicts out.
+  The `.pt2` universal cascade (subprocess) and the `graph.pb` committee
+  (in-process) each ran on the V100 in their own job, handing off through
+  the on-disk pair. Every new re-arch seam engaged as designed.
+- **Scope NOT covered (important):**
+  1. **The gate did NOT pass**, so there is NO scissor, NO press-to-
+     contact, NO bond, NO pull. A 128-atom slab with ONE impact and a
+     short capped heal is under-activated; the `radial_distribution`
+     reference (0.3, `share/activation/Si.toml`) is a documented stand-in
+     threshold. Whether that is under-activation or a threshold artifact
+     is (h)'s question (first gate-PASSING activation -> `validated=True`),
+     NOT this plumbing test's.
+  2. **Committee of ONE**, not an N-member committee; a single frozen
+     model behind the seam.
+  3. **NOT the full `sabsim prepare` deployment path** — this is a
+     driver-level harness that calls the same seams directly. E5
+     (15703266) proved prepare->activate for CLASSICAL activate; the
+     prepare path for the GPU-universal activate is a separate follow-on.
+  4. Single rank / 1 V100 per job; one impact, `cascade_step_cap=300`,
+     capped `RunControl`, 5 ps trimmed hold — plumbing, not physics.
+  5. Provenance unchanged (`resolve_potential` still classical stand-in),
+     as in 6b/T-8.
