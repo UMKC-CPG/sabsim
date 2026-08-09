@@ -6,15 +6,228 @@ CASCADE and the bespoke DeePMD for the BOND-DEBOND. NOT canonical yet.
 
 ## RESUME HERE (2026-08-08, LATEST — read this first)
 
+**★ SESSION HANDOFF 2026-08-09 — CODE phase steps (a)+(b) DONE + GREEN
+(333 tests); NEXT = bond-flow heal+gate (d) + wide gap (c).**
+DONE this session: DESIGN+PSEUDOCODE re-arch + /refine (all consistent), then
+CODE (a) CASCADE-ONLY: `build_activate_script`/`activate_surface` drop the
+re-anneal+gate; new `cascade_cleanup_commands` (teardown+strip-projectile+
+reset ids) — the strip STAYS as cascade cleanup so the handoff is
+substrate-only (DESIGN §3.4 corrected: only the ANNEAL moved, not the
+strip); `activate_surface` now returns `CascadeOutcome`. (b) DROPPED
+VERDICTS from the activate seam: `ActivatedSlabs` (2 slabs, no verdicts),
+`_validate_activated` (checks slabs present), `activation_adapter.
+activated_slabs_from_results(slab_a,slab_b)`, skeleton stub, `activate_
+surfaces`, live_stages (`activate_one_half`/`_activate_one_half_subprocess`/
+`activate_surfaces_live` all cascade-only, return CascadeOutcome), sequencer
+comments. KEPT for step (d): `reanneal_commands`, `mlip_reanneal`,
+`gate_activated_structure`, `verdict_from_activation`, `_reanneal_force_model`
+(all currently unused, awaiting the bond-flow heal+gate). Tests updated
+(adapter, cascade_driver, member_jobs). (c) DONE: template `initial_gap`
+3→10 Å (> the bond flow's 6 Å `separation_cutoff`), so assembly places the
+pair WIDE and the existing `contact_relax_commands` heal (gated on
+`_assembled_gap > separation_cutoff`, press_pull.py:325) now engages as a
+free-surface heal (§2.6/§3.4; 64 tests green). **(d) BOND-FLOW GATE — DONE +
+GREEN.** (d1) `press_pull.gate_healed_surfaces(engine, built)`: splits the
+assembled pair by wafer tag, gates each surface with `activation_gate`,
+MIRRORS wafer B's z first (it was flipped face-down at assembly; the depth
+metric reads the top bin as the free surface) — READ-ONLY, tested. (d2)
+`activation_a/b` (ActivationVerdict|None) added to `PressResult` +
+`BondDebondResult`. (d3) `press_and_bond` calls `gate_healed_surfaces` AFTER
+the heal, BEFORE the scissor; a FAILED gate returns early (no scissor/press)
+carrying the verdicts. (d4) `run_bond_debond_md_live` puts them on
+`BondDebondResult` (both branches). (d5) `_validate_bond_debond` checks
+`activation_a/b.passed` FIRST → halt-on-fail. (d6) test reconciliation:
+wide-gap press tests get a `passing_gate` fixture (stubs the gate to pass —
+they test scissors/relax, not the gate); narrow-gap tests don't hit it. Also
+FIXED a (c) fallout (`test_press_script` approach run 300000→1000000 for the
+10 Å gap). REMOVED dead `gate_activated_structure` + its imports; kept
+`verdict_from_activation` as the report distiller.
+NARROW-GAP `else` in press_and_bond LEFT as-is (production always wide after
+(c), so it's a dead path; no raise). **REPORT FOLLOW-ON DONE:**
+`run_analyzer_live` surfaces each surface's §3.5 verdict as a per-surface
+`activated_depth_{a,b}` Measure (value = measured skin depth, method = gate
+summary, OK/UNRESOLVED); `verdict_from_activation` REFACTORED to take an
+`ActivationVerdict` directly, so dead `ActivationResult` REMOVED entirely
+(cascade.py). Tests: test_activation_adapter (distiller) +
+test_live_stages (2 analyzer tests: surfaced / omitted-when-absent). 334+
+green. **(f) DONE:** template `[usage.activate]` FLIPPED to the GPU universal
+shape — partition=gpu, nodes/tasks=1, gpus_per_node=1, mem=48G, modules=[],
+`[usage.activate.environment]` = SABSIM_CASCADE_ENGINE_PREFIX + _MLIP_MODEL +
+_ALLOW_UNVALIDATED (NO LAMMPS_POTENTIALS, cascade-only). Classical CPU is the
+`SABSIM_CASCADE_CLASSICAL` opt-in (documented in the block). Reconciled 5
+deploy tests (test_prepare + test_deploy_config) to the GPU shape. REMAINING
+for the thread (deployment/validation, NOT the re-arch): (g) node-validate
+the full split on GPU; (h) first gate-pass→`validated=True`.
+All UNCOMMITTED (Paul pushes own).
+
+**★ (superseded) SESSION HANDOFF — NEXT = the re-anneal/gate CODE phase.**
+Where we are: (1) universal cascade ForceModel WIRED + node-validated; (2)
+out-of-process activate engine (subprocess+file handoff) BUILT + node-
+validated (job 16014788); (3) prepare.py per-kind `environment` env-wiring
+DONE (27 tests); (4) RE-ANNEAL DECISION made (Paul): the #8 combined-cell
+relax REPLACES the per-slab re-anneal, and the §3.5 gate MOVES POST-ASSEMBLY
+into the bond flow; (5) **DESIGN + PSEUDOCODE fully updated for that
+decision** (DESIGN §3.4/§3.5/§4.7/§10.2, ARCH §4.1, PSEUDOCODE §10.1/§10.5/
+§10.6/§9.1/§7.5 + sequencer comments — chain is consistent, all ≤80). NOT
+STARTED: the CODE re-architecture. Concrete code steps (TODO §4.7 item, and
+the "RESOLVED 2026-08-08" block in pipeline-flow note): (a)
+`cascade.build_activate_script`/`activate_surface` → CASCADE-ONLY (drop
+`reanneal_commands` + `gate_activated_structure` from BOTH the universal
+subprocess and classical in-process paths); (b) `ActivatedSlabs` +
+`ACTIVATED_SLABS_CONTRACT` + `activation_adapter` → drop the gate verdicts;
+sequencer stops gating at the activate seam; (c) `assemble_pair` → assemble
+at the WIDE gap (> MLIP cutoff); (d) bond flow (`live_stages`/`press_pull`/
+`run_bond_debond_md`) → add heal (the existing `contact_relax_commands`) →
+`activation_gate` per wafer tag → halt-on-fail → scissor → press; move the
+verdict onto the bond output; (e) update tests across both flows; (f) flip
+`[usage.activate]` to GPU (now drops LAMMPS_POTENTIALS since cascade-only);
+(g) node-validate the new split; (h) first gate-passing activation →
+`validated=True`. Minor: `label_activated_skin` §10.7 (a-priori depth on
+cascade-only, gate re-labels post-heal). All work UNCOMMITTED (Paul pushes
+own). Detail of everything below.
+
+
+**ACTIVATE-STAGE GPU ENGINE — DONE + NODE-VALIDATED + DOCUMENTED (job
+16014788).** Full out-of-process activate path PROVEN on a V100: sabsim
+built a Si slab + emitted the 58-line script, spawned the bundle `lmp` as an
+isolated subprocess (universal deepmd+ZBL cascade + classical `sw` re-anneal
+via LAMMPS_POTENTIALS), read the dump back (128 Si, Ar projectile deleted),
+gated (4 metrics), snapshotted — exit 0. ARCH §4.4 (out-of-process cascade
+engine subsection) + DESIGN §4.7 (built-state) updated; 331 tests green.
+env knobs: SABSIM_CASCADE_ENGINE_PREFIX + SABSIM_CASCADE_MLIP_MODEL +
+LAMMPS_POTENTIALS + SABSIM_ALLOW_UNVALIDATED_POTENTIAL. Job scripts:
+`dpa_gpu_bench/subprocess_activate_{check.slurm,val.py}`.
+
+**prepare.py ENV WIRING DONE 2026-08-08:** optional per-kind
+`[usage.<kind>.environment]` map (config.py `_optional_str_map` +
+UsageBlock.environment) → prepare emits sorted `export` lines; tested (27
+green). Template documents the GPU-universal activate shape (not flipped —
+see below). **RE-ANNEAL DECISION 2026-08-08 (Paul): the #8 combined-cell
+relax REPLACES the per-slab re-anneal; the §3.5 GATE MOVES POST-ASSEMBLY**
+(flow note "RESOLVED 2026-08-08"). CONSEQUENCE: the ACTIVATE stage becomes
+CASCADE-ONLY (both the universal subprocess AND the classical in-process
+paths) → my subprocess's classical `sw` re-anneal + LAMMPS_POTENTIALS
+DISSOLVE; the current cascade+re-anneal+gate build is the working
+INTERMEDIATE. That re-architecture (build_activate_script/activate_surface
+drop re-anneal+gate; gate runs per-wafer-tag after the #8 relax, before the
+scissor+press; ActivatedSlabs/sequencer checkpoint move; DESIGN §3.4/§3.5/
+§4.1 + PSEUDOCODE) is NOT YET DONE — cross-cutting, DESIGN-first. REMAINING:
+that re-architecture; then flip `[usage.activate]` to GPU (drops
+LAMMPS_POTENTIALS once cascade-only); first gate-passing activation →
+`validated=True`. Detail below (SUBPROCESS PATH BUILT).
+
+New `driver/cascade_subprocess.py`
+(`resolve_cascade_engine_prefix` via `SABSIM_CASCADE_ENGINE_PREFIX` in-repo
+env; `run_activate_subprocess` = isolated bundle-`lmp -in`; `read_dump_
+structure`). `build_activate_script` + `reanneal_commands` +
+`gate_activated_structure` (cascade.py) + `amorphized_half_from_arrays`
+(amorphized_assembly.py) extracted/added. `activate_one_half` now DISPATCHES:
+universal→`_activate_one_half_subprocess` (out-of-process, reads the dump
+back for gate+snapshot), classical→in-process (unchanged). Unit tests:
+`test_cascade_subprocess.py` (dump reader + prefix resolver),
+`build_activate_script` matches the live stream. LOOSE END (solved, no code):
+the subprocess classical RE-ANNEAL (`sw`) needs `Si.sw` — the bundle has
+none, but `LAMMPS_POTENTIALS` survives the wrapper's env reset, so the
+activate job points it at a sabsim lammps potentials dir (has Si.sw). OPEN
+(non-blocking) DESIGN NOTE: under the universal cascade the re-anneal is
+still classical `sw` (needs LAMMPS_POTENTIALS); running it under the
+universal MLIP instead (already loaded, no external file, arguably more
+faithful) is a future option — kept classical for now (§4.5). REMAINING:
+node-validate the full subprocess activate on GPU (small spec; set
+SABSIM_CASCADE_ENGINE_PREFIX + SABSIM_CASCADE_MLIP_MODEL +
+SABSIM_ALLOW_UNVALIDATED_POTENTIAL=1 + LAMMPS_POTENTIALS); ARCH §4.1/§4.4 +
+DESIGN docs for the out-of-process cascade engine; deployment `[usage.
+activate]` GPU + the env. Original in-progress detail below.
+
+**ACTIVATE-STAGE GPU ENGINE — IN PROGRESS (subprocess + file handoff).**
+Decision (Paul): the universal cascade engine (deepmd-official bundle, its
+OWN torch/MPI) CANNOT use the in-process `LammpsEngine` model ARCH §4.1/§4.4
+assume (shared `libmpi` with mpi4py) — it must run OUT-OF-PROCESS as the
+bundle's `lmp -in <script>`, handing back a structure FILE (ARCH §4.3).
+BOUNDARY: the subprocess runs the WHOLE LAMMPS half (cascade + re-anneal,
+one `lmp` invocation) and writes the activated structure; the sabsim process
+builds the slab before and runs the §3.5 gate after, reading that file.
+Classical cascade stays fully in-process on CPU, unchanged. DONE so far
+(pure + tested, 11 green): `reanneal_commands` extracted from `mlip_reanneal`
+(behavior-preserving) and `build_activate_script(...)` — the full
+out-of-process script (setup+prerelax+precomputed impacts+reanneal+
+`write_dump id type x y z` handoff), proven to match the live command stream
+exactly. STILL TO BUILD: (1) subprocess runner (bundle `lmp`, isolated env,
+GPU) keyed off `SABSIM_CASCADE_MLIP_MODEL` + a bundle-prefix ref; (2) read
+the dump back → gate + amorphized-half snapshot from FILE (today they read
+the live engine); (3) branch in `activate_one_half` (universal→subprocess,
+classical→in-process); (4) deployment: `[usage.activate]` GPU + how the
+bundle is made available — OPEN SUB-DECISION: a cpg modulefile for the
+bundle vs an env-prefix var (partly outside the repo, may need $CPG_SHARE
+work); (5) document the out-of-process cascade engine in ARCH §4.1/§4.4
+(currently in-process-only) + DESIGN; (6) node-validate the full activate
+subprocess on GPU.
+
+
 **Decision (Paul): a universal foundation MLIP drives the CASCADE only;
 bespoke DeePMD drives the BOND-DEBOND.** Genuinely universal (no bespoke
 training); do NOT fall back to classical.
 
-**DECISION 2026-08-08: ADOPT the deepmd-official bundle as the cascade
-engine, run it on CPU for now.** GPU-LAMMPS is blocked (see below) but that
-is a performance gap, not a correctness one — the universal model is PROVEN
-to run in LAMMPS. Deeper GPU routes (C, E below) are DEFERRED; revisit if
-CPU throughput is insufficient.
+**CASCADE ForceModel WIRED + NODE-VALIDATED (2026-08-08, job 16012217).**
+`resolve_cascade_generator` is now UNIVERSAL-FIRST for every material:
+`pair_style hybrid/overlay deepmd <DPA-2.4-7M.pt2> zbl zbl` with the
+species-derived cores. Classical is the explicit `SABSIM_CASCADE_CLASSICAL`
+opt-in; the universal entry is `validated=False` so a default cascade needs
+`SABSIM_ALLOW_UNVALIDATED_POTENTIAL` until it clears the §3.5 gate. The
+EXACT emitted block ran a real Si-slab+Ar mini-cascade on the V100: 100
+steps, energy conserved (drift ~0.01 eV/1729 atoms), no NaN — proving
+`pair_style deepmd (.pt2 GNN)` COMPOSES in `hybrid/overlay` with ZBL (the one
+risk). Decisions locked: projectile mapped to its real element (no NULL);
+empty preload (bundle lmp has deepmd built in); `atom_modify map yes` rides
+on `ForceModel.needs_atom_map` and the preamble injects it before read_data;
+`.pt2` path via `SABSIM_CASCADE_MLIP_MODEL` (deploy-time, GPU-arch-specific).
+Full suite green (323). Code: `cascade_potential.py` (universal model +
+generalized ZBL assembly + resolver), `commands.py` (needs_atom_map +
+preamble), `cascade.py`/`live_stages.py` (use_classical threading), tests,
+`DESIGN.md` §4.7 + `TODO.md`. Job scripts: `dpa_gpu_bench/
+universal_cascade_check.slurm`. NEXT (TODO §4.7): (a) select the deepmd GPU
+engine for the activate stage + deploy-time `.pt2` build; (b) first
+gate-passing activation → flip `validated=True`; (c) native DP-ZBL as a
+later close-range refinement.
+
+**GPU IS NOW WORKING (2026-08-08, job 16010337). Option C SOLVED for the
+production model — DPA-2.4-7M runs on the V100 via the AOTInductor `.pt2`
+path.** 4096-atom Si NVE, 100 steps: energy conserved (TotEng −26521.42 eV,
+drift ~0.01 eV), E_pair −6.51 eV/atom, no NaN, **0.289 s/step**, 14.2
+katom-step/s — ~28x the CPU throughput (CPU was 0.5 katom-step/s). This is
+now the adopted GPU cascade engine (`deepmd-kit-3.2.0b0-cuda129`).
+
+**CORRECTION to the old "both models fail `.dp→.pt2` on `u0`" claim below:
+they fail DIFFERENTLY.**
+- **DPA-2.4-7M:** `torch.export` SUCCEEDS; the only blocker was the
+  AOTInductor C++ LINK (`ld: cannot find -lcuda`) — the CUDA driver stub
+  not on the link path. FIX: symlink the node's `libcuda.so.1` as a bare
+  `libcuda.so` on `LIBRARY_PATH` (link-time; keep runtime `LD_LIBRARY_PATH`
+  clean for isolation). Then `dp convert-backend .dp .pt2` completes and
+  LAMMPS runs `pair_style deepmd .pt2`. Worked first try.
+- **DPA-3.1-3M:** the ACTUAL `u0` case, and it is SOURCE-LEVEL, not a
+  config knob. `deepmd/dpmodel/utils/network.py::get_graph_index`
+  (called from `descriptor/repflows.py:635`) does
+  `n_edge = int(xp.sum(xp.astype(nlist_mask, xp.int32)))` — casting the
+  data-dependent edge count to a Python `int`, which `torch.export` cannot
+  specialize (`GuardOnDataDependentSymNode`, `u0`). The two
+  `torch._dynamo` capture flags do NOT help (the code demands a concrete
+  value; it is not a graph-break). A deepmd source patch would fix it
+  (mark `n_edge` size-like via `torch._check_is_size`, or bound it by
+  `nloc*nnei`). DEFERRED — DPA-2.4-7M is faster AND compiles, so it wins.
+
+**PRODUCTION MODEL = DPA-2.4-7M** (GPU `.pt2`). DPA-3.1-3M stays a
+research/accuracy option pending the upstream (or our) `network.py` patch.
+
+Artifacts (job 16010337): `$CPG_SHARE/share/models/dpa_gpu_bench/v320fix/`
+(`dpa24.pt2` 184M works; `dpa24.dp`, `dpa3.dp`), job
+`v320_gpu_fix.slurm` + Python export shim `dp_export_pt2.py`, install recipe
+§7 updated. CPU adoption below stays valid as the no-GPU fallback.
+
+**DECISION 2026-08-08 (superseded on GPU): ADOPT the deepmd-official bundle
+as the cascade engine.** CPU works everywhere; GPU works for DPA-2.4-7M
+(above). Route E (ASE-on-GPU) is now UNNEEDED for DPA-2.4. Route C for
+DPA-3.1 remains a source patch if that model is ever wanted on GPU.
 
 **WHAT WORKS (proven):** DPA-2.4-7M and DPA-3.1-3M (both FULL periodic
 table, H->Og, via the `MP_traj_v024_alldata_mixu` branch) run in **LAMMPS

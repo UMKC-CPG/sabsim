@@ -140,31 +140,36 @@ function exec_one_member(member_specification, scratch_directory):
         SLABS_CONTRACT)
 
     # Step 4 — activate (amorphize) each slab's surface. A SEPARATE
-    # module (DESIGN §3) with its own pass/fail gate (§3.5); in the
-    # skeleton it is stubbed. It does NOT assume it ran before assembly
-    # (§5.3). Each call takes a HalfHandle, RE-READS the pristine half from
-    # its data file, amorphizes it, and writes the amorphized half back
-    # (§10.1). The stage returns ONE ActivatedSlabs (§10.1): both activated
-    # slabs AND both gate verdicts. The contract checks verdict_A.passed
-    # and verdict_B.passed, so a FAILED activation gate is contract-invalid
-    # and halts HERE (§10.1) — the gate is enforced at this seam, not
-    # buried in the module.
+    # module (DESIGN §3); in the skeleton it is stubbed. It does NOT assume
+    # it ran before assembly (§5.3). Each call takes a HalfHandle, RE-READS
+    # the pristine half from its data file, runs the CASCADE ONLY, and writes
+    # the amorphized half back (§10.1). Revised 2026-08-08 (§3.4): the heal
+    # and the §3.5 gate no longer ride here — they moved to the bond flow,
+    # which heals the ASSEMBLED pair at a wide gap and gates the healed
+    # surfaces before pressing. So this stage returns ONE ActivatedSlabs
+    # (§10.1) carrying just the two amorphized slabs; its contract checks
+    # they are amorphized, not a gate verdict (that now falls in the bond).
     activated = run_to_contract(
         () -> activate_surfaces(handle_A, handle_B, member_specification,
                                 potential),
         ACTIVATED_SLABS_CONTRACT)
-    slab_A = activated.slab_A   # rebind to the activated slabs; the
-    slab_B = activated.slab_B   # verdicts rode the contract check above
+    slab_A = activated.slab_A   # the amorphized slabs; the healing and the
+    slab_B = activated.slab_B   # §3.5 gate happen in the bond flow below
 
     # Step 5 — assemble the facing pair from the activated slabs (§7).
     structure = run_to_contract(
         () -> assemble_pair(slab_A, slab_B, shared, member_specification),
         STRUCTURE_CONTRACT)
 
-    # Steps 6-7: press then pull, on the MLIP (here, the stand-in). The
-    # result is a BondDebondResult (§9.1): one press outcome + one
-    # reference + a per-rate list of pulls, NOT a bare Trajectory (§5.4's
-    # rate ladder). Named for what it is at this seam.
+    # Steps 6-7: the bond flow, on the MLIP committee (here, the stand-in).
+    # It FIRST heals the two assembled surfaces with one joint relax at the
+    # wide gap and runs the §3.5 activation gate on each healed surface
+    # (§3.4, revised 2026-08-08); a FAILED gate halts HERE, before any press
+    # — the checkpoint that used to sit at the activate seam now guards the
+    # bond's scarce GPU from inside it. Only a passing gate scissors the
+    # vacuum, then presses and pulls. The result is a BondDebondResult
+    # (§9.1): one press outcome + one reference + a per-rate list of pulls,
+    # NOT a bare Trajectory (§5.4's rate ladder).
     bond_debond_trajectory = run_to_contract(
         () -> run_bond_debond_md(structure, potential, member_specification),
         BOND_DEBOND_CONTRACT)
@@ -265,9 +270,11 @@ The contracts named at the call sites are exactly the seam schemas of
 this document: `STRUCTURE_CONTRACT` and `BOND_DEBOND_CONTRACT` are §3,
 `MEASURE_VECTOR_CONTRACT` is §4. The structure stage's intermediate
 contracts are `SLABS_CONTRACT` (two valid `Slab`s plus their shared cell,
-§7.1) and `ACTIVATED_SLABS_CONTRACT` (both slabs amorphized and past the
-activation gate, `DESIGN.md` §3.5; its concrete form is §10.1's
-`ActivatedSlabs`, which carries both slabs AND both gate verdicts).
+§7.1) and `ACTIVATED_SLABS_CONTRACT` (both slabs amorphized — revised
+2026-08-08, §3.4: the activation gate no longer rides this seam; it moved
+to the bond flow, which gates the healed surfaces before pressing, so this
+contract now checks only that both slabs are amorphized, and the two §3.5
+verdicts are bond-flow artifacts).
 `POTENTIAL_CONTRACT` is the one
 exception — not a record of ours but the external potential's loadable
 `pair_style` interface (its *quality* is judged separately by the §5
@@ -842,7 +849,7 @@ exists so every seam is exercised under real data flow.
     (handle_A, handle_B, shared) = build_slabs(...)  # step 3, real
     activated  = stub_activate(handle_A, handle_B)   # step 4, STUB:
     slab_A     = activated.slab_A               # returns an ActivatedSlabs
-    slab_B     = activated.slab_B               # (§10.1), verdicts PASS
+    slab_B     = activated.slab_B               # (§10.1), amorphized slabs
     structure  = assemble_pair(slab_A, slab_B,   # step 5, trivial (Si/Si)
                                shared)
     bond_debond_trajectory = press_then_pull(structure)   # steps 6-7,
@@ -855,10 +862,12 @@ exists so every seam is exercised under real data flow.
 ```
 
 **What each stand-in must still honour:** `stub_activate` returns an
-`ActivatedSlabs` (§10.1) whose two slabs are valid but amorphization-free
-and whose two gate verdicts trivially PASS — it satisfies the same
-contract the real activation does, so §1's unpack and gate check are
-exercised, not special-cased; `mock_characterization` returns
+`ActivatedSlabs` (§10.1) whose two slabs satisfy the amorphization contract
+— revised 2026-08-08 (§3.4), the §3.5 gate no longer rides this seam (it
+moved to the bond flow), so the contract checks amorphization, not a
+verdict — and it satisfies the same contract the real activation does, so
+§1's unpack is exercised, not special-cased; `mock_characterization`
+returns
 schema-valid `unresolved` MeasureRecords (§4); `classical_pair_style`
 satisfies the same potential contract the trained MLIP will; and
 `press_then_pull` writes the strided atomic-coordinate dump so
@@ -1109,9 +1118,13 @@ function assemble_pair(slab_A, slab_B, shared, member_specification):
     slab_B = drop_disconnected(slab_B)
 
     # Place B facing A at the configured initial gap, measured between the
-    # two dividing surfaces. Then check the minimum cross-slab distance;
-    # if it violates the clash floor, back the gap off and RECORD the
-    # adjustment rather than aborting the member (DESIGN §2.6).
+    # two dividing surfaces. Revised 2026-08-08 (§3.4): this gap must be
+    # WIDER than the MLIP interaction cutoff, because the bond flow heals the
+    # two surfaces here BEFORE pressing (§9.1) and a wide gap is what makes
+    # each heal as an effectively-free surface; the bond flow later scissors
+    # it down to the press start distance (§2.6). Then check the minimum
+    # cross-slab distance; if it violates the clash floor, back the gap off
+    # and RECORD the adjustment rather than aborting the member (DESIGN §2.6).
     pair = place_facing(slab_A, slab_B, surface_A, surface_B,
                         member_specification.protocol.initial_gap)
     pair = relieve_clash(pair,
@@ -1725,10 +1738,15 @@ state, and a LIST of per-rate pulls — not a single trajectory.
 ```
 record BondDebondResult:
     # The concrete form of the §3 press/pull stage output (what §1 calls
-    # BOND_DEBOND_CONTRACT). One press, one reference, many pulls.
-    press:     PressOutcome         # step 6 (§5.1, §5.2)
-    reference: StateRef             # gated zero-load reference (§5.3)
-    pulls:     list of Trajectory   # one §3 Trajectory per pull rate
+    # BOND_DEBOND_CONTRACT). One press, one reference, many pulls — plus,
+    # from 2026-08-08 (§3.4), the two §3.5 activation verdicts, because the
+    # heal and gate moved into this flow, so the pass/fail activation result
+    # is a bond artifact now (it used to ride ActivatedSlabs, §10.1).
+    press:        PressOutcome         # step 6 (§5.1, §5.2)
+    reference:    StateRef             # gated zero-load reference (§5.3)
+    pulls:        list of Trajectory   # one §3 Trajectory per pull rate
+    activation_A: ActivationVerdict    # A's healed-surface gate (§10.6)
+    activation_B: ActivationVerdict    # B's healed-surface gate
 
 record PressOutcome:
     bonded:           boolean   # verdict at the specified load (§5.1)
@@ -1743,7 +1761,34 @@ function run_bond_debond_md(structure, potential, member_specification):
     driver = open_lammps_driver(structure, potential,
                                 member_specification)   # §9.2, persistent
 
-    # Step 6: press the two activated surfaces together and let them bond.
+    # HEAL + GATE (moved here 2026-08-08, §3.4). The structure is the two
+    # amorphized surfaces assembled at a gap WIDER than the MLIP cutoff.
+    # First heal them with ONE joint relax at that gap — because the gap
+    # exceeds the cutoff, each heals as an effectively-free surface (§10.5,
+    # delegating to §9.7's minimize_then_anneal on the joint cell). Then GATE
+    # each healed surface (§3.5, §10.6), told apart by its wafer tag; a
+    # FAILED gate HALTS before any press — the §3.5 checkpoint, now guarding
+    # the bond's scarce GPU from inside it (§9.1 <-> ARCHITECTURE §4.1). The
+    # crystalline self-reference each metric needs is resolved from share/
+    # by species (§10.6), as it always was.
+    heal_assembled_surfaces(driver, member_specification)         # §10.5
+    activation_A = activation_gate(surface_by_tag(driver, WAFER_A),
+                                   crystalline_reference(member_specification,
+                                                         WAFER_A),
+                                   member_specification)          # §10.6
+    activation_B = activation_gate(surface_by_tag(driver, WAFER_B),
+                                   crystalline_reference(member_specification,
+                                                         WAFER_B),
+                                   member_specification)
+    if not (activation_A.passed and activation_B.passed):
+        halt_pipeline(reason = failing_metric(activation_A,
+                                              activation_B))   # gate, not warn
+
+    # Only a passing gate SCISSORS the wide vacuum gap down to the press
+    # start distance (§2.6), bringing the two healed surfaces into range.
+    scissor_vacuum_gap(driver, member_specification)              # §2.6
+
+    # Step 6: press the two healed surfaces together and let them bond.
     press = press_and_bond(driver, member_specification)          # §9.3
 
     # The gated zero-load reference the pull integrates from (§5.3).
@@ -1756,7 +1801,9 @@ function run_bond_debond_md(structure, potential, member_specification):
         pulls.append(pull_at_rate(driver, reference, rate,
                                   member_specification))     # §9.5, §9.6
     return BondDebondResult{ press: press, reference: reference,
-                            pulls: pulls }
+                            pulls: pulls,
+                            activation_A: activation_A,
+                            activation_B: activation_B }
 ```
 
 `[SEAM — resolved]` this refines the §3 trajectory seam. `Trajectory`
@@ -2092,22 +2139,24 @@ routine below refuses one of those.
 
 Activation is **per-wafer**: each surface is amorphized independently in
 vacuum, BEFORE the two ever face each other — that is the whole point of
-surface-activated bonding (`DESIGN.md` §3.1). So `activate_surfaces`
-activates the two slabs independently and returns the concrete form of
-`ACTIVATED_SLABS_CONTRACT`.
+surface-activated bonding (`DESIGN.md` §3.1). **Revised 2026-08-08 (§3.4):
+activation is now CASCADE-ONLY.** The heal and the §3.5 gate moved to the
+bond flow (§9), which heals the ASSEMBLED pair at a gap wider than the MLIP
+cutoff — so the two surfaces still heal as independent free surfaces, never
+co-activated — and gates each healed surface before pressing. So
+`activate_surfaces` amorphizes the two slabs and returns the concrete form
+of `ACTIVATED_SLABS_CONTRACT`, which now carries just the two amorphized
+slabs; the pass/fail verdict is a bond-flow artifact (§9.1).
 
 ```
 record ActivatedSlabs:
-    # The concrete form of §1's ACTIVATED_SLABS_CONTRACT: both slabs
-    # amorphized AND past the gate (DESIGN §3.5). The verdict is CARRIED,
-    # not merely logged, so run_to_contract (§1) can check verdict.passed
-    # — a failed gate is a contract-invalid artifact and the pipeline
-    # HALTS (gate, not warn). Prior art only PRINTED an unthresholded g(r)
-    # RMSD, so a defective surface passed silently.
-    slab_A:    Structure           # activated slab A (grips still unset)
-    slab_B:    Structure           # activated slab B
-    verdict_A: ActivationVerdict   # A's pass/fail gate result
-    verdict_B: ActivationVerdict   # B's pass/fail gate result
+    # The concrete form of §1's ACTIVATED_SLABS_CONTRACT. Revised 2026-08-08
+    # (§3.4): activation is cascade-only, so this carries just the two
+    # amorphized slabs — the heal and the §3.5 gate moved to the bond flow
+    # (§9.1), and the pass/fail VERDICT rides the bond output now, not this
+    # seam. The contract here checks only that both slabs are amorphized.
+    slab_A:    Structure           # amorphized slab A (grips still unset)
+    slab_B:    Structure           # amorphized slab B
 
 record ActivationVerdict:
     passed:          boolean    # AND over every registered metric (§10.6)
@@ -2122,14 +2171,15 @@ record MetricVerdict:
     passed:    boolean
 ```
 
-`[SEAM — rippled in code, 2026-07-18]` this refines §1's step-4 seam the
-way §9.1 refined the press/pull seam, and the ripple is now APPLIED: the
-sequencer runs `activate_surfaces` to one `ActivatedSlabs`, rebinds
-`slab_A` / `slab_B` from it to feed `assemble_pair`, and the
-`ACTIVATED_SLABS_CONTRACT` gates on `.verdict_A.passed` /
-`.verdict_B.passed` (a failed gate halts the pipeline HERE). So the
-verdict is carried, not merely logged — exactly as the
-`bond_debond_trajectory` ripple was.
+`[SEAM — rippled in code, 2026-07-18; re-scoped 2026-08-08]` the sequencer
+runs `activate_surfaces` to one `ActivatedSlabs` and rebinds `slab_A` /
+`slab_B` from it to feed `assemble_pair`. Originally the
+`ACTIVATED_SLABS_CONTRACT` also gated on `.verdict_A.passed` /
+`.verdict_B.passed` here; the §3.4 revision moved the heal and the §3.5 gate
+into the bond flow, so this seam now checks only that both slabs are
+amorphized, and the pass/fail HALT rides the bond flow instead — a failed
+gate there aborts before the press (§9.1), the same "gate, not warn"
+discipline, one seam later.
 
 ```
 function activate_surfaces(handle_A, handle_B, member_specification,
@@ -2159,23 +2209,18 @@ function activate_surfaces(handle_A, handle_B, member_specification,
     activated_B = activate_surface(handle_B, member_specification,
                                    potential)
     return ActivatedSlabs{
-        slab_A:    activated_A.slab,    slab_B:    activated_B.slab,
-        verdict_A: activated_A.verdict, verdict_B: activated_B.verdict }
+        slab_A: activated_A.slab, slab_B: activated_B.slab }
 ```
 
-`[DISTILLATION — in code, 2026-07-19]` the code splits `activate_surfaces`
-across two layers, and the `ActivatedSlabs` shown here is the CONCEPTUAL
-result. The DRIVER (`driver/cascade.py`) returns two `ActivationResult`s
-carrying the RICH `ActivationVerdict` above — every metric, the measured
-depth, the named failure. The PIPELINE stage then maps each rich verdict
-DOWN to the small contract `Verdict` (passed, reason) that
-`ACTIVATED_SLABS_CONTRACT` reads, through the adapter
-(`pipeline/activation_adapter.py`), keeping the measured skin depth and —
-on a failure — the failing metric in the reason string. So the code
-`exec_artifacts.ActivatedSlabs` carries the DISTILLED `Verdict`, not the
-rich one; the gate still HALTS at this seam, because a distilled failure
-is still a failure. The rich per-metric detail survives on the driver
-side for the report (`DESIGN.md` §9), not on the contract.
+`[DISTILLATION — in code, 2026-07-19; re-scoped 2026-08-08]` originally the
+driver (`driver/cascade.py`) re-annealed and gated each half and returned an
+`ActivationResult` carrying the rich `ActivationVerdict`, which the pipeline
+distilled to the contract `Verdict` at THIS seam. With the §3.4 revision the
+activate driver runs the cascade only and returns the amorphized slab; the
+rich `ActivationVerdict` above is still the gate's output, but it is now
+produced in the BOND flow (§9.1), on each healed surface, and distilled onto
+the bond output — not here. So `exec_artifacts.ActivatedSlabs` carries no
+verdict, and the gate HALT moves to the bond flow.
 
 The mechanism is a SEAM, not a hard-coded procedure (`DESIGN.md` §3.1).
 v1 registers one mechanism — energetic-particle bombardment — but plasma
@@ -2207,19 +2252,20 @@ function activate_surface(handle, member_specification, potential):
 ```
 function energetic_particle_bombardment(slab, member_specification,
                                         potential):
-    # The v1 mechanism (DESIGN §3.2–§3.5). Four stages: derive the
-    # concrete impact plan, run the classical + ZBL cascade to the target
-    # fluence, re-anneal under the MLIP, then GATE — validation runs on
-    # the ACCURATE (re-annealed) structure, not the classical one (§3.4).
+    # The v1 mechanism (DESIGN §3.2–§3.4). Revised 2026-08-08: CASCADE-ONLY.
+    # Derive the concrete impact plan and run the cascade (default universal
+    # MLIP + ZBL, or a classical form + ZBL) to the target fluence; the heal
+    # and the §3.5 gate no longer run here — they moved to the bond flow
+    # (§9.1), which heals the assembled pair and gates each healed surface.
     spec    = derive_bombardment_spec(slab, member_specification)   # §10.3
     driver  = open_cascade_driver(slab, potential,
                                   member_specification)             # §10.2
     damaged = run_cascade_to_fluence(driver, spec)                  # §10.4
-    relaxed = mlip_reanneal(damaged, potential,
-                            member_specification)                   # §10.5
-    verdict = activation_gate(relaxed, slab, member_specification)  # §10.6
-    relaxed = label_activated_skin(relaxed, verdict.activated_depth)  # §10.7
-    return record{ slab: relaxed, verdict: verdict }
+    # The skin label records what the cascade amorphized; the MEASURED depth
+    # is a gate metric, so on the cascade-only path the label carries the
+    # a-priori estimate (§2.5) and the gate re-labels it post-heal (§9.1).
+    amorphized = label_activated_skin(damaged, estimated_depth)     # §10.7
+    return record{ slab: amorphized }
 ```
 
 ### 10.2 open_cascade_driver — the correctness core
@@ -2360,35 +2406,40 @@ function run_cascade_to_fluence(driver, spec):
     return damaged_slab_snapshot(driver)
 ```
 
-### 10.5 mlip_reanneal — the SABSIM addition (`DESIGN.md` §3.4)
+### 10.5 The MLIP heal — moved to the bond flow (`DESIGN.md` §3.4)
 
-```
-function mlip_reanneal(damaged_slab, potential, member_specification):
-    # A stage prior art does NOT have (DESIGN §3.4). The classical cascade
-    # MADE the disorder; now re-equilibrate GENTLY under the MLIP so the
-    # final structure is MLIP/DFT-quality, not classical-quality — the
-    # first rung of the fidelity ladder (DESIGN §4.5). This is where the
-    # classical->accurate correction happens, and it runs BEFORE the gate
-    # (§10.6), so the gate judges the accurate structure.
-    #
-    # It DELEGATES to §9.7's minimize_then_anneal: the SAME MLIP driver, a
-    # near-equilibrium schedule. A kinetically trapped glass will not fully
-    # rearrange, so "re-annealed" means "as relaxed as this schedule got
-    # it" — the classical start must be a reasonable basin (STRUCTURAL 1b).
-    schedule = member_specification.protocol.reanneal_schedule
-    return minimize_then_anneal(damaged_slab, potential, schedule)  # §9.7
-```
+A stage prior art does NOT have (DESIGN §3.4): the cascade MADE the
+disorder; the heal re-equilibrates GENTLY under the MLIP so the final
+structure is MLIP/DFT-quality, not cascade-quality — the first rung of the
+fidelity ladder (§4.5).
+
+**Revised 2026-08-08: retired here, relocated to the bond flow.** A
+PER-SLAB `mlip_reanneal` used to run in the activate stage, right after the
+cascade. It is replaced by a SINGLE joint heal on the ASSEMBLED pair, at a
+gap wider than the MLIP cutoff, as the first phase of the bond flow (§9.1):
+each surface still heals as an effectively-free surface, but now the §3.5
+gate can judge the surface the pipeline actually presses. The heal still
+DELEGATES to §9.7's `minimize_then_anneal` — the same MLIP driver, a
+near-equilibrium schedule; a kinetically trapped glass will not fully
+rearrange, so the cascade start must be a reasonable basin (STRUCTURAL 1b) —
+only the input is now the joint cell at the wide gap, not one slab. See
+§9.1 for where it is called and §9.3 for the scissor+press that follow.
 
 ### 10.6 activation_gate — pass/fail with pluggable metrics (`§3.5`)
 
 ```
-function activation_gate(activated_slab, crystalline_slab,
+function activation_gate(healed_surface, crystalline_slab,
                          member_specification):
-    # A GATE, not a report (DESIGN §3.5). Judgment is PER REALIZATION: each
-    # metric judges ONE re-annealed slab; the seed-ensemble spread is taken
-    # ABOVE this module (§10.8). Prior art only PRINTED an unthresholded
-    # g(r) RMSD (PRIOR_ART §1.8). Each metric measures ONE property and
-    # compares it to a reference with a real THRESHOLD; the gate is the AND.
+    # A GATE, not a report (DESIGN §3.5). Revised 2026-08-08: it is now
+    # CALLED FROM THE BOND FLOW (§9.1), once per surface, on each HEALED
+    # surface picked out of the assembled+relaxed pair by its wafer tag —
+    # not on a per-slab re-anneal in the activate stage. The metrics and
+    # thresholds are unchanged; only the call site and the input moved.
+    # Judgment is PER REALIZATION: each metric judges ONE healed surface;
+    # the seed-ensemble spread is taken ABOVE (§10.8). Prior art only
+    # PRINTED an unthresholded g(r) RMSD (PRIOR_ART §1.8). Each metric
+    # measures ONE property against a reference with a real THRESHOLD; the
+    # gate is the AND.
     #
     # References + thresholds live OUTSIDE the physics spec — a threshold is
     # a criterion of the GATE, not a knob of the experiment (DESIGN §3.5) —

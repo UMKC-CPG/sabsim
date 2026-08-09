@@ -950,7 +950,7 @@ the gentle re-anneal riding along after:
 | DeePMD training (inside ALF)           | GPU            |
 | Ar cascade — universal MLIP + ZBL (default) | GPU       |
 | Ar cascade — classical + ZBL (opt-in)  | CPU            |
-| MLIP re-anneal (step 4)                 | rides activate |
+| MLIP heal + §3.5 gate (§3.4)            | rides BOND (pre-press) |
 | Press / settle / pull (bond)           | GPU (`deepmd`) |
 | Imago (step 8)                         | CPU            |
 
@@ -958,16 +958,27 @@ the gentle re-anneal riding along after:
 follows the cascade potential.** Step 4's cascade dominates the activate
 job, so the job is routed by whichever cascade form it uses — the default
 universal MLIP makes activate GPU work; an opt-in classical form makes it
-CPU. The gentle MLIP re-anneal is a small tail that rides the same job and
-inherits its class; it is NOT grouped with the press/pull bond job,
-because the §3.5 activation gate — a human-inspected checkpoint before
-scarce GPU is spent on the bond — must fall between them. Because the
-default cascade is universal, activate is GPU by default; a deployment
-opts an individual member down to CPU only by choosing a validated
-classical form for that material, through the per-usage `gpus_per_node`
-knob — a config choice, not a code change. (Resolved 2026-08-06,
-superseding the earlier CPU-only-activate assumption, which held only
-while the cascade was classical.)
+CPU. Because the default cascade is universal, activate is GPU by default; a
+deployment opts an individual member down to CPU only by choosing a
+validated classical form for that material, through the per-usage
+`gpus_per_node` knob — a config choice, not a code change. (Resolved
+2026-08-06, superseding the earlier CPU-only-activate assumption, which held
+only while the cascade was classical.)
+
+**The heal + gate ride the BOND job, not activate (revised 2026-08-08).**
+The earlier design ran a per-slab MLIP re-anneal as a tail of the activate
+job and placed the §3.5 gate as a human-inspected checkpoint BETWEEN
+activate and bond. `DESIGN.md` §3.4 revised that: the heal is done once, on
+the ASSEMBLED pair at a wide gap, under the production committee — whose
+engine lives in the bond job — so the heal is the bond job's FIRST phase and
+the §3.5 gate runs there, on each healed surface, before the vacuum is
+scissored and the press begins. So the activate job is now cascade-ONLY
+(build → cascade → assemble at the wide gap → write the pair), and the
+checkpoint moves into the bond job's pre-press phase: a failed gate aborts
+the bond before its expensive press/settle/pull, so it still guards the
+scarce GPU it was meant to, just one job later. The human inspection point
+moves with it — the gate verdict is a bond-job artifact now, not an activate
+one.
 
 **Structure of the deployment config — two concerns, one file.** The
 config separates *what the machine has* from *how each kind of work uses
@@ -1297,6 +1308,36 @@ deepmd **2.2.10 / TensorFlow** training stack DIRECTLY — a real 2.2.10
 the training→inference path needs no bridge. A second, deliberately older
 engine thus coexists with the default and is chosen per job, with no
 change to the pipeline that drives it.
+
+**The universal cascade engine is OUT-OF-PROCESS, by necessity.** The two
+engines above are conda-linked so they load in-process and share the
+sabsim env's one `libmpi`. The universal foundation MLIP that drives the
+DEFAULT cascade (`DESIGN.md` §4.7) cannot be built that way: it runs only
+inside deepmd-kit's OWN self-contained offline-installer bundle — its own
+torch, its own LAMMPS, its own MPI — because a self-built stack crashes
+these DPA models (the bundle is the one that runs them). That bundle cannot
+be imported into the sabsim process or share its communicator, so the
+universal cascade breaks the in-process assumption above and is run
+DIFFERENTLY: the activate stage's CASCADE is assembled into one
+self-contained script (`driver/cascade.build_activate_script`) and run as
+the bundle's `lmp -in <script>` in a subprocess, its AMORPHIZED structure
+handed back through a file (the §4.3 file-handoff model,
+`driver/cascade_subprocess`). This is sound because the cascade needs NO
+mid-run read-back: every impact is seed-derived and each cascade ends on an
+in-LAMMPS halt, so the sabsim process builds the slab before and reads the
+amorphized structure back for assembly after, from a dump rather than a live
+engine. The heal and the §3.5 gate do NOT ride this subprocess — §3.4 moved
+them to the bond job, so the activate stage is cascade-only. The bundle is
+selected by the in-repo `SABSIM_CASCADE_ENGINE_PREFIX` env (a per-machine,
+GPU-architecture-specific prefix, so a path rather than a checked-in
+module), and the subprocess is launched in a fully-reset environment so no
+sabsim-side torch or plugin path leaks in and crashes it. The classical
+cascade is unaffected — a built-in LAMMPS pair style keeps running
+in-process on CPU through `LammpsEngine` — so only the universal (GPU) path
+leaves the process. Because the activate stage no longer re-anneals, the
+subprocess needs no classical potential and the activate job carries no
+`LAMMPS_POTENTIALS`; the heal that would have needed it now runs under the
+committee in the bond job (§3.4).
 
 ---
 

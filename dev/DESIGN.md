@@ -482,9 +482,11 @@ for us, the residual strain we *record* would then be wrong by the
 potential's own lattice error, and that number is a deliverable.
 
 So SABSIM derives each lattice constant from a **bulk relaxation under
-the current production potential** — the same committee that will run the
-re-anneal in step 4 and all of steps 6 and 7 (the cascade in step 4 is
-the exception — see below). Two consequences follow:
+the current production potential** — the same committee that will run steps
+6 and 7: the heal, the press, and the pull (revised 2026-08-08, §3.4 — the
+heal moved out of step 4 into the bond flow). Step 4 is the exception: its
+cascade runs under the universal MLIP (or a classical form), not the
+committee (see below). Two consequences follow:
 
 - The lattice is re-derived **once per potential generation**. Each ALF
   round that changes the committee can change the equilibrium lattice,
@@ -824,10 +826,14 @@ first 4 Å gap in the z-profile scanning upward, a threshold that is one
 unlucky adatom away from truncating the slab.
 
 **The gap and the clash.** The initial separation is a knob, measured
-between the two dividing surfaces. After placement the minimum
-cross-slab atomic distance is checked; if it violates the floor, the gap
-is backed off and the adjustment is recorded, rather than aborting the
-member as prior art does.
+between the two dividing surfaces. It must be set WIDER than the MLIP's
+interaction cutoff (revised 2026-08-08, §3.4): the bond flow heals the two
+surfaces at this gap before pressing, and a gap beyond the cutoff is what
+lets each heal as an effectively-free surface — the two are assembled in one
+box but do not yet interact. The bond flow later scissors the gap down to
+the press start distance. After placement the minimum cross-slab atomic
+distance is checked; if it violates the floor, the gap is backed off and the
+adjustment is recorded, rather than aborting the member as prior art does.
 
 **There is no registry search.** Prior art exposes a `lateral_shift`
 knob "to explore different bonding registries." Registry is a
@@ -999,28 +1005,58 @@ the doses SAB needs (thousands of impacts) that overhead is prohibitive.
 ### 3.4 The MLIP re-anneal (a SABSIM addition)
 
 Prior art is classical throughout; SABSIM adds a stage it does not have.
-After the classical cascade creates the disorder, the activated surface is
-**re-equilibrated under the MLIP** (gentle, near-equilibrium) so the final
-structure is MLIP/DFT-quality rather than classical-quality — the first
-rung of the fidelity ladder (§4.5). This is where the classical→accurate
-correction happens; validation (§3.5) runs *after* the re-anneal. Its
-temperature, duration, and ensemble are design parameters; a kinetically
-trapped glass will not fully rearrange, so the classical start must be a
-reasonable basin (the STRUCTURAL 1b safeguards).
+After the cascade creates the disorder, the activated surface is
+**re-equilibrated under the production MLIP** (gentle, near-equilibrium) so
+the final structure is MLIP/DFT-quality rather than cascade-quality — the
+first rung of the fidelity ladder (§4.5). This is where the cascade→accurate
+correction happens; validation (§3.5) runs *after* it. Its temperature,
+duration, and ensemble are design parameters; a kinetically trapped glass
+will not fully rearrange, so the cascade start must be a reasonable basin
+(the STRUCTURAL 1b safeguards).
 
-**Stripping the projectile precedes the re-anneal.** The cascade embeds
-the beam species (argon in v1); the re-anneal runs under the production
-committee, whose species map is only {Si, O} (§4.3) and which is never
-handed the projectile. So the projectile is removed at the **end of the
-cascade, before the re-anneal opens** — and not only its atoms but its
-*declared species*: the element must leave the cell's type list, not
-merely be emptied of atoms. A committee whose vocabulary is {Si, O}
-cannot re-equilibrate a cell that still declares argon, even with no
-argon atoms left in it. This strip is a correctness precondition for the
-handoff, distinct from the ejecta cleanup at assembly (§2.6), which later
-drops disconnected *substrate* fragments from the finished half — that
-one is housekeeping on {Si, O}; this one is what makes the {Si, O}-only
-committee runnable at all.
+**The heal runs on the ASSEMBLED pair at a wide gap, not per slab (revised
+2026-08-08).** The two amorphized halves are stacked (§2.6) at an initial
+gap WIDER than the MLIP's interaction cutoff, and a single joint relaxation
+heals BOTH surfaces at once. Because the gap exceeds the cutoff, neither
+surface feels the other: each heals as an effectively-FREE surface, exactly
+as a per-slab re-anneal in vacuum would — so nothing physical is lost by
+doing it once, on the combined cell, instead of twice. This is strictly
+better than a separate per-slab re-anneal for two reasons: it removes an
+extra LAMMPS session per half, and — the deciding one — it lets the §3.5
+gate judge the surface the pipeline will actually press, *after* it has
+healed, rather than a per-slab intermediate that the assembly and this heal
+would then disturb. It also keeps activation faithful to §3.1: the wide gap
+means the two surfaces are assembled in one box but do NOT yet interact, so
+each is still healed and judged as an independent free surface, never
+co-activated. Earlier drafts ran a per-slab re-anneal inside the cascade
+session and gated there; this combined-cell heal REPLACES it (the flow
+note's "kept both" is resolved to this).
+
+**Where it runs, and the consequence for the gate.** The heal is under the
+production committee, whose engine lives in the bond job (`ARCHITECTURE.md`
+§4.1), so the heal is the FIRST phase of the bond job — before the vacuum
+gap is scissored out and the press begins. The §3.5 gate then runs there,
+on each healed surface (told apart by wafer tag), and only a passing gate
+proceeds to the scissor + press. This moves the gate from a between-jobs
+checkpoint to the bond job's pre-press phase; a failed gate aborts the bond
+before its expensive press/settle/pull, so the checkpoint still guards the
+scarce GPU it was meant to (`ARCHITECTURE.md` §4.1, revised to match).
+
+**Stripping the projectile.** The cascade embeds the beam species (argon in
+v1), which is not part of the activated surface, and the committee's
+vocabulary is only {Si, O} (§4.3) — it cannot re-equilibrate a cell that
+still DECLARES argon, even emptied of argon atoms. So the projectile is
+removed — its atoms AND its declared species — as the **cascade's own
+cleanup, at the end of the activate stage**, before the amorphized half is
+handed off. That keeps the handed-off surface substrate-only, so the
+assembly and the bond-flow heal that follows it never see the projectile
+(the amorphized half the pipeline carries is {Si, O}, as it always was).
+Formerly the per-slab re-anneal did this deletion as its FIRST act; with the
+anneal moved to the bond flow (above), the strip is what stays behind in
+activate — it is cascade housekeeping, not part of the anneal. This is
+distinct from the ejecta cleanup that drops disconnected *substrate*
+fragments; that is housekeeping on {Si, O}, this is what makes the {Si,
+O}-only committee runnable at all.
 
 ### 3.5 The validation gate (pass/fail, not a report)
 
@@ -1030,7 +1066,7 @@ partial-g(r) pairs are hardcoded to Si/O, and its depth metric scans
 top-down and stops at the first crystalline-looking layer, so it can
 report 0 Å depth beneath a defective surface (`PRIOR_ART.md` §1.8). SABSIM
 makes activation validation a **gate**: a registry of pluggable structural
-metrics, each measuring one property of the re-annealed surface and
+metrics, each measuring one property of the **healed surface (§3.4)** and
 comparing it against a reference with a threshold. Every metric returns a
 small verdict — what it measured, which reference it used, the threshold,
 and whether it passed — and the gate passes only if *every* metric passes,
@@ -1038,7 +1074,15 @@ naming the first that fails so a halt is diagnosable. The registry is the
 same idiom as the §6 measures and the §8 analyzer: adding a metric, or
 swapping how one is computed, touches nothing else.
 
-Judgment is **per realization.** Each metric judges ONE re-annealed slab
+**When and where it runs (revised 2026-08-08).** The gate runs AFTER the
+combined-cell heal (§3.4), on the assembled pair before it is scissored and
+pressed, judging each of the two surfaces SEPARATELY — they are told apart
+by their wafer tag, and the wide heal gap keeps them independent, so each is
+still one free surface against one reference. This is the surface the
+pipeline will actually press, healed; earlier drafts gated a per-slab
+re-anneal before assembly, which the assembly and heal then disturbed.
+
+Judgment is **per realization.** Each metric judges ONE healed surface
 against its reference; the spread over amorphization seeds is taken ABOVE
 this module, by the sequencer's realization ensemble (`PSEUDOCODE.md` §10.8,
 STRUCTURAL 4), exactly as the bond metric's spread is. So a metric verdict is
@@ -1504,12 +1548,14 @@ that needs no per-material work:
   `ARCHITECTURE.md` §4.1). It still needs the ZBL cores, because universal
   models are not trained deep in the repulsive regime the cascade visits,
   and it must be treated as out-of-distribution there: the scaffold-grade
-  acceptance above, not blind trust, is what licenses it. The intended
-  mechanism is a universal model run inside LAMMPS (MACE carries a
-  `pair_style`) composed with the ZBL cores through
-  `pair_style hybrid/overlay`. Being a different model run only for the
-  cascade, it does not violate the STRUCTURAL 1b separation that keeps the
-  production MLIP off cascade distortion.
+  acceptance above, not blind trust, is what licenses it. The mechanism is a
+  universal model run inside LAMMPS composed with the ZBL cores through
+  `pair_style hybrid/overlay` — BUILT as of 2026-08-08 with deepmd's DPA-2
+  foundation model (`pair_style deepmd`, the DPA-2.4-7M `.pt2`), the two ZBL
+  cores overlaid on top (MACE's `pair_style mace` would slot in the same
+  seam). Being a different model run only for the cascade, it does not
+  violate the STRUCTURAL 1b separation that keeps the production MLIP off
+  cascade distortion.
 - **Option — a curated classical form + ZBL.** Where a material has a
   well-tested classical form (silicon's Stillinger-Weber, a
   cascade-validated Tersoff for gallium nitride), it is far cheaper per
@@ -1560,17 +1606,52 @@ step, which complicates the persistent-driver and adaptive-timestep design of
 `PSEUDOCODE.md` §10.2 and costs extra per-step work. Neither is a showstopper;
 both must be recorded so a future contributor is not surprised.
 
-**Frozen for v1 (scope decision (a), 2026-07-18; default inverted
-2026-08-06).** The generator resolver and the registry schema are built
-now. v1 builds only the classical silicon (Stillinger-Weber) instance —
-the sole working cascade today and the regression baseline; the universal
-default and the DFT last resort are designed here but not yet implemented
-behind the same resolver seam. The DESIGN default is universal-first; the
-BUILT default stays silicon/SW until the universal path is implemented and
-has cleared the acceptance rungs on a real material. Pinning the
+**Built state (scope decision (a), 2026-07-18; default inverted 2026-08-06;
+universal path BUILT 2026-08-08).** The generator resolver and the registry
+schema were built first with the classical silicon (Stillinger-Weber)
+instance as the sole working cascade and regression baseline. The universal
+path is now IMPLEMENTED behind the same resolver seam and is the default for
+every material: `resolve_cascade_generator` assembles
+`pair_style hybrid/overlay deepmd <model.pt2> zbl <long> zbl <short>` — the
+universal MLIP composed with the two species-derived ZBL cores exactly as
+this section specified — and a classical form is used only on the explicit
+`SABSIM_CASCADE_CLASSICAL` opt-in (the on-the-record env discipline, so a
+departure from the universal default stays in the run's record).
+
+The v1 universal model is **DPA-2.4-7M** (deepmd DPA-2 foundation model,
+full periodic table via the `MP_traj_v024_alldata_mixu` branch, CC-BY-4.0),
+proven to RUN in LAMMPS on a V100 through the deepmd-kit 3.2.0b0 AOTInductor
+`.pt2` path. Because that engine is a self-contained bundle with its own
+torch and MPI, the universal cascade runs OUT-OF-PROCESS — the LAMMPS
+cascade is scripted and run as the bundle's `lmp` in a subprocess, its
+structure handed back through a file (ARCHITECTURE §4.1/§4.4, §4.3). The
+activate job sets `SABSIM_CASCADE_ENGINE_PREFIX` (the bundle) and
+`SABSIM_CASCADE_MLIP_MODEL` (the `.pt2`). Per §3.4 the activate stage is
+cascade-ONLY — the heal and the §3.5 gate ride the bond job — so the
+subprocess needs no classical potential and the activate job carries no
+`LAMMPS_POTENTIALS`. (The intermediate first node-validated on a V100 ran
+cascade + a per-slab re-anneal + gate in one subprocess, job 16014788, and
+that plumbing is proven; the §3.4 revision then moved the heal + gate to the
+bond job, leaving activate cascade-only — a code change in flight.)
+
+It is registered `validated=False` because it has not yet
+cleared the §3.5 gate on any material, so a DEFAULT (universal) cascade
+REFUSES unless the run sets `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` — the same
+exploratory opt-in the classical registry uses. Its first gate-passing
+activation is what licenses flipping the flag; until then the validated
+silicon/SW path remains the certified regression anchor, reached with
+`SABSIM_CASCADE_CLASSICAL`. The `.pt2` is GPU-architecture-specific and
+built at deploy time, so the registry pins the model IDENTITY (name/branch/
+version) and the concrete artifact path is supplied via
+`SABSIM_CASCADE_MLIP_MODEL`.
+
+Remaining v1 follow-ons (logged in `TODO.md`): running DPA-2.4-7M through a
+full activation to clear the §3.5 gate (then `validated=True`); pinning the
 acceptance-check tolerances (the lattice/density band, the probe-cascade
-stability criterion) and validating any non-silicon candidate (classical
-or universal) are DESIGN follow-ons, logged in `TODO.md`.
+stability criterion); selecting the deepmd GPU engine for the activate stage
+(deployment §10) and the deploy-time `.pt2` build; native DP-ZBL as a later
+close-range refinement of the `hybrid/overlay` splice; the DFT last resort;
+and validating any non-silicon classical candidate.
 
 ### 4.8 The force-model recipe, and the settings it fixes once
 
@@ -3693,14 +3774,20 @@ run without a human looking. So a member is prepared as **three jobs**,
 submitted in order, each watched to completion and checked for
 correctness before the next is submitted:
 
-- **activate** (ordinary / CPU): build both wafers, roughen both surfaces
-  with the classical + ZBL cascade (§3), and bring them together. Named
-  for its heavy, gating work; the cheap build-and-assemble glue rides
-  along. The checkpoint that follows it is the **activation gate** (§3.5)
-  — a boundary that is at once a change of machine kind *and* a decision
-  the human should inspect before spending scarce GPU time.
-- **bond** (GPU): press, settle, and pull (§5), with the committee of
-  MLIP models evaluated together in one process.
+- **activate** (GPU by default): build both wafers, roughen both surfaces
+  with the cascade (§3 — the default universal MLIP makes this GPU, an
+  opt-in classical form CPU, §4.1), and bring them together — assembling
+  the pair at a gap wider than the MLIP cutoff (§3.4). It is CASCADE-ONLY:
+  the cheap build-and-assemble glue rides along, but the heal and the gate
+  no longer sit here (revised 2026-08-08, §3.4). It hands the assembled,
+  still-amorphous pair to the bond job.
+- **bond** (GPU): first HEAL the two surfaces with a single joint relax at
+  the wide gap (§3.4) and run the **activation gate** (§3.5) on each healed
+  surface — the human-inspected checkpoint, now here, before any expensive
+  press — then, only if it passes, scissor the vacuum and press, settle,
+  and pull (§5), with the committee of MLIP models evaluated together in
+  one process. The gate is thus a decision the human should inspect early
+  in the bond job, before its scarce GPU is spent on the press.
 - **analyze** (ordinary / CPU): measure (§6). Split into its *own* job —
   not folded into bond — because the all-electron characterization (§8)
   will eventually be heavy, and drawing the boundary now avoids moving it

@@ -1047,21 +1047,56 @@ foundations, interaction rules. -->
       composition, the bootstrap ALF convergence threshold, the MLIP
       re-anneal protocol, and the optional MLIP melt-quench upgrade
       (`ARCHITECTURE.md` §2.3 MLIP + potential-gate bullets).
-- [ ] Classical cascade generator DESIGN follow-ons (`DESIGN.md` §4.7,
-      written 2026-07-18, scope (a)): the seam + registry schema are
-      designed and v1 populates SILICON (Stillinger-Weber) only; silica /
-      gallium nitride / lithium niobate are recorded as documented,
-      UNTESTED candidates. Still open: (1) pin the acceptance-check
+- [ ] Cascade generator DESIGN follow-ons (`DESIGN.md` §4.7, written
+      2026-07-18, scope (a)). **UNIVERSAL PATH BUILT 2026-08-08**: the
+      universal foundation MLIP + ZBL is now the DEFAULT for every material
+      behind `resolve_cascade_generator` — `pair_style hybrid/overlay deepmd
+      <model.pt2> zbl zbl`, v1 model **DPA-2.4-7M** (`validated=False`,
+      proven to run on a V100 via the deepmd 3.2.0b0 `.pt2` path). Classical
+      forms (silicon SW validated; silica / GaN / LiNbO3 documented +
+      untested) are the explicit `SABSIM_CASCADE_CLASSICAL` opt-in. Still
+      open: (1) run DPA-2.4-7M through a FULL activation to clear the §3.5
+      gate (§4.7 rung 4, the arbiter), then flip `validated=True` — until
+      then a default cascade needs `SABSIM_ALLOW_UNVALIDATED_POTENTIAL`;
+      (2) the deepmd GPU engine for the activate stage is WIRED + node-
+      validated (2026-08-08, job 16014788) as an OUT-OF-PROCESS
+      subprocess+file-handoff (ARCH §4.4 — the bundle has its own torch/MPI,
+      cannot share sabsim's in-process LAMMPS): `driver/cascade_subprocess`
+      + `activate_one_half` dispatch, keyed off `SABSIM_CASCADE_ENGINE_
+      PREFIX`. The per-kind `environment` EMISSION mechanism is now DONE
+      (config.py `UsageBlock.environment` + prepare.py, 27 tests); STILL
+      OPEN under (2): flip `[usage.activate]` to the GPU universal shape
+      (partition/gres + the engine-prefix and model env — NO
+      LAMMPS_POTENTIALS, since the re-arch below makes activate cascade-only)
+      and the deploy-time, GPU-arch-specific `.pt2` build; (3) pin the
+      acceptance-check
       tolerances — the crystal lattice/density band and the probe
-      single-impact stability criterion (§4.7 rungs 2-3); (2) actually
-      validate a non-silicon candidate against the §3.5 gate before
-      trusting it (§4.7 rung 4 is the arbiter); (3) build the Tier-2
-      foundation-MLIP + ZBL fallback and the Tier-3 DFT melt-quench when a
-      material with no acceptable classical form arrives (lithium niobate
-      may be the first, given the Buckingham catastrophe, `PRIOR_ART.md`
-      §1.9). The generator resolver is called by the §10.2 cascade driver,
-      so Phase-1 code routes through it with the silicon entry the only
-      one registered.
+      single-impact stability criterion (§4.7 rungs 2-3); (4) native DP-ZBL
+      as a later close-range refinement of the `hybrid/overlay` splice
+      (deepmd `dp_zbl_model`); (5) validate a non-silicon classical
+      candidate against the §3.5 gate before trusting it; (6) the Tier-3
+      DFT melt-quench last resort for a material with neither a trustworthy
+      universal model nor a classical form (lithium niobate may be the
+      first, given the Buckingham catastrophe, `PRIOR_ART.md` §1.9).
+- [ ] **Re-anneal + gate re-architecture (DECIDED 2026-08-08, Paul; flow
+      note "RESOLVED 2026-08-08").** The #8 combined-cell relax REPLACES the
+      per-slab re-anneal, and the §3.5 gate MOVES POST-ASSEMBLY. Cross-
+      cutting, DESIGN-first: (1) `cascade.build_activate_script` +
+      `activate_surface` drop the re-anneal AND the gate — BOTH the universal
+      out-of-process subprocess and the classical in-process paths, so the
+      ACTIVATE stage becomes cascade-only and just yields the amorphized
+      half; (2) the §3.5 gate runs after the #8 joint relax, per-surface by
+      wafer tag, BEFORE the scissor + press (keeps §4.1's gate-before-press-
+      GPU); (3) the return contract shifts — the verdict comes from the
+      post-#8 gate, so `ActivatedSlabs` + the sequencer's gate checkpoint
+      move accordingly; (4) DESIGN + PSEUDOCODE are now UPDATED to match
+      (DESIGN §2.2/§2.6/§3.4/§3.5/§4.7/§10.2, ARCH §4.1/§4.4, PSEUDOCODE
+      §7.5/§9.1/§10.1/§10.5/§10.6 + sequencer; refined 2026-08-08) — the CODE
+      remains. This also drops the activate job's LAMMPS_POTENTIALS need (no
+      classical re-anneal in the bundle) and lets `[usage.activate]` flip
+      cleanly to the GPU universal shape. The current cascade+re-anneal+gate
+      activate (node-validated, job 16014788) is the working INTERMEDIATE
+      this simplifies.
 - [ ] Activation gate (Phase 2) DESIGN follow-ons (`DESIGN.md` §3.5,
       `PSEUDOCODE.md` §10.6, written 2026-07-18). The gate design is a
       metric registry (g(r)/partial g_AB, coordination DISTRIBUTION +

@@ -278,8 +278,28 @@ split (drive issued separately), `press_and_bond` runs the relax then the
 drive, `RunControl.relax_chunks=5`, `_assembled_gap` guard. Model cutoff
 read from Prakash Si `input.json`: rcut 6.0, type_map ['Si']. NEXT: the
 GPU proof run (activate classical @gap10 → bond deepmd) + ledger T-8.
-DEFERRED DESIGN (§3.4/§2.6): whether this joint relax should REPLACE the
-per-slab re-anneal, and where the gate then runs — kept BOTH for now.
+RESOLVED 2026-08-08 (Paul): the joint combined-cell relax (#8) REPLACES the
+per-slab re-anneal, and the §3.5 GATE MOVES POST-ASSEMBLY. So (§3.4/§3.5/
+§2.6/§4.1): the ACTIVATE stage becomes CASCADE-ONLY per half (no re-anneal,
+no gate) — it just hands back the amorphized surface; ASSEMBLE stacks the
+two at the wide gap (~10 Å > model cutoff); then the #8 joint relax heals
+each surface as effectively-free AND the §3.5 gate runs on THAT healed
+surface (per wafer tag) before the scissor+press. Rationale: the gate should
+judge the actually-healed surface, and #8's free-surface heal is equivalent
+to the per-slab re-anneal, so keeping both was redundant. This resolves the
+cascade-engine wrinkle for free: the out-of-process activate subprocess
+(universal MLIP) then runs CASCADE-ONLY — no classical `sw` re-anneal in the
+bundle, so no LAMMPS_POTENTIALS and no two-torch tension. IMPLEMENTATION (a
+cross-cutting re-architecture, NOT yet done): (1) `build_activate_script` +
+`activate_surface` drop the re-anneal and the gate — both the universal
+subprocess AND the classical in-process paths; (2) the §3.5 gate moves to
+run after the #8 relax, per-surface by wafer tag, gating BEFORE the scissor
++ press (keeps §4.1's "gate before scarce press GPU"); (3) the return
+contract shifts — activate yields the amorphized half, the verdict comes
+from the post-#8 gate, so `ActivatedSlabs`/the sequencer checkpoint move
+accordingly; (4) DESIGN §3.4/§3.5/§4.1 + PSEUDOCODE updated to match. The
+current cascade+re-anneal+gate activate (node-validated) is the working
+INTERMEDIATE this simplifies.
 
 **#8 DONE (plumbing) 2026-08-06 — see LEDGER T-8.** The DeePMD-bond seam
 is PROVEN as plumbing; a clean end-to-end GREEN is DEFERRED to a proper
