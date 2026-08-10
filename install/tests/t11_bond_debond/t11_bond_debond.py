@@ -129,6 +129,31 @@ def main() -> None:
     # the pipeline exposes — set here since we call the stage directly.
     set_trajectory_options(TrajectoryOptions(enabled=True, stride=500))
 
+    # DEMO MODE (SABSIM_BOND_DEMO=1) — for a WORKFLOW VISUAL ONLY, never a
+    # measurement. It lets the bond flow run end to end on a surface that is
+    # not gate-passing (e.g. the over-amorphized Si) by (a) bypassing the
+    # §3.5 gate halt and (b) tolerating LAMMPS "lost atoms" (thermo_modify
+    # lost warn) instead of aborting, so the press/pull records a movie even
+    # as the over-driven surface sheds atoms. The result numbers are NOT
+    # meaningful; the point is to see the pipeline execute.
+    if os.environ.get("SABSIM_BOND_DEMO") == "1":
+        import sabsim.driver.press_pull as press_pull
+        from sabsim.driver.activation_gate import ActivationVerdict
+        original_preamble = press_pull.preamble_commands
+        press_pull.preamble_commands = (
+            lambda *args, **kw: list(original_preamble(*args, **kw))
+            + ["thermo_modify lost warn"])
+
+        def _demo_gate(engine, built):
+            passed = ActivationVerdict(
+                passed=True, activated_depth=0.0, per_metric={},
+                reason="DEMO: gate bypassed for a workflow visual")
+            return passed, passed
+
+        press_pull.gate_healed_surfaces = _demo_gate
+        print("*** DEMO MODE: gate bypassed + lost atoms tolerated — "
+              "VISUAL ONLY, numbers not meaningful ***")
+
     member = _trim_for_a_first_number(
         load_and_validate_study(template).members[1])   # si-si-reference
     print("member:", member.name, "| pull ladder:",
