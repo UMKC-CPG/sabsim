@@ -7,7 +7,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BENCH=/cluster/VAST/rulisp-lab/cpg/share/models/dpa_gpu_bench
 
-for energy in 25 40; do
+# Energies (eV) from the command line, e.g. `submit ... 5 10 15`; default
+# 25 40. Probing very low energy tests whether staying below Si's melt
+# threshold avoids the quenched-melt coordination failure.
+energies=("$@"); [ ${#energies[@]} -eq 0 ] && energies=(25 40)
+for energy in "${energies[@]}"; do
     out="$BENCH/si_bracket_${energy}ev"
     export T10_ENERGY_EV="$energy"
     export T10_N_LATERAL=4
