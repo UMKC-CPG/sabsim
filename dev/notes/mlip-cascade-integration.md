@@ -63,6 +63,47 @@ persisted they act/report automatically; if it ended, do the above by hand.
 The build tool for the oxide pair is `install/tests/t12_oxide_pair/
 build_matched_halves.py` (re-run to rebuild the matched halves).
 
+## FINDING 2026-08-10 — universal cascade makes QUENCHED-MELT Si, not a-Si
+
+The universal DPA-2.4-7M cascade, run CASCADE-ONLY, produces a dense
+LIQUID-LIKE Si, not tetrahedral a-Si — so every Si activation FAILS the
+§3.5 coordination gate and the bond crashes. **The anneal fix below is a
+CANDIDATE to DISCUSS with Paul, NOT a decision.**
+
+EVIDENCE (all COMPLETED, all gate-FAILED on coordination ~0.92 vs the
+[0.05, 0.60] band): T-10 `16324481` (6x6x10, 75 eV), Si bracket
+`16365791` (4x4x8, 25 eV) + `16365792` (40 eV).
+- The region that should be crystalline BULK (the gate's deep-third
+  self-reference) has a SMEARED neighbour distribution — continuous
+  density 2.3–3.4 Å, NO tetrahedral first shell + gap. Coordination
+  reaches 4 only at a 2.7 Å cutoff and climbs to 6.7 @2.9, 8.8 @3.2
+  (crystalline/tetrahedral Si = 4 out to ~2.6 Å, then nothing to 3.84).
+- nn distances are NORMAL (median ~2.36 Å) and density ~crystalline, so it
+  is NOT crushed/overlapping — it is a dense, ~6-coordinated LIQUID-Si-like
+  network (liquid Si is denser AND higher-coordinated than crystalline).
+- ENERGY DOES NOT FIX IT: 25 eV is as bad as 75 eV. So it was never an
+  over-DOSE problem; it is the melt QUENCH.
+- The surface is far out-of-distribution for graph.pb: the Si bond T-11
+  `16345420` collapsed (111 neighbours/atom) + shed atoms; the demo bond
+  `16365808` (gate bypassed, lost-atoms tolerated) same — no usable movie.
+
+DIAGNOSIS: the cascade MELTS the Si; cascade-only (no anneal) freezes the
+melt disordered instead of relaxing it into the 4-coordinated tetrahedral
+network. The re-arch (§3.4) moved annealing into the bond-flow HEAL, and
+that heal is far too short to anneal a quenched melt.
+
+CANDIDATE FIX — DISCUSS FIRST: a proper post-melt ANNEAL under the
+universal model (hold at moderate T so the liquid relaxes to tetrahedral
+a-Si, then cool) BEFORE gating/bonding. This REOPENS the re-arch decision
+that removed the per-slab re-anneal — the heal may need to BE a real
+anneal, or the cascade may need its own. Open questions for Paul: anneal
+T / duration / cool-rate; where it lives (activate vs bond flow); and
+whether the gate's `bond_cutoff` (2.9 Å, `share/activation/Si.toml`) also
+needs revisiting, since a dense-melt g(r) first-minimum sits past 2.9 Å.
+NOTE: SiO2 amorphized CLEANLY (1:2, 6 atoms lost) — the melt-quench issue
+may be Si-specific (Si's anomalous dense liquid); LiNbO3 over-sputtered
+instead. Check each oxide's g(r)/coordination when an oxide gate exists.
+
 ## RESUME HERE (2026-08-08, LATEST — read this first)
 
 **★ (g) DONE — T-9 NODE-VALIDATED 2026-08-09 (jobs 16306379 + 16306381).**
