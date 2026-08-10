@@ -28,11 +28,14 @@ SABSIM_TEMPLATE (study spec), VALWORK (scratch). Optional: T10_N_LATERAL /
 T10_N_DEPTH (slab size), T10_TRAJ_STRIDE (movie stride).
 """
 
+import dataclasses
 import os
 
 import numpy as np
 from ase import Atoms
 from ase.io import write as ase_write
+
+from sabsim.spec.records import Quantity
 
 from sabsim.driver.activation_gate import (
     activation_gate,
@@ -158,7 +161,17 @@ def main() -> None:
     seed = int(os.environ.get("T10_SEED", "20260809"))
 
     member = load_and_validate_study(template).members[1]   # si-si-reference
-    print("member:", member.name, "| domain:", member.material_domain)
+    # The universal DPA cascade is far more aggressive than the classical SW
+    # one the 75 eV default was tuned for (full fluence over-drove Si into a
+    # dense disordered state). T10_ENERGY_EV lowers the beam energy to find a
+    # gentle-enough dose; unset keeps 75 eV.
+    energy_override = os.environ.get("T10_ENERGY_EV")
+    if energy_override is not None:
+        member = dataclasses.replace(member, protocol=dataclasses.replace(
+            member.protocol,
+            activation_energy=Quantity(float(energy_override), "eV")))
+    print("member:", member.name, "| domain:", member.material_domain,
+          "| energy:", member.protocol.activation_energy)
 
     built, data_file, area, thickness = _build_silicon_slab(
         n_lateral, n_depth, work_directory)
