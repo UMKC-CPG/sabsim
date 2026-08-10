@@ -4,6 +4,58 @@ Working note, 2026-08-07. Tracks the effort to close the "runs on real
 physics" gap (TODO L1788): wire a universal foundation MLIP for the
 CASCADE and the bespoke DeePMD for the BOND-DEBOND. NOT canonical yet.
 
+## RESUME HERE (2026-08-09 EVENING — OVERNIGHT FLEET, read FIRST)
+
+Four V100 activations launched Sun 2026-08-09 ~21:30; all finish before the
+Tue 08:00 maintenance window (reservation `Aug_Maint`, all nodes). Branch
+`universal-mlip-cascade` is **9 commits ahead of main, NOT pushed** (Paul
+pushes own). Every harness is committed under `install/tests/`. Logs +
+artifacts in `$CPG_SHARE/share/models/dpa_gpu_bench/`.
+
+**THE JOBS** (check `sacct -j <id> --format=State,Elapsed`; `.out` files):
+- **T-10  16324481** (gpu g027) — Si 6x6x10 full-fluence activation, gate
+  DIRECTLY. Out: `t10-activate-gate-16324481.out` → look for
+  `T10 GATE PASSED|FAILED`. Surface: `t10_val/activated.extxyz`.
+- **T-10b 16345032** (requeue g021) — 2nd Si realization, seed 20260810 →
+  `t10b_val/`. A genuine A!=B pair with T-10 (preemptible; may restart).
+- **T-12 SiO2   16344824** (gpu) — amorphous SiO2 surface + movie →
+  `t12_val/sio2_activated.extxyz` + `sio2_movie.dump`.
+- **T-12 LiNbO3 16344825** (gpu) — amorphous LiNbO3 surface + movie →
+  `t12_val/linbo3_activated.extxyz` + `linbo3_movie.dump`.
+
+**NEXT WHEN THEY FINISH:**
+1. **Si (h):** if T-10 gate PASSED → (a) flip `UNIVERSAL_CASCADE_MODEL.
+   validated` False→True in `cascade_potential.py`; (b) append ledger T-10;
+   (c) run T-11 Si bond-debond: `sbatch install/tests/t11_bond_debond/
+   t11_bond_debond.slurm` (uses `t10_val` surface mirrored). For a TRUE
+   pair, edit t11 to load `t10_val` (A) + `t10b_val` (B). If FAILED → read
+   the failing metric; more fluence/impacts and/or tune
+   `share/activation/Si.toml`; re-run T-10.
+2. **Oxides — assemble + bond (the real target):** the two amorphized
+   halves are COMMENSURATE (2.03% strain, shared cell, global
+   `{Ar,Li,Nb,O,Si}` map; SiO2=wafer A, LiNbO3=wafer B). Assemble with
+   `assemble_amorphized_pair` (both already tagged) → bond-debond under
+   **Prakash's SiO2+LiNbO3 model**: `SABSIM_DEEPMD_MODEL=$CPG_SHARE/share/
+   training_deepmd_sio2_linbo3/model.pb` (type_map [Si,Li,Nb,O], rcut 6),
+   in-process deepmd — a T-11-style harness on the oxide surfaces (T-13,
+   to build).
+   **BLOCKER TO RESOLVE FIRST (§3.5 gate):** `press_and_bond` gates each
+   healed surface post-heal and HALTS on fail; there is NO oxide reference
+   (Si-only), and the gate keys on `frozenset(built.type_map)` = the GLOBAL
+   `{Ar,Li,Nb,O,Si}` set (same for BOTH wafers — it can't tell SiO2 from
+   LiNbO3). So the oxide bond needs EITHER (a) per-material references +
+   a per-wafer species key (a gate design change for heterogeneous
+   interfaces), OR (b) a gate-optional bond path for oxides. Decide with
+   Paul before T-13.
+3. **Movies:** `t12_val/{sio2,linbo3}_movie.dump`, `t10_val/
+   cascade_movie.dump`, `t10b_val/cascade_movie.dump` — OVITO/VMD.
+
+**WATCHERS:** two session background pollers were set (T-10 → auto-flip +
+ledger + auto-fire T-11 on PASS; T-12 both → report). If the session
+persisted they act/report automatically; if it ended, do the above by hand.
+The build tool for the oxide pair is `install/tests/t12_oxide_pair/
+build_matched_halves.py` (re-run to rebuild the matched halves).
+
 ## RESUME HERE (2026-08-08, LATEST — read this first)
 
 **★ (g) DONE — T-9 NODE-VALIDATED 2026-08-09 (jobs 16306379 + 16306381).**
