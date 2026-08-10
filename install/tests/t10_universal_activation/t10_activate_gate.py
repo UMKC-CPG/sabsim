@@ -180,6 +180,15 @@ def main() -> None:
 
     # FULL fluence — no shrink; this is the whole point of T-10.
     spec = derive_bombardment_spec(built, member)
+    # T10_MAX_IMPACTS caps the number of impacts — for a SHORT, finely
+    # sampled onset movie (e.g. 1 impact with a small T10_TRAJ_STRIDE) to
+    # watch the crystal -> melt transition the full-run stride skips past.
+    max_impacts = os.environ.get("T10_MAX_IMPACTS")
+    if max_impacts is not None:
+        keep = max(1, int(max_impacts))
+        spec = dataclasses.replace(
+            spec, impact_seeds=spec.impact_seeds[:keep],
+            impact_count=min(keep, spec.impact_count))
     print(f"cascade: {spec.impact_count} impacts of {spec.projectile_symbol} "
           f"at {spec.impact_energy:.0f} eV | dose "
           f"{spec.impact_count / area:.4f} ions/A^2")
