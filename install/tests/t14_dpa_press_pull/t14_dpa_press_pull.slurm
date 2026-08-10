@@ -31,7 +31,8 @@ echo "=== node / gpu ==="; nvidia-smi -L || true
 source "$SHARE/virtual_envs/sabsim/bin/activate" 2>/dev/null || true
 python -c "import sabsim, ase; print('sabsim env OK')" || exit 2
 ls "$SABSIM_CASCADE_MLIP_MODEL" || { echo "MODEL missing"; exit 3; }
-ls "$OXIDE_PAIR_DATA" || { echo "assembled pair missing (run T-13 first)"; exit 4; }
+ls "$OXIDE_PAIR_DATA" \
+    || { echo "assembled pair missing (run T-13 first)"; exit 4; }
 
 echo "=== running T-14 (DPA press-pull) ==="
 python "$REPO/install/tests/t14_dpa_press_pull/t14_dpa_press_pull.py"
