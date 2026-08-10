@@ -207,7 +207,8 @@ def main() -> None:
         built, member, cascade_force_model, data_file, spec, seed=seed,
         projectile_types=projectile_types, output_structure_file=dump_path,
         geometry=CascadeGeometry(),
-        trajectory_file=movie_path, trajectory_stride=traj_stride)
+        trajectory_file=movie_path, trajectory_stride=traj_stride,
+        skip_prerelax=(os.environ.get("T10_SKIP_PRERELAX") == "1"))
     print("script lines:", len(script), "| trajectory stride:", traj_stride)
 
     run_activate_subprocess(

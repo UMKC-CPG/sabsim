@@ -492,7 +492,8 @@ def build_activate_script(
         geometry: CascadeGeometry = CascadeGeometry(),
         control: CascadeControl = CascadeControl(),
         trajectory_file: str | None = None,
-        trajectory_stride: int = 200) -> list:
+        trajectory_stride: int = 200,
+        skip_prerelax: bool = False) -> list:
     """Assemble the CASCADE-ONLY activate run as one self-contained script.
 
     This is the out-of-process twin of :func:`run_cascade_to_fluence` plus
@@ -536,7 +537,12 @@ def build_activate_script(
         member, cascade_force_model, data_file, base_low, surface_high,
         seed, geometry)
     # The §2.4 out-of-plane relax before the first impact (same as live).
-    script += cascade_prerelax_commands()
+    # skip_prerelax omits it — a DIAGNOSTIC to test whether this minimize,
+    # run under the universal potential, itself disorders the crystal before
+    # any impact (observed for DPA-2.4-7M on Si: the pre-impact frame was
+    # already ~8-coordinated).
+    if not skip_prerelax:
+        script += cascade_prerelax_commands()
 
     # Optional cascade MOVIE: opened here (after the prerelax, before the
     # first impact) and held open across every impact and the cleanup, so
