@@ -38,6 +38,7 @@ export SABSIM_TEMPLATE="$REPO/dev/templates/study_spec.toml"
 # beam energy; unset keeps the study's 75 eV.
 export T12_BUILD_DIR="${T12_BUILD_DIR:-$BENCH/t12_val}"
 export VALWORK="${VALWORK:-$BENCH/t12_val}"
+mkdir -p "$VALWORK"
 
 echo "=== half: $T12_HALF_NAME ==="
 echo "=== node / gpu ==="; nvidia-smi -L || true
@@ -46,7 +47,8 @@ source "$SHARE/virtual_envs/sabsim/bin/activate" 2>/dev/null || true
 echo "python=$(command -v python)"
 python -c "import sabsim, ase; print('sabsim env OK')" || exit 2
 ls "$SABSIM_CASCADE_MLIP_MODEL" || { echo "MODEL missing"; exit 3; }
-ls "$VALWORK/${T12_HALF_NAME}_half.pkl" || { echo "no pre-built half"; exit 4; }
+ls "$T12_BUILD_DIR/${T12_HALF_NAME}_half.pkl" \
+    || { echo "no pre-built half in $T12_BUILD_DIR"; exit 4; }
 
 echo "=== running oxide cascade ($T12_HALF_NAME) ==="
 python "$REPO/install/tests/t12_oxide_pair/activate_half.py"
