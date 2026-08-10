@@ -23,14 +23,21 @@ artifacts in `$CPG_SHARE/share/models/dpa_gpu_bench/`.
 - **T-12 LiNbO3 16344825** (gpu) — amorphous LiNbO3 surface + movie →
   `t12_val/linbo3_activated.extxyz` + `linbo3_movie.dump`.
 
+**T-11 ALREADY QUEUED:** `16345420` submitted `--dependency=afterok:
+16324481` — it fires CLUSTER-SIDE when T-10 finishes (no session needed),
+on the `t10_val` surface MIRRORED. It fires REGARDLESS of the gate result
+(SLURM only sees T-10 exit 0): if T-10 activated well → a real Si
+work-of-separation + press/pull movie in `t11_val/`; if under-activated →
+T-11's own heal+gate halts harmlessly. Check `t11-bond-debond-16345420.out`.
+
 **NEXT WHEN THEY FINISH:**
-1. **Si (h):** if T-10 gate PASSED → (a) flip `UNIVERSAL_CASCADE_MODEL.
-   validated` False→True in `cascade_potential.py`; (b) append ledger T-10;
-   (c) run T-11 Si bond-debond: `sbatch install/tests/t11_bond_debond/
-   t11_bond_debond.slurm` (uses `t10_val` surface mirrored). For a TRUE
-   pair, edit t11 to load `t10_val` (A) + `t10b_val` (B). If FAILED → read
-   the failing metric; more fluence/impacts and/or tune
-   `share/activation/Si.toml`; re-run T-10.
+1. **Si (h):** read `t10-activate-gate-16324481.out` gate verdict. If
+   PASSED → (a) flip `UNIVERSAL_CASCADE_MODEL.validated` False→True in
+   `cascade_potential.py`; (b) append ledger T-10 + T-11 (from
+   16345420's out). If FAILED → read the failing metric; more
+   fluence/impacts and/or tune `share/activation/Si.toml`; re-run T-10.
+   For a TRUE A!=B pair, edit t11 to load `t10_val` (A) + `t10b_val` (B)
+   and re-run.
 2. **Oxides — assemble + bond (the real target):** the two amorphized
    halves are COMMENSURATE (2.03% strain, shared cell, global
    `{Ar,Li,Nb,O,Si}` map; SiO2=wafer A, LiNbO3=wafer B). Assemble with
