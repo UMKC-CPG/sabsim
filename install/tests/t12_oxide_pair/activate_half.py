@@ -18,11 +18,14 @@ cascade engine knobs (SABSIM_CASCADE_ENGINE_PREFIX / _MLIP_MODEL /
 _ALLOW_UNVALIDATED_POTENTIAL). Optional T12_TRAJ_STRIDE.
 """
 
+import dataclasses
 import os
 import pickle
 from types import SimpleNamespace
 
 from ase.io import write as ase_write
+
+from sabsim.spec.records import Quantity
 
 from sabsim.driver.cascade import (
     build_activate_script,
@@ -66,21 +69,32 @@ def main() -> None:
     half_name = os.environ["T12_HALF_NAME"]
     _self_log_environment(half_name)
     work_directory = os.environ["VALWORK"]
+    # The pre-built matched half is READ from the build dir (default = the
+    # output dir); a re-run at a different energy points VALWORK elsewhere so
+    # its outputs never clobber another energy's, while reusing the one build.
+    build_directory = os.environ.get("T12_BUILD_DIR", work_directory)
     template = os.environ["SABSIM_TEMPLATE"]
     traj_stride = int(os.environ.get("T12_TRAJ_STRIDE", "500"))
 
-    with open(os.path.join(work_directory, f"{half_name}_half.pkl"),
+    with open(os.path.join(build_directory, f"{half_name}_half.pkl"),
               "rb") as handle:
         half = pickle.load(handle)
-    data_file = os.path.join(work_directory, f"{half_name}_half.data")
+    data_file = os.path.join(build_directory, f"{half_name}_half.data")
     built = SimpleNamespace(atoms=half.atoms, type_map=half.type_map)
     print(f"{half_name}: {len(half.atoms)} atoms | type_map {half.type_map}")
 
-    # The cascade knobs (Ar beam, 75 eV, 0.025 ions/A^2, the 0.1 fs cascade
-    # step) are material-agnostic, so any member's protocol carries them; the
-    # impact COUNT derives from THIS half's lateral area. The universal force
-    # model ignores the member's domain.
+    # The cascade knobs (Ar beam, 0.025 ions/A^2, the 0.1 fs cascade step) are
+    # material-agnostic, so any member's protocol carries them; the impact
+    # COUNT derives from THIS half's lateral area. The universal force model
+    # ignores the member's domain. The BEAM ENERGY is overridable via
+    # T12_ENERGY_EV — LiNbO3 needs far less than silicon's 75 eV to amorphize
+    # without heavy, Li-preferential sputtering (75 eV ablated ~40 A).
     member = load_and_validate_study(template).members[1]   # si-si-reference
+    energy_override = os.environ.get("T12_ENERGY_EV")
+    if energy_override is not None:
+        member = dataclasses.replace(member, protocol=dataclasses.replace(
+            member.protocol,
+            activation_energy=Quantity(float(energy_override), "eV")))
     spec = derive_bombardment_spec(built, member)
     print(f"cascade: {spec.impact_count} impacts of {spec.projectile_symbol} "
           f"at {spec.impact_energy:.0f} eV")
