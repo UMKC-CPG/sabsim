@@ -152,6 +152,10 @@ def main() -> None:
     n_lateral = int(os.environ.get("T10_N_LATERAL", "6"))
     n_depth = int(os.environ.get("T10_N_DEPTH", "10"))
     traj_stride = int(os.environ.get("T10_TRAJ_STRIDE", "500"))
+    # The cascade seed: a distinct value gives an INDEPENDENT realization
+    # (a different impact pattern), for a true A/B pair. Default reproduces
+    # the first T-10 run.
+    seed = int(os.environ.get("T10_SEED", "20260809"))
 
     member = load_and_validate_study(template).members[1]   # si-si-reference
     print("member:", member.name, "| domain:", member.material_domain)
@@ -178,7 +182,7 @@ def main() -> None:
     dump_path = os.path.join(work_directory, "activated.dump")
     movie_path = os.path.join(work_directory, "cascade_movie.dump")
     script = build_activate_script(
-        built, member, cascade_force_model, data_file, spec, seed=20260809,
+        built, member, cascade_force_model, data_file, spec, seed=seed,
         projectile_types=projectile_types, output_structure_file=dump_path,
         geometry=CascadeGeometry(),
         trajectory_file=movie_path, trajectory_stride=traj_stride)
