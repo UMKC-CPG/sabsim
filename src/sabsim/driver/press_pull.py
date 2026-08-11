@@ -282,7 +282,8 @@ def _press_setup(
     read as one continuous movie of the wafers meeting and relaxing.
     """
     commands = (
-        preamble_commands(data_file, member.numerical.md_timestep)
+        preamble_commands(data_file, member.numerical.md_timestep,
+                          force_model)
         + force_model_commands(force_model)
         + region_group_commands(built, geometry)
         + integrator_commands(member, seed)
@@ -528,7 +529,8 @@ def _pull_setup(
     1.3 GB, so a run nobody intends to analyze does not write them.
     """
     return (
-        preamble_commands(data_file, member.numerical.md_timestep)
+        preamble_commands(data_file, member.numerical.md_timestep,
+                          force_model)
         + pull_headroom_commands(rate, travel_time)
         + _pull_fixture_commands(
             built, member, force_model, rate, seed, geometry,
@@ -596,7 +598,7 @@ def begin_or_resume_pull(
     # and NO headroom — the box came back with it), then re-establish the
     # fixtures over it. The step count rides in with the restart, so the
     # ledger reconciles to where the atoms actually are.
-    engine.commands(restart_preamble_commands())
+    engine.commands(restart_preamble_commands(force_model))
     engine.read_restart(checkpoint.engine_state)
     engine.commands(
         timestep_command(numerical.md_timestep)
