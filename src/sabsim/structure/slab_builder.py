@@ -70,9 +70,10 @@ from pymatgen.io.ase import AseAtomsAdaptor
 # bond is later one whose endpoints carry different tags; a transferred
 # atom is one that ends in the fragment whose tag it does not share.
 # Wafer A is the BOTTOM slab and wafer B the TOP by construction (see
-# BuiltPair), so these tags also split the pair into bottom vs top.
-WAFER_A_TAG = 1
-WAFER_B_TAG = 2
+# BuiltPair), so these tags also split the pair into bottom vs top. They
+# are DEFINED in the dependency-free `wafer_tags` module and re-exported
+# here (so the driver can import them without pulling in pymatgen/ASE).
+from sabsim.structure.wafer_tags import WAFER_A_TAG, WAFER_B_TAG
 
 # Below this residual-strain magnitude the two surface lattices count as
 # already coincident — the identity case the null test checks and the

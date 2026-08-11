@@ -75,7 +75,7 @@ from sabsim.driver.resume import (
     write_checkpoint,
 )
 from sabsim.spec.records import MemberSpecification, Quantity
-from sabsim.structure.slab_builder import WAFER_A_TAG, WAFER_B_TAG
+from sabsim.structure.wafer_tags import WAFER_A_TAG, WAFER_B_TAG
 
 
 @dataclass(frozen=True)
