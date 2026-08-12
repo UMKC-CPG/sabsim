@@ -74,6 +74,23 @@ class Engine(ABC):
         """
 
     @abstractmethod
+    def atom_ids(self) -> np.ndarray:
+        """Return the survivors' LAMMPS atom ids, ascending, row-for-row
+        with :meth:`positions` and :meth:`types`.
+
+        The press/pull control loop pairs positions with the BUILDER's
+        per-atom wafer-tag array. That array is keyed by ORIGINAL atom id
+        (the build order is the id order, so atom id ``k`` carries tag
+        ``tags[k-1]``). When a free surface EVAPORATES or SPUTTERS atoms
+        under a long run, the survivors keep their original ids but those
+        ids are no longer the dense ``1..N`` set — there are gaps. Exposing
+        the surviving ids lets a caller re-index the full tag array onto the
+        survivors (``tags[atom_ids - 1]``) so the row-for-row pairing holds
+        even after loss. With nothing lost the ids ARE ``1..N`` and the
+        re-index is the identity, matching the original contract.
+        """
+
+    @abstractmethod
     def normal_stress(self) -> float:
         """Return the global normal (zz) stress, in metal pressure units.
 
@@ -264,8 +281,28 @@ class MockEngine(Engine):
         return self._atom_count
 
     def positions(self) -> np.ndarray:
-        """Return the next scripted position frame, else empty."""
-        return np.asarray(self._positions.next(np.zeros((0, 3))), float)
+        """Return the next scripted position frame, else empty.
+
+        The frame's length is remembered so :meth:`atom_ids` can hand back
+        a matching id set on the very next call — the pairing the press/pull
+        realignment relies on.
+        """
+        frame = np.asarray(self._positions.next(np.zeros((0, 3))), float)
+        self._last_atom_count = int(frame.shape[0])
+        return frame
+
+    def atom_ids(self) -> np.ndarray:
+        """Return dense ascending ids over the last positions frame.
+
+        The mock models no id gaps (it drops no atoms), so the surviving
+        ids are simply ``1..N`` for the N atoms the most recent
+        :meth:`positions` returned. Re-indexing a builder tag array by these
+        (``tags[atom_ids - 1]``) is therefore the identity, exactly as a
+        loss-free real run would be. Falls back to the preset atom count if
+        asked before any positions frame has been served.
+        """
+        count = getattr(self, "_last_atom_count", self._atom_count)
+        return np.arange(1, count + 1, dtype=int)
 
     def types(self) -> np.ndarray:
         """Return the next scripted per-atom type frame, else empty.

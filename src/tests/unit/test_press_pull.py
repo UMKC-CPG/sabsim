@@ -19,6 +19,7 @@ from sabsim.driver.engine import MockEngine
 from sabsim.driver.activation_gate import ActivationVerdict
 from sabsim.driver.press_pull import (
     RunControl,
+    _positions_with_tags,
     _scissors_delta,
     begin_or_resume_pull,
     gate_healed_surfaces,
@@ -589,3 +590,65 @@ def test_gate_healed_surfaces_gates_each_wafer_by_tag():
                "amorphization_depth"}
     assert set(verdict_a.per_metric) == metrics
     assert set(verdict_b.per_metric) == metrics
+
+
+class _LossyEngine:
+    """A minimal stand-in that reports SURVIVORS after atom loss.
+
+    A real free surface evaporates atoms under a long universal-MLIP run,
+    leaving the survivors' ids as a NON-consecutive subset of ``1..N``. The
+    mock cannot express that (it keeps ids dense), so this tiny engine hands
+    back a chosen id set and the matching positions to prove that
+    :func:`_positions_with_tags` realigns the full builder tag array onto
+    exactly the survivors — the fix for the ``gather_atoms`` crash.
+    """
+
+    def __init__(self, survivor_ids, survivor_positions) -> None:
+        self._ids = np.asarray(survivor_ids, dtype=int)
+        self._positions = np.asarray(survivor_positions, dtype=float)
+
+    def positions(self) -> np.ndarray:
+        return self._positions
+
+    def atom_ids(self) -> np.ndarray:
+        return self._ids
+
+
+def test_positions_with_tags_realigns_after_atom_loss():
+    """Losing an interior atom must drop its tag, not shift the rest.
+
+    Four atoms are built as wafers ``[A, A, B, B]`` (ids 1..4). Atom id 3
+    (the first B atom) evaporates, so the engine returns only ids
+    ``[1, 2, 4]``. The realigned tags must be ``[A, A, B]`` — atom 4 keeps
+    its B tag because the re-index is BY ID (``tags[id-1]``), not by row
+    position, which a naive length-truncation would get wrong.
+    """
+    full_tags = np.array([WAFER_A_TAG, WAFER_A_TAG,
+                          WAFER_B_TAG, WAFER_B_TAG])
+    survivor_ids = [1, 2, 4]
+    survivor_positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+                          [3.0, 0.0, 0.0]]
+    engine = _LossyEngine(survivor_ids, survivor_positions)
+
+    frame, aligned_tags = _positions_with_tags(engine, full_tags)
+
+    assert frame.shape == (3, 3)
+    np.testing.assert_array_equal(
+        aligned_tags, [WAFER_A_TAG, WAFER_A_TAG, WAFER_B_TAG])
+
+
+def test_positions_with_tags_is_identity_without_loss():
+    """With every atom present the realignment must be a no-op.
+
+    This guards the backward-compatibility promise: when nothing is lost
+    the survivor ids are the dense ``1..N`` and the returned tags equal the
+    builder's array unchanged, so the original row-for-row contract holds.
+    """
+    full_tags = np.array([WAFER_A_TAG, WAFER_B_TAG, WAFER_B_TAG])
+    engine = _LossyEngine([1, 2, 3],
+                          [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+                           [2.0, 0.0, 0.0]])
+
+    _frame, aligned_tags = _positions_with_tags(engine, full_tags)
+
+    np.testing.assert_array_equal(aligned_tags, full_tags)

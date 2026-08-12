@@ -156,6 +156,13 @@ class _RecordingEngine:
         import numpy as np
         return np.zeros((self._atoms, 3))
 
+    def atom_ids(self):
+        # Dense ids over whatever positions frame this stub serves, so the
+        # press/pull tag realignment sees a loss-free 1..N (identity). Keyed
+        # off positions() so a subclass overriding it stays consistent.
+        import numpy as np
+        return np.arange(1, self.positions().shape[0] + 1)
+
     def box(self):
         import numpy as np
         return np.diag([10.0, 10.0, self._height])

@@ -221,6 +221,29 @@ def _wafer_z(positions: np.ndarray, tags: np.ndarray) -> tuple:
     return z_lower, z_upper
 
 
+def _positions_with_tags(engine: Engine, tags: np.ndarray) -> tuple:
+    """Current positions and their wafer tags, aligned row-for-row.
+
+    The builder's tag array covers the ORIGINAL N atoms, keyed by atom id
+    (build order == id order, so atom id ``k`` carries ``tags[k-1]``). Under
+    a long universal-MLIP run a free surface evaporates or sputters a few
+    atoms, so :meth:`engine.positions` returns only M <= N survivors. Pairing
+    those M rows against the full N-entry tag array would misalign (or raise
+    on the length mismatch), which is the failure that stalled every DPA
+    press/pull once atoms began to shed.
+
+    The engine also exposes the survivors' ids in the same ascending order
+    as the positions rows, so re-indexing the tag array by those ids
+    (``tags[atom_ids - 1]``) realigns tags onto exactly the survivors. With
+    no loss the ids are ``1..N`` and this is the identity, preserving the
+    original row-for-row contract.
+    """
+    frame = np.asarray(engine.positions(), dtype=float)
+    survivor_ids = np.asarray(engine.atom_ids(), dtype=int)
+    aligned_tags = np.asarray(tags)[survivor_ids - 1]
+    return frame, aligned_tags
+
+
 def gate_healed_surfaces(engine: Engine, built) -> tuple:
     """Gate each HEALED surface of the assembled pair (§3.5, in the bond flow).
 
@@ -239,8 +262,8 @@ def gate_healed_surfaces(engine: Engine, built) -> tuple:
     activated slab. Returns ``(verdict_a, verdict_b)``; the caller halts the
     bond before the press if either failed.
     """
-    positions = np.asarray(engine.positions(), dtype=float)
-    tags = np.asarray(built.atoms.get_tags())
+    positions, tags = _positions_with_tags(
+        engine, np.asarray(built.atoms.get_tags()))
     cell = np.asarray(built.atoms.get_cell(), dtype=float)
     references = load_activation_references(frozenset(built.type_map))
 
@@ -331,7 +354,8 @@ def _scissors_delta(
     negative: if the surfaces already sit within the target, nothing is
     cut.
     """
-    z_lower, z_upper = _wafer_z(np.asarray(engine.positions()), tags)
+    frame, aligned_tags = _positions_with_tags(engine, tags)
+    z_lower, z_upper = _wafer_z(frame, aligned_tags)
     wanted = interface_opening(z_lower, z_upper, bin_width) - target_gap
     # The real nearest-atom separation is the ceiling the cut cannot cross.
     closest_atom_gap = float(z_upper.min() - z_lower.max())
@@ -407,7 +431,8 @@ def press_and_bond(
     contact_chunk = None
     for chunk in range(control.max_chunks):
         engine.commands([f"run {control.chunk_steps}"])
-        z_lower, z_upper = _wafer_z(np.asarray(engine.positions()), tags)
+        frame, aligned_tags = _positions_with_tags(engine, tags)
+        z_lower, z_upper = _wafer_z(frame, aligned_tags)
         opening = interface_opening(
             z_lower, z_upper, control.density_bin_width)
         stress_series.append(engine.normal_stress())
@@ -679,8 +704,8 @@ def pull_at_rate(
         # across a resume, where a burst counter would restart at zero.
         ledger.sample_steps.append(step)
         ledger.displacement.append(rate_metal * (step * timestep))
-        frame = np.asarray(engine.positions())
-        z_lower, z_upper = _wafer_z(frame, tags)
+        frame, aligned_tags = _positions_with_tags(engine, tags)
+        z_lower, z_upper = _wafer_z(frame, aligned_tags)
         ledger.opening.append(interface_opening(
             z_lower, z_upper, control.density_bin_width))
         ledger.force.append(engine.grip_reaction("top"))

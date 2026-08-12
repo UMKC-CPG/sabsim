@@ -142,40 +142,79 @@ class LammpsEngine(Engine):
         """Return the number of atoms (maps to get_natoms)."""
         return int(self._lmp.get_natoms())
 
-    def positions(self) -> np.ndarray:
-        """Return the atom positions as an (N, 3) array, in atom-id order.
+    def _survivor_order(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return ``(ids_ascending, permutation)`` for the current atoms.
 
-        ``gather_atoms`` is COLLECTIVE: every rank gets all N atoms
-        ordered by atom id, regardless of which rank owns them. That is
-        what the control loop needs, because it pairs this array
-        row-for-row with the builder's tag array (``press_pull`` §9.5) —
-        a rank-local view would pair a position with another atom's tag.
-        Note this lives on the plain LAMMPS object and NOT on its
-        ``numpy`` wrapper, which has no ``gather_atoms``; it hands back a
-        flat ctypes buffer of 3N doubles (``dtype=1``, ``count=3``) that
-        is copied into a real array here.
+        The read-backs below must survive atom LOSS: a free surface under a
+        long universal-MLIP run evaporates or sputters a few atoms, so the
+        surviving ids are a subset of ``1..N`` WITH GAPS. The old-style
+        ``gather_atoms`` cannot express that — it demands a dense,
+        consecutive id set and raises ``lammps_gather_atoms(): Atom-IDs
+        must exist and be consecutive`` the moment one is missing, which is
+        exactly what killed every DPA press/pull.
 
-        VERIFIED on a compute node (stage 4): the gathered id order is
-        1..N and matches the builder's write order exactly, under both 1
-        and 4 MPI ranks, so a position row and its tag line up.
+        ``gather_atoms_concat`` has no such requirement: it gathers every
+        atom across ranks, but grouped by rank in each rank's local order
+        rather than by id. Sorting by id turns that arbitrary order into a
+        stable, canonical ASCENDING-ID order. The permutation is returned so
+        the sibling reads (positions, types) can be reordered the SAME way —
+        both are gathered in a separate concat call, but with no MD run
+        between them the concat order is identical, so one permutation
+        aligns them all. With nothing lost the ids are ``1..N`` and this
+        reproduces the old id-ordered behaviour exactly.
         """
-        flat_positions = self._lmp.gather_atoms("x", 1, 3)
-        return np.array(flat_positions, dtype=float).reshape(-1, 3)
+        raw_ids = np.array(
+            self._lmp.gather_atoms_concat("id", 0, 1), dtype=int)
+        permutation = np.argsort(raw_ids, kind="stable")
+        return raw_ids[permutation], permutation
+
+    def positions(self) -> np.ndarray:
+        """Return the atom positions as an (M, 3) array, ascending id order.
+
+        The control loop pairs this array row-for-row with the builder's
+        wafer-tag array (``press_pull`` §9.5), so the rows MUST be in a
+        deterministic per-atom order — a rank-local view would pair a
+        position with another atom's tag. The order here is ascending atom
+        id (see :meth:`_survivor_order`), which equals the builder's write
+        order when no atom has been lost. When atoms HAVE been lost the row
+        count M is below the original N; a caller realigns the full tag
+        array through :meth:`atom_ids`.
+
+        The concat gather hands back a flat buffer of ``3M`` doubles
+        (``dtype=1``, ``count=3``); it is reshaped and then reordered by the
+        id-sort permutation so a position row and its id (and tag) line up.
+        """
+        ids_sorted, permutation = self._survivor_order()
+        flat_positions = self._lmp.gather_atoms_concat("x", 1, 3)
+        stacked = np.array(flat_positions, dtype=float).reshape(-1, 3)
+        return stacked[permutation]
 
     def types(self) -> np.ndarray:
-        """Return per-atom LAMMPS type ids as an (N,) int array, id-ordered.
+        """Return per-atom LAMMPS type ids as an (M,) int array, id-ordered.
 
-        The species half of the same collective read-back as
-        :meth:`positions`: ``gather_atoms("type", ...)`` gathers every
-        atom's integer type across ranks in atom-id order, so type row i
-        and position row i belong to the same atom. The count is 1 int per
-        atom (``dtype=0`` for int, ``count=1``), against ``x``'s 3 doubles.
-        The amorphized-half read-back needs this because sputtering and the
-        projectile deletion change the composition, so the pre-cascade
-        species list no longer describes the survivors (Engine contract).
+        The species half of the same read-back as :meth:`positions`, sharing
+        its ascending-id order so type row i and position row i belong to
+        the same atom. The count is 1 int per atom (``dtype=0`` for int,
+        ``count=1``), against ``x``'s 3 doubles. The amorphized-half
+        read-back needs this because sputtering and the projectile deletion
+        change the composition, so the pre-cascade species list no longer
+        describes the survivors (Engine contract). Gathered loss-tolerantly
+        (``gather_atoms_concat``) and reordered by the shared permutation.
         """
-        flat_types = self._lmp.gather_atoms("type", 0, 1)
-        return np.array(flat_types, dtype=int)
+        _ids_sorted, permutation = self._survivor_order()
+        flat_types = self._lmp.gather_atoms_concat("type", 0, 1)
+        return np.array(flat_types, dtype=int)[permutation]
+
+    def atom_ids(self) -> np.ndarray:
+        """Return the survivors' atom ids, ascending (Engine contract).
+
+        These are the ids that survived any sputtering/evaporation, in the
+        SAME ascending order as :meth:`positions` and :meth:`types`. A caller
+        re-indexes its builder tag array as ``tags[atom_ids - 1]`` to realign
+        wafer tags onto the survivors after loss.
+        """
+        ids_sorted, _permutation = self._survivor_order()
+        return ids_sorted
 
     def normal_stress(self) -> float:
         """Return the global normal (zz) stress, in metal pressure units.
