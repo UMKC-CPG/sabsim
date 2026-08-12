@@ -96,6 +96,14 @@ def main() -> None:
             member.protocol,
             activation_energy=Quantity(float(energy_override), "eV")))
     spec = derive_bombardment_spec(built, member)
+    # T12_MAX_IMPACTS caps the impact count (e.g. 1 for a minimally-
+    # disturbed surface — a single low-energy ion, no full fluence).
+    max_impacts = os.environ.get("T12_MAX_IMPACTS")
+    if max_impacts is not None:
+        keep = max(1, int(max_impacts))
+        spec = dataclasses.replace(
+            spec, impact_seeds=spec.impact_seeds[:keep],
+            impact_count=min(keep, spec.impact_count))
     print(f"cascade: {spec.impact_count} impacts of {spec.projectile_symbol} "
           f"at {spec.impact_energy:.0f} eV")
 
