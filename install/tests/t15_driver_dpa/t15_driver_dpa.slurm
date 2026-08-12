@@ -32,7 +32,12 @@ export SIO2_SURFACE="${SIO2_SURFACE:-$_sio2}"
 export LINBO3_SURFACE="${LINBO3_SURFACE:-$_linbo3}"
 export MATCH_PKL="$BENCH/t12_val/match.pkl"
 export SABSIM_CASCADE_MLIP_MODEL="$BENCH/v320fix/dpa24.pt2"
-export VALWORK="$BENCH/t15_val"
+# Honor a per-run VALWORK passed via --export (e.g. one dir per limiting
+# pair) so concurrent jobs never share an output directory. Bare `sbatch`
+# with no override falls back to the single-run default. The earlier T-16
+# batch hardcoded this and both pairs raced in one dir; the fallback form
+# fixes that while keeping the no-arg path working.
+export VALWORK="${VALWORK:-$BENCH/t15_val}"
 mkdir -p "$VALWORK"
 
 echo "=== node / gpu ==="; nvidia-smi -L || true
