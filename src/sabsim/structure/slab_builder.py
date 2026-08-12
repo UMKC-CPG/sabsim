@@ -432,6 +432,72 @@ def _polar_rotation(deformation: np.ndarray) -> np.ndarray:
     return rotation
 
 
+def _promote_to_3d(cell: np.ndarray) -> np.ndarray:
+    """Return the two cell vectors as a 2x3 array (pad a zero z if 2D)."""
+    matrix = np.asarray(cell, dtype=float)
+    if matrix.shape[1] == 2:
+        matrix = np.column_stack([matrix, np.zeros(len(matrix))])
+    return matrix
+
+
+def _rotation_between(source: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """A 3x3 rotation mapping unit vector ``source`` onto ``target``.
+
+    Rodrigues' formula for the minimal rotation between two directions. The
+    caller pre-aligns the two to the same hemisphere, so the antiparallel
+    degenerate case cannot arise and identity covers the already-aligned one.
+    """
+    axis = np.cross(source, target)
+    sine = np.linalg.norm(axis)
+    cosine = float(np.dot(source, target))
+    if sine < 1.0e-12:
+        return np.eye(3)
+    skew = np.array([[0.0, -axis[2], axis[1]],
+                     [axis[2], 0.0, -axis[0]],
+                     [-axis[1], axis[0], 0.0]])
+    return np.eye(3) + skew + skew @ skew * ((1.0 - cosine) / sine ** 2)
+
+
+def _coplanar_2d(substrate_cell, film_cell) -> tuple:
+    """Bring both matched supercells into ONE plane and express them in 2D.
+
+    The Zur-McGill supercell vectors are 3D, and for two slabs cut on
+    DIFFERENT crystal faces the two cells can live in DIFFERENT planes:
+    SiO2(100)'s surface vectors tilt out of the xy-plane, LiNbO3(001)'s lie
+    in it. Naively dropping the z component (the old ``[:, :2]``) then
+    SHORTENS the tilted cell -- SiO2's true 4.869 A edge reads as 4.217 A --
+    so the even split lands BELOW both materials and over-compresses the
+    build (the ~24 GPa the T-16/T-17 oxide cells carried, which amorphized
+    the crystal before any impact). Instead we ROTATE the film's plane onto
+    the substrate's (a rigid 3D rotation, so the film's true lengths and its
+    in-plane twist survive -- the caller's polar decomposition still removes
+    the twist), then express both cells in an orthonormal basis of the
+    substrate plane. That drop to 2D is lossless. For cells already
+    co-planar in xy (Si/Si, and every 2D array the tests pass) the rotation
+    is the identity and the basis is (x, y), so the plain-midpoint and
+    twist-removal behaviours are exactly preserved.
+    """
+    substrate3 = _promote_to_3d(substrate_cell)
+    film3 = _promote_to_3d(film_cell)
+    substrate_normal = np.cross(substrate3[0], substrate3[1])
+    substrate_normal = substrate_normal / np.linalg.norm(substrate_normal)
+    film_normal = np.cross(film3[0], film3[1])
+    film_normal = film_normal / np.linalg.norm(film_normal)
+    # The cross-product normal's sign is arbitrary handedness; align the two
+    # to the same hemisphere so the plane-aligning rotation is the minimal
+    # one and never a spurious 180-degree flip.
+    if np.dot(film_normal, substrate_normal) < 0.0:
+        film_normal = -film_normal
+    film3 = film3 @ _rotation_between(film_normal, substrate_normal).T
+    # Orthonormal basis of the shared (substrate) plane; both cells project
+    # onto it with NO length lost, since both now lie in that plane.
+    first = substrate3[0] / np.linalg.norm(substrate3[0])
+    second = substrate3[1] - np.dot(substrate3[1], first) * first
+    second = second / np.linalg.norm(second)
+    basis = np.array([first, second])
+    return substrate3 @ basis.T, film3 @ basis.T
+
+
 def even_split_shared_cell(
         substrate_cell: np.ndarray,
         film_cell: np.ndarray) -> np.ndarray:
@@ -457,11 +523,16 @@ def even_split_shared_cell(
     later strained onto it (:func:`tile_slab_to_shared_cell`), the film
     absorbing the twist as part of its map. Because the midpoint is
     equidistant from both aligned cells, each slab feels half the misfit —
-    the even split. Only the in-plane (first two components) of each vector
-    is used; any vacuum z-component is ignored.
+    the even split. The two supercells may lie in DIFFERENT planes (slabs
+    cut on different faces), so they are first rotated into one plane and
+    expressed in 2D with their true lengths (:func:`_coplanar_2d`) — NOT
+    projected by dropping z, which would shorten a tilted cell and shrink
+    the shared cell below both materials.
     """
-    substrate = np.asarray(substrate_cell, dtype=float)[:, :2]
-    film = np.asarray(film_cell, dtype=float)[:, :2]
+    # Bring both cells into one plane, expressed in 2D with their TRUE
+    # lengths (a naive z-drop would shorten an out-of-plane cell and shrink
+    # the shared cell below both materials -- see :func:`_coplanar_2d`).
+    substrate, film = _coplanar_2d(substrate_cell, film_cell)
     # Carry the film supercell onto the substrate one; the rotation part of
     # that map is the twist between the two slabs (§2.3).
     film_to_substrate = substrate @ np.linalg.inv(film)
@@ -480,32 +551,70 @@ def tile_slab_to_shared_cell(
     """Tile a slab by its match matrix and strain it onto the shared cell.
 
     The geometric heart of the strained-coincidence assembly (§2.3, §2.4).
-    ``tiling`` is the slab's whole-number 2x2 matrix from the Zur-McGill
-    match — how many primitive surface cells, combined which way, make its
-    matched supercell. It can be NON-diagonal (the off-diagonal whole
-    numbers are exactly what let the search find a small shared cell, §2.3),
-    which a plain axis-by-axis repeat cannot express, so the tiling is
-    applied with ``make_supercell`` on the full 3x3 transform (identity
-    along z, so the vacuum direction is untouched).
+    We build the integer supercell of THIS slab whose shape matches the
+    ``shared_cell``, then apply only the small misfit strain onto it.
 
-    The tiled supercell is then STRAINED onto ``shared_cell`` — the single
-    in-plane cell both slabs share (:func:`even_split_shared_cell`) — by
-    replacing the in-plane cell and rescaling the atoms with it
-    (``scale_atoms=True`` holds every atom's fractional position, so the
-    basis rides along and the layer spacing along z is left exactly as cut;
-    the out-of-plane relaxation §2.4 calls for happens later, under the
-    force model). Because BOTH slabs are set to the identical
-    ``shared_cell`` here, they emerge commensurate to numerical noise, which
-    is precisely what the assembly's commensurability assertion checks
-    (:func:`sabsim.structure.amorphized_assembly._assert_commensurate`).
+    The supercell matrix is derived from the slab's OWN primitive surface
+    cell and the shared cell (``round(shared_cell @ inverse(primitive))``),
+    NOT from ``tiling`` directly. That matters when the two slabs are cut on
+    different faces: a hexagonal surface's matched cell is a RECTANGLE, and
+    the honest way to fill that rectangle is to cut it out of the crystal
+    with ``make_supercell`` — which places the correct atoms for whatever
+    shape and count the rectangle needs (a hexagon re-expressed as a
+    rectangle simply gets however many atoms the rectangle holds). Building
+    the raw ``tiling`` supercell instead gives an OBLIQUE cell that then has
+    to be SHEARED onto the rectangular shared cell — a large spurious strain
+    (the ~24 GPa the T-17 oxide cells carried on their long axis). ``tiling``
+    is kept as a cross-check: it fixes the same number of primitive cells, so
+    a mismatch flags an inconsistent shared cell rather than a silent
+    under- or over-fill.
+
+    The supercell is then STRAINED onto ``shared_cell`` by replacing the
+    in-plane cell and rescaling the atoms (``scale_atoms=True`` holds every
+    atom's fractional position, so the basis rides along and the layer
+    spacing along z is left exactly as cut; the out-of-plane relaxation §2.4
+    calls for happens later, under the force model). Because the supercell
+    already has the shared cell's SHAPE, this is a pure ~few-percent stretch
+    with NO shear. Both slabs set to the identical ``shared_cell`` emerge
+    commensurate to numerical noise, which is what the assembly's
+    commensurability assertion checks (:func:`sabsim.structure.
+    amorphized_assembly._assert_commensurate`).
     """
+    # Build the matched supercell from the authoritative Zur-McGill tiling:
+    # `make_supercell` fills it with the correct atoms (the tiling's
+    # determinant sets the count), in whatever shape the tiling gives -- which
+    # for a hexagonal surface is an OBLIQUE cell.
     transform = np.eye(3)
     transform[:2, :2] = np.asarray(tiling, dtype=float)
     tiled = make_supercell(slab, transform)
+
+    # Re-index that supercell to the shared cell's SHAPE before straining. A
+    # whole-number re-outlining of the SAME lattice (determinant +-1, so the
+    # atom count is untouched) turns the oblique cell into the rectangle the
+    # shared cell is, so the strain that follows is a pure stretch with NO
+    # shear. This is the honest hex->rect: relabel the boundary, never shear
+    # the atoms. For a slab whose supercell is already the right shape (e.g.
+    # Si/Si) the re-index is the identity and nothing changes.
+    current = np.asarray(tiled.get_cell())[:2, :2]
+    target = np.asarray(shared_cell, dtype=float)[:, :2]
+    reindex = np.rint(target @ np.linalg.inv(current))
+    # Re-index ONLY when it is a genuine whole-number re-outlining of the same
+    # lattice (determinant exactly +-1): that is the hexagonal-to-rectangular
+    # case, where it removes the shear for free. When the two cells differ by
+    # a rotation (a TWISTED match, which `match_surfaces` may return) the
+    # rounded matrix is not unimodular; there is no free re-outline, so we
+    # leave the supercell as tiled and let the strain below absorb the misfit,
+    # exactly as before this fix. The condition DETECTS the safe case rather
+    # than assuming it (a determinant of 0 or 2+ means "not a re-outline").
+    if abs(int(round(np.linalg.det(reindex)))) == 1:
+        reindex_transform = np.eye(3)
+        reindex_transform[:2, :2] = reindex
+        tiled = make_supercell(tiled, reindex_transform)
+
     # Replace ONLY the in-plane cell with the shared one, keeping the slab's
     # own z (vacuum) vector and flattening any z-leak in the in-plane rows.
     strained_cell = np.asarray(tiled.get_cell()).copy()
-    strained_cell[:2, :2] = np.asarray(shared_cell, dtype=float)[:, :2]
+    strained_cell[:2, :2] = target
     strained_cell[:2, 2] = 0.0
     tiled.set_cell(strained_cell, scale_atoms=True)
     return tiled

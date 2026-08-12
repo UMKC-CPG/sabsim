@@ -148,10 +148,64 @@ def test_even_split_undoes_the_twist_before_averaging():
         film_aligned @ film_aligned.T, film @ film.T, atol=1.0e-9)
 
 
+def test_even_split_uses_true_lengths_of_out_of_plane_vectors():
+    """A film cell tilted out of xy must not be shortened by projection.
+
+    Regression for the SiO2(100)/LiNbO3(001) build (T-17): SiO2's short
+    supercell vector points ~30 deg out of the surface plane, so its TRUE
+    length (4.869) differs from its bare xy-projection (4.217). The earlier
+    even split dropped z and averaged the PROJECTION against LiNbO3's
+    in-plane 5.119, landing the shared short edge at 4.668 -- below BOTH
+    materials -- which over-compressed the build to ~24 GPa and amorphized
+    the crystal before any impact. The shared short edge must instead be the
+    midpoint of the true lengths, ~4.994.
+    """
+    substrate = np.array([[5.119, 0.0, 0.0], [0.0, 44.335, 0.0]])
+    # SiO2 short vector: xy-length 4.217, z = -2.435 -> true length 4.869.
+    film = np.array([[4.217, 0.0, -2.435], [0.0, 44.129, 0.0]])
+
+    shared = even_split_shared_cell(substrate, film)
+
+    short_edge = float(np.linalg.norm(shared[0]))
+    # The midpoint of the TRUE lengths (4.869, 5.119), not the projected
+    # average (4.217, 5.119) = 4.668 that caused the bug.
+    assert abs(short_edge - 4.994) < 0.02, short_edge
+
+
+def test_tile_hexagonal_slab_to_rectangular_cell_without_shear():
+    """A hexagonal surface fills a rectangular cell by CUTTING, not shearing.
+
+    Regression for the T-17 oxide build: LiNbO3(001)'s surface stamp is a
+    120-degree diamond, but its matched cell is a rectangle. Building the raw
+    tiling supercell gives an oblique 120-degree cell that, forced onto the
+    rectangle, shears ~30 degrees -- a huge spurious strain (~24 GPa). The
+    tiler must instead build the crystal's rectangular supercell directly
+    (correct atom count) and strain only the small misfit, so the result is
+    rectangular with no shear.
+    """
+    from ase import Atoms
+    hexagonal = [[5.119, 0.0, 0.0], [-2.56, 4.434, 0.0], [0.0, 0.0, 30.0]]
+    slab = Atoms("Li", positions=[[0.0, 0.0, 15.0]], cell=hexagonal,
+                 pbc=[True, True, False])
+    tiling = np.array([[1, 0], [0, 10]])           # pymatgen's diagonal tiling
+    shared = np.array([[5.0, 0.0], [0.0, 44.3]])   # the rectangular matched cell
+
+    tiled = tile_slab_to_shared_cell(slab, tiling, shared)
+
+    # Ten primitive cells' worth of atoms (make_supercell filled the rectangle
+    # correctly), and the in-plane cell is the rectangle -- no leftover slant.
+    assert len(tiled) == 10
+    cell = np.asarray(tiled.get_cell())[:2, :2]
+    angle = np.degrees(np.arccos(
+        cell[0] @ cell[1]
+        / (np.linalg.norm(cell[0]) * np.linalg.norm(cell[1]))))
+    assert abs(angle - 90.0) < 1.0e-6, angle
+
+
 def test_tile_slab_to_shared_cell_tiles_and_strains():
-    """A non-diagonal tiling grows the atom count and lands on the cell."""
+    """The slab is built as the supercell matching the shared cell, on it."""
     slab = build_slab(load_crystal(_SI_CIF), _SI_100)
-    tiling = np.array([[2, 1], [0, 2]])             # det 4, off-diagonal
+    tiling = np.array([[2, 0], [0, 2]])             # det 4, the cell count
     shared = np.array([[7.9, 0.1], [-0.1, 7.9]])
     z_before = slab.get_positions()[:, 2]
 
