@@ -324,7 +324,7 @@ def _footprint_repeat(base_area: float, target_area: float) -> int:
 def _standalone_half(
         wafer, member, derived_lattices, declared_species,
         lateral_repeat=1,
-        coincidence_tiling=None, shared_cell=None):
+        matched_cell=None, shared_cell=None):
     """Cut ONE wafer's standalone half in memory (no file yet, §2.2/§7.1).
 
     Loads the wafer's crystal, RESCALES it to the model-derived lattice for
@@ -338,8 +338,8 @@ def _standalone_half(
     lattices, not the tiled dose footprint. :func:`build_halves` passes the
     dose-spreading footprint tiling explicitly, sized from the study's
     ``target_footprint_area`` (:func:`_footprint_repeat`, §3.6).
-    ``coincidence_tiling`` and ``shared_cell`` carry the §2.4
-    strained-tiling geometry for a real mismatch (the whole-number matrix
+    ``matched_cell`` and ``shared_cell`` carry the §2.4 strained-tiling
+    geometry for a real mismatch (this wafer's own matched supercell vectors
     and the shared cell both wafers are strained onto); they stay ``None``
     for the identity case, which needs neither. ``declared_species`` are the
     elements this half must DECLARE whether or not it contains any — the
@@ -356,7 +356,7 @@ def _standalone_half(
         min_slab_thickness=_effective_slab_thickness(member.numerical),
         min_vacuum=to_metal(member.numerical.slab_vacuum, "distance"),
         lateral_repeat=lateral_repeat,
-        coincidence_tiling=coincidence_tiling, shared_cell=shared_cell)
+        matched_cell=matched_cell, shared_cell=shared_cell)
 
 
 def _write_half(half, wafer, scratch_directory, wafer_tag, comm):
@@ -425,15 +425,18 @@ def build_halves(
     # each takes its own whole-number matrix. Identity needs neither.
     if match.is_identity:
         shared_cell = None
-        tiling_a = tiling_b = None
-        # Identity: no tiling to the shared cell, so one dose tile IS one
+        matched_cell_a = matched_cell_b = None
+        # Identity: no strain onto a shared cell, so one dose tile IS one
         # primitive surface cell — use its in-plane area as the base.
         base_cell = np.asarray(primitive_a.atoms.get_cell())[:2, :2]
     else:
         shared_cell = even_split_shared_cell(
             match.substrate_cell, match.film_cell)
-        tiling_a = match.film_tiling
-        tiling_b = match.substrate_tiling
+        # Slab A is the matcher's 'film', slab B its 'substrate', so each
+        # takes its OWN matched supercell vectors (the tiler derives the
+        # supercell transform from these, §2.4).
+        matched_cell_a = match.film_cell
+        matched_cell_b = match.substrate_cell
         # Mismatch: both halves are first strained onto the shared cell, so
         # one dose tile IS the shared cell — its area is the footprint base.
         base_cell = np.asarray(shared_cell)[:, :2]
@@ -449,11 +452,11 @@ def build_halves(
     half_a = _standalone_half(
         member.material.wafer_a, member, derived_lattices, declared_species,
         lateral_repeat=footprint_repeat,
-        coincidence_tiling=tiling_a, shared_cell=shared_cell)
+        matched_cell=matched_cell_a, shared_cell=shared_cell)
     half_b = _standalone_half(
         member.material.wafer_b, member, derived_lattices, declared_species,
         lateral_repeat=footprint_repeat,
-        coincidence_tiling=tiling_b, shared_cell=shared_cell)
+        matched_cell=matched_cell_b, shared_cell=shared_cell)
     handle_a = _write_half(
         half_a, member.material.wafer_a, scratch_directory, WAFER_A_TAG,
         comm)

@@ -172,44 +172,42 @@ def test_even_split_uses_true_lengths_of_out_of_plane_vectors():
     assert abs(short_edge - 4.994) < 0.02, short_edge
 
 
-def test_tile_hexagonal_slab_to_rectangular_cell_without_shear():
-    """A hexagonal surface fills a rectangular cell by CUTTING, not shearing.
+def test_tile_slab_builds_supercell_matching_matched_cell():
+    """The tiler builds the supercell that REPRODUCES the matched vectors.
 
-    Regression for the T-17 oxide build: LiNbO3(001)'s surface stamp is a
-    120-degree diamond, but its matched cell is a rectangle. Building the raw
-    tiling supercell gives an oblique 120-degree cell that, forced onto the
-    rectangle, shears ~30 degrees -- a huge spurious strain (~24 GPa). The
-    tiler must instead build the crystal's rectangular supercell directly
-    (correct atom count) and strain only the small misfit, so the result is
-    rectangular with no shear.
+    Regression for the T-17 oxide build: feeding the raw Zur-McGill tiling to
+    ASE's ``make_supercell`` built a long 1xN strip (e.g. 189 Å) that, forced
+    onto the compact shared cell, sheared atoms into ~0.8 Å overlaps. The
+    tiler now derives the supercell transform from the matched CELL VECTORS
+    (pymatgen's ``get_2d_transform``) and must reproduce them exactly — an
+    oblique 2-D supercell stays that cell, never a strip.
     """
     from ase import Atoms
     hexagonal = [[5.119, 0.0, 0.0], [-2.56, 4.434, 0.0], [0.0, 0.0, 30.0]]
     slab = Atoms("Li", positions=[[0.0, 0.0, 15.0]], cell=hexagonal,
                  pbc=[True, True, False])
-    tiling = np.array([[1, 0], [0, 10]])           # pymatgen's diagonal tiling
-    shared = np.array([[5.0, 0.0], [0.0, 44.3]])   # the rectangular matched cell
+    # A genuine 2-D (off-diagonal) supercell of the hexagonal surface cell —
+    # the shape the old make_supercell(tiling) path failed to reproduce.
+    transform = np.array([[2, 1], [1, 3]])          # det 5, oblique
+    primitive = np.asarray(slab.get_cell())[:2, :2]
+    matched = transform @ primitive                 # the matched vectors
+    # Strain-free (shared == matched) isolates the supercell build: the
+    # transform must reproduce the matched cell, not a strip.
+    tiled = tile_slab_to_shared_cell(slab, matched, matched)
 
-    tiled = tile_slab_to_shared_cell(slab, tiling, shared)
-
-    # Ten primitive cells' worth of atoms (make_supercell filled the rectangle
-    # correctly), and the in-plane cell is the rectangle -- no leftover slant.
-    assert len(tiled) == 10
-    cell = np.asarray(tiled.get_cell())[:2, :2]
-    angle = np.degrees(np.arccos(
-        cell[0] @ cell[1]
-        / (np.linalg.norm(cell[0]) * np.linalg.norm(cell[1]))))
-    assert abs(angle - 90.0) < 1.0e-6, angle
+    assert len(tiled) == 5                           # det(transform) atoms
+    assert np.allclose(np.asarray(tiled.get_cell())[:2, :2], matched)
 
 
 def test_tile_slab_to_shared_cell_tiles_and_strains():
     """The slab is built as the supercell matching the shared cell, on it."""
     slab = build_slab(load_crystal(_SI_CIF), _SI_100)
-    tiling = np.array([[2, 0], [0, 2]])             # det 4, the cell count
+    # The slab's own 2x2 matched supercell vectors (det-4 atom count).
+    matched = 2.0 * np.asarray(slab.get_cell())[:2, :2]
     shared = np.array([[7.9, 0.1], [-0.1, 7.9]])
     z_before = slab.get_positions()[:, 2]
 
-    tiled = tile_slab_to_shared_cell(slab, tiling, shared)
+    tiled = tile_slab_to_shared_cell(slab, matched, shared)
 
     # The whole-number matrix sets the atom count by its determinant.
     assert len(tiled) == len(slab) * 4
@@ -230,7 +228,8 @@ def test_mismatched_halves_emerge_commensurate():
     The whole point of the strained tiling (§2.4): a genuine lattice
     mismatch is carried into ONE shared cell, so the assembly's
     commensurability assertion (§2.6) accepts the pair. Slab A is the
-    matcher's 'film', slab B its 'substrate', so each takes its own tiling.
+    matcher's 'film', slab B its 'substrate', so each takes its own matched
+    supercell vectors.
     """
     si = load_crystal(_SI_CIF)
     stretched = rescale_crystal_to_cell(
@@ -241,9 +240,8 @@ def test_mismatched_halves_emerge_commensurate():
         slab_a, slab_b, max_area=400.0, misfit_tolerance=0.15)
 
     shared = even_split_shared_cell(match.substrate_cell, match.film_cell)
-    tiled_a = tile_slab_to_shared_cell(slab_a, match.film_tiling, shared)
-    tiled_b = tile_slab_to_shared_cell(
-        slab_b, match.substrate_tiling, shared)
+    tiled_a = tile_slab_to_shared_cell(slab_a, match.film_cell, shared)
+    tiled_b = tile_slab_to_shared_cell(slab_b, match.substrate_cell, shared)
 
     cell_a = np.asarray(tiled_a.get_cell())[:2, :2]
     cell_b = np.asarray(tiled_b.get_cell())[:2, :2]

@@ -98,12 +98,12 @@ def main() -> None:
         sio2, SIO2_FACE, "SiO2", GLOBAL_SPECIES,
         min_slab_thickness=thickness, min_vacuum=vacuum,
         lateral_repeat=footprint_repeat,
-        coincidence_tiling=tiling_sio2, shared_cell=shared_cell)
+        matched_cell=match.film_cell, shared_cell=shared_cell)
     half_linbo3 = build_standalone_half(
         linbo3, LINBO3_FACE, "LiNbO3", GLOBAL_SPECIES,
         min_slab_thickness=thickness, min_vacuum=vacuum,
         lateral_repeat=footprint_repeat,
-        coincidence_tiling=tiling_linbo3, shared_cell=shared_cell)
+        matched_cell=match.substrate_cell, shared_cell=shared_cell)
 
     for name, half in (("sio2", half_sio2), ("linbo3", half_linbo3)):
         atoms = half.atoms

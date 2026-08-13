@@ -276,7 +276,7 @@ def build_standalone_half(
         min_vacuum: float = 10.0,
         lateral_repeat: int = 1,
         termination_index: int = 0,
-        coincidence_tiling=None,
+        matched_cell=None,
         shared_cell=None) -> StandaloneHalf:
     """Cut ONE wafer alone in vacuum, beam species declared (§4.3, §7.1).
 
@@ -299,26 +299,28 @@ def build_standalone_half(
     from the protocol record and directly testable. ``identity`` is the
     material label carried for provenance and the report.
 
-    **The strained coincidence cell (§2.4).** When ``coincidence_tiling``
-    and ``shared_cell`` are given — a genuine lattice mismatch — the freshly
-    cut slab is first tiled by its whole-number Zur-McGill matrix and
-    strained onto the shared cell (:func:`tile_slab_to_shared_cell`) BEFORE
-    the dose tiling, so both wafers of a dissimilar pair emerge on one
-    commensurate cell. Strain is applied here, at build, because amorphous
-    material has no lattice to strain cleanly (§2.4). For the Si/Si identity
-    case both are left ``None`` and the half is cut on its own lattice, as
-    before — that case needs neither tiling nor strain. In both paths the
+    **The strained coincidence cell (§2.4).** When ``matched_cell`` and
+    ``shared_cell`` are given — a genuine lattice mismatch — the freshly cut
+    slab is first built as its Zur-McGill matched supercell and strained onto
+    the shared cell (:func:`tile_slab_to_shared_cell`) BEFORE the dose tiling,
+    so both wafers of a dissimilar pair emerge on one commensurate cell.
+    ``matched_cell`` is this slab's own matched supercell vectors
+    (``match.film_cell`` for slab A, ``match.substrate_cell`` for slab B).
+    Strain is applied here, at build, because amorphous material has no
+    lattice to strain cleanly (§2.4). For the Si/Si identity case both are
+    left ``None`` and the half is cut on its own lattice, as before — that
+    case needs neither supercell nor strain. In both paths the
     ``lateral_repeat`` dose tiling then multiplies whatever cell resulted,
     which is strain-neutral (identical copies).
     """
     slab = build_slab(
         crystal, miller_face, min_slab_thickness, min_vacuum,
         termination_index)
-    # A real mismatch: tile to the whole-number matched supercell and strain
-    # it onto the shared cell (§2.4) before any dose tiling. Identity leaves
-    # both None and cuts on the crystal's own lattice.
-    if coincidence_tiling is not None and shared_cell is not None:
-        slab = tile_slab_to_shared_cell(slab, coincidence_tiling, shared_cell)
+    # A real mismatch: build the matched supercell and strain it onto the
+    # shared cell (§2.4) before any dose tiling. Identity leaves both None
+    # and cuts on the crystal's own lattice.
+    if matched_cell is not None and shared_cell is not None:
+        slab = tile_slab_to_shared_cell(slab, matched_cell, shared_cell)
     if lateral_repeat > 1:
         slab = slab.repeat((lateral_repeat, lateral_repeat, 1))
     slab = orthogonalize_in_plane(slab)
@@ -546,75 +548,62 @@ def even_split_shared_cell(
 
 def tile_slab_to_shared_cell(
         slab: Atoms,
-        tiling: np.ndarray,
+        matched_cell: np.ndarray,
         shared_cell: np.ndarray) -> Atoms:
-    """Tile a slab by its match matrix and strain it onto the shared cell.
+    """Build the slab's matched supercell and strain it onto the shared cell.
 
-    The geometric heart of the strained-coincidence assembly (§2.3, §2.4).
-    We build the integer supercell of THIS slab whose shape matches the
-    ``shared_cell``, then apply only the small misfit strain onto it.
+    The geometric heart of the strained-coincidence assembly (§2.3, §2.4),
+    built on pymatgen's own supercell construction rather than a hand-rolled
+    one. ``matched_cell`` is THIS slab's Zur-McGill matched supercell — the
+    two in-plane vectors ``match.film_cell`` (slab A) or
+    ``match.substrate_cell`` (slab B) carry — and ``shared_cell`` is the
+    even-split cell both slabs land on (:func:`even_split_shared_cell`).
 
-    The supercell matrix is derived from the slab's OWN primitive surface
-    cell and the shared cell (``round(shared_cell @ inverse(primitive))``),
-    NOT from ``tiling`` directly. That matters when the two slabs are cut on
-    different faces: a hexagonal surface's matched cell is a RECTANGLE, and
-    the honest way to fill that rectangle is to cut it out of the crystal
-    with ``make_supercell`` — which places the correct atoms for whatever
-    shape and count the rectangle needs (a hexagon re-expressed as a
-    rectangle simply gets however many atoms the rectangle holds). Building
-    the raw ``tiling`` supercell instead gives an OBLIQUE cell that then has
-    to be SHEARED onto the rectangular shared cell — a large spurious strain
-    (the ~24 GPa the T-17 oxide cells carried on their long axis). ``tiling``
-    is kept as a cross-check: it fixes the same number of primitive cells, so
-    a mismatch flags an inconsistent shared cell rather than a silent
-    under- or over-fill.
+    The supercell transform is derived the way pymatgen's
+    ``CoherentInterfaceBuilder`` does it (``coherent_interfaces.
+    get_2d_transform``): the integer matrix that carries the slab's OWN
+    primitive surface cell exactly onto ``matched_cell`` is
+    ``matched_cell @ pseudo-inverse(primitive)``. Feeding the raw Zur-McGill
+    TILING matrix to ``make_supercell`` instead was the old bug — ASE reads
+    that matrix in a different basis and built a long 1xN strip (e.g. 189 Å)
+    that, forced onto the compact shared cell, sheared atoms into ~0.8 Å
+    overlaps. Deriving the transform from the matched VECTORS is basis-proof,
+    and we VERIFY the built supercell reproduces them (as pymatgen does)
+    rather than trusting the round.
 
-    The supercell is then STRAINED onto ``shared_cell`` by replacing the
-    in-plane cell and rescaling the atoms (``scale_atoms=True`` holds every
-    atom's fractional position, so the basis rides along and the layer
-    spacing along z is left exactly as cut; the out-of-plane relaxation §2.4
-    calls for happens later, under the force model). Because the supercell
-    already has the shared cell's SHAPE, this is a pure ~few-percent stretch
-    with NO shear. Both slabs set to the identical ``shared_cell`` emerge
-    commensurate to numerical noise, which is what the assembly's
-    commensurability assertion checks (:func:`sabsim.structure.
-    amorphized_assembly._assert_commensurate`).
+    With the supercell already AT the matched cell's shape, straining it onto
+    ``shared_cell`` (``set_cell(..., scale_atoms=True)``, holding fractional
+    positions so the z/vacuum vector and the layer spacing ride along
+    untouched) is a pure ~few-percent stretch — plus, for slab A, the rigid
+    twist that rotates it into slab B's frame, which is an isometry and so
+    squashes nothing. Because ``shared_cell`` is the even split OF the two
+    matched cells, it is always close to each one, so this stretch is small
+    for BOTH slabs — the reason no case (ribbon or oblique or twisted) shears.
+    Both slabs set to the identical ``shared_cell`` emerge commensurate to
+    numerical noise, which the assembly's commensurability assertion checks
+    (:func:`sabsim.structure.amorphized_assembly._assert_commensurate`).
     """
-    # Build the matched supercell from the authoritative Zur-McGill tiling:
-    # `make_supercell` fills it with the correct atoms (the tiling's
-    # determinant sets the count), in whatever shape the tiling gives -- which
-    # for a hexagonal surface is an OBLIQUE cell.
-    transform = np.eye(3)
-    transform[:2, :2] = np.asarray(tiling, dtype=float)
-    tiled = make_supercell(slab, transform)
+    # pymatgen's get_2d_transform: the integer supercell matrix that carries
+    # the slab's primitive surface cell onto its matched coincidence cell.
+    primitive = np.asarray(slab.get_cell())[:2, :2]
+    matched = np.asarray(matched_cell, dtype=float)[:, :2]
+    supercell_transform = np.eye(3)
+    supercell_transform[:2, :2] = np.rint(matched @ np.linalg.pinv(primitive))
+    tiled = make_supercell(slab, supercell_transform)
 
-    # Re-index that supercell to the shared cell's SHAPE before straining. A
-    # whole-number re-outlining of the SAME lattice (determinant +-1, so the
-    # atom count is untouched) turns the oblique cell into the rectangle the
-    # shared cell is, so the strain that follows is a pure stretch with NO
-    # shear. This is the honest hex->rect: relabel the boundary, never shear
-    # the atoms. For a slab whose supercell is already the right shape (e.g.
-    # Si/Si) the re-index is the identity and nothing changes.
-    current = np.asarray(tiled.get_cell())[:2, :2]
-    target = np.asarray(shared_cell, dtype=float)[:, :2]
-    reindex = np.rint(target @ np.linalg.inv(current))
-    # Re-index ONLY when it is a genuine whole-number re-outlining of the same
-    # lattice (determinant exactly +-1): that is the hexagonal-to-rectangular
-    # case, where it removes the shear for free. When the two cells differ by
-    # a rotation (a TWISTED match, which `match_surfaces` may return) the
-    # rounded matrix is not unimodular; there is no free re-outline, so we
-    # leave the supercell as tiled and let the strain below absorb the misfit,
-    # exactly as before this fix. The condition DETECTS the safe case rather
-    # than assuming it (a determinant of 0 or 2+ means "not a re-outline").
-    if abs(int(round(np.linalg.det(reindex)))) == 1:
-        reindex_transform = np.eye(3)
-        reindex_transform[:2, :2] = reindex
-        tiled = make_supercell(tiled, reindex_transform)
+    # VERIFY the supercell reproduces the matched vectors before straining: a
+    # mismatch means the slab and match are inconsistent, and we refuse rather
+    # than silently shear (the same guard pymatgen's builder raises).
+    built = np.asarray(tiled.get_cell())[:2, :2]
+    if not np.allclose(built, matched, atol=1.0e-6):
+        raise ValueError(
+            "supercell transform did not reproduce the matched cell; the "
+            "slab and coincidence match are inconsistent (§2.4)")
 
-    # Replace ONLY the in-plane cell with the shared one, keeping the slab's
-    # own z (vacuum) vector and flattening any z-leak in the in-plane rows.
+    # Strain the correctly-shaped supercell onto the shared cell: a pure
+    # in-plane stretch (plus the rigid twist for slab A), z left as cut.
     strained_cell = np.asarray(tiled.get_cell()).copy()
-    strained_cell[:2, :2] = target
+    strained_cell[:2, :2] = np.asarray(shared_cell, dtype=float)[:, :2]
     strained_cell[:2, 2] = 0.0
     tiled.set_cell(strained_cell, scale_atoms=True)
     return tiled
