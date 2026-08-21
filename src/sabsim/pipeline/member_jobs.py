@@ -37,6 +37,7 @@ from sabsim.deploy.scratch import member_scratch
 from sabsim.pipeline.contracts import (
     ACTIVATED_SLABS_CONTRACT,
     BOND_DEBOND_CONTRACT,
+    DERIVED_LATTICES_CONTRACT,
     MEASURE_VECTOR_CONTRACT,
     POTENTIAL_CONTRACT,
     SLABS_CONTRACT,
@@ -118,19 +119,29 @@ def run_member_job(member, scratch_directory, job: JobKind,
 
     The three sub-stages reuse the sequencer's own stage calls (§1),
     differing only in that they start from ``scratch``'s artifact rather
-    than the previous in-memory handle. The potential is the lookup every job does
-    (``resolve_potential``): classical stand-in now, trained committee
-    later, the SAME seam.
+    than the previous in-memory handle. The potential is the lookup
+    every job does (``resolve_potential``): classical stand-in now,
+    trained committee later, the SAME seam.
     """
     potential = run_to_contract(
         lambda: stage_set.resolve_potential(member), POTENTIAL_CONTRACT)
 
     if job.name == "activate":
-        # Starts from the spec (reads = NONE): build both halves, activate
-        # each surface, assemble the pair — then write the pair for bond.
+        # Starts from the spec (reads = NONE): derive the working lattice
+        # (step 2b, DESIGN.md §2.2) under the current model, build both
+        # halves, activate each surface, assemble the pair — then write
+        # the pair for bond. The whole-chain sequencer runs derive_lattices
+        # before build; this per-job path MUST do the same, or build
+        # receives the scratch directory in the DerivedLattices slot and
+        # fails (the regression when step 2b was wired, commit cf92d30).
+        derived_lattices = run_to_contract(
+            lambda: stage_set.derive_lattices(
+                member, potential, scratch_directory, comm),
+            DERIVED_LATTICES_CONTRACT)
         handle_a, handle_b, shared = run_to_contract(
             lambda: stage_set.build(
-                member, potential, scratch_directory, comm),
+                member, potential, derived_lattices, scratch_directory,
+                comm),
             SLABS_CONTRACT)
         activated = run_to_contract(
             lambda: stage_set.activate(

@@ -10,6 +10,7 @@ exercised with no compute node; the stages themselves are tested
 elsewhere.
 """
 
+import dataclasses
 import os
 import tomllib
 
@@ -200,6 +201,36 @@ def test_three_separate_jobs_complete_the_chain(tmp_path):
     with (tmp_path / "measure_vector.toml").open("rb") as handle:
         record = tomllib.load(handle)
     assert record["verdicts"]["bonded"] is True
+
+
+def test_activate_derives_lattices_and_passes_them_to_build(tmp_path):
+    """Regression: the activate job must run derive_lattices (step 2b) and
+    hand its result to build in the DerivedLattices slot.
+
+    Commit cf92d30 wired step 2b into the whole-chain sequencer but not
+    this per-job path, so activate skipped derive_lattices and called
+    build with the scratch directory where a DerivedLattices was expected.
+    The fake stage set could not catch it because its build ignores its
+    arguments; here build inspects them with a strict signature, so a
+    mis-aligned call fails.
+    """
+    seen = {}
+
+    def _checking_build(member, potential, lattices, scratch, comm=None):
+        seen["lattices_type"] = type(lattices).__name__
+        seen["scratch"] = scratch
+        return (
+            HalfHandle("a.data", {"Si": 1}, "Si", WAFER_A_TAG),
+            HalfHandle("b.data", {"Si": 1}, "Si", WAFER_B_TAG),
+            SharedCell(note="identity"))
+
+    stages = dataclasses.replace(_fake_stage_set(), build=_checking_build)
+    run_member_job(
+        _member(), str(tmp_path), registry_lookup("activate"), stages)
+
+    # build received the step-2b DerivedLattices, not the scratch path.
+    assert seen["lattices_type"] == "DerivedLattices"
+    assert seen["scratch"] == str(tmp_path)
 
 
 # ---------------------------------------------------------------------
