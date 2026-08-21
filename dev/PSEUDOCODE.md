@@ -2281,15 +2281,17 @@ function open_cascade_driver(slab, potential, member_specification):
     # antipattern, DESIGN §3.3 — the same one §9.2 refuses). At the doses
     # SAB needs (thousands of impacts) that overhead is prohibitive.
     #
-    # POTENTIAL: hybrid/overlay of the config-selected CLASSICAL generator
-    # (Stillinger-Weber for SILICON — one model across the whole pipeline,
-    # decided 2026-07-17; BKS or Vashishta for silica, Munetoh-Tersoff a
-    # fallback; Buckingham for ionic — DESIGN §3.3, §4.7) with TWO ZBL hard
-    # cores, NOT the MLIP. The classical part does the bonding; ZBL #1
-    # (longer cutoff) the projectile-substrate collision; ZBL #2 (short
-    # cutoff, below the bond) a hard core on every substrate-substrate
-    # pair, because the classical generators have only FINITE short-range
-    # repulsion and would otherwise let cascade atoms fuse (PRIOR_ART §1.9).
+    # POTENTIAL: hybrid/overlay of the §4.7-selected generator — the
+    # UNIVERSAL FOUNDATION MLIP by default, a config-selected classical
+    # model the secondary fallback (Stillinger-Weber for SILICON; BKS or
+    # Vashishta for silica, Munetoh-Tersoff a further fallback; Buckingham
+    # for ionic — DESIGN §3.3, §4.7) — with TWO ZBL hard cores. The
+    # generator does the bonding; ZBL #1 (longer cutoff) the
+    # projectile-substrate collision; ZBL #2 (short cutoff, below the
+    # bond) a hard core on every substrate-substrate pair, because the
+    # generators (foundation MLIP or classical alike) have only FINITE,
+    # soft short-range repulsion and would otherwise let cascade atoms
+    # fuse (PRIOR_ART §1.9).
     # The ZBL Z-pair channels are DERIVED from the species set (§10.3),
     # never hand-enumerated (prior art's argon-only failure).
     #
@@ -2589,11 +2591,11 @@ threshold.
 `minimize_then_anneal` — the same MLIP driver, a near-equilibrium
 schedule. Activation AUTHORED the disorder; §9.7 relaxes it.
 
-`[DELEGATE -> POTENTIAL, DESIGN §4]` the classical generator
-(BKS/Vashishta/Munetoh-Tersoff/Buckingham, config-selected via the §4.7
-generator seam — selection, acceptance, and fallback) and the MLIP
-committee (step 2) are §4 concerns; this module CONSUMES both, never
-authors them.
+`[DELEGATE -> POTENTIAL, DESIGN §4]` the cascade generator — the
+universal foundation MLIP by default, a config-selected classical model
+(BKS/Vashishta/Munetoh-Tersoff/Buckingham) the fallback, via the §4.7
+generator seam — and the per-pair MLIP committee (step 2) are §4
+concerns; this module CONSUMES both, never authors them.
 
 `[ABOVE this module]` the ensemble (STRUCTURAL 4: averaging the bond
 metric over amorphization realizations, `DESIGN.md` §3.2) is looped by the

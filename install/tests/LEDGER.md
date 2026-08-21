@@ -632,3 +632,76 @@ one")?  This is the split's plumbing on real hardware — distinct from T-8
      capped `RunControl`, 5 ps trimmed hold — plumbing, not physics.
   5. Provenance unchanged (`resolve_potential` still classical stand-in),
      as in 6b/T-8.
+
+---
+
+## T-17 — box-relax 16453628 + lattice/stiffness probes — 2026-08-21
+
+**Question.** For the geometrically-matched SiO2/LiNbO3 oxide pair that
+DETONATED under the fixed-box DPA press (t14/t15), WHERE does the frame-0
+stress come from, and does a one-time in-plane `box/relax` find a
+zero-stress cell the crystal can hold? (The A.2/§5.6 + A.3 question.)
+
+- **As-run scripts (UNCOMMITTED diagnostic probes — rule-1 caveat, to be
+  committed):** `install/tests/t17_dpa_lattice/` — `relax_lattice.py`
+  (per-material bulk box-relax under DPA), `build_stiffness_probe.py` +
+  `stepwise_measure.py` (+/-1% strain -> stress slope -> biaxial
+  modulus), `box_relax_probe.py` + `box_relax.slurm` (the assembled-pair
+  in-plane box/relax + NVT stability probe).
+- **Structure / model:** SiO2(100)/LiNbO3(001) matched halves; force
+  model = universal DPA-2.4-7M `.pt2`, out-of-process in the deepmd
+  bundle on a V100. Bulk cells 576 (SiO2) / 540 (LiNbO3); stiffness slabs
+  54 / 60 atoms; assembled pair 5724 atoms.
+
+- **Evidence 1 — the CIF lattice is far off the DPA lattice
+  (`t17_val/lattice_results.json`, verbatim):**
+  - SiO2  `"initial_pressure_bar": 73862.6 -> "final_pressure_bar":
+    4592.4`; `"percent_change_abc": [-0.53, -1.25, +2.08]`
+  - LiNbO3 `"initial_pressure_bar": 84347.2 -> "final_pressure_bar":
+    2793.3`; `"percent_change_abc": [-0.68, -0.43, +0.69]`
+  So each bulk crystal built from CIF numbers sits ~7-8 GPa off the
+  model's own equilibrium — a per-material, MISFIT-INDEPENDENT stress.
+
+- **Evidence 2 — biaxial moduli are close
+  (`t17_stiffness/stepwise_results.json`, verbatim mean-in-plane stress
+  vs strain, linear):** SiO2 (pxx+pyy)/2 falls 62617 -> 15458 bar across
+  the +/-1% sweep -> M ~= 234 GPa; LiNbO3 falls from 80571 bar similarly
+  -> M ~= 276 GPa (ratio ~1.18). So the even split sits NEAR the
+  stiffness-weighted split; re-weighting is a modest refinement.
+
+- **Evidence 3 — one-time in-plane box/relax finds a zero-stress cell the
+  crystal holds (job 16453628, `t17-boxrelax-16453628.out`, verbatim):**
+  - BEFORE (even-split cell): `atoms=5724 box a=22.019 b=38.504`;
+    `[whole] press=57681 pxx=97829 pyy=57648 pzz=17566 bar`
+  - AFTER `box/relax x 0 y 0` + minimize: `box a=21.961 (-0.27%)
+    b=38.491 (-0.03%)`; `[whole] press=-7815 pxx=-37 pyy=-25 ... bar`;
+    `pe/atom -8.9327 -> -9.3588`
+  - after 2.0 ps NVT 300 K on the relaxed cell: `atoms=5724 (lost 0)
+    temp=293.8 K`; `VERDICT (relaxed cell): HELD and STAYED ORDERED
+    (box-relax cell survives!)`; `=== T-17 box-relax exit 0 ===`
+
+- **Verdict: FINDINGS captured (diagnostic).** The oxide-pair frame-0
+  stress is dominated by the CIF-vs-DPA lattice offset (~7-8 GPa per
+  material, Evidence 1), NOT by the coincidence-misfit or the even split
+  (moduli within 18%, Evidence 2). A single in-plane `box/relax x 0 y 0`
+  + minimize drives the assembled pair's in-plane stress to ~0
+  (pxx 97829 -> -37, pyy 57648 -> -25 bar) with a -0.27% box change, and
+  the relaxed cell STAYS ORDERED under 2 ps of 300 K NVT with no atom
+  loss (Evidence 3). This is the demonstrated A.2 one-time combined-cell
+  relax, and the reason mainline must build on the §2.2 derived lattice.
+
+- **Scope NOT covered:**
+  1. **Diagnostic probes, not committed harnesses** — the scripts above
+     are uncommitted (`??`) and self-select cells via env vars; rule 1 is
+     satisfied only once they are committed beside this ledger.
+  2. **`box/relax` relaxed only x,y** — pzz was left compressive
+     (-23382 bar); z is the free-surface/grip axis, handled separately.
+  3. **No per-slab stress split** — the `.pt2` exposes only the GLOBAL
+     virial, so box-relax finds ONE combined-cell minimum, not each
+     slab's share.
+  4. **Provenance-record + freeze are UNBUILT** — the probe measures the
+     relaxed cell but does not write it to provenance or freeze x,y for a
+     subsequent press; that wiring is the promotion work (§5.6/§2.6).
+  5. **Universal model, not the bespoke committee**; single V100; the
+     stiffness slope->modulus FIT was done by hand off the JSON, not
+     coded in any script.

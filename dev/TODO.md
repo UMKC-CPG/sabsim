@@ -1097,6 +1097,12 @@ foundations, interaction rules. -->
       cleanly to the GPU universal shape. The current cascade+re-anneal+gate
       activate (node-validated, job 16014788) is the working INTERMEDIATE
       this simplifies.
+      SCOPE ADD (2026-08-21): the #8 combined-cell relax also owns the
+      RECORDED one-time LATERAL re-equilibration (x,y), not only the
+      out-of-plane heal — see the §5.6 lateral-stress item. That is
+      what lets the press hold a FIXED, recorded cell without the
+      `lateral_relax` band-aid, so this relax and the §5.6 rewrite land
+      together.
 - [ ] Activation gate (Phase 2) DESIGN follow-ons (`DESIGN.md` §3.5,
       `PSEUDOCODE.md` §10.6, written 2026-07-18). The gate design is a
       metric registry (g(r)/partial g_AB, coordination DISTRIBUTION +
@@ -1345,11 +1351,98 @@ foundations, interaction rules. -->
       start; the same seam takes the committee later) and the build
       rescales onto it, any symmetry (`derive_lattice`,
       `rescale_crystal_to_cell`, `_coupling_for`), retiring the CIF-lattice
-      cut. STILL CODE-OPEN: the matcher is IMPLEMENTED + tested
-      (`match_surfaces`, pymatgen ZSLGenerator) but NOT wired into
-      `build_halves` (it uses a stand-in SharedCell), and the strained
-      real-mismatch assembly is a `NotImplementedError`
-      (`slab_builder.py:388`, `assemble_facing_pair`) — the next task.
+      cut. CODE STATUS 2026-08-21 (supersedes the 2026-08-06 line above):
+      the matcher (`match_surfaces`, pymatgen ZSLGenerator) is now
+      WIRED through `build_standalone_half`, and the strained
+      real-mismatch assembly is BUILT (Phase B, branch
+      `universal-mlip-cascade`, commits `40b9e6a` + `563eb80`):
+      `even_split_shared_cell` + `tile_slab_to_shared_cell` place both
+      slabs on one commensurate cell. Only `assemble_facing_pair` (the
+      crystalline all-in-one null path) still raises
+      `NotImplementedError`, and the real mismatch path no longer
+      needs it. DRIFT that remains (A.3, review 2026-08-21): the split
+      is EVEN (`even_split_shared_cell`, `slab_builder.py:546`), NOT
+      the §2.4 stiffness-weighted split the docs describe. The
+      `biaxial_stiffness * thickness` weighting needs each material's
+      elastic constants under the potential — the SAME constants the
+      potential-quality gate computes (§2.4:677) — which are not yet
+      measured. CORRECTED by the T-17 evidence (2026-08-21): the
+      MEASURED biaxial moduli are close (SiO2 ~234, LiNbO3 ~276 GPa,
+      ratio ~1.18, `build_stiffness_probe.py`), so the even split sits
+      NEAR the stiffness-weighted split — the weighting is a MODEST
+      refinement for this pair, NOT the detonation cause. The dominant
+      residual stress is the §2.2 CIF-vs-DPA-lattice offset (~7-8 GPa
+      per material, `relax_lattice.py`), which mainline `build_halves`
+      already removes via `derive_lattices` but the t12/t14/t15
+      harnesses skipped; the one-time box-relax is the demonstrated fix
+      (see the §5.6 lateral-stress item below). THICKNESS
+      AS A STRESS LEVER (Paul, 2026-08-21, capture-not-act): thickness
+      enters the stiffness weight, so thickening the STIFFER slab moves
+      strain onto the softer one and lowers PEAK stress — but that
+      optimizes a DIFFERENT objective (min-peak or equal stress) than
+      §2.4's current total-energy minimum, and couples §2.4 to the §2.5
+      depth floor (thickness can only grow above the floor). DECIDE the
+      objective function before acting.
+- [ ] **Cell geometry is defined by the universal MLIP, never
+      re-derived under the trained committee — self-consistency loop
+      left open (noted 2026-08-21, Paul; fine for now).** With the
+      universal foundation model as the bootstrap generator, the whole
+      cell construction runs on ITS energetics: the derived lattices
+      (§2.2 bulk relax), the elastic constants behind the strain split
+      (§2.4), and the amorphized half-cells themselves. The bespoke
+      committee is then trained on configs the universal model visited
+      — but the cell is NOT rebuilt under the committee once it exists.
+      DESIGN §2.2 / ARCH §2.3 already say "the shared cell is
+      re-derived whenever an ALF round changes the committee", so the
+      design anticipates closing this loop; the universal-generator
+      flow simply does not close it yet. Accepted for v1. FUTURE:
+      re-derive the cell under the trained committee and check whether
+      the geometry (and thus the training configs) shifts enough to
+      warrant an outer iteration.
+- [ ] **Lateral stress accommodation during the press — §5.6 needs a
+      recorded exception (review 2026-08-21; Paul approved the
+      direction).** Pressing the SiO2/LiNbO3 pair detonates: the
+      assembled cell carries large residual stress (frame-0 probes, up to
+      ~24 GPa for a CIF-built cell), the fixed-box press (§5.6) traps
+      it, and the interface rebounds and disintegrates between press
+      frames 9-10. ROOT CAUSE, CORRECTED by the T-17 evidence
+      (2026-08-21): the dominant term is the §2.2 CIF-vs-DPA-lattice
+      offset (~7-8 GPa per material, `relax_lattice.py`) — a MISFIT-
+      INDEPENDENT stress that mainline `build_halves` already removes
+      via the `derive_lattices` rescale (commit `cf92d30`) but the
+      detonating t12/t14/t15 harnesses SKIPPED (they built from CIF).
+      The measured biaxial moduli are close (SiO2 ~234, LiNbO3 ~276
+      GPa), so the even split is NOT the cause — A.3 is a modest
+      refinement. §5.6 forbids a live lateral barostat ("the recorded
+      substrate strain relaxes away and the provenance number becomes
+      a fiction") — correctly — and the uncommitted `lateral_relax`
+      band-aid (`lateral_relax_commands`, `commands.py`; `press_pull.
+      py`; `fix nph x 0 y 0`) is exactly the zero-stress,
+      runs-during-the-measurement barostat §5.6 rules out. The
+      DEMONSTRATED fix is the one-time box-relax (`box_relax_probe.py`,
+      job 16453628: pxx/pyy ~98k/58k -> ~0 bar, box moved -0.27%,
+      stayed ordered). SANCTIONED DIRECTION: (1) apply the mainline
+      §2.2 `derive_lattices` rescale (removes the dominant offset — the
+      harness bug was skipping it); (2) fold a ONE-TIME, RECORDED
+      combined-cell lateral relaxation into the #8 combined-cell relax
+      (see the re-arch item) — x,y find the post-amorphization
+      equilibrium ONCE at assembly, the relaxed cell + new per-slab
+      strains are written to provenance (§2.6), then x,y are FROZEN for
+      the whole press/settle/pull; (3) keep a stiffness-set barostat
+      (holds toward the RECORDED cell with the material's biaxial
+      modulus as the resistance, not toward zero) only as a documented
+      fallback. DESIGN EDIT REQUIRED, COORDINATED (refine catch, 2026-08-21):
+      the fixed-lateral rule is echoed beyond §5.6 — PSEUDOCODE §9
+      (~line 1848) and §10 (~2070/2311) both say "LATERAL cell HELD
+      FIXED — no barostat", and §2.6 records no combined lateral relax
+      yet. The revision (permit a recorded, one-time, pre-measurement
+      re-equilibration; still forbid drift DURING the pull) touches
+      §5.6 + §2.6 + PSEUDOCODE §9/§10 together, not §5.6 alone. Retire
+      the unconditional `lateral_relax`.
+      The distinction from `lateral_relax`, in three axes: WHEN (once,
+      before vs continuously during), RECORDED (yes vs silent drift),
+      and FIXED-during-measurement (yes vs no). Couples to A.3 (shares
+      the elastic constants) and the thickness lever above.
 - [ ] Structure-contract schema: the labeled atom groups the builder
       emits (frozen base, thermostat border, NVE interior, activated
       skin, press/pull grips, per-slab id) and consumed across the
@@ -1830,7 +1923,12 @@ foundations, interaction rules. -->
       beta-cristobalite is cubic and lattice-matches silicon far better,
       which is presumably why it was named. Either obtain the
       cristobalite file or re-point the member and record WHY the
-      lattice match got worse.
+      lattice match got worse. CIF LEAD (Paul, 2026-08-21): we ran Si,
+      SiO2, and LiNbO3, so CIFs for all three should exist — worst
+      case, produce them from the `.skl` files under `~/olcao/jobs/` or
+      `~/imago/jobs/`. Shipped today: Si diamond + `sio2_alpha_quartz.
+      cif`; the cristobalite and a LiNbO3 CIF are what to recover. Do
+      this with the batched node validations.
 
 - [ ] **Silica has no activation reference data**
       (`share/activation/O_Si.toml` is missing), so its gate correctly
@@ -2247,6 +2345,170 @@ foundations, interaction rules. -->
       of the strained build + pre-cascade relax on real LAMMPS. Gated on
       the `si-sio2` CIF fix and silica activation references (both open
       items above).
+
+- [ ] **Reconcile the universal-cascade re-arch tails — docs and dead
+      code lagging a flow that already changed (A.4, review
+      2026-08-21).** The code went cascade-only + universal-default,
+      but leftovers still describe the old flow: (1) `mlip_reanneal` /
+      `reanneal_commands` (`cascade.py`) are ORPHANED — no caller in
+      the cascade-only path — remove or archive; (2) gate module +
+      function docstrings say "re-annealed surface"
+      (`activation_gate.py`), the revision renamed it "healed"; (3)
+      PSEUDOCODE §10.2 / DESIGN §3.3 still call the cascade potential a
+      "config-selected CLASSICAL generator, NOT the MLIP", but the
+      default is now universal MLIP + ZBL (§4.7); (4) the `cascade.py`
+      header still frames the re-anneal (§10.5) and gate (§10.6) as
+      "land next"; (5) PSEUDOCODE §1 omits the live `derive_lattices`
+      stage (step 2b) the sequencer runs. Items (1)-(2) and (4)-(5)
+      are cosmetic (comment / dead-code / a missing pseudocode stage,
+      no behaviour change). Item (3) is NOT cosmetic (refine catch,
+      2026-08-21): "classical generator runs the cascade" is the
+      STRUCTURAL-1b framing in ARCHITECTURE §2.3 + DESIGN §3.3/§4.8,
+      which the universal-cascade re-arch superseded in §4.7 + code but
+      never propagated UP. Reconcile by DISTINGUISHING the UNIVERSAL
+      FOUNDATION model (does the cascade by default, §4.7) from the
+      per-pair COMMITTEE (still never does cascades — STRUCTURAL 1b's
+      rationale is intact for it). ARCH §2.3 + DESIGN §3.3/§4.8 +
+      PSEUDOCODE §10.2 edit together; VISION is unaffected.
+      DOC-CHAIN PROPAGATION DONE 2026-08-21 (Paul blessed the framing):
+      item (3) landed — ARCH §2.3 (4 spots), DESIGN §3.3/§4.5/§4.8, and
+      PSEUDOCODE §10.2/§11 now state universal foundation MLIP + ZBL is
+      the cascade primary (classical + ZBL the fallback), the universal
+      model is ALSO the bootstrap generator for the press/settle/pull
+      configs, the per-pair committee is the production potential +
+      uncertainty source, and the hand-built-DFT seed step is retired
+      (§4.5). Remaining A.4 work is the CODE-side cosmetics — (1)
+      orphaned `mlip_reanneal`, (2) gate docstrings "re-annealed" ->
+      "healed", (4) the `cascade.py` header, (5) the PSEUDOCODE §1
+      `derive_lattices` omission. Minor terminology: "seed committee"
+      in §4.8 part 2 / §11 now reads as the FIRST ALF committee
+      (anchored by the starting collection), NOT the generator — left
+      as-is since the anchor role is unchanged; clarify only if it
+      confuses a reader.
+- [ ] **Small code/doc drifts surfaced by the review (A.5,
+      2026-08-21) — reconcile each toward the correct side.** (1)
+      `loader.py` enforces only `len(pull_rate_ladder) >= 1`, but
+      PSEUDOCODE §2 and the field doc say ">= 3 rates over a decade".
+      (2) The g(r) auto-pass scores FIRST-PEAK position
+      (`activation_gate.py:419`); PSEUDOCODE §10 specifies a coarse
+      SECOND-shell RMSD — the discriminator the docs name is not the
+      one scored. (3) Residual strain is stored as a rotation-
+      invariant SCALAR (`SurfaceMatch.residual_strain`), but PSEUDOCODE
+      §7.6 requires the strain TENSOR with shear kept plus a
+      post-enumeration `max_component <= tolerance` cut — shear
+      provenance is lost today. (4) The `ZSLGenerator` call omits the
+      `max_angle_tol` and `lowest=false` (`slab_builder.py:378`) that
+      PSEUDOCODE §7.6 maps the one physical knob onto.
+- [ ] **Analyzer is a hardcoded tuple, not the §6.7 registry, and M1
+      is not per-rate (review 2026-08-21).** `run_analyzer_live`
+      (`live_stages.py`) emits a fixed Measure tuple; DESIGN §6.7 /
+      PSEUDOCODE §8.1 specify a `registered_measures()` registry the
+      gate reads by name. And M1 (mechanical W_sep) collapses the rate
+      ladder to the single slowest separated rung and emits ONE record,
+      so the §6.5 rate-ladder-monotonicity check has no per-rate
+      records to read; DESIGN §4 / §8.4 want one record PER pull with
+      the rate in provenance. Related to the M2/M3/M5 measures build
+      (already tracked) and the committee-sigma item (uncertainty is
+      still hardcoded 0.0).
+- [ ] **Spec-layer static checks the review found deferred or absent
+      (2026-08-21).** (1) The §1.5 "pair species-union == potential's
+      global type map" check — documented as the SHARPEST static check
+      — is in practice deferred to a hardcoded `KNOWN_SPECIES` set
+      (`loader.py`); the union-equals-type-map test is not computed at
+      load. (2) The §2.5 deferred thickness check (`slab_thickness >=
+      activated_depth + minimum_bulk_thickness`) is never REGISTERED to
+      fire once its input exists. (3) No object->file serializer, so
+      the §1.7 exact round-trip is one-way (file->object) only.
+      (`controls_disagree` and the difference-set are separately
+      tracked / descoped.)
+- [ ] **Universal cascade over-coordinates Si — the coordination
+      metric blocks the `validated=True` flip (T-10, review
+      2026-08-21).** Full-fluence universal DPA-2.4-7M activation of a
+      ~2880-atom Si slab (jobs 16324481 + 16345032) FAILED the §3.5
+      gate on the COORDINATION metric — measured ~0.916/0.913 vs the
+      allowed band (0.05, 0.6) — while rdf, ring, and depth all passed.
+      An energy bracket 5/10/15/25/40 eV (jobs 16365791/92,
+      16370749/50/51) all failed coordination (0.76-0.94, never in
+      band) at every energy. So the §4.7-rung-4 trigger to flip
+      `UNIVERSAL_CASCADE_MODEL.validated=True` is NOT met. OPEN
+      QUESTION (Paul's call): is the universal cascade genuinely
+      driving Si into a densely over-coordinated disordered state, or
+      is the coordination reference/band in `share/activation/Si.toml`
+      mis-set (a documented stand-in)? Decide before the flip. These
+      numbers were never written to LEDGER — capture with a T-10 entry.
+- [ ] **Promote the T-17 probes into src/ + write the belated T-17
+      LEDGER entry (Phase-2 mining, 2026-08-21).** The uncommitted
+      `t17_dpa_lattice/` probes proved the two pieces A.2/A.3 need,
+      with GPU numbers that live only in scratch JSON — capture them in
+      a T-17 LEDGER entry BEFORE the code is discarded. Promotion
+      candidates (each needs the standard doc-chain treatment +
+      Engine-seam wiring, NOT a raw lift):
+      - `box_relax_probe.py` (`fix box/relax x 0 y 0` + minimize, job
+        16453628) -> the #8 combined-cell relax routine (§5.6/§2.6):
+        add provenance-record of the relaxed cell + FREEZE x,y. The
+        DEMONSTRATED A.2 fix.
+      - `build_stiffness_probe.py` (+/-1% strain -> stress slope) -> a
+        new `biaxial_stiffness.py` beside `bulk_relax.py` (§2.4);
+        MEASURED SiO2 ~234 / LiNbO3 ~276 GPa. CAVEAT: the slope->
+        modulus FIT is uncoded (no polyfit in any script) — promotion
+        must add it. Feeds A.3.
+      - `square_cell_search.py::_worst_axis_strain` (+ `_cell_shape`,
+        `_twist_degrees`) -> `slab_builder.py`: replace the scalar
+        `SurfaceMatch.residual_strain` with a worst-axis/tensor view
+        and rank away from thin ribbons. The A.5 fix.
+      - a thin login-node/CLI entry over `build_halves` (retires the
+        hand-inlined `t12/build_matched_halves.py`).
+      - the global->model TYPE-REMAP on assembly (t13) ->
+        `write_lammps_data`/`amorphized_assembly`, keyed off the bond
+        model's declared type_map.
+      Cross-cutting: consolidate `_rescale_crystal` (copied 3-5x) at
+      `slab_builder.rescale_crystal_to_cell`; the gate-bypass demo
+      monkeypatch copied across t11/t13/t15 is the tell that the oxide
+      gate (per-material refs + per-wafer species key) is the missing
+      src/ piece.
+- [ ] **Deploy the universal-GPU activate through the mainline
+      `prepare` path — two coupled regressions in the per-job route
+      (review 2026-08-21).** The `prepare`/`run_member_job` activate
+      path was last green 2026-07-30 (job 15454930, si-si DEPLOY
+      SMOKE) and 2026-08-05 (bond on GPU, job 15724578); TWO changes
+      since then broke or outdated it, and it has not re-run.
+      (A.1.1, ROUTING) `deploy/registry.py:97` still pins activate to
+      `resource_class="cpu"` — the ORIGINAL §14 decision (2026-07-30,
+      "activate = classical engine / CPU") — which the 2026-08-08
+      §10.2/§4.7 revision (universal cascade, GPU by default)
+      superseded in the DOCS but not the code. So `prepare` routes
+      activate to a CPU partition and `_check_gpu_ceiling`
+      (`prepare.py`) would then refuse GPUs there: the universal-GPU
+      activate is not deployable, only the classical CPU path. FIX:
+      make activate GPU by default with the classical CPU path an
+      explicit deployment opt-in (the per-kind `[usage.activate.
+      environment]` map already carries the bundle env). Careful bits:
+      activate bundles the CPU geometry (build/assemble) with the GPU
+      cascade — running the whole job on a GPU node is simplest and the
+      geometry is cheap. NOTE the compute logic ALREADY dispatches
+      universal-first (`live_stages` activate -> subprocess); ONLY the
+      deploy routing lags.
+      (A.1.2, BUG) `pipeline/member_jobs.py:131` calls
+      `stage_set.build(member, potential, scratch, comm)` — 4 args —
+      but `StageSet.build` now takes `(member, pot, lattices, scratch,
+      comm)` and the activate job never runs `derive_lattices` at all.
+      REGRESSED when step-2b (`derive_lattices`) was wired (commit
+      `cf92d30`, 2026-08-06): the SEQUENCER call site was updated
+      (`sequencer.py:153-167`) but the parallel `run_member_job` site
+      was missed, so the per-job activate mis-aligns every arg after
+      `potential` and crashes at `cell_for`. FIX: mirror the sequencer
+      — run `derive_lattices` first, thread the result into `build`.
+      VALIDATE A.1.1 + A.1.2 TOGETHER: one real `prepare`-generated GPU
+      activate on a compute node, logged as the next
+      `install/tests/LEDGER.md` entry.
+      CODE DONE 2026-08-21 (Phase-3 item 2): A.1.2 fixed —
+      `run_member_job` activate now runs `derive_lattices` (step 2b)
+      and threads it into `build` (`member_jobs.py`), mirroring the
+      sequencer, with a regression test whose `build` inspects its args
+      (the fake-stage-set's arg-ignoring `build` was why the bug
+      slipped). A.1.1 fixed — activate `resource_class` "cpu" -> "gpu"
+      (`registry.py`, per §10.2). Full suite green. REMAINING: the node
+      validation above.
 
 ---
 

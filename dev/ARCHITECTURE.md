@@ -96,9 +96,11 @@ for one thin, config-selected **backend plugin** we maintain (the
 and Kaleidoscope are our own prior tools, so we *reuse* them as the
 engine (ADOPT) and build the step-8 characterization batch on top
 (BUILD) — that batch is our edge. Step 4's LAMMPS row hides a potential
-split (§2.3): the violent Ar cascade runs on an adopted classical + ZBL
-potential and only the gentle post-cascade anneal uses the MLIP, so the
-MLIP is never asked to reproduce cascades.
+split (§2.3): the violent Ar cascade runs on a **universal foundation
+MLIP + ZBL** (a broad pre-trained model; a classical + ZBL potential is
+the secondary fallback), while the **per-pair committee** the pipeline
+trains is never asked to reproduce cascades — only the foundation model
+is.
 
 ### 2.3 Module responsibilities (single responsibility each)
 
@@ -277,8 +279,10 @@ MLIP is never asked to reproduce cascades.
   surface (g(r), coordination, ~29 Å depth) — **not** of the classical
   amorphous *structure*'s accuracy, which SABSIM checks separately (see
   the MLIP-training and potential-quality bullets). Per STRUCTURAL 1b the
-  violent Ar cascade runs on a classical + ZBL potential; the MLIP takes
-  over only for the gentle post-cascade anneal and steps 6-7. Surface
+  violent Ar cascade runs on a UNIVERSAL foundation MLIP + ZBL (a
+  classical + ZBL potential is the secondary fallback); the per-pair
+  committee takes over only for the gentle post-cascade anneal and
+  steps 6-7. Surface
   activation is designed as a pluggable **mechanism** — energetic-particle
   bombardment (an ion or fast-atom beam, identical in classical MD) is
   v1's implementation, and the seam leaves room for other methods (e.g.
@@ -339,39 +343,49 @@ MLIP is never asked to reproduce cascades.
   2026-07-08).** Steps 4/6/7 run MD *on* the MLIP, yet the configs they
   visit (amorphized surface, pressed interface, breaking bonds) are what
   the MLIP must be trained on — circular. Active learning is the escape:
-  the config *generator* need not be the production potential. (1)
-  **Seed** a first DeePMD on hand-built near-equilibrium DFT — bulk Si,
-  bulk cristobalite, their surfaces, the *strained* substrates
-  STRUCTURAL 4 introduces, moderate-T rattled snapshots (optionally
-  warm-started from a foundation MLIP). (2) **Generate** the hard configs
-  with a cheaper generator: the violent Ar cascade runs on a
-  well-validated classical silica potential (BKS or Vashishta, not an
-  arbitrary Tersoff set) with a ZBL overlay — so amorphous-surface
-  configs are manufactured with no MLIP, breaking the circularity; the
-  pressed interface and separation run on the seed MLIP. (3) **Label** a
-  selected subset with VASP, **train** DeePMD, and **refine** with ALF —
+  the config *generator* need not be the production potential, and a
+  **universal foundation MLIP is that generator** — the 2026-08-21
+  decision, promoting the earlier "optionally warm-started from a
+  foundation MLIP" note to the primary path and retiring the separate
+  hand-built-DFT seed. (1) **Generate** every hard config on the
+  universal foundation MLIP: the violent Ar cascade on **foundation
+  MLIP + ZBL** (a well-validated classical silica potential — BKS or
+  Vashishta, not an arbitrary Tersoff set — with a ZBL overlay is the
+  secondary fallback), and the pressed interface and the
+  press/settle/pull on the *same* foundation MLIP — so all the hard
+  configs are manufactured with **no per-pair MLIP**, breaking the
+  circularity. Hand-built near-equilibrium DFT (bulk Si, cristobalite,
+  their surfaces, the *strained* STRUCTURAL-4 substrates, rattled
+  snapshots) is kept only as an optional cheap anchor in the training
+  set, not a required seed stage. (2) **Label** a selected subset with
+  VASP, **train** the per-pair committee, and **refine** with ALF —
   rerun the protocol, let committee / UDD uncertainty flag configs,
   VASP-label those, retrain, until committee uncertainty across a full
-  protocol run falls below threshold. (4) **Convergence** is the
-  potential-quality gate plus that uncertainty threshold; it hands off to
-  the interface check of STRUCTURAL 3.
-  **Division of labor + safeguards.** The MLIP is *not* asked to
-  reproduce cascades or Ar chemistry: the classical + ZBL potential owns
-  the violent step-4 cascade, and the MLIP takes over only for the gentle
-  post-cascade anneal and steps 6-7 — so its species set stays {Si, O}
-  and the deferred question of where ZBL lives is settled (in the
-  cascade). Because glasses are kinetically trapped, a gentle anneal
-  cannot fix a badly-wrong classical topology, so the classical structure
-  is trusted only as a *starting basin*: it is corrected downstream (VASP
-  labels + MLIP re-anneal + ALF) and **validated** — g(r), ring and
-  coordination statistics against DFT and experiment — as an added check
-  in the potential-quality gate, anchored by small DFT melt-quench cells.
-  A fidelity ladder keeps the classical structure a rung, not a ceiling:
-  classical cascade -> MLIP re-anneal (v1) -> eventually MLIP melt-quench
-  (once the MLIP has molten-regime coverage the MLIP itself makes the
-  glass). For a future pair lacking a trustworthy classical potential the
-  generator swaps to a foundation MLIP or a DFT melt-quench; the
-  bootstrap *pattern* is unchanged.
+  protocol run falls below threshold. (3) **Convergence** is the
+  potential-quality gate plus that uncertainty threshold; it hands off
+  to the interface check of STRUCTURAL 3. The **production** run — the
+  one that emits the bond number — then uses the trained **committee**,
+  whose spread is the uncertainty signal a single foundation model
+  cannot give.
+  **Division of labor + safeguards.** The distinction is between two
+  MLIPs. The **per-pair committee** — the production potential — is
+  *not* asked to reproduce cascades or Ar chemistry; that role belongs
+  to the **universal foundation MLIP + ZBL**, which owns the violent
+  step-4 cascade (a classical + ZBL potential is the secondary
+  fallback), so the committee's species set stays {Si, O} and the
+  deferred question of where ZBL lives is settled (in the cascade).
+  Because glasses are kinetically trapped, the foundation-model
+  amorphous structure is trusted only as a *starting basin*: it is
+  corrected downstream (VASP labels + committee re-anneal + ALF) and
+  **validated** — g(r), ring and coordination statistics against DFT
+  and experiment — as an added check in the potential-quality gate,
+  anchored by small DFT melt-quench cells. A fidelity ladder keeps that
+  starting glass a rung, not a ceiling: foundation-MLIP cascade ->
+  committee re-anneal -> eventually MLIP melt-quench (once the committee
+  has molten-regime coverage it makes the glass itself). The bootstrap
+  *pattern* is pair-generic — the universal foundation model is the
+  default generator for every pair — and a classical potential or a DFT
+  melt-quench is the fallback where the foundation model is untrusted.
 - **Bond characterization — Imago + Kaleidoscope
   [engine ADOPT · protocol BUILD · our edge].**
   Kaleidoscope fans the chosen step-8 snapshots out as a batch of

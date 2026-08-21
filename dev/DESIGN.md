@@ -947,20 +947,22 @@ classical MD, and both are just one setting of the projectile spec below.
 ### 3.3 The cascade engine — heat-sink and boundary design
 
 This is the correctness core, and the part prior art gets wrong. The
-classical + ZBL potential runs the cascade (STRUCTURAL 1b; selected per
-material by the §4.7 generator seam): a `hybrid/overlay` splice of the
-config-selected classical generator —
-**Stillinger-Weber for silicon** (the same model the press/pull uses, so
-one silicon model spans the whole pipeline; decided 2026-07-17; BKS or
-Vashishta for silica, Munetoh-Tersoff a fallback; Buckingham for ionic) —
-with **two ZBL hard cores, not one**. The first, longer-range, covers the
+cascade runs on a **universal foundation MLIP + ZBL** (STRUCTURAL 1b;
+selected per material by the §4.7 generator seam), with a **classical +
+ZBL** potential as the secondary fallback: a `hybrid/overlay` splice of
+the §4.7-selected generator — the universal foundation model by
+default, or, as the fallback, a config-selected classical model
+(**Stillinger-Weber for silicon**; BKS or Vashishta for silica,
+Munetoh-Tersoff a further fallback; Buckingham for ionic) — with **two
+ZBL hard cores, not one**. The first, longer-range, covers the
 projectile-substrate collisions; the second, with a very short cutoff
 below the bond length, covers every substrate-substrate pair. That second
-core is not optional: the classical generators (Stillinger-Weber, Tersoff)
-have only a FINITE short-range repulsion, so under an energetic cascade
-two substrate atoms can be driven into each other and fuse; the short ZBL
-supplies the missing hard wall while switching off well below the bond, so
-normal bonding is untouched (`PRIOR_ART.md` §1.9).
+core is not optional: the generators — the universal MLIP and the
+classical models (Stillinger-Weber, Tersoff) alike — have only a
+FINITE, soft short-range repulsion, so under an energetic cascade two
+substrate atoms can be driven into each other and fuse; the short ZBL
+supplies the missing hard wall while switching off well below the bond,
+so normal bonding is untouched (`PRIOR_ART.md` §1.9).
 
 The **heat-sink and boundary design** must be:
 
@@ -1363,14 +1365,18 @@ resolves by generating those configurations with a *cheaper generator*
 than the production model. Expressed through the plugin above, one
 bootstrap pass is:
 
-1. **Seed.** Train an initial committee (`train_DEEPMD_ensemble_task`) on
-   hand-built near-equilibrium DFT — bulk Si and cristobalite, their
-   surfaces, the STRUCTURAL-4 strained substrates, and moderate-T rattled
-   snapshots — enough not to explode near equilibrium.
-2. **Generate the hard configs cheaply.** Run the violent Ar cascade on
-   the classical + ZBL potential (CPU) to make amorphized-surface configs
-   with no MLIP at all; run the interface and separation on the seed
-   committee (GPU) to make pressed-interface and bond-breaking configs.
+1. **Generator.** The **universal foundation MLIP** is the cheaper
+   generator — no separate seed committee is trained (the 2026-08-21
+   decision retires that step). Hand-built near-equilibrium DFT — bulk
+   Si and cristobalite, their surfaces, the STRUCTURAL-4 strained
+   substrates, moderate-T rattled snapshots — is kept only as an
+   optional cheap anchor in the training set, not a seed stage.
+2. **Generate the hard configs.** Run the violent Ar cascade on the
+   **foundation MLIP + ZBL** (a classical + ZBL potential is the
+   secondary fallback) to make amorphized-surface configs; run the
+   interface and separation on the *same* **foundation MLIP** to make
+   pressed-interface and bond-breaking configs — no per-pair committee
+   is needed to generate any of them.
 3. **Label, convert, retrain.** VASP labels a selected subset (ALF's
    `QM_task = VASP_ase_calculator_task`); the converter folds it into the
    HDF5 store; `train_DEEPMD_ensemble_task` retrains the committee.
@@ -1391,16 +1397,21 @@ bootstrap pass is:
 
 **Convergence** is that uncertainty threshold together with the
 potential-quality gate (§7); this is the hand-off to STRUCTURAL 3. The
-division of labor from §3 holds throughout: the classical potential owns
-the violent cascade, the committee owns only the gentle stages, so the
-species map stays {O, Si} and the model is never asked to reproduce
-cascades or Ar.
+division of labor from §3 holds throughout: the foundation MLIP owns
+the violent cascade and all config generation, the per-pair committee
+owns only the gentle production stages, so the committee's species map
+stays {O, Si} and the committee is never asked to reproduce cascades or
+Ar.
 
-**What fills the committee's slot in v1 (2026-07-22).** The loop above
-is the design; today no committee is trained, so every stage the design
-hands to the MLIP — the gentle re-anneal of §3.4 and the press, settle
-and pull of §5 — runs instead on a CLASSICAL potential resolved per
-material from the SAME registry the cascade generator reads (§4.7;
+**What fills the committee's slot in v1 (2026-07-22; updated
+2026-08-21).** The loop above is the design; no committee is trained
+yet, so the production potential's slot is filled by a stand-in. The
+cascade already runs on the universal foundation MLIP + ZBL (§4.7), and
+the 2026-08-21 decision makes that **same foundation model the
+generator for the gentle stages too** — the re-anneal of §3.4 and the
+press, settle and pull of §5 — as it is wired in. Until that lands,
+those stages fall back to a CLASSICAL potential resolved per material
+from the SAME registry the cascade generator reads (§4.7;
 `driver/cascade_potential.classical_force_model`). That is a deliberate
 stand-in rather than a second design: it wears the same `ForceModel` /
 `pair_style` seam the trained committee will, which is precisely what
@@ -1767,9 +1778,10 @@ student can read the file and know what was manufactured.
 4. **The accuracy audit.** The block below.
 5. **How the hard configurations are manufactured.** Which protocol
    stages run purely to harvest frames, and on WHICH force model each
-   runs — the violent cascade on the classical + ZBL form of §4.7, the
-   press and pull on whatever committee currently exists (§4.5 step 2) —
-   how many, and under what conditions.
+   runs — the violent cascade on the foundation MLIP + ZBL form of §4.7
+   (classical + ZBL the fallback), the press and pull on the same
+   universal foundation MLIP (§4.5 step 2) — how many, and under what
+   conditions.
 6. **How a subset is chosen for labelling.** The accurate calculations
    are the cost bottleneck, so the recipe states the budget and the
    selection rule: favour the interface region, prefer configurations
