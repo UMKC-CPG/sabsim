@@ -642,8 +642,9 @@ DETONATED under the fixed-box DPA press (t14/t15), WHERE does the frame-0
 stress come from, and does a one-time in-plane `box/relax` find a
 zero-stress cell the crystal can hold? (The A.2/§5.6 + A.3 question.)
 
-- **As-run scripts (UNCOMMITTED diagnostic probes — rule-1 caveat, to be
-  committed):** `install/tests/t17_dpa_lattice/` — `relax_lattice.py`
+- **As-run scripts (diagnostic probes, ARCHIVED not distributed — a
+  deliberate rule-1 exception, see Scope 1):** `install/tests/archive/
+  t17_dpa_lattice/` — `relax_lattice.py`
   (per-material bulk box-relax under DPA), `build_stiffness_probe.py` +
   `stepwise_measure.py` (+/-1% strain -> stress slope -> biaxial
   modulus), `box_relax_probe.py` + `box_relax.slurm` (the assembled-pair
@@ -691,9 +692,13 @@ zero-stress cell the crystal can hold? (The A.2/§5.6 + A.3 question.)
   relax, and the reason mainline must build on the §2.2 derived lattice.
 
 - **Scope NOT covered:**
-  1. **Diagnostic probes, not committed harnesses** — the scripts above
-     are uncommitted (`??`) and self-select cells via env vars; rule 1 is
-     satisfied only once they are committed beside this ledger.
+  1. **Diagnostic probes, ARCHIVED not distributed** — the scripts above
+     live under gitignored `install/tests/archive/` and self-select cells
+     via env vars. DELIBERATE rule-1 exception: the raw probes hold
+     dead-ends that would mislead if shipped, so their LESSONS are
+     reproduced by the promoted mainline routines + committed tests (the
+     combined-cell box-relax, the biaxial-stiffness routine, the
+     worst-axis strain metric), not by the probes.
   2. **`box/relax` relaxed only x,y** — pzz was left compressive
      (-23382 bar); z is the free-surface/grip axis, handled separately.
   3. **No per-slab stress split** — the `.pt2` exposes only the GLOBAL

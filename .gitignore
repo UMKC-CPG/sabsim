@@ -92,3 +92,9 @@ sunita2/
 *.swp
 *.swo
 *~
+
+# Diagnostic probe investigations kept locally for reference, never
+# distributed. Their LESSONS are extracted into src/ (with committed
+# tests); the raw probes contain dead-ends and superseded ideas that
+# would mislead if shipped. LEDGER entries cite them by archive path.
+install/tests/archive/
