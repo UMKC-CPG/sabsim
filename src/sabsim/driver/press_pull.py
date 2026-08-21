@@ -47,6 +47,7 @@ from sabsim.driver.commands import (
     force_model_commands,
     grip_hold_and_readback_commands,
     integrator_commands,
+    combined_cell_relax_commands,
     preamble_commands,
     press_drive_commands,
     press_release_commands,
@@ -405,6 +406,13 @@ def press_and_bond(
         # seam is proven and surfaces are activated under the committee.
         engine.commands(contact_relax_commands(
             member, seed, control.relax_chunks * control.chunk_steps))
+        # One-time combined-cell relax (§5.6, §2.6): resize the shared
+        # lateral cell to zero in-plane stress, then FREEZE it for the
+        # press. The recorded relaxation that replaces the forbidden live
+        # barostat; it relieves the dominant frame-0 stress (the cell off
+        # the model's preferred lattice) so the strained pair does not
+        # detonate at contact (T-17, job 16453628).
+        engine.commands(combined_cell_relax_commands())
         # The §3.5 activation gate, now HERE (§3.4): judge each healed
         # surface. A FAILED gate halts the bond BEFORE the press, so its
         # scarce GPU is never spent on an un-activated surface (§9.1). The

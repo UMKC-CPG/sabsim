@@ -373,6 +373,34 @@ def integrator_commands(member: MemberSpecification, seed: int) -> list:
     ]
 
 
+def combined_cell_relax_commands() -> list:
+    """Relax the assembled pair's IN-PLANE cell to zero stress, ONCE.
+
+    A one-time ``fix box/relax x 0 y 0`` + ``minimize`` run at the joint
+    heal (DESIGN.md §5.6, §2.6): the shared lateral cell resizes to its
+    zero-in-plane-stress size while z is left to the free surface and the
+    grips, then the fix is REMOVED so the cell is frozen for the press,
+    settle, and pull. This is the recorded, one-time relaxation §5.6
+    sanctions -- NOT a live lateral barostat during the measurement, which
+    §5.6 forbids because the cell would drift and the per-area denominator
+    would move mid-run. It relieves the dominant frame-0 stress -- the
+    cell sitting off the potential's preferred lattice, ~7-8 GPa per
+    material (T-17 job 16453628 drove it to ~0 with a sub-0.3% box change,
+    the relaxed cell staying ordered) -- so the strained pair does not
+    detonate at contact.
+
+    ``vmax`` caps the fractional box change per minimize iteration so the
+    relax is smooth rather than lurching; the minimize tolerances are a
+    §5.9 stand-in until the convergence study pins them.
+    """
+    return [
+        "fix combined_cell_relax all box/relax x 0.0 y 0.0 vmax 0.001",
+        "min_style cg",
+        "minimize 1.0e-6 1.0e-4 1000 10000",
+        "unfix combined_cell_relax",
+    ]
+
+
 # The load RISE TIME: how long the press load takes to climb from zero to
 # the target before it HOLDS there. A documented §5.9 STAND-IN, not a
 # converged value — the real load-schedule knob is a follow-on

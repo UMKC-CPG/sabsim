@@ -2223,11 +2223,25 @@ reported.
 
 ### 5.6 The box, the boundary, and the run that has to finish
 
-The lateral cell is the shared coincidence cell of §2 and is **held
-fixed** — no lateral barostat, or the recorded substrate strain relaxes
-away mid-run and the provenance number becomes a fiction. The
-z-boundary is non-periodic, with vacuum sized for the full pull distance
-plus margin.
+The lateral cell is the shared coincidence cell of §2, taken to its
+zero-in-plane-stress size by a **one-time combined-cell relaxation** run
+ONCE at the joint heal (§2.6, §3.4) — a single `fix box/relax x 0 y 0`
+plus minimize on the assembled pair — whose result is **recorded** (the
+relaxed cell, and the per-slab strains it implies) and then **held
+fixed** for the whole press, settle, and pull. The distinction that
+matters is *when*. A live lateral barostat running **during** the press
+is forbidden: the cell would drift as the measurement proceeds, the
+per-unit-area denominator would move mid-run, and the recorded substrate
+strain would relax away — the provenance number becomes a fiction. The
+one-time relaxation instead moves the box **once, before** the
+measurement, writes down where it landed, and freezes it; the
+measurement then runs on a fixed, recorded cell. This is also why the
+assembled pair does not detonate at contact: T-17 (job 16453628) showed
+the dominant frame-0 stress is the cell sitting off the potential's
+preferred lattice (~7–8 GPa per material), which the combined relax
+drives to ~0 with a sub-0.3% box change, the relaxed cell staying
+ordered. The z-boundary is non-periodic, with vacuum sized for the full
+pull distance plus margin.
 
 Two things are then gates rather than warnings. **Atom count is
 conserved**: a non-periodic boundary silently deletes any atom that

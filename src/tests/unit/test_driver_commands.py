@@ -21,6 +21,7 @@ from sabsim.driver.commands import (
     ForceModel,
     RegionGeometry,
     classical_si_stand_in,
+    combined_cell_relax_commands,
     deepmd_model,
     force_model_commands,
     grip_hold_and_readback_commands,
@@ -342,3 +343,27 @@ def test_pull_grows_the_box_to_fit_its_own_travel():
     # overrun exactly the way the failing one did.
     faster = pull_headroom_commands(Quantity(10.0, "m/s"), 500.0)[0]
     assert "zhi+60" in faster, faster
+
+
+def test_combined_cell_relax_is_a_one_time_boxrelax_then_freeze():
+    """The §5.6 combined-cell relax is a ONE-TIME box/relax + minimize.
+
+    It resizes the shared lateral cell (x and y) to zero in-plane stress
+    at the joint heal, then REMOVES the fix so the cell is frozen for the
+    press / settle / pull -- the recorded relaxation that replaces the
+    forbidden live barostat. z is left to the free surface and the grips.
+    """
+    commands = combined_cell_relax_commands()
+    assert commands == [
+        "fix combined_cell_relax all box/relax x 0.0 y 0.0 vmax 0.001",
+        "min_style cg",
+        "minimize 1.0e-6 1.0e-4 1000 10000",
+        "unfix combined_cell_relax",
+    ]
+    # x and y relax; z is NOT barostatted (the grips drive z).
+    box_line = commands[0]
+    assert " x 0.0" in box_line and " y 0.0" in box_line
+    assert " z " not in box_line
+    # It ENDS by removing the fix, so no barostat survives into the
+    # measurement -- the §5.6 requirement that the cell be frozen.
+    assert commands[-1] == "unfix combined_cell_relax"

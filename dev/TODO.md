@@ -1443,6 +1443,16 @@ foundations, interaction rules. -->
       before vs continuously during), RECORDED (yes vs silent drift),
       and FIXED-during-measurement (yes vs no). Couples to A.3 (shares
       the elastic constants) and the thickness lever above.
+      CODE DONE 2026-08-21 (Phase-3 item 3): DESIGN §5.6 revised +
+      PSEUDOCODE §9 synced; `combined_cell_relax_commands` added
+      (`commands.py`, `fix box/relax x 0 y 0` + minimize + unfix),
+      WIRED at the joint heal before the gate (`press_pull.py`), and the
+      `lateral_relax` band-aid fully retired (field, builder, wiring,
+      t15). Full suite green. REMAINING: (a) write the relaxed cell +
+      per-slab strains to provenance (the "recorded" half of §5.6 — the
+      FREEZE is done via `unfix`, the record is not yet captured to the
+      artifact); (b) node-validate the mainline combined-cell-relax
+      press on the oxide pair (batched).
 - [ ] Structure-contract schema: the labeled atom groups the builder
       emits (frozen base, thermostat border, NVE interior, activated
       skin, press/pull grips, per-slab id) and consumed across the

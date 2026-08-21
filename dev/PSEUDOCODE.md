@@ -1845,10 +1845,13 @@ function open_lammps_driver(structure, potential, member_specification):
     # (§10.7) carried from activation, integrated as interior but TRACKED
     # for §5.1. (The cascade driver, §10.2, carves a frozen_base instead
     # of grips from the same z-ranges — the zones are stage-appropriate.)
-    # The lateral cell is HELD FIXED — no lateral barostat, or the
-    # recorded substrate strain relaxes away and the provenance number
-    # becomes a fiction (§5.6). The z-boundary is non-periodic, vacuum
-    # sized for the full pull distance plus margin.
+    # The lateral cell is taken to zero in-plane stress by a ONE-TIME
+    # combined-cell relax at the joint heal (`fix box/relax x 0 y 0` +
+    # minimize), recorded, then HELD FIXED for the whole press/settle/
+    # pull; a live barostat DURING the press is forbidden (the cell would
+    # drift and the provenance number becomes a fiction, §5.6). The
+    # z-boundary is non-periodic, vacuum sized for the full pull distance
+    # plus margin.
     return driver
 ```
 
