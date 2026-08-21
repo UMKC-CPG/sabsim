@@ -19,6 +19,8 @@ import sabsim.structure
 from sabsim.structure.slab_builder import (
     WAFER_A_TAG,
     WAFER_B_TAG,
+    _residual_strain,
+    _worst_axis_strain,
     assemble_facing_pair,
     build_facing_pair,
     build_slab,
@@ -88,6 +90,40 @@ def test_sisi_match_is_the_identity_null_test():
     match = match_surfaces(slab, slab)
     assert match.is_identity
     assert match.residual_strain < 1.0e-6
+
+
+def test_worst_axis_strain_is_the_honest_metric_the_scalar_hides():
+    """A short-axis strain the aggregate scalar buries shows up per-axis.
+
+    The rotation-invariant `residual_strain` divides by the longest edge
+    squared, so a big strain on a SHORT ribbon axis reads tiny; the
+    per-axis `_worst_axis_strain` reports the true stretch each slab feels
+    on the even-split cell. A ~5x50 ribbon whose short axis is stretched
+    2.5% reads ~0.05% by the scalar but ~1.25% per-axis (half the misfit,
+    the even split) -- an order of magnitude larger.
+    """
+    substrate = np.array([[5.0, 0.0], [0.0, 50.0]])
+    film = np.array([[5.125, 0.0], [0.0, 50.0]])
+    scalar = _residual_strain(substrate, film)
+    worst = _worst_axis_strain(substrate, film)
+    assert scalar < 0.001                    # the short axis is buried
+    assert abs(worst - 0.0125) < 1.0e-3      # the honest per-axis stretch
+    assert worst > 10.0 * scalar             # far larger than the scalar
+    # An identity match feels nothing on either axis.
+    assert _worst_axis_strain(substrate, substrate) < 1.0e-9
+
+
+def test_match_surfaces_records_the_worst_axis_strain():
+    """match_surfaces populates the honest per-axis strain (§2.4).
+
+    For the Si/Si identity the honest metric is ~0 like the scalar; the
+    field exists so a real mismatch carries the true per-direction ceiling
+    the scalar would otherwise hide.
+    """
+    slab = build_slab(load_crystal(_SI_CIF), _SI_100)
+    match = match_surfaces(slab, slab)
+    assert match.worst_axis_strain is not None
+    assert match.worst_axis_strain < 1.0e-6
 
 
 def test_match_carries_the_tiling_geometry_for_a_mismatch():

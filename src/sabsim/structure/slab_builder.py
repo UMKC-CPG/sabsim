@@ -109,6 +109,15 @@ class SurfaceMatch:
     film_tiling: tuple = None       # 2x2 whole-number tiling of slab B
     substrate_cell: tuple = None    # slab A supercell in-plane vectors, Å
     film_cell: tuple = None         # slab B supercell in-plane vectors, Å
+    # The HONEST per-axis strain (§2.4): the largest PRINCIPAL strain
+    # either slab feels on the even-split shared cell, as a fraction.
+    # Unlike `residual_strain` above -- a rotation-invariant scalar that
+    # divides by the longest edge squared and so HIDES a big strain on a
+    # short axis (a thin ribbon reads deceptively low) -- this is the true
+    # per-direction ceiling (`_worst_axis_strain`), what §2.4's split and
+    # any ribbon-averse ranking should read. None when reconstructed from
+    # a manifest (no supercell vectors to measure).
+    worst_axis_strain: float = None
 
 
 @dataclass
@@ -360,6 +369,38 @@ def _residual_strain(
     return float(np.max(np.abs(metric_film - metric_substrate)) / scale)
 
 
+def _worst_axis_strain(
+        substrate_cell: np.ndarray,
+        film_cell: np.ndarray) -> float:
+    """Largest PER-AXIS principal strain either slab feels (§2.3, §2.4).
+
+    The rotation-invariant scalar :func:`_residual_strain` divides the
+    metric-tensor difference by the LONGEST edge squared, so a severe
+    strain on a SHORT axis barely registers -- a thin ribbon can read
+    ~0.9% overall while one axis is really strained ~2.5%. This returns
+    the honest ceiling instead. Bring both matched supercells into one
+    plane with their true lengths (:func:`_coplanar_2d`), remove the twist
+    (:func:`_polar_rotation`), and take the EVEN-split shared cell (§2.4) --
+    exactly the steps :func:`even_split_shared_cell` uses. Then for each
+    slab take the PRINCIPAL strains: the singular values of the
+    deformation gradient carrying its own matched cell onto the shared
+    cell, minus one. Return the largest magnitude over BOTH slabs and BOTH
+    axes, as a fraction (0 = exact). This is the per-direction stretch or
+    compression no axis choice can hide, and it is what the §2.4 split and
+    any ribbon-averse match ranking should read.
+    """
+    substrate, film = _coplanar_2d(substrate_cell, film_cell)
+    twist = _polar_rotation(substrate @ np.linalg.inv(film))
+    film_aligned = film @ twist.T
+    shared = 0.5 * (substrate + film_aligned)
+    worst = 0.0
+    for own in (substrate, film_aligned):
+        deformation = shared.T @ np.linalg.inv(own.T)
+        principal = np.linalg.svd(deformation, compute_uv=False) - 1.0
+        worst = max(worst, float(np.max(np.abs(principal))))
+    return worst
+
+
 def match_surfaces(
         slab_a: Atoms,
         slab_b: Atoms,
@@ -387,6 +428,8 @@ def match_surfaces(
         best.substrate_sl_vectors, best.film_sl_vectors)
     return SurfaceMatch(
         residual_strain=strain,
+        worst_axis_strain=_worst_axis_strain(
+            best.substrate_sl_vectors, best.film_sl_vectors),
         match_area=float(best.match_area),
         is_identity=(strain <= _IDENTITY_STRAIN_TOLERANCE),
         substrate_tiling=_whole_tuples(best.substrate_transformation),

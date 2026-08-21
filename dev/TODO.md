@@ -2462,10 +2462,19 @@ foundations, interaction rules. -->
         MEASURED SiO2 ~234 / LiNbO3 ~276 GPa. CAVEAT: the slope->
         modulus FIT is uncoded (no polyfit in any script) — promotion
         must add it. Feeds A.3.
-      - `square_cell_search.py::_worst_axis_strain` (+ `_cell_shape`,
-        `_twist_degrees`) -> `slab_builder.py`: replace the scalar
-        `SurfaceMatch.residual_strain` with a worst-axis/tensor view
-        and rank away from thin ribbons. The A.5 fix.
+      - `square_cell_search.py::_worst_axis_strain` -> `slab_builder.py`.
+        DONE 2026-08-21 (Phase-3 item 4): `_worst_axis_strain` added
+        (generalized to substrate/film; reuses `_coplanar_2d` +
+        `_polar_rotation` like `even_split_shared_cell`), and
+        `SurfaceMatch.worst_axis_strain` now carries the honest per-axis
+        ceiling beside the misleading scalar; `match_surfaces` populates
+        it. 2 unit tests (a ribbon reads 0.05% scalar vs 1.25% per-axis;
+        identity -> 0). REMAINING (a §2.3 design call, separate item):
+        RANK `match_surfaces` by the honest metric + a ribbon-shape
+        penalty (`_cell_shape` aspect/angle, `_twist_degrees`) instead
+        of pure area -- needs the objective decided (smallest area vs
+        lowest worst-axis vs least-ribbon) since it changes which cell
+        gets built.
       - a thin login-node/CLI entry over `build_halves` (retires the
         hand-inlined `t12/build_matched_halves.py`).
       - the global->model TYPE-REMAP on assembly (t13) ->
