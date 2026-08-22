@@ -55,10 +55,17 @@ from sabsim.driver.cascade import (
     derive_bombardment_spec,
     derive_seeds,
 )
-from sabsim.driver.bulk_relax import derive_lattice
+from sabsim.driver.bulk_relax import (
+    bulk_relax_subprocess_script,
+    conventional_cell,
+    cubic_lattice_constant,
+    derive_lattice,
+    read_data_box,
+)
 from sabsim.driver.cascade_potential import (
     classical_force_model,
     resolve_cascade_generator,
+    universal_force_model,
 )
 from sabsim.driver.cascade_subprocess import (
     read_dump_structure,
@@ -227,17 +234,27 @@ def derive_lattices_live(
     under the current model, and reads the equilibrium conventional cell
     back — the cell the build then cuts slabs on, retiring the CIF's
     published scale (which would leave the box stressed at step zero,
-    §2.2). At cold start "the current model" is the classical/seed form
-    resolved from the SAME registry the quiet stages use
-    (:func:`~sabsim.driver.cascade_potential.classical_force_model`), so
-    when a universal MLIP or a trained committee enters that registry the
-    derivation follows it unchanged. Compute-node work: the ``LammpsEngine``
-    import is lazy, and the bulk data file is written by one rank.
+    §2.2). "The current model" is universal-first (DESIGN §4.7): by default
+    the block relaxes under the SAME universal MLIP the cascade then
+    bombards under, so the working lattice and the amorphizing potential
+    agree — a cell equilibrated under one description and bombarded under
+    another starts stressed (the offset that detonated the oxide bring-up).
+    That model lives in deepmd's own bundle and cannot load in-process
+    (ARCHITECTURE §4.1/§4.4), so the universal derivation runs OUT-OF-
+    PROCESS through the same file handoff as ``activate``
+    (:func:`~sabsim.driver.bulk_relax.bulk_relax_subprocess_script`, read
+    back by :func:`~sabsim.driver.bulk_relax.read_data_box`). Only an
+    explicit classical cascade takes the in-process ``LammpsEngine`` path,
+    under :func:`~sabsim.driver.cascade_potential.classical_force_model`.
+    Compute-node work: the ``LammpsEngine`` import is lazy, the bulk data
+    file is written by one rank, and the one GPU subprocess is driven by
+    the primary rank while peers wait at a barrier.
     """
-    from sabsim.driver.lammps_engine import LammpsEngine
-
     cells: dict = {}
     provenance: list = []
+    use_classical = _classical_cascade_requested()
+    allow_unvalidated = _unvalidated_potentials_allowed()
+    rank = comm.Get_rank() if comm is not None else 0
     # The §2.2 bulk-relax block size is a spec knob (numerical), not pinned.
     bulk_cells = member.numerical.bulk_cells_per_axis
     for wafer in (member.material.wafer_a, member.material.wafer_b):
@@ -245,28 +262,57 @@ def derive_lattices_live(
             continue                     # same material: derive once
         crystal = load_crystal(_resolve_cif(wafer.cif_source))
         type_map = bulk_type_map(crystal, bulk_cells)
+        coupling = _coupling_for(crystal)
         bulk_file = os.path.join(
             str(scratch_directory), f"bulk_{wafer.identity}.data")
         _publish_file(comm, lambda: write_bulk_data(
             crystal, bulk_cells, bulk_file))
-        seed = classical_force_model(
-            type_map, frozenset(type_map), domain=member.material_domain,
-            allow_unvalidated=_unvalidated_potentials_allowed())
-        log_file = os.path.join(
-            str(scratch_directory), f"log.derive_{wafer.identity}")
-        engine = LammpsEngine(
-            command_line_args=["-screen", "none", "-log", log_file],
-            comm=comm)
-        result = derive_lattice(
-            engine, bulk_file, seed, bulk_cells,
-            coupling=_coupling_for(crystal))
-        engine.close()
+
+        if use_classical:
+            # Explicit classical request: the in-process engine, no ZBL.
+            from sabsim.driver.lammps_engine import LammpsEngine
+            seed = classical_force_model(
+                type_map, frozenset(type_map),
+                domain=member.material_domain,
+                allow_unvalidated=allow_unvalidated)
+            log_file = os.path.join(
+                str(scratch_directory), f"log.derive_{wafer.identity}")
+            engine = LammpsEngine(
+                command_line_args=["-screen", "none", "-log", log_file],
+                comm=comm)
+            result = derive_lattice(
+                engine, bulk_file, seed, bulk_cells, coupling=coupling)
+            engine.close()
+            derived_cell = result.conventional_cell
+            lattice_edge = result.lattice_constant
+            note = "classical seed"
+        else:
+            # Universal-first default (§4.7): relax under the foundation MLIP
+            # out-of-process in its bundle, read the relaxed cell back.
+            model = universal_force_model(
+                type_map, allow_unvalidated=allow_unvalidated)
+            relaxed_file = os.path.join(
+                str(scratch_directory), f"relaxed_bulk_{wafer.identity}.data")
+            script = bulk_relax_subprocess_script(
+                bulk_file, model, relaxed_file, coupling=coupling)
+            if rank == 0:
+                run_activate_subprocess(
+                    script, str(scratch_directory), relaxed_file,
+                    script_name=f"derive_{wafer.identity}.in",
+                    log_name=f"log.derive_{wafer.identity}")
+            if comm is not None:
+                comm.Barrier()
+            relaxed_block_cell, _ = read_data_box(relaxed_file)
+            derived_cell = conventional_cell(relaxed_block_cell, bulk_cells)
+            lattice_edge = cubic_lattice_constant(
+                relaxed_block_cell, bulk_cells)
+            note = "universal MLIP (out-of-process)"
+
         cells[wafer.identity] = tuple(
             tuple(float(component) for component in row)
-            for row in result.conventional_cell)
+            for row in derived_cell)
         provenance.append(
-            f"{wafer.identity}: a~{result.lattice_constant:.4f} A, "
-            f"classical seed")
+            f"{wafer.identity}: a~{lattice_edge:.4f} A, {note}")
     return DerivedLattices(cells=cells, provenance="; ".join(provenance))
 
 

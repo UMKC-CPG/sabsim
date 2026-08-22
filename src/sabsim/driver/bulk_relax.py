@@ -80,8 +80,16 @@ def bulk_relax_commands(
     ``coupling`` is ``iso`` for a cubic crystal (uniform scaling keeps the
     cell cubic, so one lattice constant results); ``aniso`` or ``tri``
     suit lower-symmetry crystals, a §2 follow-on.
+
+    When ``force_model`` is a message-passing MLIP (``needs_atom_map`` —
+    the universal foundation model, §4.7), ``atom_modify map yes`` is
+    inserted right after ``atom_style`` and BEFORE the ``read_data`` that
+    creates the atoms: the graph network gathers per-atom features across
+    the neighbor graph, so the global atom map must already exist. A
+    classical form leaves the preamble untouched (its ``needs_atom_map`` is
+    false), which is why the in-process classical path never needed this.
     """
-    return [
+    lines = [
         "units metal",
         "atom_style atomic",
         "boundary p p p",
@@ -93,6 +101,78 @@ def bulk_relax_commands(
         f"{settings.force_tolerance:g} "
         f"{settings.max_iterations} {settings.max_evaluations}",
     ]
+    if force_model.needs_atom_map:
+        # After atom_style (index 1), before read_data: the atom map the
+        # GNN neighbor gather needs must exist when the atoms are created.
+        lines.insert(2, "atom_modify map yes")
+    return lines
+
+
+def bulk_relax_subprocess_script(
+        data_file: str,
+        force_model: ForceModel,
+        relaxed_data_file: str,
+        settings: MinimizeSettings = MinimizeSettings(),
+        coupling: str = "iso") -> list:
+    """The bulk box-relax as a STANDALONE script for the bundle engine (§4.4).
+
+    The same relaxation as :func:`bulk_relax_commands`, but terminated with
+    a ``write_data`` so the caller reads the relaxed cell back from a FILE
+    rather than from a live :class:`Engine`. This is the out-of-process
+    path taken when the model is the universal MLIP (DESIGN §4.7): that
+    model lives in deepmd's own self-contained bundle and cannot load into
+    sabsim's in-process engine (ARCHITECTURE §4.1/§4.4), so the §2.2
+    lattice derivation runs as the bundle's ``lmp -in <script>`` exactly as
+    the cascade does, and hands its geometry back through the file handoff.
+    ``nocoeff`` keeps the written file to structure + box — all the reader
+    needs — instead of echoing pair coefficients we never read back.
+    """
+    return [
+        *bulk_relax_commands(data_file, force_model, settings, coupling),
+        f"write_data {relaxed_data_file} nocoeff",
+    ]
+
+
+def read_data_box(data_path: str) -> tuple[np.ndarray, int]:
+    """Parse the periodic cell (and atom count) from a LAMMPS data file.
+
+    The out-of-process bulk relax writes its relaxed geometry with
+    ``write_data``; this reads the cell back (the §4.4 file handoff). A
+    data file states the box DIRECTLY as its edges — ``xlo xhi``,
+    ``ylo yhi``, ``zlo zhi`` and the optional ``xy xz yz`` tilts — so the
+    cell vectors follow with NO bound-vs-actual conversion (unlike a dump's
+    ``ITEM: BOX BOUNDS``, which reports shifted bounds): ``a =
+    (xhi-xlo, 0, 0)``, ``b = (xy, yhi-ylo, 0)``, ``c = (xz, yz, zhi-zlo)``.
+    Returns ``(cell 3x3 in Å, atom_count)``; reading stops at the ``Atoms``
+    section, since the whole box lives in the header above it.
+    """
+    x_lo = x_hi = y_lo = y_hi = z_lo = z_hi = None
+    tilt_xy = tilt_xz = tilt_yz = 0.0
+    atom_count = None
+    with open(data_path, encoding="utf-8") as data_file:
+        for raw_line in data_file:
+            line = raw_line.strip()
+            if line.startswith("Atoms"):
+                break                 # header is done; box is above here
+            if line.endswith("xlo xhi"):
+                x_lo, x_hi = (float(value) for value in line.split()[:2])
+            elif line.endswith("ylo yhi"):
+                y_lo, y_hi = (float(value) for value in line.split()[:2])
+            elif line.endswith("zlo zhi"):
+                z_lo, z_hi = (float(value) for value in line.split()[:2])
+            elif line.endswith("xy xz yz"):
+                tilt_xy, tilt_xz, tilt_yz = (
+                    float(value) for value in line.split()[:3])
+            elif line.endswith(" atoms"):
+                atom_count = int(line.split()[0])
+    if None in (x_lo, x_hi, y_lo, y_hi, z_lo, z_hi):
+        raise ValueError(
+            f"no complete box (xlo/ylo/zlo lines) in data file {data_path}")
+    cell = np.array([
+        [x_hi - x_lo, 0.0, 0.0],
+        [tilt_xy, y_hi - y_lo, 0.0],
+        [tilt_xz, tilt_yz, z_hi - z_lo]], dtype=float)
+    return cell, (atom_count if atom_count is not None else 0)
 
 
 def conventional_cell(cell: np.ndarray, cells_per_axis: int) -> np.ndarray:

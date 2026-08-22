@@ -1005,10 +1005,17 @@ function solve_shared_cell(material_A, material_B, potential,
     # load each crystal from its CIF (material.cif_source — symmetry and
     # basis, DESIGN §1.2) and relax the bulk under the current model,
     # referenced to VASP. At the COLD START the current model is the
-    # classical/seed model, not yet a trained committee (DESIGN §2.2);
-    # the relaxation itself is a driver minimization (§9.7). The
-    # relaxed-vs-VASP disagreement is itself a potential-quality measure
-    # (DESIGN §2.2, §7-of-DESIGN) — recorded, not discarded.
+    # UNIVERSAL foundation MLIP — the SAME model that runs the step-4
+    # cascade — so the derived cell and the amorphizing potential agree
+    # (DESIGN §2.2/§4.7: a cell equilibrated under one description and
+    # bombarded under another starts stressed, the oxide-bring-up offset).
+    # A classical seed is used only on explicit request. Because the
+    # universal .pt2 loads only in the deepmd bundle, the DEFAULT
+    # relaxation runs OUT-OF-PROCESS (box/relax + minimize + write_data,
+    # read back with read_data_box; ARCHITECTURE §4.4), mirroring the
+    # cascade handoff; the classical path stays an in-process minimization
+    # (§9.7). The relaxed-vs-VASP disagreement is itself a potential-
+    # quality measure (DESIGN §2.2, §7-of-DESIGN) — recorded, not discarded.
     lattice_A = relaxed_lattice(material_A, potential)   # vs VASP
     lattice_B = relaxed_lattice(material_B, potential)
 

@@ -504,20 +504,37 @@ committee (see below). Two consequences follow:
   learning error and not partly as a settings mismatch between the two
   sides of the comparison.
 
-**Cold start.** At the very beginning there is no production potential to
+**Cold start.** At the very beginning there is no production committee to
 relax under — the bootstrap (§4.5) has not yet trained one. So "the
-current potential" means the **classical/seed model** that opens the
-bootstrap: the first cell is relaxed under it, giving a crude but
-self-consistent lattice, and §2.2's rule is re-applied under the trained
-committee the moment it exists, re-deriving the cell then. The step is
-identical; only the model beneath it changes. This makes "**derive the
-lattice by relaxing the bulk under the current model**" a first-class,
-named pipeline step in its own right, not a hidden preprocessing detail.
-Its first *real* execution is deliberately the **smallest** use of the
-LAMMPS execution layer (`ARCHITECTURE.md` §4.1) — a few-atom bulk relax —
-and that is exactly the moment the walking skeleton's hardcoded stand-in
-lattice is retired: not smuggled into the plumbing-only skeleton before a
-force engine exists, and not left hardcoded once one does.
+current potential" means the **universal foundation MLIP** — the *same*
+chemistry-agnostic model that then runs the step-4 cascade (§4.7). This is
+the universal-first decision (§4.7) reaching §2.2: the working lattice and
+the amorphizing potential must **agree**, because a cell equilibrated under
+one description and bombarded under another starts stressed — precisely the
+CIF-vs-model offset that detonated the oxide bring-up (a ribbon relaxed on
+one basis, then driven under a lattice the model did not want). Deriving
+the cell under the universal MLIP retires that offset at the source. A
+**classical seed** is used only on explicit request (`SABSIM_CASCADE_
+CLASSICAL`), the same opt-in that selects a classical cascade; for silicon
+the classical and MLIP lattices nearly coincide, so the choice is benign
+there and material at the oxide margins. §2.2's rule is re-applied under
+the trained committee the moment it exists, re-deriving the cell then. The
+step is identical; only the model beneath it changes. This makes "**derive
+the lattice by relaxing the bulk under the current model**" a first-class,
+named pipeline step, not a hidden preprocessing detail.
+
+Because the universal MLIP is the AOTInductor `.pt2` that lives in
+deepmd-kit's own self-contained bundle and cannot load into sabsim's
+in-process engine (`ARCHITECTURE.md` §4.1/§4.4), the **universal §2.2
+derivation runs OUT-OF-PROCESS** through the same file handoff the step-4
+cascade uses (`ARCHITECTURE.md` §4.4): the primary rank drives the bundle's
+`lmp -in <script>` for a `fix box/relax` + `minimize`, writes the relaxed
+cell with `write_data`, and every rank reads the cell back. An explicit
+classical derivation keeps the small in-process path. Its first *real*
+execution is still the **smallest** use of the execution layer — a few-atom
+bulk relax — and it is exactly the moment the walking skeleton's hardcoded
+stand-in lattice is retired: not smuggled into the plumbing-only skeleton
+before a force engine exists, and not left hardcoded once one does.
 
 **One in-plane footprint, several potentials.** A run visits three force
 models with three slightly different equilibrium lattices — the classical

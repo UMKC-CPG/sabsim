@@ -22,6 +22,7 @@ from sabsim.driver.cascade_potential import (
     domains_for_species,
     registered_material_domains,
     resolve_cascade_generator,
+    universal_force_model,
 )
 
 # A silicon slab bombarded by argon: substrate type 1, projectile type 2.
@@ -45,6 +46,33 @@ def test_universal_is_the_default_and_refuses_until_gate_cleared():
     # It names the model and the on-the-record exploratory opt-in.
     assert UNIVERSAL_CASCADE_MODEL.name in message
     assert "SABSIM_ALLOW_UNVALIDATED_POTENTIAL" in message
+
+
+def test_universal_force_model_is_deepmd_alone_no_zbl(monkeypatch):
+    """The quiet-stage universal form is deepmd only — no ZBL cores (§2.2).
+
+    ZBL is a keV close-approach hard core; the §2.2 bulk relax equilibrates
+    at ordinary bond lengths, so the working lattice is the pure MLIP
+    equilibrium. It is the universal sibling of ``classical_force_model``.
+    """
+    monkeypatch.setenv("SABSIM_CASCADE_MLIP_MODEL", FAKE_MODEL_PATH)
+    force_model = universal_force_model(
+        {"O": 1, "Si": 2}, allow_unvalidated=True)
+
+    assert force_model.pair_style == f"deepmd {FAKE_MODEL_PATH}"
+    assert "zbl" not in force_model.pair_style
+    # Real elements in LAMMPS type-id order (deepmd has no NULL slot), and
+    # the graph network needs the global atom map; no runtime plugin load.
+    assert force_model.pair_coeff == ("* * O Si",)
+    assert force_model.needs_atom_map is True
+    assert force_model.preload == ()
+
+
+def test_universal_force_model_refuses_until_gate_cleared():
+    """Like the cascade, an unvalidated bulk derivation refuses by default."""
+    with pytest.raises(NotImplementedError) as caught:
+        universal_force_model({"Si": 1})
+    assert "SABSIM_ALLOW_UNVALIDATED_POTENTIAL" in str(caught.value)
 
 
 def test_universal_overlay_assembles_deepmd_plus_two_zbl(monkeypatch):

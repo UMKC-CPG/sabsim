@@ -612,3 +612,98 @@ def test_dissimilar_halves_emerge_commensurate(tmp_path):
     cell_a = np.asarray(half_a.atoms.get_cell())[:2, :2]
     cell_b = np.asarray(half_b.atoms.get_cell())[:2, :2]
     assert np.allclose(cell_a, cell_b, atol=1.0e-6)
+
+
+# ---------------------------------------------------------------------
+# The §2.2 lattice-derivation dispatch (DESIGN §4.7): universal by
+# default (out-of-process under the foundation MLIP), classical only on
+# explicit request (in-process). Login-node tests: the universal
+# subprocess and the in-process engine are both stubbed.
+# ---------------------------------------------------------------------
+
+class _FakeInProcessEngine:
+    """Stands in for LammpsEngine on the login node (classical branch)."""
+
+    def __init__(self, *args, **kwargs):
+        self.received = []
+
+    def commands(self, command_stream):
+        self.received.extend(command_stream)
+
+    def box(self):
+        return np.diag([10.8618, 10.8618, 10.8618])
+
+    def energy(self):
+        return -296.0
+
+    def atom_count(self):
+        return 64
+
+    def close(self):
+        pass
+
+
+def test_derive_lattices_live_universal_runs_out_of_process(
+        monkeypatch, tmp_path):
+    """The default derivation relaxes under the universal MLIP, out-of-
+    process, and never opens an in-process engine (DESIGN §2.2/§4.7)."""
+    from sabsim.pipeline import live_stages
+    import sabsim.driver.lammps_engine as lammps_engine_module
+
+    monkeypatch.setenv("SABSIM_CASCADE_MLIP_MODEL", "/models/DPA-2.4-7M.pt2")
+    monkeypatch.setenv("SABSIM_ALLOW_UNVALIDATED_POTENTIAL", "1")
+    monkeypatch.delenv("SABSIM_CASCADE_CLASSICAL", raising=False)
+
+    scripts = []
+
+    def fake_subprocess(script, work, output_file, **kwargs):
+        scripts.append(script)
+        # Emulate the bundle relax handing a relaxed data file back.
+        with open(output_file, "w", encoding="utf-8") as handle:
+            handle.write(
+                "relaxed\n\n64 atoms\n\n"
+                "0.0 10.8618 xlo xhi\n0.0 10.8618 ylo yhi\n"
+                "0.0 10.8618 zlo zhi\n\nAtoms\n\n1 1 0.0 0.0 0.0\n")
+
+    def forbid_engine(*args, **kwargs):
+        raise AssertionError(
+            "the universal path must not open an in-process engine")
+
+    monkeypatch.setattr(
+        live_stages, "run_activate_subprocess", fake_subprocess)
+    monkeypatch.setattr(
+        lammps_engine_module, "LammpsEngine", forbid_engine)
+
+    result = live_stages.derive_lattices_live(
+        _si_si_member(), potential=None, scratch_directory=str(tmp_path))
+
+    # Si/Si derives ONCE, out-of-process, under a deepmd box/relax.
+    assert len(scripts) == 1
+    assert any("box/relax" in line for line in scripts[0])
+    assert any(
+        line.startswith("pair_style deepmd ") for line in scripts[0])
+    assert "universal MLIP (out-of-process)" in result.provenance
+
+
+def test_derive_lattices_live_classical_uses_the_in_process_engine(
+        monkeypatch, tmp_path):
+    """An explicit classical request takes the in-process path and spawns
+    no subprocess (DESIGN §4.7, 'classical by choice')."""
+    from sabsim.pipeline import live_stages
+    import sabsim.driver.lammps_engine as lammps_engine_module
+
+    monkeypatch.setenv("SABSIM_CASCADE_CLASSICAL", "1")
+    monkeypatch.setattr(
+        lammps_engine_module, "LammpsEngine", _FakeInProcessEngine)
+
+    def forbid_subprocess(*args, **kwargs):
+        raise AssertionError(
+            "the classical path must not spawn a subprocess")
+
+    monkeypatch.setattr(
+        live_stages, "run_activate_subprocess", forbid_subprocess)
+
+    result = live_stages.derive_lattices_live(
+        _si_si_member(), potential=None, scratch_directory=str(tmp_path))
+
+    assert "classical seed" in result.provenance

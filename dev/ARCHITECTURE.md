@@ -1353,6 +1353,23 @@ subprocess needs no classical potential and the activate job carries no
 `LAMMPS_POTENTIALS`; the heal that would have needed it now runs under the
 committee in the bond job (§3.4).
 
+**The §2.2 lattice derivation rides the SAME subprocess (universal path).**
+Once the §2.2 bulk relax derives the working lattice under the universal
+MLIP rather than a classical seed (`DESIGN.md` §2.2/§4.7 — so the cell and
+the cascade agree), it inherits the same out-of-process necessity: the
+`.pt2` will not load in-process. So the DEFAULT derivation is assembled as a
+standalone `fix box/relax` + `minimize` script
+(`driver/bulk_relax.bulk_relax_subprocess_script`) and run through the same
+`driver/cascade_subprocess.run_activate_subprocess` the cascade uses. The
+one difference from the cascade handoff is the read-back: a box relax
+CHANGES the cell, so the script ends with `write_data` and the caller reads
+the relaxed cell (and atom count) back with `bulk_relax.read_data_box` —
+whereas the cascade leaves the box fixed and reads only atoms from a dump.
+An explicit classical derivation (`SABSIM_CASCADE_CLASSICAL`) keeps the
+small in-process `LammpsEngine` path. The primary rank drives the one GPU
+subprocess while peers wait at a barrier, then every rank reads the same
+handoff file — deterministic, so the derived cell agrees across ranks.
+
 ---
 
 ## 5. Development Trajectory and Checkpoints

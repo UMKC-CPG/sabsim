@@ -1103,6 +1103,26 @@ foundations, interaction rules. -->
       what lets the press hold a FIXED, recorded cell without the
       `lateral_relax` band-aid, so this relax and the §5.6 rewrite land
       together.
+- [ ] **`coordination_numbers` MISCOUNTS on non-orthogonal cells — the
+      gate coordination failures are a MEASUREMENT ARTIFACT, not
+      over-amorphization (diagnostic 2026-08-22).** The gate kernel uses
+      `box_x=cell[0][0]`, `box_y=cell[1][1]` with per-axis minimum-image,
+      valid ONLY for an orthogonal in-plane cell (the stand-in caveat the
+      module already states). But the activated slabs are sheared: a
+      PRISTINE diamond-Si slab (cell[1]=[-3.84,3.84,0], NN 2.351 A) reads
+      coordination MODE 2 from `coordination_numbers` vs MODE 4 from ASE
+      `neighbor_list` (the truth) at cutoff 2.9 A. So the 0.76-1.0 defect
+      fractions that FAILED Si (T-10) and LiNbO3 (T-19) are wrong before
+      any physics -- NO cascade dose/energy sweep could fix them (this
+      diagnostic SAVED that V100 series). FIX: count neighbors with a
+      general-cell routine (ASE `neighbor_list`, already a dependency) in
+      `coordination_numbers`; likely also affects the ring metric + the
+      `_reference_coordination` self-reference (its deep-third "crystal"
+      also read over-coordinated). Then RE-RUN the gate on the existing
+      activated surfaces (`t10_val`, `t12_val_*`) to get the TRUE
+      coordination, and only THEN judge it against the (still stand-in)
+      thresholds. This also subsumes the separate "coordination not
+      per-species" review item -- do both in the kernel rewrite.
 - [ ] Activation gate (Phase 2) DESIGN follow-ons (`DESIGN.md` §3.5,
       `PSEUDOCODE.md` §10.6, written 2026-07-18). The gate design is a
       metric registry (g(r)/partial g_AB, coordination DISTRIBUTION +
@@ -1351,7 +1371,22 @@ foundations, interaction rules. -->
       start; the same seam takes the committee later) and the build
       rescales onto it, any symmetry (`derive_lattice`,
       `rescale_crystal_to_cell`, `_coupling_for`), retiring the CIF-lattice
-      cut. CODE STATUS 2026-08-21 (supersedes the 2026-08-06 line above):
+      cut. CODE STATUS 2026-08-22 (universal-first reaches §2.2, branch
+      `universal-mlip-cascade`): `derive_lattices_live` now derives the
+      working lattice under the UNIVERSAL MLIP by default — the SAME model
+      the step-4 cascade runs under — so the cell and the amorphizing
+      potential AGREE. This closes the specific gap the A.3 note below
+      flags: the dominant oxide residual stress is the §2.2 CIF-vs-DPA
+      offset, which relaxing under classical SW then bombarding under DPA
+      does NOT remove; deriving under DPA does. Because the `.pt2` loads
+      only in the deepmd bundle, the default derivation runs OUT-OF-PROCESS
+      (`bulk_relax_subprocess_script` -> `run_activate_subprocess`, read
+      back by `read_data_box`), mirroring the cascade handoff; an explicit
+      `SABSIM_CASCADE_CLASSICAL` keeps the small in-process path. Also
+      fixed en route: `bulk_relax_commands` now inserts `atom_modify map
+      yes` before `read_data` for a message-passing MLIP (it was classical-
+      only and silently deepmd-incompatible). Docs propagated (DESIGN
+      §2.2, ARCH §4.4, PSEUDOCODE §7.2); 10 unit tests added; 61 green. CODE STATUS 2026-08-21 (supersedes the 2026-08-06 line above):
       the matcher (`match_surfaces`, pymatgen ZSLGenerator) is now
       WIRED through `build_standalone_half`, and the strained
       real-mismatch assembly is BUILT (Phase B, branch

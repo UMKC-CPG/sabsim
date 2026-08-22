@@ -527,6 +527,53 @@ def resolve_cascade_generator(
         entry, type_map, projectile, long_core, short_core)
 
 
+def universal_force_model(
+        type_map: dict,
+        allow_unvalidated: bool = False,
+        model: UniversalCascadeModel = UNIVERSAL_CASCADE_MODEL) -> ForceModel:
+    """The universal MLIP ALONE — no ZBL — for the QUIET stages (§4.7).
+
+    The universal counterpart of :func:`classical_force_model`: the same
+    no-ZBL form the gentle stages want, but built on the chemistry-agnostic
+    foundation model instead of a per-material classical potential. ZBL is
+    a keV close-approach hard core; the §2.2 bulk relax equilibrates a
+    crystal at ordinary bond lengths where ZBL contributes nothing, so the
+    working lattice is the pure MLIP equilibrium. Deriving that lattice
+    under the SAME model the cascade then bombards under is the point (DESIGN
+    §2.2, §4.7): a cell equilibrated under one description and bombarded
+    under another starts stressed — exactly the offset that detonated the
+    oxide bring-up. For silicon the classical and MLIP lattices nearly
+    coincide, so this only matters at the margins, but the discipline is
+    uniform: match first, tile second, under one potential.
+
+    Every LAMMPS type maps to its REAL element — the universal model covers
+    the whole periodic table and deepmd's element map has no ``NULL`` slot —
+    and ``needs_atom_map`` is set because the graph network gathers features
+    across the neighbor graph. It carries no ``preload``: the deepmd bundle
+    ships the ``deepmd`` pair style built in (no runtime ``plugin load``),
+    matching :func:`_assemble_universal_overlay`. Like the default cascade
+    it follows the gate-not-warn discipline — the universal model is
+    unvalidated until it clears the §3.5 gate, so a bulk derivation refuses
+    unless ``allow_unvalidated`` opts into the same on-the-record bring-up.
+    """
+    if not model.validated and not allow_unvalidated:
+        raise NotImplementedError(
+            f"the universal model '{model.name}' is the §2.2 lattice-"
+            f"derivation default (DESIGN §4.7) but has NOT yet cleared the "
+            f"§3.5 activation gate: {model.caveat} To derive under it as "
+            f"EXPLORATORY bring-up — provisional, reported as such — set "
+            f"SABSIM_ALLOW_UNVALIDATED_POTENTIAL, or request a validated "
+            f"classical form explicitly (SABSIM_CASCADE_CLASSICAL).")
+    # Element labels in LAMMPS type-id order; deepmd needs no NULL slot.
+    symbols_in_order = sorted(type_map, key=lambda symbol: type_map[symbol])
+    element_labels = " ".join(symbols_in_order)
+    model_path = resolve_universal_model_path(model)
+    return ForceModel(
+        pair_style=f"deepmd {model_path}",
+        pair_coeff=(f"* * {element_labels}",),
+        needs_atom_map=True)
+
+
 def classical_force_model(
         type_map: dict,
         substrate,
