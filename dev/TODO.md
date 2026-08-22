@@ -2510,6 +2510,19 @@ foundations, interaction rules. -->
       the oxide bond can now run the REAL gate per wafer. REMAINING: real
       DFT/exp reference numbers (the silica/LiNbO3 stand-in items above),
       and the node validation of the oxide bond under the real gate.
+- [ ] **Press/pull preamble must tolerate lost atoms so the §5.6 gate
+      can report them (T-18 finding, 2026-08-22).** The press/pull
+      `preamble_commands` (`commands.py`) lacks `thermo_modify lost
+      warn`, so a sputtered/evaporated atom during the pull makes LAMMPS
+      ABORT (`ERROR: Lost atoms`) BEFORE the driver's §5.6 atom-
+      conservation gate (`atom_count_conserved` -> `PullResult.
+      atoms_conserved`) can flag it — the designed behaviour is a VOID
+      measurement (§5.6, §7.6), not a crash. The cascade already sets it
+      (`commands.py:1095`). FIX: add `thermo_modify lost warn` to the
+      press/pull preamble so a lost atom is dropped-and-gated, not fatal.
+      Surfaced by T-18 (job 16701588): the oxide press HELD to contact
+      (the combined-cell relax works — no detonation) but the pull then
+      crashed on ONE lost atom (193 -> 192).
 - [ ] **Deploy the universal-GPU activate through the mainline
       `prepare` path — two coupled regressions in the per-job route
       (review 2026-08-21).** The `prepare`/`run_member_job` activate

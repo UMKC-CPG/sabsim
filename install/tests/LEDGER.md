@@ -710,3 +710,53 @@ zero-stress cell the crystal can hold? (The A.2/§5.6 + A.3 question.)
   5. **Universal model, not the bespoke committee**; single V100; the
      stiffness slope->modulus FIT was done by hand off the JSON, not
      coded in any script.
+
+---
+
+## T-18 — job 16701588 (combined-cell-relax oxide press) — 2026-08-22
+
+**Question.** Does the mainline combined-cell relax (Phase-3 item 3,
+commit `cd4c46e`) stop the SiO2/LiNbO3 press detonation on real hardware?
+The pair used to blow apart between press frames 9-10 under the fixed-box
+press; item 3 replaced the forbidden live `lateral_relax` barostat with a
+one-time recorded `fix box/relax x 0 y 0` at the joint heal.
+
+- **As-run scripts (committed):** `install/tests/t15_driver_dpa/` —
+  `assemble_pair.py` (part 1, sabsim env) + `driver_press_pull.py`
+  (part 2, deepmd bundle python) + `t15_driver_dpa.slurm`. The harness is
+  DEMO-gated (gate bypassed) so the press RUNS TO CONTACT and the outcome
+  is visible; the combined-cell relax under test is now automatic inside
+  mainline `press_and_bond`, so re-running t15 exercises it unchanged.
+- **Structure / model:** the matched SiO2/LiNbO3 amorphized pair (small,
+  193 atoms after the demo assembly), force model = universal DPA-2.4-7M
+  `.pt2`, in-process in the deepmd 3.2.0b0 bundle on one V100. Launch:
+  `sbatch --export=ALL,VALWORK=.../v_item3_press t15_driver_dpa.slurm`.
+- **Evidence (verbatim, `t15-driver-dpa-16701588.out` / `.err`):**
+  - `=== press ===`; `contact_reached : True`; `chunks_to_contact: 6`;
+    `note : contact on the dual criterion, held at temperature (§9.3)`
+  - press movie written: `v_item3_press/press_movie.dump` (1.25 MB) —
+    opens in OVITO as a LAMMPS dump.
+  - `settled reference: False` — the settle did not converge (short demo
+    settle).
+  - pull crashed: `Exception: ERROR: Lost atoms: original 193 current 192
+    (src/thermo.cpp:494)` at `pull_at_rate` -> `run` (press_pull.py:717).
+  - `16701588  FAILED`, `Total wall time: 0:23:14`.
+- **Verdict: PARTIAL PASS — the detonation is FIXED.** The press reached
+  contact on the dual criterion and HELD at temperature (chunk 6), with
+  no blow-up: the combined-cell relax lets the strained oxide pair press
+  stably where the fixed-box press detonated. Two downstream issues, both
+  NOT physics failures of item 3: the settle did not converge (a demo
+  tuning matter), and the pull hard-crashed on ONE lost atom because the
+  press/pull `preamble_commands` lacks `thermo_modify lost warn` (the
+  cascade has it, commands.py:1095) — so LAMMPS aborts on a sputtered atom
+  BEFORE the driver's §5.6 atom-conservation gate can report it. That is a
+  mainline gap (tracked in TODO), not a t15 defect.
+- **Scope NOT covered:**
+  1. **Gate DEMO-bypassed** — this proves the PRESS (item 3), not the
+     §3.5 per-wafer gate (item 6); that is a separate validation.
+  2. **Small demo pair (193 atoms), short capped RunControl, one fast
+     pull rung** — plumbing + behaviour, not a converged measurement.
+  3. **Settle + pull did NOT complete** — no work-of-separation number;
+     the pull needs the lost-atom fix above before it can run to the end.
+  4. Single V100, in-process bundle lammps; provenance is the demo
+     harness, not the `sabsim prepare` deployment path.
