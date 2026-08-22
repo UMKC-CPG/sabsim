@@ -760,3 +760,70 @@ one-time recorded `fix box/relax x 0 y 0` at the joint heal.
      the pull needs the lost-atom fix above before it can run to the end.
   4. Single V100, in-process bundle lammps; provenance is the demo
      harness, not the `sabsim prepare` deployment path.
+
+---
+
+## T-18 re-run — job 16701673 (lost-atom fix) — 2026-08-22
+
+**Question.** With the lost-atom fix (`3e6b2aa`, `thermo_modify lost warn`
+in the press/pull preamble), does the oxide press+settle+pull run to
+completion instead of crashing as T-18 did on one lost atom?
+
+- **As-run script:** `install/tests/t15_driver_dpa/` (unchanged from
+  T-18; the fix is in mainline `commands.py`). Launch:
+  `sbatch --export=ALL,VALWORK=.../v_item3_press_v2 t15_driver_dpa.slurm`.
+- **Evidence (verbatim, `t15-driver-dpa-16701673.out`):**
+  - `contact_reached : True` (press held to contact — item 3 again)
+  - `settled reference: False` (the short demo settle did not converge)
+  - `=== pull @ 10.0 m/s ===`; `complete : False`;
+    `separation_index: None`; `atoms_conserved : True`
+  - `T15 DRIVER-UNDER-DPA COMPLETE`; `=== T-15 exit 0 ===`
+  - movies: `v_item3_press_v2/press_movie.dump` (1.16 MB) +
+    `pull_movie.dump` (75 KB), both OVITO-readable.
+- **Verdict: PASS — the fix resolves T-18's pull crash.** The full
+  press -> settle -> pull now runs to a clean exit 0 (was `FAILED` on
+  `ERROR: Lost atoms` at the pull); the driver's §5.6 atom-conservation
+  gate is now reachable and reports `atoms_conserved=True`. Supersedes
+  T-18's "pull crashed on one lost atom" finding.
+- **Scope NOT covered:** the pull did NOT reach full separation
+  (`complete=False`) within the 40-chunk cap at the fast 10 m/s rung, so
+  there is still no converged work-of-separation number — a chunk-budget /
+  pull-rate tuning matter, not a crash. Settle still did not converge
+  (demo). Gate still DEMO-bypassed (that is T-19). Small demo pair.
+
+## T-19 — job 16701674 (real per-wafer §3.5 gate) — 2026-08-22
+
+**Question.** Does the per-wafer activation gate (Phase-3 item 6, commit
+`ef7a07d`) run on real hardware — keying each oxide wafer by its OWN
+declared species and judging it against its OWN reference?
+
+- **As-run scripts (committed):** `install/tests/t19_oxide_gate/`
+  (`assemble_pair.py` sets per-wafer species; `driver_press_pull.py` runs
+  the REAL gate, no demo bypass) + `t19_oxide_gate.slurm`. Launch:
+  `sbatch --export=ALL,VALWORK=.../t19_val t19_oxide_gate.slurm`.
+- **Evidence (verbatim, `t19-oxide-gate-16701674.out`):**
+  - `wafer A species ['O', 'Si'] | wafer B species ['Li', 'Nb', 'O']`
+  - wafer A judged against `.../share/activation/O_Si.toml`: rdf PASS,
+    coordination 0.284 PASS (band 0.05-0.60), ring 0.591 PASS, depth 0.0
+    FAIL (target 7.0) -> `passed=False`.
+  - wafer B judged against `.../share/activation/Li_Nb_O.toml`: rdf PASS,
+    coordination 0.952 FAIL (band 0.05-0.60), ring 0.602 PASS, depth 34.0
+    PASS -> `passed=False`.
+  - `contact_reached : False`; `note: activation gate failed (§3.5)`;
+    `T19 REAL-GATE DRIVER COMPLETE`; `=== T-19 exit 0 ===`
+  - `t19_val/press_movie.dump` (561 KB) = the heal + combined-cell relax
+    (item 3 runs BEFORE the gate).
+- **Verdict: PASS (plumbing).** The gate keyed each wafer by its OWN
+  species set (O_Si for SiO2, Li_Nb_O for LiNbO3), loaded the correct
+  per-material reference for each, ran all four metrics per wafer, and
+  HALTED before the press on failure -- exactly item 6's design. The
+  global-type-map bug is gone.
+- **Scope NOT covered (the CALIBRATION question, open):** both surfaces
+  FAILED the stand-in thresholds, informatively -- wafer A (SiO2) on depth
+  = 0.0 (the metric found no amorphized skin), wafer B (LiNbO3) on
+  coordination = 0.952 (OVER-coordinated, the SAME signature as the T-10
+  Si coordination wall). Whether the universal cascade over-amorphizes /
+  over-coordinates the oxides or the `real=false` stand-in bands + depth
+  targets are mis-set is the open per-material calibration question
+  (shared with T-10). This validates the gate PLUMBING, not the oxide
+  amorphization quality or the reference numbers.
