@@ -860,3 +860,42 @@ oxide pair at the DPA-preferred lattices (§2.2) AND on a LOW-ASPECT 2-D
 cell (item-4 worst-axis-ranked match, `build_dpa_matched_halves.py` /
 `square_cell_search.py` in the archive), verify near-zero frame-0 stress,
 THEN press -- and judge every run from the TRAJECTORY, not the log.
+
+---
+
+## T-20 — job 16701820 (corrected 2-D DPA-lattice cell) — 2026-08-22
+
+**Question.** After T-18's ribbon exploded, does a cell built the RIGHT way
+-- each crystal rescaled to its DPA-preferred lattice (§2.2), matched on a
+LOW-ASPECT 2-D coincidence ranked by the item-4 worst-axis strain -- start
+near-enough zero stress under DPA and STAY ordered? (The archive's
+decision gate.)
+
+- **As-run scripts (committed):** `install/tests/t20_2dcell/`
+  (`prepare_pair.py` builds it, `frame0_check.py` measures it) +
+  `t20_2dcell.slurm`. Launch:
+  `sbatch --export=ALL,VALWORK=.../v_2dcell_v2 t20_2dcell.slurm`.
+- **Structure:** SiO2(100)/LiNbO3(001), rescaled to the DPA lattices,
+  matched on the 644 A^2 / aspect-1.13 / worst-axis-1.77% / twist-5.4 cell
+  (SiO2 tiling [[1,14],[0,24]], LiNbO3 [[4,5],[0,7]]); pristine pair 2976
+  atoms (SiO2 1296 + LiNbO3 1680), both halves on the 23.70x26.80 A cell.
+  Force model = universal DPA-2.4-7M `.pt2`, in-process bundle, one V100.
+- **Evidence (verbatim, `t20-2dcell-16701820.out`):**
+  - `[frame-0 (as built)] atoms=2976 pxx+pyy(mean)=5.09 GPa pzz=0.39 GPa`
+  - `[after box-relax] atoms=2976 pxx+pyy(mean)=0.12 GPa pzz=-2.64 GPa`
+  - `[after 2 ps NVT 300 K] atoms=2976 pxx+pyy(mean)=0.43 GPa pzz=-0.05
+    GPa`
+  - trajectory (`v_2dcell_v2/frame0_relax.dump`): 25 frames, atoms
+    2976..2976 (NO loss), OVITO-readable.
+  - `T20 FRAME0 CHECK COMPLETE`; `=== T-20 exit 0 ===`.
+- **Verdict: PASS -- the corrected cell is sound, judged from the
+  trajectory.** The 2-D DPA-lattice cell starts at 5.1 GPa in-plane (vs
+  the T-18 ribbon-on-CIF's ~24 GPa), the item-3 combined-cell box-relax
+  drives it to 0.12 GPa, and it STAYS ordered at 300 K (0.43 GPa, all
+  2976 atoms held). This is the genuine validation of item 3 (the ribbon
+  T-18 faked and retracted), the item-4 worst-axis 2-D cell, and the §2.2
+  DPA-lattice rescale -- together. Contrast T-18: 24 GPa -> 191 atoms.
+- **Scope NOT covered:** PRISTINE crystals (not yet activated); box-relax
+  left pzz compressive (-2.64 GPa, z not barostatted) which the NVT then
+  relieved (-0.05 GPa) via the free surfaces; no press/pull, no
+  work-of-separation. NEXT: activate THIS cell's surfaces, then press.
