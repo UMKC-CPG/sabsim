@@ -2527,6 +2527,37 @@ foundations, interaction rules. -->
       Surfaced by T-18 (job 16701588): the oxide press HELD to contact
       (the combined-cell relax works — no detonation) but the pull then
       crashed on ONE lost atom (193 -> 192).
+- [ ] **The §5.6 atom-conservation gate has a BLIND SPOT over the press
+      phase (T-18 correction, 2026-08-22).** `pull_at_rate` captures the
+      conservation baseline at PULL start, so any atom lost during the
+      PRESS (or settle) is invisible to the gate: T-18-rerun ejected
+      ~2440 of 2631 atoms DURING the press yet reported
+      `atoms_conserved=True`, because the pull began from the
+      already-blown ~193-atom remnant. §5.6 says a lost atom invalidates
+      the run — but the gate must span the WHOLE press+settle+pull, or
+      the press/settle need their own conservation check, or a VOID run
+      slips through as a pass. FIX: baseline the count at the ASSEMBLED
+      pair (before the press) and check it at every stage boundary, not
+      just across the pull. Also: `contact_reached` can fire on
+      flying-atom stress spikes, so a press verdict should not rest on it
+      alone -- a disintegrated pair is not a bonded one.
+- [ ] **Rebuild the oxide validation pair BEFORE re-validating the press
+      (T-18 correction, 2026-08-22).** T-18 pressed a thin-ribbon cell
+      (`t12_val/match.pkl`: aspect 5.2:1/6.35:1, tilings 1x6/1x5, x = one
+      unit cell) built on CIF lattices -- the ~24 GPa configuration the
+      archived T-17 README gates ("nothing downstream runs until
+      re-matched at DPA lattices"). The combined-cell relax cannot rescue
+      it. Before any further oxide press validation: (a) rebuild each
+      half at the DPA-preferred lattice (§2.2 rescale, which mainline
+      `build_halves` does but the t12 harness skipped;
+      `build_dpa_matched_halves.py` in the archive does it standalone);
+      (b) take a LOW-ASPECT 2-D coincidence cell, ranked by the item-4
+      worst-axis strain, not the misleading scalar
+      (`square_cell_search.py` in the archive); (c) confirm near-zero
+      frame-0 stress (the archive's decision gate) BEFORE pressing. This
+      is also the concrete motivation to WIRE item-4's worst-axis metric
+      into `match_surfaces` ranking (the A.3 follow-on) and to WIRE the
+      §2.2 rescale into the oxide build path.
 - [ ] **Deploy the universal-GPU activate through the mainline
       `prepare` path — two coupled regressions in the per-job route
       (review 2026-08-21).** The `prepare`/`run_member_job` activate

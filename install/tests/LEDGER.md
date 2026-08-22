@@ -827,3 +827,36 @@ declared species and judging it against its OWN reference?
   targets are mis-set is the open per-material calibration question
   (shared with T-10). This validates the gate PLUMBING, not the oxide
   amorphization quality or the reference numbers.
+
+---
+
+## T-18 / T-18-rerun CORRECTION — 2026-08-22 (supersedes their PASS)
+
+The T-18 and T-18-rerun verdicts above are WRONG and are retracted. I read
+the driver's log fields, not the trajectory. Inspecting the actual dump
+(`v_item3_press_v2/press_movie.dump`) shows the pair DISINTEGRATED under
+the press: atom count 2631 -> 2167 (step 5000) -> 540 -> 318 -> ... -> 191
+(step 20500), ~93% of atoms ejected. The system EXPLODED; it did not press
+to contact.
+
+Three corrections:
+1. **The combined-cell relax (item 3) did NOT fix this detonation.** It
+   cannot: the pair is a THIN RIBBON (`t12_val/match.pkl`: substrate/film
+   aspect 5.2:1 / 6.35:1, tilings 1x6 / 1x5, x-extent 9.4 A = ONE unit
+   cell) built on CIF lattices, i.e. the ~24 GPa configuration the
+   archived T-17 README explicitly gates ("nothing downstream runs until
+   re-matched at DPA lattices"). The validation ran on a known-bad cell.
+2. **"193 atoms" was the post-explosion remnant, not the pair (2631).**
+3. **`atoms_conserved=True` is a FALSE pass:** the driver captures the
+   conservation baseline at PULL start, which here was the already-blown
+   ~193-atom remnant, so the entire press-phase loss (2440 atoms) is
+   invisible to the §5.6 gate. That is a mainline bug (tracked in TODO):
+   the conservation gate has no coverage over the press phase.
+4. `contact_reached=True` fired on flying-atom stress spikes, not a real
+   press. T-19's gate-halt is unaffected (it never pressed).
+
+CORRECT NEXT STEP (the archive's decision gate, not yet done): rebuild the
+oxide pair at the DPA-preferred lattices (§2.2) AND on a LOW-ASPECT 2-D
+cell (item-4 worst-axis-ranked match, `build_dpa_matched_halves.py` /
+`square_cell_search.py` in the archive), verify near-zero frame-0 stress,
+THEN press -- and judge every run from the TRAJECTORY, not the log.
