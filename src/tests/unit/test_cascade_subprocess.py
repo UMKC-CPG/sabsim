@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from sabsim.driver.cascade_subprocess import (
+    _isolated_lammps_wrapper,
     read_dump_structure,
     resolve_cascade_engine_prefix,
 )
@@ -85,3 +86,46 @@ def test_resolve_engine_prefix_returns_existing(monkeypatch, tmp_path):
     """A real directory resolves through unchanged."""
     monkeypatch.setenv("SABSIM_CASCADE_ENGINE_PREFIX", str(tmp_path))
     assert resolve_cascade_engine_prefix() == str(tmp_path)
+
+
+# ---------------------------------------------------------------------
+# The isolation wrapper must run each bundle lmp as an MPI SINGLETON:
+# the parent runs under srun --mpi=pmix, so its PMIx/OMPI client vars
+# leak in; a child that inherits them HANGS in MPI_Init trying to join
+# the parent's namespace (seen once the §2.2 derivation added a SECOND
+# bundle subprocess before the cascade). Stripping them is the fix.
+# ---------------------------------------------------------------------
+
+def test_isolation_wrapper_strips_mpi_client_vars_before_lmp():
+    """The wrapper drops PMIX_/OMPI_/PMI_ vars, and does so before lmp."""
+    wrapper = _isolated_lammps_wrapper("/opt/bundle", "/tmp/run.in")
+    assert "compgen -e" in wrapper
+    assert "PMIX_*|OMPI_*|PMI_*" in wrapper
+    # The strip must precede the exec, or lmp's MPI_Init reads them first.
+    assert wrapper.index("PMIX_*|OMPI_*|PMI_*") < wrapper.index("exec lmp")
+
+
+def test_isolation_wrapper_singleton_strip_actually_unsets(tmp_path):
+    """Running just the strip line clears PMIX_/OMPI_ but keeps other vars."""
+    import subprocess
+
+    wrapper = _isolated_lammps_wrapper("/opt/bundle", "/tmp/run.in")
+    strip_line = next(
+        line for line in wrapper.splitlines() if "compgen -e" in line)
+
+    probe_env = {
+        "PATH": "/usr/bin:/bin",
+        "PMIX_NAMESPACE": "job.42", "PMIX_RANK": "0",
+        "OMPI_COMM_WORLD_SIZE": "1", "PMI_FD": "7",
+        "SABSIM_KEEP_ME": "yes",
+    }
+    result = subprocess.run(
+        ["bash", "-c", f"{strip_line}\nenv"],
+        env=probe_env, capture_output=True, text=True, check=True)
+    remaining = result.stdout
+    assert "PMIX_NAMESPACE" not in remaining
+    assert "PMIX_RANK" not in remaining
+    assert "OMPI_COMM_WORLD_SIZE" not in remaining
+    assert "PMI_FD" not in remaining
+    # Non-MPI variables are left untouched.
+    assert "SABSIM_KEEP_ME=yes" in remaining

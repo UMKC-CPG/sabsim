@@ -71,6 +71,22 @@ def _isolated_lammps_wrapper(prefix: str, script_file: str) -> str:
     reset the validated benchmark jobs use — and then hard-verifies that
     ``python`` is the bundle's before running the script. ``CUDA_VISIBLE_
     DEVICES`` is deliberately NOT unset: it carries the allocation's GPU in.
+
+    It ALSO strips the PMIx / Open MPI runtime variables (``PMIX_*``,
+    ``OMPI_*``, ``PMI_*``). The parent ``sabsim`` process is launched under
+    ``srun --mpi=pmix``, so it is a legitimate PMIx client and those vars
+    live in its environment. A child ``lmp`` that inherits them tries, in
+    MPI_Init, to join the PARENT's PMIx namespace as an unexpected extra
+    client — the first bundle subprocess in a run may get away with it, but
+    a SECOND one (now that the §2.2 lattice derivation ALSO runs a bundle
+    subprocess before the cascade, DESIGN §2.2/§4.7) collides with the
+    stale server state and HANGS in MPI_Init (observed: a cascade `lmp`
+    asleep for hours, GPU idle, only PMIx `psec/munge` warnings in its
+    log). Each bundle ``lmp`` is a single ``-n1`` process that needs no MPI
+    rendezvous, so clearing these vars makes it initialize as a clean
+    singleton. ``compgen -e`` enumerates the exported names (the wrapper
+    runs under ``bash -c``), so the strip catches whatever the launcher set
+    without hard-coding the exact list.
     """
     return "\n".join([
         "set -uo pipefail",
@@ -78,6 +94,10 @@ def _isolated_lammps_wrapper(prefix: str, script_file: str) -> str:
         "DEEPMD_LMP_PLUGIN",
         "unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_PREFIX_1 CONDA_PREFIX_2 "
         "CONDA_PROMPT_MODIFIER",
+        # Run each bundle lmp as an MPI SINGLETON: drop the parent's PMIx /
+        # Open MPI client vars so MPI_Init does not try to join its namespace.
+        'for mpi_var in $(compgen -e); do case "$mpi_var" in '
+        'PMIX_*|OMPI_*|PMI_*) unset "$mpi_var" ;; esac; done',
         "export CONDA_SHLVL=0",
         "export PATH=/usr/bin:/bin",
         f'source "{prefix}/etc/profile.d/conda.sh"',
