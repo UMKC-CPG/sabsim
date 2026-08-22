@@ -183,6 +183,26 @@ def test_preamble_adds_atom_map_only_for_a_message_passing_model():
     assert "atom_modify map yes" not in without_map
 
 
+def test_preamble_tolerates_lost_atoms_so_the_gate_can_gate_them():
+    """The press/pull preamble DROPS a lost atom with a warning, not abort.
+
+    A ``p p f`` boundary deletes any atom that leaves the open-z box, and
+    LAMMPS aborts on a lost atom by default. The driver's §5.6 atom-count
+    conservation gate is meant to INVALIDATE such a run (a void
+    measurement) -- but only if LAMMPS does not crash first, so the
+    preamble sets ``thermo_modify lost warn``. Regression for T-18
+    (job 16701588), where the oxide pull crashed on ONE lost atom.
+    """
+    from sabsim.driver.commands import restart_preamble_commands
+
+    commands = preamble_commands("pair.data", Quantity(1.0, "fs"))
+    assert "thermo_modify lost warn" in commands
+    # It rides on the shared base, so the resume path (read_restart) that
+    # reuses restart_preamble_commands inherits it too, not just a fresh
+    # read_data.
+    assert "thermo_modify lost warn" in restart_preamble_commands()
+
+
 def test_region_groups_carve_by_z_position():
     """Grips, borders, and interior come from the per-wafer z-ranges."""
     commands = region_group_commands(_fake_pair(), RegionGeometry())

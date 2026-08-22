@@ -240,8 +240,18 @@ def restart_preamble_commands(force_model: ForceModel | None = None) -> list:
     ``atom_modify map yes`` is inserted right after ``atom_style`` — it
     MUST precede the read that creates the atoms, which is why it lives in
     the preamble rather than beside the ``pair_style`` lines. A classical
-    force model (or no force model) leaves the three lines untouched, so
-    the classical command block is unchanged.
+    force model (or no force model) leaves those lines untouched.
+
+    ``thermo_modify lost warn`` closes the block: the ``p p f`` boundary
+    silently deletes any atom that leaves the open-z box (a free surface
+    evaporates or sputters under a long run), and LAMMPS ABORTS on a lost
+    atom by default. Aborting is the wrong response here — a lost atom is
+    meant to INVALIDATE the run through the driver's §5.6 atom-count
+    conservation gate (a VOID measurement, §7.6), not to crash it before
+    that gate can read the count. Dropping the atom with a warning lets
+    the gate be the arbiter, as the cascade already does for its
+    sputtering (§10.3). It leads both a fresh ``read_data`` and a resumed
+    ``read_restart``, so every press/pull run inherits it.
     """
     lines = [
         "units metal",
@@ -252,6 +262,7 @@ def restart_preamble_commands(force_model: ForceModel | None = None) -> list:
         # After atom_style, before the read: the global atom map the GNN
         # neighbor gather needs must exist when the atoms are created.
         lines.insert(2, "atom_modify map yes")
+    lines.append("thermo_modify lost warn")
     return lines
 
 

@@ -2510,8 +2510,12 @@ foundations, interaction rules. -->
       the oxide bond can now run the REAL gate per wafer. REMAINING: real
       DFT/exp reference numbers (the silica/LiNbO3 stand-in items above),
       and the node validation of the oxide bond under the real gate.
-- [ ] **Press/pull preamble must tolerate lost atoms so the §5.6 gate
-      can report them (T-18 finding, 2026-08-22).** The press/pull
+- [x] **Press/pull preamble must tolerate lost atoms so the §5.6 gate
+      can report them (T-18 finding, 2026-08-22). DONE 2026-08-22:**
+      `thermo_modify lost warn` added to `restart_preamble_commands`
+      (the shared base, so both a fresh `read_data` and a resumed
+      `read_restart` inherit it), + a regression test. Re-running T-18 to
+      confirm the full press+settle+pull now completes. The press/pull
       `preamble_commands` (`commands.py`) lacks `thermo_modify lost
       warn`, so a sputtered/evaporated atom during the pull makes LAMMPS
       ABORT (`ERROR: Lost atoms`) BEFORE the driver's §5.6 atom-
