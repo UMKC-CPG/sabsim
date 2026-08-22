@@ -326,7 +326,9 @@ def assemble_amorphized_pair(
         initial_gap: float,
         clash_floor: float,
         grip_vacuum: float = 10.0,
-        bin_width: float = 1.0) -> BuiltPair:
+        bin_width: float = 1.0,
+        wafer_a_species: frozenset = None,
+        wafer_b_species: frozenset = None) -> BuiltPair:
     """Stack two amorphized halves into a facing pair (DESIGN §2.6, §7.5).
 
     The BARRIER stage. ``half_a`` and ``half_b`` are the two amorphized
@@ -407,4 +409,6 @@ def assemble_amorphized_pair(
         wafer_b_z_range=(upper_low, upper_high),
         type_map=_type_map_of(pair_atoms),
         match=match,
-        initial_gap_adjustment=clash_lift)
+        initial_gap_adjustment=clash_lift,
+        wafer_a_species=wafer_a_species,
+        wafer_b_species=wafer_b_species)

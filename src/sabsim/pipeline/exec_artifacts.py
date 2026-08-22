@@ -143,6 +143,11 @@ class Slab:
     identity: str                  # the material this slab is made of
     note: str                      # a placeholder description in W0
     data_file: str | None = None   # the slab's file on disk, if written
+    # The DECLARED material species of this wafer — the pre-cascade half's
+    # type map minus the projectile — carried so the §3.5 gate keys each
+    # wafer's activation reference by ITS own set, not the pair's global
+    # type map (DESIGN.md §3.5). Empty on the W0 placeholder.
+    species: frozenset = frozenset()
 
 
 @dataclass(frozen=True)

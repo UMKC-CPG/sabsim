@@ -1,0 +1,47 @@
+# Activation-gate reference data for amorphous silica (a-SiO2),
+# DESIGN §3.5 / §10.6. Keyed by the wafer's species set {O, Si}, so the
+# gate loads it as `O_Si.toml` (load_activation_references sorts and
+# underscore-joins the species).
+#
+# STAND-INS, not the real anchors: literature-guided placeholders so the
+# oxide gate machinery runs end to end (real = false). Replace with a
+# DFT / experimental partial g(r), ring, and coordination statistics for
+# vitreous silica when they are prepared; a real reference of the same
+# shape drops in unchanged. Every number here is a DESIGN §3.6 follow-on
+# to pin.
+real = false
+
+# First minimum of the Si-O g(r) — the bond cutoff the coordination and
+# ring metrics use. The Si-O first-neighbour peak sits near 1.62 A and its
+# first minimum near 2.0 A; a stand-in constant is used until it is
+# derived from the measured g(r).
+bond_cutoff = 2.0
+
+[gr]
+# Vitreous silica's sharp Si-O first-neighbour peak (~1.62 A). The
+# tolerance is deliberately coarse because g(r) is report-leaning (the
+# curve is recorded for by-hand inspection).
+first_peak = 1.62
+first_peak_tolerance = 0.30
+
+[coordination]
+# Well-formed a-SiO2 keeps Si four-fold and O two-fold, so a healthy
+# network has only a few percent of coordination defects. The band
+# brackets "amorphized network" between "barely damaged crystal" and
+# "wholesale destruction"; the same 0.05-0.60 span silicon uses is a
+# reasonable stand-in until an a-SiO2 melt-quench pins it.
+defect_fraction_min = 0.05
+defect_fraction_max = 0.60
+
+[rings]
+# The silica continuous random network is dominated by 6-membered
+# (Si-O)_n rings with a spread of 4-8; require a meaningful non-six-ring
+# share in the amorphized skin.
+non_six_fraction_min = 0.15
+
+[depth]
+# The amorphized skin must reach at least this deep. A STAND-IN for silica
+# (unlike Si's 7 A, which was measured by this pipeline's own sweep): the
+# silica energy x dose sweep is a DESIGN §3.6 follow-on, so silicon's
+# measured operating point is reused as the starting guess until it runs.
+target_angstrom = 7.0

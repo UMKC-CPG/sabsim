@@ -152,6 +152,17 @@ class BuiltPair:
     # the amorphized assembly (:mod:`sabsim.structure.amorphized_assembly`)
     # sets it to the lift it applied.
     initial_gap_adjustment: float = 0.0
+    # Each wafer's DECLARED material species set — the key its §3.5
+    # activation reference is loaded by (DESIGN.md §3.5). Recorded per
+    # wafer, NOT from the global type_map, so the gate can tell a SiO2
+    # wafer ({O, Si}) from a LiNbO3 wafer ({Li, Nb, O}) and judge each
+    # against its own reference. Declared (from the pre-cascade half), not
+    # inferred from survivors, so a fully-sputtered species does not change
+    # the key. None on the crystalline/identity path and any pair built
+    # before this field existed; the gate then falls back to the global
+    # type_map (unchanged for a same-material pair, where the two coincide).
+    wafer_a_species: frozenset = None
+    wafer_b_species: frozenset = None
 
 
 @dataclass

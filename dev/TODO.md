@@ -1940,15 +1940,17 @@ foundations, interaction rules. -->
       cif`; the cristobalite and a LiNbO3 CIF are what to recover. Do
       this with the batched node validations.
 
-- [ ] **Silica has no activation reference data**
-      (`share/activation/O_Si.toml` is missing), so its gate correctly
-      reports every metric UNRESOLVED. The 2026-07-22 run confirmed the
-      cascade itself works on silica — 42 impacts at 75 eV, zero
-      sputtered atoms out of 7920 — but nothing can yet JUDGE the
-      result. Needs an Si-O bond cutoff, a first-peak g(r), a
-      coordination band and a ring criterion for amorphous silica, plus
-      silica's own energy x dose sweep (the current dose is silicon's
-      operating point reused as a starting guess).
+- [~] **Silica activation reference — STAND-IN shipped, real numbers
+      still open.** `share/activation/O_Si.toml` now EXISTS as a
+      `real = false` stand-in (Phase-3 item 6, 2026-08-21), so the gate
+      RUNS on silica instead of reporting UNRESOLVED for a missing file.
+      The 2026-07-22 run confirmed the cascade itself works on silica
+      (42 impacts at 75 eV, zero sputtered out of 7920). STILL OPEN (the
+      real anchor): a DFT/experimental Si-O first-peak g(r), a
+      coordination band and a ring criterion for amorphous silica, and
+      silica's own energy x dose sweep (the stand-in reuses silicon's
+      operating point + a literature-guided 1.62 A peak / 2.0 A cutoff).
+      Same for `Li_Nb_O.toml` (LiNbO3 stand-in, also shipped item 6).
 
 - [ ] **MLIP INTEGRATION STATUS — the socket is built, the plug is
       prototyped, they have NEVER been connected (2026-07-22).** The whole
@@ -2494,6 +2496,20 @@ foundations, interaction rules. -->
       monkeypatch copied across t11/t13/t15 is the tell that the oxide
       gate (per-material refs + per-wafer species key) is the missing
       src/ piece.
+      OXIDE GATE DONE 2026-08-21 (Phase-3 item 6, A1+B1 per Paul): the
+      §3.5 gate keys each wafer by its DECLARED species set, not the
+      pair's global type map (`gate_healed_surfaces`, `press_pull.py`).
+      `Slab.species` recorded at activation (half type_map minus
+      projectile); `BuiltPair.wafer_a_species`/`_b_species` carried
+      through `assemble_amorphized_pair`; gate loads each wafer's ref by
+      its set, falling back to the global map for a same-material pair.
+      `real=false` stand-in refs shipped: `share/activation/O_Si.toml`
+      (silica) + `Li_Nb_O.toml` (lithium niobate). DESIGN §3.5 updated.
+      2 regression tests (per-wafer keying; the same-material fallback).
+      Full suite green. This retires the demo gate-bypass monkeypatch --
+      the oxide bond can now run the REAL gate per wafer. REMAINING: real
+      DFT/exp reference numbers (the silica/LiNbO3 stand-in items above),
+      and the node validation of the oxide bond under the real gate.
 - [ ] **Deploy the universal-GPU activate through the mainline
       `prepare` path — two coupled regressions in the per-job route
       (review 2026-08-21).** The `prepare`/`run_member_job` activate

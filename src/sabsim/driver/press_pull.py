@@ -266,16 +266,26 @@ def gate_healed_surfaces(engine: Engine, built) -> tuple:
     positions, tags = _positions_with_tags(
         engine, np.asarray(built.atoms.get_tags()))
     cell = np.asarray(built.atoms.get_cell(), dtype=float)
-    references = load_activation_references(frozenset(built.type_map))
+    # Each wafer is judged against ITS OWN material's reference: a SiO2
+    # wafer keys {O, Si}, a LiNbO3 wafer keys {Li, Nb, O}, so the gate can
+    # tell them apart (DESIGN.md §3.5). The per-wafer species is recorded on
+    # the pair; when absent (the crystalline/identity path, or a pair built
+    # before that field existed) it falls back to the pair's global type
+    # map, which for a same-material pair IS each wafer's set.
+    global_species = frozenset(built.type_map)
+    references_a = load_activation_references(
+        getattr(built, "wafer_a_species", None) or global_species)
+    references_b = load_activation_references(
+        getattr(built, "wafer_b_species", None) or global_species)
 
     # Wafer A is bottom, its activated surface already facing up (+z).
     verdict_a = activation_gate(
-        positions[tags == WAFER_A_TAG], cell, references)
+        positions[tags == WAFER_A_TAG], cell, references_a)
     # Wafer B faces down — mirror its z so the free surface is at the top.
     positions_b = positions[tags == WAFER_B_TAG].copy()
     z_b = positions_b[:, 2]
     positions_b[:, 2] = (z_b.max() + z_b.min()) - z_b
-    verdict_b = activation_gate(positions_b, cell, references)
+    verdict_b = activation_gate(positions_b, cell, references_b)
     return verdict_a, verdict_b
 
 

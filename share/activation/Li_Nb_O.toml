@@ -1,0 +1,48 @@
+# Activation-gate reference data for amorphized lithium niobate
+# (a-LiNbO3), DESIGN §3.5 / §10.6. Keyed by the wafer's species set
+# {Li, Nb, O}, so the gate loads it as `Li_Nb_O.toml`
+# (load_activation_references sorts and underscore-joins the species).
+#
+# STAND-INS, not the real anchors: literature-guided placeholders so the
+# oxide gate machinery runs end to end (real = false). Lithium niobate is
+# a strongly ionic, ferroelectric oxide, so its real references need a
+# DFT / experimental partial g(r) and coordination statistics for the
+# amorphized phase, and a long-range electrostatics treatment is a
+# documented future target (DESIGN §4). Replace when prepared; a real
+# reference of the same shape drops in unchanged. Every number here is a
+# DESIGN §3.6 follow-on to pin.
+real = false
+
+# First minimum of the shortest cation-oxygen g(r) — the bond cutoff the
+# coordination and ring metrics use. The Nb-O and Li-O first-neighbour
+# peaks sit near 1.9-2.1 A; the first minimum near 2.6 A is a stand-in
+# constant until it is derived from the measured g(r).
+bond_cutoff = 2.6
+
+[gr]
+# The dominant Nb-O first-neighbour peak of the oxygen-octahedra network
+# (~1.98 A). The tolerance is deliberately coarse because g(r) is
+# report-leaning (the curve is recorded for by-hand inspection).
+first_peak = 1.98
+first_peak_tolerance = 0.35
+
+[coordination]
+# Crystalline LiNbO3 is a network of NbO6 and LiO6 octahedra; amorphizing
+# it broadens the oxygen coordination and opens defects. The band is a
+# stand-in on silicon's 0.05-0.60 span until an a-LiNbO3 melt-quench pins
+# an ionic-oxide-appropriate distribution.
+defect_fraction_min = 0.05
+defect_fraction_max = 0.60
+
+[rings]
+# The mixed cation-oxygen network carries a spread of ring sizes; require
+# a meaningful non-six-ring share in the amorphized skin. A stand-in until
+# the ring statistics of the ionic network are characterised.
+non_six_fraction_min = 0.15
+
+[depth]
+# The amorphized skin must reach at least this deep. A STAND-IN: the
+# LiNbO3 energy x dose sweep is a DESIGN §3.6 follow-on (the material
+# amorphizes at lower beam energy than silicon), so silicon's measured
+# operating point is reused as the starting guess until it runs.
+target_angstrom = 7.0

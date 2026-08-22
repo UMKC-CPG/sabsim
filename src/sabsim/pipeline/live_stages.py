@@ -837,12 +837,19 @@ def activate_surfaces_live(
     _outcome_b, amorphized_b = activate_one_half(
         handle_b, member, half_seeds[1], scratch_directory, comm)
 
+    # Each wafer's DECLARED material species: the half's pre-cascade type
+    # map minus the projectile beam. This is what the §3.5 gate keys the
+    # wafer's activation reference by (DESIGN.md §3.5), so it is recorded
+    # here from the declared map rather than inferred from the survivors.
+    projectile = _projectile_species(member)
+    species_a = frozenset(handle_a.type_map) - projectile
+    species_b = frozenset(handle_b.type_map) - projectile
     slab_a = Slab(
         identity=handle_a.identity, note="amorphized half A (bottom)",
-        data_file=amorphized_a)
+        data_file=amorphized_a, species=species_a)
     slab_b = Slab(
         identity=handle_b.identity, note="amorphized half B (top)",
-        data_file=amorphized_b)
+        data_file=amorphized_b, species=species_b)
     return activated_slabs_from_results(slab_a, slab_b)
 
 
@@ -916,7 +923,9 @@ def _assemble_on_one_rank(
         half_a, half_b, match,
         bond_cutoff=_BOND_CUTOFF,
         initial_gap=to_metal(member.protocol.initial_gap, "distance"),
-        clash_floor=to_metal(member.numerical.clash_floor, "distance"))
+        clash_floor=to_metal(member.numerical.clash_floor, "distance"),
+        wafer_a_species=activated.slab_a.species,
+        wafer_b_species=activated.slab_b.species)
 
     pair_file = os.path.join(scratch_directory, "assembled_pair.data")
     # Already on the single assembling rank, so this is a plain write;

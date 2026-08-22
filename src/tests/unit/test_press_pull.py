@@ -592,6 +592,95 @@ def test_gate_healed_surfaces_gates_each_wafer_by_tag():
     assert set(verdict_b.per_metric) == metrics
 
 
+def test_gate_keys_each_wafer_by_its_own_material_species(monkeypatch):
+    """A dissimilar pair gates each wafer against ITS material's reference.
+
+    The bug this guards: the gate used to key BOTH wafers by the pair's
+    GLOBAL type map, so it could not tell a SiO2 wafer from a LiNbO3 one
+    and loaded one (wrong, missing) reference for both. Now each wafer's
+    declared species set selects its own reference (DESIGN.md §3.5).
+    """
+    import sabsim.driver.press_pull as press_pull_module
+
+    requested = []
+
+    def _spy(species):
+        requested.append(frozenset(species))
+        # A permissive reference so the gate runs to completion.
+        from sabsim.driver.activation_gate import ActivationReferences
+        return ActivationReferences(
+            real=False, bond_cutoff=2.5,
+            gr={"first_peak": 2.0, "first_peak_tolerance": 1.0},
+            coordination={"defect_fraction_min": 0.0,
+                          "defect_fraction_max": 1.0},
+            rings={"non_six_fraction_min": 0.0},
+            depth={"target_angstrom": 0.0}, source="spy")
+
+    monkeypatch.setattr(
+        press_pull_module, "load_activation_references", _spy)
+
+    points, cell = _si_diamond_block(n_lateral=3, n_depth=8)
+    median_z = float(np.median(points[:, 2]))
+    tags = np.where(points[:, 2] < median_z, WAFER_A_TAG, WAFER_B_TAG)
+    engine = MockEngine(positions=[points])
+    built = SimpleNamespace(
+        atoms=SimpleNamespace(get_tags=lambda: tags,
+                              get_cell=lambda: cell),
+        type_map={"Si": 1, "O": 2, "Li": 3, "Nb": 4},
+        wafer_a_species=frozenset({"O", "Si"}),
+        wafer_b_species=frozenset({"Li", "Nb", "O"}))
+
+    gate_healed_surfaces(engine, built)
+
+    # Each wafer asked for ITS OWN species set, not the pair's global map.
+    assert requested == [
+        frozenset({"O", "Si"}), frozenset({"Li", "Nb", "O"})]
+    assert frozenset({"Si", "O", "Li", "Nb"}) not in requested
+
+
+def test_gate_falls_back_to_the_global_type_map_when_species_absent(
+        monkeypatch):
+    """A same-material pair with no per-wafer species keys the global map.
+
+    The identity/crystalline path (and any pair built before the per-wafer
+    field existed) sets no wafer species; the gate then keys the pair's
+    global type map, which for a same-material pair IS each wafer's set —
+    preserving the original Si/Si behaviour.
+    """
+    import sabsim.driver.press_pull as press_pull_module
+
+    requested = []
+    monkeypatch.setattr(
+        press_pull_module, "load_activation_references",
+        lambda species: (requested.append(frozenset(species))
+                         or _null_reference()))
+
+    points, cell = _si_diamond_block(n_lateral=3, n_depth=8)
+    median_z = float(np.median(points[:, 2]))
+    tags = np.where(points[:, 2] < median_z, WAFER_A_TAG, WAFER_B_TAG)
+    engine = MockEngine(positions=[points])
+    built = SimpleNamespace(
+        atoms=SimpleNamespace(get_tags=lambda: tags,
+                              get_cell=lambda: cell),
+        type_map={"Si": 1})           # no wafer_a/b_species set
+
+    gate_healed_surfaces(engine, built)
+
+    assert requested == [frozenset({"Si"}), frozenset({"Si"})]
+
+
+def _null_reference():
+    """A permissive activation reference for the fallback test."""
+    from sabsim.driver.activation_gate import ActivationReferences
+    return ActivationReferences(
+        real=False, bond_cutoff=2.5,
+        gr={"first_peak": 2.0, "first_peak_tolerance": 1.0},
+        coordination={"defect_fraction_min": 0.0,
+                      "defect_fraction_max": 1.0},
+        rings={"non_six_fraction_min": 0.0},
+        depth={"target_angstrom": 0.0}, source="null")
+
+
 class _LossyEngine:
     """A minimal stand-in that reports SURVIVORS after atom loss.
 

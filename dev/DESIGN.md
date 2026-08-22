@@ -1090,6 +1090,16 @@ still one free surface against one reference. This is the surface the
 pipeline will actually press, healed; earlier drafts gated a per-slab
 re-anneal before assembly, which the assembly and heal then disturbed.
 
+Each surface is judged against **its own material's reference**, keyed by
+that wafer's **declared species set** — a SiO2 wafer keys `{O, Si}`, a
+LiNbO3 wafer keys `{Li, Nb, O}` — not by the pair's global type map, which
+for a dissimilar pair spans both materials and could not tell them apart.
+The per-wafer species is recorded on the assembled pair from the
+pre-cascade half (so a fully-sputtered species does not change the key),
+and a same-material pair falls back to the global map, which then *is* each
+wafer's set. Its reference file is that key `.toml` in `share/activation/`
+(`O_Si.toml`, `Li_Nb_O.toml`), the same species-keyed lookup silicon uses.
+
 Judgment is **per realization.** Each metric judges ONE healed surface
 against its reference; the spread over amorphization seeds is taken ABOVE
 this module, by the sequencer's realization ensemble (`PSEUDOCODE.md` §10.8,
