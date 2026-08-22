@@ -99,6 +99,18 @@ class Engine(ABC):
         """
 
     @abstractmethod
+    def in_plane_stress(self) -> float:
+        """Return the mean in-plane (xx, yy) stress, metal pressure units.
+
+        The average of the pressure tensor's xx and yy components. The
+        biaxial-stiffness measurement (DESIGN.md §2.4) reads this across a
+        small in-plane strain sweep; the slope of stress vs strain is the
+        biaxial modulus. Same sign convention as :meth:`normal_stress` --
+        positive under compression -- so a stretched (positive-strain)
+        slab reports a negative (tension) stress.
+        """
+
+    @abstractmethod
     def grip_reaction(self, side: str) -> float:
         """Return the summed z reaction force (eV/Å) on a grip.
 
@@ -225,6 +237,7 @@ class MockEngine(Engine):
             positions=None,
             types=None,
             normal_stress=None,
+            in_plane_stress=None,
             bottom_reaction=None,
             top_reaction=None,
             energies=None,
@@ -246,6 +259,7 @@ class MockEngine(Engine):
         self._positions = _Script(positions)
         self._types = _Script(types)
         self._normal_stress = _Script(normal_stress)
+        self._in_plane_stress = _Script(in_plane_stress)
         self._bottom_reaction = _Script(bottom_reaction)
         self._top_reaction = _Script(top_reaction)
         self._energies = _Script(energies)
@@ -316,6 +330,14 @@ class MockEngine(Engine):
     def normal_stress(self) -> float:
         """Return the next scripted normal stress, else zero."""
         return float(self._normal_stress.next(0.0))
+
+    def in_plane_stress(self) -> float:
+        """Return the next scripted mean in-plane stress, else zero.
+
+        A test scripts a SERIES (one per strain in the sweep) so the
+        biaxial-stiffness fit is exercised against a known slope.
+        """
+        return float(self._in_plane_stress.next(0.0))
 
     def grip_reaction(self, side: str) -> float:
         """Return the next scripted reaction for the named grip."""

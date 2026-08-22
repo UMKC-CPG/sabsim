@@ -673,8 +673,14 @@ sizes are close). Three readings of that one formula:
 - **One weight going to infinity gives "one slab takes all the strain."**
   That is what a later prior-art generation silently switched to.
 - **In between is the physical answer**, and it is what we use: the
-  stiffer, thicker slab moves less. The biaxial modulus comes from the
-  same elastic constants the potential-quality gate already computes.
+  stiffer, thicker slab moves less. The biaxial modulus is measured
+  under the current potential by `driver/biaxial_stiffness` — a small
+  in-plane strain sweep on a slab of the material whose stress-vs-strain
+  slope is the modulus, a sibling of §2.2's bulk relax against the same
+  `Engine` seam — and it is the same elastic constant the §7.2
+  potential-quality gate reads. (v1 still applies the even split; wiring
+  the measured modulus into the weighted split is the follow-on in
+  `TODO.md`.)
 
 Two further points the two-number rescale of prior art misses:
 

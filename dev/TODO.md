@@ -2458,10 +2458,19 @@ foundations, interaction rules. -->
         add provenance-record of the relaxed cell + FREEZE x,y. The
         DEMONSTRATED A.2 fix.
       - `build_stiffness_probe.py` (+/-1% strain -> stress slope) -> a
-        new `biaxial_stiffness.py` beside `bulk_relax.py` (§2.4);
-        MEASURED SiO2 ~234 / LiNbO3 ~276 GPa. CAVEAT: the slope->
-        modulus FIT is uncoded (no polyfit in any script) — promotion
-        must add it. Feeds A.3.
+        new `biaxial_stiffness.py` beside `bulk_relax.py` (§2.4).
+        DONE 2026-08-21 (Phase-3 item 5): `biaxial_stiffness.py` added
+        (Engine-seam'd like `bulk_relax`; `measure_biaxial_modulus`
+        walks a `change_box` strain sweep reading in-plane stress, and
+        `fit_biaxial_modulus` CODES the slope->modulus fit that was
+        missing from the probe -- modulus = -slope, since LAMMPS
+        pressure is positive in compression). Added `Engine.
+        in_plane_stress` (ABC + MockEngine + LammpsEngine `pxx/pyy`
+        mean). DESIGN §2.4 updated. 4 unit tests (fit recovers a known
+        modulus ignoring the surface offset; the sweep orchestration).
+        Full suite green. REMAINING (A.3, separate item): WIRE the
+        measured modulus into a stiffness-weighted `split_strain`,
+        replacing `even_split_shared_cell`'s even midpoint.
       - `square_cell_search.py::_worst_axis_strain` -> `slab_builder.py`.
         DONE 2026-08-21 (Phase-3 item 4): `_worst_axis_strain` added
         (generalized to substrate/film; reuses `_coplanar_2d` +

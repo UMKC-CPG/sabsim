@@ -241,6 +241,18 @@ class LammpsEngine(Engine):
         """
         return float(self._lmp.get_thermo("pzz"))
 
+    def in_plane_stress(self) -> float:
+        """Return the mean in-plane (xx, yy) stress, metal pressure units.
+
+        The average of the ``pxx`` and ``pyy`` thermo keywords (the two
+        in-plane pressure-tensor components). Same convention as
+        :meth:`normal_stress` -- positive under compression -- so the
+        biaxial-stiffness sweep (DESIGN.md §2.4) sees stress FALL as it
+        stretches the slab, and the modulus is minus that slope.
+        """
+        return 0.5 * float(
+            self._lmp.get_thermo("pxx") + self._lmp.get_thermo("pyy"))
+
     def grip_reaction(self, side: str) -> float:
         """Return the summed z reaction force (eV/Å) on a grip.
 
