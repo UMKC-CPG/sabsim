@@ -1008,12 +1008,26 @@ def cascade_fixed_timestep_commands(
         member: MemberSpecification) -> list:
     """Restore the fixed step for the between-impact relaxation (§10.4).
 
-    Removes the adaptive fix and pins the step back to ``cascade_timestep``
-    — the stable fixed step the border-thermostatted cool-down runs under,
-    so the substrate settles back toward the target temperature before the
-    next impact starts from an equilibrated state, not a hot one.
+    Removes the adaptive fix and pins the step to ``md_timestep`` — the
+    ordinary MLIP molecular-dynamics step — for the border-thermostatted
+    cool-down, so the substrate settles back toward the target
+    temperature before the next impact starts from an equilibrated
+    state, not a hot one.
+
+    **It is deliberately NOT ``cascade_timestep``.** That tiny step
+    (0.1 fs by default) exists to stop a fast recoil tunnelling through
+    the steep ZBL wall during the violent phase. By the time this
+    relaxation runs the cascade has already ended on its physical-time
+    halt and the projectile's energy has thermalized, so nothing in the
+    cell is moving fast enough to need it; the ordinary MD step (1 fs)
+    integrates the cool-down perfectly stably. Running the cool-down at
+    the cascade step instead spends TEN TIMES the steps for the same
+    physical duration — measured at 49% of a whole single-impact run
+    (LEDGER T-21), which is pure waste. The re-anneal already made this
+    distinction (:func:`reanneal_commands` runs at ``md_timestep``);
+    this brings the between-impact relaxation into line with it.
     """
-    fixed_step = to_metal(member.numerical.cascade_timestep, "time")
+    fixed_step = to_metal(member.numerical.md_timestep, "time")
     return [
         "unfix cascade_dt",
         f"timestep {_lammps_number(fixed_step)}",

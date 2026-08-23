@@ -305,9 +305,14 @@ def run_cascade_to_fluence(
         engine.commands(
             trajectory_dump_commands(trajectory_file, trajectory_stride))
 
+    # The between-impact relaxation runs at the ORDINARY MD step, not
+    # the tiny cascade step (see cascade_fixed_timestep_commands): the
+    # cascade has halted and the energy has thermalized, so the step
+    # count must be derived from the same step the relaxation is
+    # actually integrated with, or the requested duration is wrong.
     relax_steps = max(1, round(
         spec.between_impact_relaxation
-        / to_metal(member.numerical.cascade_timestep, "time")))
+        / to_metal(member.numerical.md_timestep, "time")))
 
     for impact_seed in spec.impact_seeds:
         position = sample_impact_position(
@@ -552,9 +557,14 @@ def build_activate_script(
         script += trajectory_dump_commands(
             trajectory_file, trajectory_stride)
 
+    # The between-impact relaxation runs at the ORDINARY MD step, not
+    # the tiny cascade step (see cascade_fixed_timestep_commands): the
+    # cascade has halted and the energy has thermalized, so the step
+    # count must be derived from the same step the relaxation is
+    # actually integrated with, or the requested duration is wrong.
     relax_steps = max(1, round(
         spec.between_impact_relaxation
-        / to_metal(member.numerical.cascade_timestep, "time")))
+        / to_metal(member.numerical.md_timestep, "time")))
 
     # Every impact, precomputed from its seed — no live state is consulted,
     # so the whole bombardment is known before the run starts.

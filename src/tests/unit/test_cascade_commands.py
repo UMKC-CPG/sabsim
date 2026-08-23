@@ -18,6 +18,7 @@ from sabsim.driver.cascade_potential import resolve_cascade_generator
 from sabsim.driver.commands import (
     CascadeGeometry,
     cascade_adaptive_timestep_commands,
+    _lammps_number,
     cascade_fixed_timestep_commands,
     cascade_halt_commands,
     cascade_integrator_commands,
@@ -106,6 +107,25 @@ def test_fixed_timestep_removes_adaptive_and_pins_the_step():
     commands = cascade_fixed_timestep_commands(_template_member())
     assert commands[0] == "unfix cascade_dt"
     assert commands[1].startswith("timestep ")
+
+
+def test_relaxation_runs_at_the_md_step_not_the_cascade_step():
+    """The cool-down uses md_timestep, NOT the tiny cascade step.
+
+    The cascade step exists only to keep a fast recoil off the ZBL
+    wall; by the relaxation the cascade has halted and the energy has
+    thermalized. Pinning the cool-down to the cascade step would spend
+    ten times the steps for the same physical time (LEDGER T-21 put it
+    at 49% of a single-impact run).
+    """
+    from sabsim.driver.commands import to_metal
+    member = _template_member()
+    commands = cascade_fixed_timestep_commands(member)
+    md_step = to_metal(member.numerical.md_timestep, "time")
+    cascade_step = to_metal(member.numerical.cascade_timestep, "time")
+    # The two must differ, or the test proves nothing.
+    assert md_step != cascade_step
+    assert commands[1] == f"timestep {_lammps_number(md_step)}"
 
 
 # ---------------------------------------------------------------------
