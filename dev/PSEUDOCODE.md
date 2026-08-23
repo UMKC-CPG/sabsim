@@ -2704,13 +2704,124 @@ record ReferenceSettings:
     # audit runs (DESIGN §4.8 "Frozen for v1"); the FIELDS are fixed here
     # because a value the manufacture uses must be visible (§1.4).
 
+record QuenchSpec:
+    # DESIGN §4.8 part 2, family 3 — one bulk melt-quench amorphous
+    # structure. Melt a bulk cell until it forgets its lattice, then
+    # cool it back down; what is left is the amorphous network.
+    #
+    # This is the ONLY family that produces amorphous chemistry without
+    # a cascade, which is why it is cheap enough to be worth stating
+    # carefully. It has NO free surface (contrast the cascade's
+    # amorphized surface, part 5 family 7) and is sized to be labelled
+    # WHOLE, so it never needs the §6.4 subcell treatment.
+    phase:             string     # the crystal phase melted, naming
+                                  # what the network came FROM; the
+                                  # same composition quenched from
+                                  # different phases can land in
+                                  # different networks
+    cell_atom_count:   int        # target size. Bounded ABOVE by what
+                                  # the accurate method will label
+                                  # whole, and BELOW by the descriptor
+                                  # cutoff: a cell narrower than twice
+                                  # the cutoff has every atom seeing
+                                  # its own periodic image, which
+                                  # teaches the model an artefact
+    melt_temperature:  Quantity   # held WELL above melting, so the
+                                  # crystal genuinely loses order
+                                  # rather than merely softening
+    melt_duration:     Quantity   # long enough that the liquid has no
+                                  # memory of the starting lattice —
+                                  # checked, not assumed (below)
+    quench_rate:       Quantity   # temperature per unit time. THE
+                                  # decisive knob: a fast quench
+                                  # freezes in more defects and a
+                                  # higher-energy network, a slow one
+                                  # relaxes toward the ideal glass, and
+                                  # the two are measurably different
+                                  # materials. Stated as a RATE, not a
+                                  # duration, so it means the same
+                                  # thing at any temperature span
+    final_temperature: Quantity   # where the quench stops
+    replicas:          int        # independent seeds. An amorphous
+                                  # network is ONE DRAW from an
+                                  # ensemble, not a structure, so a
+                                  # single replica misrepresents the
+                                  # phase the model must learn
+    # VERIFY, do not assume: the melt must be confirmed disordered
+    # (coordination and g(r) departing from the crystal) before the
+    # quench is trusted. A "melt" that stayed crystalline yields a
+    # rattled crystal wearing an amorphous label — training data that
+    # is wrong rather than merely useless.
+
+
+record WarmRunSpec:
+    # DESIGN §4.8 part 2, family 6 — one short warm run of one crystal.
+    # Not optional: every stage the trained model owns (the re-settle,
+    # the press, the settle, the pull) runs HOT, and a committee taught
+    # only cold and rattled cells reports large, meaningless spread the
+    # instant a warm run begins — spending the §4.4 uncertainty signal
+    # exactly where it needs to mean something.
+    phase:            string      # which crystal is run warm
+    ensemble:         string      # "NVT" or "NPT". BOTH are required
+                                  # and they are NOT interchangeable:
+                                  # NPT lets the cell breathe and so
+                                  # supplies THERMAL EXPANSION, while
+                                  # NVT supplies correlated motion at
+                                  # FIXED volume. A model shown only
+                                  # NVT never learns the volume a
+                                  # crystal actually takes when hot
+    temperature:      Quantity    # modestly elevated — the protocol's
+                                  # working range, not a melt
+    duration:         Quantity    # short: this anchors the committee,
+                                  # it does not measure a property
+    equilibration:    Quantity    # leading interval DISCARDED before
+                                  # harvesting. Frames from the initial
+                                  # transient are on the way to the
+                                  # ensemble, not in it
+    sampling_stride:  Quantity    # spacing between harvested frames.
+                                  # Consecutive MD frames are strongly
+                                  # correlated, so harvesting every
+                                  # step buys volume without buying
+                                  # information — and pays the labeller
+                                  # for the duplicates
+    replicas:         int         # independent seeds per (phase,
+                                  # ensemble, temperature)
+
+
 record StartingCollection:
-    # DESIGN §4.8 part 2. The calm structures computed before anything
-    # else. Its purpose is stated out loud because it is easy to
-    # over-invest: it exists so the seed committee does not fly apart,
-    # NOT to make it accurate.
+    # DESIGN §4.8 part 2 — COLLECTION 1 of the settled recipe, six
+    # families, ALL REQUIRED (settled 2026-08-23). The calm structures
+    # computed before anything else. Its purpose is stated out loud
+    # because it is easy to over-invest: it exists so the FIRST
+    # committee does not fly apart, NOT to make it accurate. (It is no
+    # longer a separate seed STAGE, DESIGN §4.5 step 1, but it IS
+    # required training data.)
     bulk_phases:        list of PhaseSpec   # every phase in the domain
     clean_surfaces:     list of SurfaceSpec # their cut faces
+    melt_quench:        list of QuenchSpec  # the AMORPHOUS network of
+                                            # each phase, melted and
+                                            # quenched in BULK. Not the
+                                            # cascade's amorphized
+                                            # SURFACE (§11.3): no free
+                                            # surface, no bombardment,
+                                            # small enough to label
+                                            # whole. The cheapest source
+                                            # of the amorphous chemistry
+                                            # the interface is made of.
+    warm_runs:          list of WarmRunSpec # short NVT and NPT runs of
+                                            # each crystal at modestly
+                                            # elevated temperature. NOT
+                                            # optional: every stage the
+                                            # trained model owns runs
+                                            # HOT, and a committee taught
+                                            # only cold and rattled
+                                            # cells reports large,
+                                            # meaningless spread the
+                                            # instant a warm run starts.
+                                            # NPT supplies thermal
+                                            # expansion, NVT the
+                                            # correlated motion at fixed
+                                            # volume.
     strained_substrates: list of StrainSpec # STRUCTURAL 4's shared-cell
                                             # stretch (a special case of
                                             # the deformations below)
@@ -2776,12 +2887,23 @@ record ForceModelRecipe:
                                              # quantity, not a footnote
 
     # --- Part 5: how the hard configurations are made (§11.3). ---
+    # COLLECTION 2 of the settled recipe, five families, ALL REQUIRED
+    # (DESIGN §4.8 part 5, settled 2026-08-23): the amorphized surface,
+    # the initial joint cell (assembled at the wide gap, before any
+    # relaxation), the relaxed joint cell (in contact, not yet loaded),
+    # the pressed cell, and the pulled cell THROUGH failure. The two
+    # joint cells are named because "press and pull" does not imply
+    # them: they are the un-loaded contact chemistries, visited once on
+    # the way in and never again.
     generation_plan: GenerationPlan  # which stages run to harvest, on
                                      # WHICH force model each runs (the
-                                     # cascade on the §4.7 classical form,
-                                     # the press/pull on the current
-                                     # committee), how many, and at what
-                                     # conditions
+                                     # cascade on the §4.7 foundation
+                                     # MLIP + ZBL, classical + ZBL the
+                                     # fallback; the press/pull on the
+                                     # SAME foundation MLIP -- not a
+                                     # committee, which is what breaks
+                                     # the circularity), how many, and
+                                     # at what conditions
 
     # --- Part 6: what gets the expensive labels (§11.4). ---
     labeling_budget: int             # accurate calls per round; VASP is
@@ -2878,9 +3000,12 @@ function bootstrap_potential(force_model_recipe, reference_data):
 
 ```
 function seed_committee(force_model_recipe, reference_data):
-    # DESIGN §4.5 step 1. Train an INITIAL committee on hand-built near-
-    # equilibrium DFT: bulk Si and cristobalite, their surfaces, the
-    # STRUCTURAL-4 strained substrates, and moderate-T rattled snapshots.
+    # DESIGN §4.5 step 1. Train an INITIAL committee on COLLECTION 1 of
+    # the settled recipe (§4.8 part 2) -- all six families: bulk ground
+    # state, bulk strained, bulk melt-quench amorphous, clean surfaces,
+    # rattled snapshots, warm NVT/NPT runs. This is no longer a seed
+    # STAGE (the universal foundation MLIP is the generator), but the
+    # data is still required training data.
     # The bar is LOW on purpose — "does not fly apart near equilibrium",
     # not "accurate" — because its only job is to run step-2 generation
     # long enough to REACH the hard configs (§11.3). The strained-substrate

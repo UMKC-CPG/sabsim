@@ -1019,7 +1019,17 @@ that shrinks so no atom moves more than a fraction of an ångström per step
 — a fast recoil at a fixed step can jump straight THROUGH the steep ZBL
 wall into an overlap — and it is restored to the fixed step for the
 thermostatted relaxation (an adaptive step destabilizes the Nose-Hoover
-thermostat); and the cascade **duration is sized for the impact energy** —
+thermostat). That restored step is the **ordinary MD step**, NOT the
+tiny cascade step: the cascade step exists only to keep a fast recoil
+off the ZBL wall, and by the relaxation the cascade has ended on its
+physical-time halt and the deposited energy has thermalized, so nothing
+is moving fast enough to require it. Pinning the cool-down to the
+cascade step spends TEN TIMES the steps for the same physical duration
+— measured at 49% of a whole single-impact run (`install/tests/
+LEDGER.md` T-21) — for no physics. The re-anneal (§3.4) already ran at
+the MD step; the between-impact relaxation was brought into line with
+it on 2026-08-23. And the cascade **duration is sized for the impact
+energy** —
 a higher-energy impact deposits more and takes longer to dissipate — not a
 constant step count that would cut a 500 eV cascade off early. **Execution
 uses a persistent LAMMPS driver** — the LAMMPS **Python binding**, held
@@ -1400,16 +1410,24 @@ bootstrap pass is:
 
 1. **Generator.** The **universal foundation MLIP** is the cheaper
    generator — no separate seed committee is trained (the 2026-08-21
-   decision retires that step). Hand-built near-equilibrium DFT — bulk
-   Si and cristobalite, their surfaces, the STRUCTURAL-4 strained
-   substrates, moderate-T rattled snapshots — is kept only as an
-   optional cheap anchor in the training set, not a seed stage.
+   decision retires that step). The hand-built near-equilibrium DFT
+   structures are no longer a SEED STAGE, but they remain REQUIRED
+   TRAINING DATA: they are Collection 1 of the settled recipe, §4.8
+   part 2, and all six families are required. An earlier draft of this
+   step called them "an optional cheap anchor", which contradicted
+   §4.8's own argument that the strained cells and the warm runs are
+   load-bearing; §4.8 is correct and this step was corrected to match
+   (2026-08-23). Retiring the seed STAGE never meant discarding the
+   seed DATA.
 2. **Generate the hard configs.** Run the violent Ar cascade on the
    **foundation MLIP + ZBL** (a classical + ZBL potential is the
-   secondary fallback) to make amorphized-surface configs; run the
+   secondary fallback) to make the amorphized surfaces; run the
    interface and separation on the *same* **foundation MLIP** to make
-   pressed-interface and bond-breaking configs — no per-pair committee
-   is needed to generate any of them.
+   the joint, pressed and pulled cells — no per-pair committee is
+   needed to generate any of them. These are Collection 2 of the
+   settled recipe, §4.8 part 5, and all five families are required:
+   the amorphized surface, the initial joint cell, the relaxed joint
+   cell, the pressed cell, and the pulled cell (through failure).
 3. **Label, convert, retrain.** VASP labels a selected subset (ALF's
    `QM_task = VASP_ase_calculator_task`); the converter folds it into the
    HDF5 store; `train_DEEPMD_ensemble_task` retrains the committee.
@@ -1775,17 +1793,35 @@ student can read the file and know what was manufactured.
    must handle, fixing the type-map ordering every downstream simulation
    inherits (§4.3), together with the declared domain above. This is the
    key a member's `potential_ref` ultimately resolves against.
-2. **The starting collection.** The calm, near-equilibrium structures
-   computed accurately before anything else: the perfect crystals of
-   every phase in the declared domain, their clean surfaces, the
-   STRUCTURAL-4 strained substrates, moderate-temperature rattled
-   snapshots, short warm runs of each crystal in the NVT and NPT
-   ensembles at modestly elevated temperature, and uniformly stretched,
-   compressed and sheared cells of each bulk phase at several
-   magnitudes, carried PAST the reversible range into the regime where
-   bonds begin to fail. Two families here are load-bearing rather than
-   optional — the strained cells and the warm runs — for the reasons
-   below.
+2. **The starting collection — COLLECTION 1 of the settled recipe.**
+   The calm structures, computed accurately before anything else and
+   needing no protocol run to produce. Six families, ALL REQUIRED
+   (settled 2026-08-23; the recipe is the eleven families of this part
+   and part 5 together, and nothing outside that list is training
+   data):
+
+   1. **Bulk ground state** — the perfect crystal of every phase in the
+      declared domain, at its relaxed lattice.
+   2. **Bulk strained** — uniformly stretched, compressed and sheared
+      cells of each bulk phase at several magnitudes, carried PAST the
+      reversible range into the regime where bonds begin to fail. This
+      subsumes the STRUCTURAL-4 strained substrates.
+   3. **Bulk melt-quench amorphous** — the amorphous network of each
+      phase, produced by melting and quenching a bulk cell. NOT the
+      cascade's amorphized surface (family 7): this one is bulk, has no
+      free surface, needs no bombardment, and is small enough to label
+      whole. It is the cheapest source of the amorphous chemistry the
+      interface is made of, and omitting it would leave that chemistry
+      to be learned only from the expensive, surface-contaminated
+      cascade configs.
+   4. **Clean surfaces** — the free surface of each phase, unbombarded.
+   5. **Rattled snapshots** — moderate-temperature static displacements
+      about the cold cell.
+   6. **Warm runs** — short runs of each crystal in the NVT and NPT
+      ensembles at modestly elevated temperature.
+
+   Families 2 and 6 are the two whose necessity is easiest to doubt, so
+   the argument for them is spelled out below.
    The potential-quality gate (§7.2) already checks elastic stiffness
    against references, so a model taught only relaxed and rattled cells
    would be gated on a property it was never shown — an inconsistency
@@ -1805,16 +1841,46 @@ student can read the file and know what was manufactured.
    supplies the correlated motion at fixed volume. For each family the
    recipe states how many and how produced.
    The purpose is stated out loud, because it is easy to over-invest:
-   this collection exists so the seed committee does not fly apart, not
-   to make it accurate.
+   this collection exists so the FIRST committee does not fly apart,
+   not to make it accurate. (It anchors that first committee; it is no
+   longer a separate seed STAGE, §4.5 step 1.) Accuracy comes from the
+   configurations the protocol actually visits — Collection 2 — and
+   from the refinement loop.
 3. **The production reference settings.** The block below.
 4. **The accuracy audit.** The block below.
-5. **How the hard configurations are manufactured.** Which protocol
-   stages run purely to harvest frames, and on WHICH force model each
-   runs — the violent cascade on the foundation MLIP + ZBL form of §4.7
-   (classical + ZBL the fallback), the press and pull on the same
-   universal foundation MLIP (§4.5 step 2) — how many, and under what
-   conditions.
+5. **How the hard configurations are manufactured — COLLECTION 2 of
+   the settled recipe.** The configurations the protocol itself visits,
+   harvested from a bootstrap run. Five families, ALL REQUIRED (settled
+   2026-08-23), each a state the others do not revisit:
+
+   7. **Amorphized surface** — one per half, the product of the violent
+      Ar cascade. This is what the activate stage exists to make.
+   8. **Initial joint cell** — the two activated halves assembled at
+      the wide gap, BEFORE any relaxation. Two surfaces facing each
+      other and not yet interacting.
+   9. **Relaxed joint cell** — after the combined-cell relax: in
+      contact, but not yet under load.
+   10. **Pressed cell** — the interface under compression.
+   11. **Pulled cell** — the separation, INCLUDING the failing and
+       failed states, since a pull that fails through the crystal
+       rather than along the interface is an outcome §6 must tell apart
+       from the other and the model must therefore have seen both.
+
+   Families 8 and 9 are named explicitly because "press and pull" does
+   not imply them: they are the un-loaded contact chemistries, visited
+   once on the way in and never again.
+
+   The recipe states which stages run purely to harvest frames, and on
+   WHICH force model each runs — the violent cascade on the foundation
+   MLIP + ZBL form of §4.7 (classical + ZBL the fallback), the press
+   and pull on the same universal foundation MLIP (§4.5 step 2) — how
+   many, and under what conditions. Collection 1 is labelled as whole
+   cells, being small by construction; Collection 2 is labelled as the
+   **interface subcells** of §6.4, because all-electron cost grows
+   steeply with atom count and a production cascade cell is an order of
+   magnitude beyond what DFT will take (LEDGER T-21 measured ~1960
+   atoms for a single-impact calibration cell against a routine DFT
+   budget of a few hundred).
 6. **How a subset is chosen for labelling.** The accurate calculations
    are the cost bottleneck, so the recipe states the budget and the
    selection rule: favour the interface region, prefer configurations

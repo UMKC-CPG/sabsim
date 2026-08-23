@@ -354,10 +354,16 @@ is.
   secondary fallback), and the pressed interface and the
   press/settle/pull on the *same* foundation MLIP — so all the hard
   configs are manufactured with **no per-pair MLIP**, breaking the
-  circularity. Hand-built near-equilibrium DFT (bulk Si, cristobalite,
-  their surfaces, the *strained* STRUCTURAL-4 substrates, rattled
-  snapshots) is kept only as an optional cheap anchor in the training
-  set, not a required seed stage. (2) **Label** a selected subset with
+  circularity. The hand-built near-equilibrium DFT structures are no
+  longer a required seed STAGE, but they remain REQUIRED TRAINING DATA
+  — Collection 1 of the settled recipe (DESIGN §4.8 part 2), six
+  families: bulk ground state, bulk strained, bulk melt-quench
+  amorphous, clean surfaces, rattled snapshots, warm NVT/NPT runs.
+  Collection 2 (DESIGN §4.8 part 5) is the five the protocol visits:
+  amorphized surface, initial joint cell, relaxed joint cell, pressed
+  cell, pulled cell. Eleven families, all required (settled
+  2026-08-23); earlier text here called Collection 1 "optional", which
+  contradicted DESIGN §4.8 and was corrected. (2) **Label** a selected subset with
   VASP, **train** the per-pair committee, and **refine** with ALF —
   rerun the protocol, let committee / UDD uncertainty flag configs,
   VASP-label those, retrain, until committee uncertainty across a full
