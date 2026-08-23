@@ -2704,6 +2704,131 @@ record ReferenceSettings:
     # audit runs (DESIGN §4.8 "Frozen for v1"); the FIELDS are fixed here
     # because a value the manufacture uses must be visible (§1.4).
 
+record PhaseSpec:
+    # DESIGN §4.8 part 2, family 1 — one crystal phase of the declared
+    # domain, at its ground state.
+    #
+    # These entries ARE the domain's truth. §4.8 part 1 notes that the
+    # domain label is "a handle, not the truth — the truth is the
+    # enumerated starting collection", so a phase absent from this list
+    # was not taught, whatever the label claims.
+    name:          string     # the phase, not just the composition:
+                              # alpha-quartz and cristobalite are the
+                              # same SiO2 and different chemistry, and
+                              # conflating them is the §4.8 hazard
+    structure_ref: string     # where the symmetry, basis and
+                              # connectivity come from (a CIF, §1.2)
+    # NO lattice constant is stored. The CIF's published scale is a
+    # STARTING geometry only: the working lattice is DERIVED by relaxing
+    # under the model being manufactured (§2.2). Recording a scale here
+    # would invite exactly the CIF-vs-model offset that LEDGER T-21
+    # measured at -1.52% for silicon under DPA-2.4-7M.
+
+
+record SurfaceSpec:
+    # DESIGN §4.8 part 2, family 4 — one clean, unbombarded free
+    # surface. The calm counterpart to the cascade's amorphized surface
+    # (part 5 family 7): same face, no damage.
+    phase:        string      # which PhaseSpec it is cut from
+    miller_index: (int, int, int)   # the crystallographic face
+    termination:  string      # which atomic plane the cut ends on.
+                              # A polar oxide can be cut several ways
+                              # from ONE Miller index, and the choices
+                              # differ in energy and reactivity, so the
+                              # index alone does not identify a surface
+    slab_thickness: Quantity  # enough that the middle is bulk-like;
+                              # the two faces must not interact
+    vacuum:         Quantity  # enough that the slab does not see its
+                              # own periodic image across the gap
+
+
+record StrainSpec:
+    # DESIGN §4.8 part 2, family 2 — one deformed bulk cell. Serves BOTH
+    # the STRUCTURAL-4 shared-cell stretch (where the matcher's cell
+    # dictates the strain) and the free deformation sweep.
+    phase:      string        # which PhaseSpec is deformed
+    strain:     3x3 tensor    # the full tensor, SHEAR KEPT. Not a
+                              # scalar magnitude: a mismatched interface
+                              # under load carries shear, and the press
+                              # and pull are themselves compression and
+                              # tension, so a model taught only
+                              # volumetric scaling has not seen the
+                              # deformations the protocol applies. (The
+                              # same tensor-not-scalar point PSEUDOCODE
+                              # §7.6 makes about residual strain.)
+    origin:     string        # "structural-4" when the shared cell
+                              # fixes it, "sweep" when it is chosen —
+                              # recorded because one is dictated by the
+                              # pair and the other is ours to pick
+    # The sweep is carried PAST the reversible range, into the regime
+    # where bonds begin to fail: §7.2 GATES elastic stiffness, and a
+    # pull that fails through the crystal rather than along the
+    # interface is an outcome §8 must tell apart from the other. A model
+    # shown only small strains cannot do either.
+
+
+record RattleSpec:
+    # DESIGN §4.8 part 2, family 5 — static displacements about the cold
+    # cell. The cheapest way to show the model the neighbourhood of
+    # equilibrium.
+    amplitude:   Quantity     # displacement scale per atom
+    count:       int          # how many snapshots per phase
+    seed:        int          # the draws are random; the seed makes
+                              # them reproducible (§10.3's discipline)
+    # These are UNCORRELATED kicks around a cold cell. They are NOT a
+    # substitute for the warm runs of family 6: a rattled snapshot never
+    # shows correlated thermal motion, nor the volume a crystal actually
+    # takes when hot. Both families are required for that reason.
+
+
+record GenerationPlan:
+    # DESIGN §4.8 part 5 — how Collection 2 is manufactured. Which
+    # protocol stages run purely to harvest frames, on WHICH force model
+    # each runs, how many, and under what conditions.
+    harvest_stages: list of string   # the five families of part 5:
+                                     # amorphized surface, initial joint
+                                     # cell, relaxed joint cell, pressed
+                                     # cell, pulled cell
+    cascade_model:  string           # the §4.7 foundation MLIP + ZBL
+                                     # (classical + ZBL the fallback),
+                                     # named the way a member's
+                                     # potential_ref is (§2)
+    protocol_model: string           # the SAME foundation MLIP for the
+                                     # press and pull. NOT a committee:
+                                     # generating the hard configs with
+                                     # the model those configs are meant
+                                     # to train is the circularity
+                                     # STRUCTURAL 1b exists to break
+    frames_per_stage: dict           # how many are kept per stage
+    conditions:       dict           # energies, doses, rates, and
+                                     # temperatures the harvest runs at
+    # Collection 1 is labelled as whole cells, being small by
+    # construction; Collection 2 is labelled as the §6.4 interface
+    # SUBCELLS, because a production cascade cell is an order of
+    # magnitude beyond what the accurate method will take (LEDGER T-21:
+    # ~1960 atoms for a single-impact calibration cell, against a
+    # routine budget of a few hundred).
+
+
+record DescriptorSpec:
+    # DESIGN §4.8 part 7 — how the model SEES a local environment.
+    form:            string   # the descriptor family
+    cutoff_radius:   Quantity # the locality assumption made explicit.
+                              # Everything beyond it is invisible to the
+                              # model, so this is the claim that the
+                              # chemistry is short-ranged — and it is
+                              # what makes the §6.4 subcell legitimate
+                              # as a training target at all: a subcell
+                              # is valid precisely when it is wider than
+                              # this. It also sets the FLOOR on
+                              # QuenchSpec.cell_atom_count, since a cell
+                              # narrower than twice the cutoff has every
+                              # atom seeing its own image.
+    # A long-range electrostatic treatment is a documented future target
+    # for the strongly ionic oxides (DESIGN §4); this record is where
+    # that would be declared when it arrives.
+
+
 record QuenchSpec:
     # DESIGN §4.8 part 2, family 3 — one bulk melt-quench amorphous
     # structure. Melt a bulk cell until it forgets its lattice, then
