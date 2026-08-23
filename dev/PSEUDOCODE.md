@@ -2704,6 +2704,93 @@ record ReferenceSettings:
     # audit runs (DESIGN §4.8 "Frozen for v1"); the FIELDS are fixed here
     # because a value the manufacture uses must be visible (§1.4).
 
+record SelectionRule:
+    # DESIGN §4.8 part 6 — which harvested configurations earn an
+    # accurate calculation. The accurate method is THE cost bottleneck,
+    # so every slot spent on a configuration that teaches nothing new is
+    # a slot not spent on chemistry the model has never seen.
+    #
+    # Distinct from the §4.6 sampler cutoffs (Escut, Fscut). Those
+    # decide which frames the MD CAPTURES; this decides which captured
+    # frames get LABELLED. Capture is cheap, labelling is not.
+    interface_preference: number  # how strongly to favour the
+                                  # interface region. The bulk is
+                                  # already covered cheaply by
+                                  # Collection 1, so bulk-like frames
+                                  # bought at labelling prices are
+                                  # mostly redundant
+    uncertainty_weight:   number  # how strongly to prefer the
+                                  # configurations the committee least
+                                  # agrees on. This is what makes the
+                                  # loop ACTIVE learning rather than
+                                  # bulk sampling — but it must not be
+                                  # the only criterion, or the budget
+                                  # chases whichever corner is noisiest
+                                  # instead of whichever is most
+                                  # relevant
+    duplicate_cutoff:     number  # below this DESCRIPTOR-SPACE distance
+                                  # to something the store already
+                                  # holds, a candidate is a near-
+                                  # duplicate and is skipped.
+                                  # Descriptor space, NOT structural
+                                  # similarity: the model sees only
+                                  # within DescriptorSpec.cutoff_radius,
+                                  # so two cells that look different can
+                                  # present identical local
+                                  # environments — and paying twice for
+                                  # one environment is exactly the waste
+                                  # this rule exists to stop
+    frame_as_subcell:     boolean # frame interface configurations as
+                                  # the §6.4 subcells rather than whole
+                                  # production cells. Legitimate because
+                                  # the potential is short-ranged, and
+                                  # necessary because all-electron cost
+                                  # grows steeply with atom count
+    # The asymmetry §4.5 step 3 names: a TRAINING configuration need
+    # only be physically valid and relevant, which leaves the subcell
+    # choice free — whereas the §6.4 interface_fidelity cross-check
+    # compares two METHODS and so demands both see the identical system.
+
+
+record TrainingSpec:
+    # DESIGN §4.8 part 7 — how long each committee member trains and
+    # what its loss rewards.
+    length:          Quantity  # training length (epochs or steps).
+                               # Load-bearing for a reason that is easy
+                               # to miss: committee spread is only
+                               # epistemic uncertainty if the members
+                               # are trained to COMPARABLE convergence.
+                               # Members stopped at different degrees of
+                               # fit disagree because they are unequally
+                               # trained, and that disagreement is
+                               # training noise wearing the uncertainty
+                               # signal's clothes — which would corrupt
+                               # both the §4.6 sampler and the §4.4
+                               # runtime backstop
+    energy_weight:   number    # how the loss balances energies against
+    force_weight:    number    # forces. NOT a free 50/50: a
+                               # configuration carries 3N force
+                               # components against a SINGLE energy, so
+                               # an unweighted loss is dominated by
+                               # forces by sheer count. The balance
+                               # decides what the model is good AT —
+                               # forces give faithful dynamics, energies
+                               # give faithful relative stability
+                               # BETWEEN structures. Both are gated:
+                               # §7.2 checks elastic stiffness (a
+                               # curvature of the energy) and the
+                               # protocol needs forces. And the Tier-0
+                               # screen is purely an ENERGY-difference
+                               # test — LEDGER T-21 rejected DPA-2.4-7M
+                               # for ranking a damaged structure 0.421
+                               # eV/atom BELOW the crystal, a failure no
+                               # amount of force accuracy would have
+                               # caught
+    learning_schedule: string  # how the step size is annealed
+    validation_split:  number  # the held-out fraction, so "trained" is
+                               # a measured claim and not a hope
+
+
 record PhaseSpec:
     # DESIGN §4.8 part 2, family 1 — one crystal phase of the declared
     # domain, at its ground state.
@@ -2799,9 +2886,10 @@ record GenerationPlan:
                                      # the model those configs are meant
                                      # to train is the circularity
                                      # STRUCTURAL 1b exists to break
-    frames_per_stage: dict           # how many are kept per stage
-    conditions:       dict           # energies, doses, rates, and
-                                     # temperatures the harvest runs at
+    frames_per_stage: map            # stage name -> how many kept
+    conditions:       map            # knob -> value: the energies,
+                                     # doses, rates and temperatures
+                                     # the harvest runs at
     # Collection 1 is labelled as whole cells, being small by
     # construction; Collection 2 is labelled as the §6.4 interface
     # SUBCELLS, because a production cascade cell is an order of
