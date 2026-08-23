@@ -899,3 +899,77 @@ decision gate.)
   left pzz compressive (-2.64 GPa, z not barostatted) which the NVT then
   relieved (-0.05 GPa) via the free surfaces; no press/pull, no
   work-of-separation. NEXT: activate THIS cell's surfaces, then press.
+
+## T-21 — jobs 16707838 + 16729651 + 16731025 + 16731354 — 2026-08-23
+
+*(Si activate; null test; Tier-0 model screen; A100 export/portability.)*
+
+**Question.** Does the universal-first cascade produce a THIN amorphized
+skin under DPA-2.4-7M, and if not, why -- cascade parameters, thermostat,
+or the model itself?
+
+- **As-run scripts:** `$CPG_SHARE/share/models/dpa_gpu_bench/`
+  (`v_si_fastcheck/`, `v_null_test/{energy_*,null_*}.in + null_test.slurm`),
+  `share/models/tier0_screen/{tier0_screen.py,tier0_screen.slurm}`,
+  `share/models/a100fix/a100_export.slurm`. NOT yet copied under
+  `install/tests/` -- see "Scope NOT covered".
+- **16707838 (Si/Si activate, reduced fluence 0.003, V100).** Half A ran
+  4/4 impacts, 200 frames; job hit its 6 h wall during half B (TIMEOUT).
+  Judged FROM THE TRAJECTORY:
+  - atoms 4400 -> 4402 (4399 Si + 3 Ar); ONE Si sputtered. No explosion.
+  - temperature RATCHETS every impact and never recovers:
+    `132 -> 399 -> 727 -> 1024 -> 1377 -> 1598 -> 1729 K peak -> 1537 K`
+    (Si melts at 1687 K). Half B, independent seed, reproduced it:
+    `132 -> 374 -> 716 -> 848 K`.
+  - energy bookkeeping: projectiles supplied 4 x 75 eV = 300 eV, but
+    kinetic energy rose +799.5 eV while potential energy fell -875.9 eV
+    and TOTAL energy fell -76.4 eV (Langevin was net REMOVING). The slab
+    heated ITSELF: 0.199 eV/atom released.
+  - structure: interior coordination 3.80 -> **5.75**, number density
+    +11.5%, thickness 57.49 -> 51.54 A. NOT amorphous silicon (a-Si stays
+    ~4-coordinated) -- a DENSE high-coordination phase.
+  - §2.2 derive ran universal and out-of-process as designed:
+    a = 5.3475 A vs the CIF's 5.4300 (**-1.52%**), zero strain in the
+    built slab (measured NN distance 2.3155 A -> a = 5.3475 exactly).
+- **16729651 (null test, V100).** Inherent-structure energies, deepmd
+  ALONE (no ZBL), same box/surfaces:
+  - `RESULT pristine   minimized_pe_per_atom -6.461513`
+  - `RESULT amorphized minimized_pe_per_atom -6.882385`
+  - the DAMAGED slab is **0.421 eV/atom LOWER** = 1852 eV over the slab.
+    Surface cannot explain it (would need 20.7 J/m^2 vs ~1.5 real).
+    Half A got 876 eV = 47% of the way through the transformation.
+  - null DYNAMICS, no projectile: `withzbl` PE -28420.81 -> -28590.25,
+    `nozbl` -28420.87 -> -28603.22 -- **ZBL is NOT implicated**. The
+    pristine slab stays tetrahedral (coordination 3.80 -> 4.14) and
+    EXPANDS (57.49 -> 58.53 A): it is METASTABLE; the dense phase needs
+    an impact to nucleate.
+- **16731025 (Tier-0 screen, H100 g034).** Minimize pristine vs damaged
+  under each model; crystal MUST be lower:
+  - `SUMMARY DPA-2.4-7M a=5.3473 a_error_pct=-1.54
+    gap_eV_per_atom=-0.377817 verdict=FAIL`
+  - `SUMMARY DPA-3.1-3M a=5.5147 a_error_pct=+1.54
+    gap_eV_per_atom=+0.360604 verdict=PASS`
+  - ASE/FIRE reproduced LAMMPS `box/relax` (5.3473 vs 5.3475) -- harness
+    cross-validated by an independent route.
+- **16731354 (A100 export + portability, g002).** 
+  - **lmp loads `.pth` DIRECTLY** for BOTH models, energy conserved:
+    dpa24 TotEng -26521.413 -> -26521.428 (6e-7 drift); dpa3
+    -21959.485 -> -21959.393 (4e-6). `.pth` is NOT arch-locked.
+  - `dpa24.dp -> dpa24_a100.pt2` export **OK on A100** (184 MB), NVE
+    check exit 0, step-0 energy matching eager to 8e-8 relative.
+  - `dpa3.dp -> .pt2` **FAILED with the same `u0` guard on A100** --
+    confirming the bug is SOURCE-LEVEL, not architecture-related.
+  - speed (4096 atoms): `.pt2` AOT A100 **0.1879 s/step**; `.pth` eager
+    A100 0.4636; dpa3 `.pth` eager A100 0.8842; `.pt2` AOT V100 0.2890.
+    **AOT is 2.47x faster than eager on the same hardware.**
+- **Verdict: the universal cascade PLUMBING passes; DPA-2.4-7M FAILS the
+  physics.** The model does not hold diamond silicon as the stable phase,
+  so amorphization depth is set by a propagating transformation front
+  rather than by the ion range -- no thermostat or fluence tuning can fix
+  that. DPA-3.1-3M passes the same gate and runs today via `.pth`.
+- **Scope NOT covered:** cascade depth under DPA-3.1 (that is Tier 1, not
+  yet run); no oxide screened (Tier-0 is per material AND per model);
+  the `.pth` runs are 100-step NVE benchmarks, not cascades; harnesses
+  still live under `$CPG_SHARE`, not `install/tests/`; DPA-3.1 has no
+  `.pt2`, so it runs 2.47x slower than it could until the `network.py`
+  patch in `dev/notes/mlip-cascade-integration.md` is applied.

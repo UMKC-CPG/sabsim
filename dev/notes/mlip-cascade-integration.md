@@ -4,6 +4,193 @@ Working note, 2026-08-07. Tracks the effort to close the "runs on real
 physics" gap (TODO L1788): wire a universal foundation MLIP for the
 CASCADE and the bespoke DeePMD for the BOND-DEBOND. NOT canonical yet.
 
+## RESUME HERE (2026-08-23) — DPA-2.4-7M FAILS THE PHYSICS; USE DPA-3.1
+
+**Read this before the 2026-08-09 block below, which it supersedes on the
+model choice.** Full evidence: `install/tests/LEDGER.md` T-21.
+
+**DPA-2.4-7M does NOT hold diamond silicon as the stable phase.** Minimize
+the pristine slab and a bombardment-damaged slab under deepmd alone, same
+box and surfaces: pristine `-6.461513` eV/atom, damaged `-6.882385` — the
+DAMAGED structure is **0.421 eV/atom LOWER**. So a cascade nucleates a
+transformation that then runs downhill on its own: the slab converts to a
+dense ~5.75-coordinated phase (from 3.80), densifies 11.5%, contracts 10%,
+and releases 0.199 eV/atom as heat — which is what drove the observed
+`132 -> 1729 K` temperature ratchet, NOT the 4 x 75 eV of projectile
+energy. Consequence: **amorphization depth is set by a propagating phase
+front, not by the ion range, so it cannot be tuned by energy, dose, or
+thermostat.** The old "PRODUCTION MODEL = DPA-2.4-7M" line further down
+is WRONG for silicon cascades.
+
+Ruled out along the way: pre-strain (the slab was built exactly on the
+§2.2 DPA lattice, measured NN 2.3155 Å → a = 5.3475 Å, zero strain); the
+ZBL overlay (null runs with and without it behave identically); and
+spontaneous instability (the unbombarded slab stays tetrahedral and
+EXPANDS — it is metastable, the impact is what nucleates).
+
+**TIER-0 SCREEN — run this before trusting ANY model.** Minimize a
+pristine crystal and a damaged configuration under the candidate; require
+`E(crystal) < E(damaged)`. Minutes per model, and it is a hard gate.
+Script: `$CPG_SHARE/share/models/tier0_screen/tier0_screen.py`.
+
+| model | lattice a | damaged − pristine | verdict |
+|---|---|---|---|
+| DPA-2.4-7M | 5.3473 Å (−1.54%) | −0.378 eV/atom | **FAIL** |
+| DPA-3.1-3M | 5.5147 Å (+1.54%) | +0.361 eV/atom | **PASS** |
+
+**DPA-3.1-3M IS USABLE TODAY — no `.pt2`, no patch.** `lmp` loads the
+PyTorch `.pth` DIRECTLY (`pair_style deepmd .../dpa3.pth`), energy
+conserved (4e-6 drift over 100 NVE steps), and `.pth` is NOT
+architecture-locked, so it runs on V100/A100/H100 alike. Only the
+AOT-compiled `.pt2` is arch-specific.
+
+### The `network.py` `u0` bug — DIAGNOSED, patch NOT applied
+
+Applying it is DEFERRED (2026-08-23, Paul): `.pth` already works, so this
+buys SPEED only — but a lot of it. Measured on 4096 atoms: `.pt2` AOT on
+A100 **0.1879 s/step** vs `.pth` eager on A100 0.4636 — **AOT is 2.47x
+faster on the same hardware**. For DPA-3.1 that is ~0.88 → ~0.36 s/step.
+
+The `dpa3.dp -> .pt2` export fails identically on V100 and A100, so the
+bug is SOURCE-LEVEL, not architectural. THREE copies of one pattern:
+
+| file | line | expression |
+|---|---|---|
+| `deepmd/dpmodel/utils/network.py` | 1343 | `int(xp.sum(...))` |
+| `deepmd/pt/model/network/utils.py` | 92 | `n_edge = nlist_mask.sum().item()` |
+| `deepmd/pd/model/network/utils.py` | 92 | same (paddle — ignore) |
+
+`int(...)` / `.item()` force a DATA-DEPENDENT value (the edge count
+depends on mask VALUES, not shapes) to a Python int, so `torch.export`
+carries it as unbacked symint `u0` and refuses to specialize
+(`GuardOnDataDependentSymNode`). Dynamo capture flags do NOT help.
+
+`n_edge` has exactly ONE consumer in each file (`network.py:1375`,
+`utils.py:120`):
+
+```python
+edge_id    = arange(0, n_edge)
+edge_index = zeros([nf, nloc, nnei])
+edge_index[nlist_mask] = edge_id
+```
+
+**FIX — mask rank by cumulative sum, which is shape-static.** Delete the
+`n_edge` line and replace those three lines:
+
+```python
+# dpmodel/utils/network.py
+flat_mask = xp.reshape(xp.astype(nlist_mask, nlist.dtype), (-1,))
+edge_index = xp.reshape(
+    (xp.cumulative_sum(flat_mask, axis=0) - 1) * flat_mask,
+    (nf, nloc, nnei))
+
+# pt/model/network/utils.py
+flat_mask = nlist_mask.to(nlist.dtype).reshape(-1)
+edge_index = ((torch.cumsum(flat_mask, 0) - 1)
+              * flat_mask).reshape(nf, nloc, nnei)
+```
+
+EQUIVALENT because at the k-th `True` in row-major order the cumulative
+sum is k+1, so minus 1 gives k — exactly what a boolean scatter of
+`arange(n_edge)` assigns; multiplying by the mask restores 0 at `False`
+positions, matching the `zeros` init. Same tensor, no symint forced.
+
+**ATTEMPTED 2026-08-23 — three sites patched and PROVEN equivalent,
+then blocked INSIDE PYTORCH.** Work kept at
+`$CPG_SHARE/share/models/dpa3_patch/` (`patched/deepmd` = the shadow
+package, `tools/` = the probes, `patch_test.slurm` = the gated job).
+The shared bundle was NEVER written to: `BUNDLE_BASELINE.md5` records
+its checksums and the job re-verifies them on entry and exit (still
+`OK`). Undo = `rm -rf .../dpa3_patch/patched`, or restore the `.orig`
+files kept beside each patched file.
+
+The blocker is NOT one line. It is the same anti-pattern in a chain,
+and each fix exposed the next:
+
+1. `dpmodel/utils/network.py:1343` -- `int(xp.sum(...))`.
+   FIX: rank by cumulative sum (shape-static).
+2. `pt/model/network/utils.py:92` -- `.sum().item()`.
+   FIX: the same rewrite, torch-native.
+3. `dpmodel/descriptor/repflows.py:1481` -- `int(xp.sum(...))`, run
+   only when `use_dynamic_sel` (its own comment says "int cannot jit").
+   FIX: `h2.shape[0]` -- same number, but a SHAPE, so the symbol
+   becomes size-like.
+4. `dpmodel/utils/network.py:1280` in `aggregate()` -- the branch
+   `bin_count.shape[0] != num_owner`, which pads to length.
+   FIX: `xp_bincount(..., minlength=num_owner)`, removing the branch;
+   the tail zeros it adds are turned into ones by the existing
+   `where`, which is exactly what the old padding wrote.
+
+Each round moved the error forward, which is how we know the fixes
+land: `u0` (not size-like) -> `u5` **size-like** -> `Ne(u5, 14)` branch
+guard -> and finally:
+
+```
+Eq(u4, 1)  (Size-like symbols: u4)
+Caused by: (autograd/graph.py:869 in _engine_run_backward)
+```
+
+**That last one is inside PyTorch's autograd engine, not deepmd** -- a
+broadcast guard on an unbacked symbolic size while building the
+BACKWARD graph. Fixing it means patching torch itself or restructuring
+deepmd so no unbacked size reaches a backward pass. That is a different
+and much larger job, so the attempt STOPS here (Paul, 2026-08-23).
+
+**The physics was verified at every round, and the verification itself
+had to be fixed first.** The first equivalence run was INVALID: both
+runs loaded the patched package, because `python $W/eval_model.py` puts
+`$W` on `sys.path[0]` and `$W` held `deepmd/`. The agreement it showed
+was GPU run-to-run noise. Now the package lives in `patched/`, the
+probes in `tools/`, and the job asserts the two runs loaded DIFFERENT
+`deepmd.__file__` paths before the gate can even be reached. With that
+in place: stock `-344.3080332279` vs patched `-344.3080327511` eV, max
+force difference `5.5e-07` eV/A (3.7e-07 relative) -- **EQUIVALENCE
+PASS**, i.e. the rewrite is physics-neutral, and the residual matches
+the patched-vs-patched noise floor.
+
+**If this is ever resumed:** the three deepmd fixes are done and
+verified -- start from site 4. Worth trying first, cheapest to
+hardest: a newer deepmd/torch (this is a 3.2.0b0 BETA on torch 2.11);
+the `guard_or_false` / `statically_known_true` APIs the error message
+itself recommends; or exporting with the backward graph disabled if
+inference-only export is possible.
+
+**Steps when it is done:** (1) shadow-copy ONLY the 25 MB `deepmd`
+package (`cp -a $PREFIX/lib/python3.12/site-packages/deepmd
+$WORK/patched/`) — NOT the 17 GB prefix; the 6 `.so` files under
+`deepmd/lib/` come along verbatim. (2) Edit both files, keep `.orig`.
+(3) `PYTHONPATH=$WORK/patched` on the EXPORT process ONLY — the
+isolation wrapper deliberately unsets PYTHONPATH, and the lmp runtime
+must never see it. (4) Assert `deepmd.__file__` is under `$WORK/patched`
+or you silently export the unpatched bundle. (5) **EQUIVALENCE GATE:**
+patched vs unpatched energy AND forces on one structure, agree to ~1e-6
+relative, or stop — the patch must not change physics. (6) Export with
+the `-lcuda` symlink + `LIBRARY_PATH` from
+`share/models/a100fix/a100_export.slurm`. (7) Validate: NVE in LAMMPS,
+TF32 OFF, step-0 energy matching the `.pth` run to ~1e-4 eV. (8) LEDGER
+entry noting the patch is **EXPORT-TIME ONLY** — the `.pt2` is
+self-contained, so production LAMMPS never loads patched Python.
+
+**Risks:** `xp.cumulative_sum` on torch tensors via `array_api_compat` is
+used elsewhere in deepmd (`dpmodel/loss/dos.py`) but unverified on this
+path — fallback is patching only the `pt` copy. Patch BOTH, since which
+copy the exporter touches is not guaranteed. int32 cumsum over
+`nf*nloc*nnei` (~4e5) is safe; use int64 for a much larger cell. This is
+a local patch to a BETA (3.2.0b0) — record it or a bundle refresh
+silently reverts it.
+
+### Hardware
+
+`gpu` + `requeue` carry A100 (16 nodes x 4), H100 (up to 8/node), L40S,
+H200 — and 49 of 64 A100s were FREE with an EMPTY pending queue while we
+queued behind 3 V100s. Pin V100 ONLY when using the V100 `.pt2`. A fresh
+A100 `.pt2` for DPA-2.4 exists at
+`$CPG_SHARE/share/models/a100fix/dpa24_a100.pt2` (physics FAILS Tier-0,
+kept only as the export-path control). PHYSICS CAVEAT on newer hardware:
+Ampere+ defaults to TF32 matmul (10 mantissa bits vs 23), so set
+`torch.backends.cuda.matmul.allow_tf32 = False` for anything numerical
+and re-run the NVE conservation check before trusting a new GPU type.
+
 ## RESUME HERE (2026-08-09 EVENING — OVERNIGHT FLEET, read FIRST)
 
 Four V100 activations launched Sun 2026-08-09 ~21:30; all finish before the
