@@ -523,9 +523,9 @@ step is identical; only the model beneath it changes. This makes "**derive
 the lattice by relaxing the bulk under the current model**" a first-class,
 named pipeline step, not a hidden preprocessing detail.
 
-Because the universal MLIP is the AOTInductor `.pt2` that lives in
-deepmd-kit's own self-contained bundle and cannot load into sabsim's
-in-process engine (`ARCHITECTURE.md` §4.1/§4.4), the **universal §2.2
+Because the universal MLIP lives in deepmd-kit's own self-contained
+bundle (its own torch and MPI) and cannot load into sabsim's in-process
+engine (`ARCHITECTURE.md` §4.1/§4.4), the **universal §2.2
 derivation runs OUT-OF-PROCESS** through the same file handoff the step-4
 cascade uses (`ARCHITECTURE.md` §4.4): the primary rank drives the bundle's
 `lmp -in <script>` for a `fix box/relax` + `minimize`, writes the relaxed
@@ -1612,8 +1612,8 @@ that needs no per-material work:
   and it must be treated as out-of-distribution there: the scaffold-grade
   acceptance above, not blind trust, is what licenses it. The mechanism is a
   universal model run inside LAMMPS composed with the ZBL cores through
-  `pair_style hybrid/overlay` — BUILT as of 2026-08-08 with deepmd's DPA-2
-  foundation model (`pair_style deepmd`, the DPA-2.4-7M `.pt2`), the two ZBL
+  `pair_style hybrid/overlay` — BUILT as of 2026-08-08 with a deepmd DPA
+  foundation model (`pair_style deepmd`), the two ZBL
   cores overlaid on top (MACE's `pair_style mace` would slot in the same
   seam). Being a different model run only for the cascade, it does not
   violate the STRUCTURAL 1b separation that keeps the production MLIP off
@@ -1674,21 +1674,44 @@ schema were built first with the classical silicon (Stillinger-Weber)
 instance as the sole working cascade and regression baseline. The universal
 path is now IMPLEMENTED behind the same resolver seam and is the default for
 every material: `resolve_cascade_generator` assembles
-`pair_style hybrid/overlay deepmd <model.pt2> zbl <long> zbl <short>` — the
+`pair_style hybrid/overlay deepmd <model> zbl <long> zbl <short>` — the
 universal MLIP composed with the two species-derived ZBL cores exactly as
 this section specified — and a classical form is used only on the explicit
 `SABSIM_CASCADE_CLASSICAL` opt-in (the on-the-record env discipline, so a
 departure from the universal default stays in the run's record).
 
-The v1 universal model is **DPA-2.4-7M** (deepmd DPA-2 foundation model,
-full periodic table via the `MP_traj_v024_alldata_mixu` branch, CC-BY-4.0),
-proven to RUN in LAMMPS on a V100 through the deepmd-kit 3.2.0b0 AOTInductor
-`.pt2` path. Because that engine is a self-contained bundle with its own
+The universal model is **DPA-3.1-3M** (deepmd DPA-3 foundation model,
+full periodic table via the `MP_traj_v024_alldata_mixu` branch frozen to a
+singletask `.pth`, CC-BY-4.0), loaded directly by `pair_style deepmd` with
+energy conserved over NVE.
+
+**Why not DPA-2.4-7M, which this section previously named.** That model
+FAILS the Tier-0 inherent-structure screen on silicon: minimize a pristine
+crystal and a damaged configuration under the candidate and the crystal
+must come out LOWER, yet DPA-2.4-7M ranks the damaged slab 0.378 eV/atom
+BELOW the perfect crystal (LEDGER T-21, job 16731025). Under such a model
+a silicon surface has a thermodynamic incentive to destroy itself, and an
+activation run self-heats rather than amorphizing — the failure is in the
+energy ordering, so no amount of force accuracy would have caught it, and
+nothing downstream of a wrong basin is worth computing. DPA-3.1-3M passes
+the same screen at +0.361 eV/atom and is adopted for that reason
+(2026-08-25). The screen is per material AND per model, so passing it on
+silicon licenses nothing about the oxides.
+
+The earlier preference for DPA-2.4-7M was an ENGINEERING one — it exported
+cleanly to AOTInductor `.pt2` while DPA-3.1-3M hit an unbacked-symint
+export failure — and that reason no longer binds: LAMMPS loads the PyTorch
+`.pth` directly, so no export is needed. The `.pth` is also PORTABLE where
+a `.pt2` is architecture-locked, which unpins the cascade from any one GPU
+type; the ~2.5x per-step speed of an AOT build is the only thing given up,
+and the export patch is documented should it be worth reclaiming.
+
+Because that engine is a self-contained bundle with its own
 torch and MPI, the universal cascade runs OUT-OF-PROCESS — the LAMMPS
 cascade is scripted and run as the bundle's `lmp` in a subprocess, its
 structure handed back through a file (ARCHITECTURE §4.1/§4.4, §4.3). The
 activate job sets `SABSIM_CASCADE_ENGINE_PREFIX` (the bundle) and
-`SABSIM_CASCADE_MLIP_MODEL` (the `.pt2`). Per §3.4 the activate stage is
+`SABSIM_CASCADE_MLIP_MODEL` (the weights). Per §3.4 the activate stage is
 cascade-ONLY — the heal and the §3.5 gate ride the bond job — so the
 subprocess needs no classical potential and the activate job carries no
 `LAMMPS_POTENTIALS`. (The intermediate first node-validated on a V100 ran
@@ -1702,12 +1725,12 @@ REFUSES unless the run sets `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` — the same
 exploratory opt-in the classical registry uses. Its first gate-passing
 activation is what licenses flipping the flag; until then the validated
 silicon/SW path remains the certified regression anchor, reached with
-`SABSIM_CASCADE_CLASSICAL`. The `.pt2` is GPU-architecture-specific and
-built at deploy time, so the registry pins the model IDENTITY (name/branch/
-version) and the concrete artifact path is supplied via
+`SABSIM_CASCADE_CLASSICAL`. The weights are a large deploy-time artifact
+rather than a checked-in file, so the registry pins the model IDENTITY
+(name/branch/version) and the concrete artifact path is supplied via
 `SABSIM_CASCADE_MLIP_MODEL`.
 
-Remaining v1 follow-ons (logged in `TODO.md`): running DPA-2.4-7M through a
+Remaining v1 follow-ons (logged in `TODO.md`): running DPA-3.1-3M through a
 full activation to clear the §3.5 gate (then `validated=True`); pinning the
 acceptance-check tolerances (the lattice/density band, the probe-cascade
 stability criterion); selecting the deepmd GPU engine for the activate stage

@@ -544,7 +544,8 @@ def build_activate_script(
     # The §2.4 out-of-plane relax before the first impact (same as live).
     # skip_prerelax omits it — a DIAGNOSTIC to test whether this minimize,
     # run under the universal potential, itself disorders the crystal before
-    # any impact (observed for DPA-2.4-7M on Si: the pre-impact frame was
+    # any impact (observed for DPA-2.4-7M on Si, the model since retired
+    # for failing the Tier-0 screen: the pre-impact frame was
     # already ~8-coordinated).
     if not skip_prerelax:
         script += cascade_prerelax_commands()

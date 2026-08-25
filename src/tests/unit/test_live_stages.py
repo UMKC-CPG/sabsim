@@ -650,7 +650,7 @@ def test_derive_lattices_live_universal_runs_out_of_process(
     from sabsim.pipeline import live_stages
     import sabsim.driver.lammps_engine as lammps_engine_module
 
-    monkeypatch.setenv("SABSIM_CASCADE_MLIP_MODEL", "/models/DPA-2.4-7M.pt2")
+    monkeypatch.setenv("SABSIM_CASCADE_MLIP_MODEL", "/models/dpa3.pth")
     monkeypatch.setenv("SABSIM_ALLOW_UNVALIDATED_POTENTIAL", "1")
     monkeypatch.delenv("SABSIM_CASCADE_CLASSICAL", raising=False)
 

@@ -67,12 +67,18 @@ _SHORT_CORE_INDEX = 2
 
 
 # The environment variable that names the universal cascade model's ON-DISK
-# AOTInductor ``.pt2`` artifact. The registry entry below PINS the model's
-# identity (name, branch, version) for reproducibility, but the concrete
-# ``.pt2`` package is compiled for a specific GPU architecture and is
-# therefore a DEPLOY-TIME build, not a checked-in file — so its path is
-# supplied at run time here, the same override-by-environment discipline the
-# bespoke committee model uses (``SABSIM_DEEPMD_MODEL``).
+# weights. The registry entry below PINS the model's identity (name, branch,
+# version) for reproducibility, but the weights themselves are a large
+# deploy-time artifact (tens of MB) rather than a checked-in file, so the
+# path is supplied at run time here — the same override-by-environment
+# discipline the bespoke committee model uses (``SABSIM_DEEPMD_MODEL``).
+#
+# The artifact is a PyTorch ``.pth``, which LAMMPS loads directly through
+# ``pair_style deepmd`` and which is NOT tied to a GPU architecture: the
+# same file runs on V100, A100 and H100 alike. An AOT-compiled ``.pt2`` is
+# roughly 2.5x faster per step but IS architecture-locked and must be
+# rebuilt per GPU type, so it is an optional deploy-time optimisation, not
+# the contract (DESIGN §4.7).
 _UNIVERSAL_MODEL_PATH_VARIABLE = "SABSIM_CASCADE_MLIP_MODEL"
 
 
@@ -103,7 +109,7 @@ class UniversalCascadeModel:
     — the on-the-record path §4.7 defines for bringing up any new material.
     """
 
-    name: str                 # e.g. "DPA-2.4-7M"
+    name: str                 # e.g. "DPA-3.1-3M"
     model_branch: str         # the multitask fitting branch frozen out
     version: str              # upstream release / provenance tag
     source: str               # literature / repository provenance
@@ -111,53 +117,73 @@ class UniversalCascadeModel:
     validated: bool           # has it cleared the §3.5 activation gate?
 
 
-# The universal cascade model v1: DPA-2.4-7M. Proven to RUN in LAMMPS on a
-# V100 via the deepmd-kit 3.2.0b0 AOTInductor ``.pt2`` path (2026-08-08), but
-# NOT yet run through a full activation + §3.5 gate — hence ``validated=
-# False``. It is the faster of the two DPA foundation models benchmarked and
-# the one that exports cleanly to ``.pt2`` (DPA-3.1-3M hits an unbacked-symint
-# export failure), which is why it is the v1 universal choice.
+# The universal cascade model: DPA-3.1-3M (adopted 2026-08-25, replacing
+# DPA-2.4-7M). The change is a PHYSICS correction, not a performance one.
+# The Tier-0 inherent-structure screen — minimize a pristine crystal and a
+# damaged configuration under the candidate, and require the crystal to sit
+# LOWER — is a hard gate, and DPA-2.4-7M FAILS it on silicon: it ranks the
+# damaged slab 0.378 eV/atom BELOW the perfect crystal, so under that model
+# a silicon surface has a thermodynamic incentive to destroy itself, and an
+# activation run self-heats rather than amorphizing (LEDGER T-21, job
+# 16731025). DPA-3.1-3M PASSES the same screen at +0.361 eV/atom.
+#
+# The earlier reason for preferring DPA-2.4-7M was an ENGINEERING one — it
+# exported cleanly to AOTInductor ``.pt2`` while DPA-3.1-3M hit an unbacked-
+# symint export failure — and that reason no longer binds: LAMMPS loads the
+# PyTorch ``.pth`` DIRECTLY, with energy conserved (4e-6 drift over 100 NVE
+# steps), so no export is needed at all. The ``.pth`` route is also PORTABLE
+# where ``.pt2`` is architecture-locked, which unpins the cascade from any
+# one GPU type. Speed is the only thing given up (~2.5x per step); the
+# export patch is documented in dev/notes/mlip-cascade-integration.md
+# should it ever be worth reclaiming.
 UNIVERSAL_CASCADE_MODEL = UniversalCascadeModel(
-    name="DPA-2.4-7M",
+    name="DPA-3.1-3M",
     model_branch="MP_traj_v024_alldata_mixu",
-    version="deepmodelingcommunity/DPA-2.4-7M-patched-mt (CC-BY-4.0); "
-            "frozen + AOTInductor .pt2 under deepmd-kit 3.2.0b0",
-    source="DPA-2 universal foundation model (Zhang et al.), covering the "
-           "full periodic table H->Og via the MP_traj_v024_alldata_mixu "
-           "multitask branch. HuggingFace deepmodelingcommunity/DPA-2.4-7M.",
+    version="deepmodelingcommunity/DPA-3.1-3M (CC-BY-4.0); the broad "
+            "Materials-Project branch frozen to a singletask .pth, run "
+            "under deepmd-kit 3.1.x",
+    source="DPA-3 universal foundation model, trained multitask on the "
+           "OpenLAM datasets and covering the full periodic table. "
+           "HuggingFace deepmodelingcommunity/DPA-3.1-3M.",
     caveat="Universal foundation MLIP: OUT-OF-DISTRIBUTION deep in the "
            "repulsive regime the cascade visits, so it is spliced with the "
            "two ZBL cores and treated as scaffold-grade (DESIGN §4.7), never "
-           "trusted there. It has RUN in LAMMPS (V100, .pt2) but has NOT yet "
-           "cleared the §3.5 activation gate on any material, so validated "
-           "stays False — a default cascade refuses unless the run sets "
-           "SABSIM_ALLOW_UNVALIDATED_POTENTIAL, and results obtained that way "
-           "are EXPLORATORY. The .pt2 is GPU-architecture-specific and built "
-           "at deploy time; its path is given via SABSIM_CASCADE_MLIP_MODEL.",
+           "trusted there. It PASSES the Tier-0 inherent-structure screen on "
+           "silicon (+0.361 eV/atom, crystal below damaged) where DPA-2.4-7M "
+           "failed, but Tier-0 is per material AND per model — no oxide has "
+           "been screened, and passing Tier-0 is a floor, not a validation. "
+           "It has NOT yet cleared the §3.5 activation gate on any material, "
+           "so validated stays False: a default cascade refuses unless the "
+           "run sets SABSIM_ALLOW_UNVALIDATED_POTENTIAL, and results obtained "
+           "that way are EXPLORATORY. The weights are a portable PyTorch "
+           ".pth; its path is given via SABSIM_CASCADE_MLIP_MODEL.",
     validated=False)
 
 
 def resolve_universal_model_path(
         model: UniversalCascadeModel = UNIVERSAL_CASCADE_MODEL) -> str:
-    """Resolve the on-disk ``.pt2`` artifact for the universal cascade model.
+    """Resolve the on-disk weights for the universal cascade model.
 
-    The registry pins the model IDENTITY (name/branch/version); the concrete
-    AOTInductor ``.pt2`` is GPU-architecture-specific and built at deploy
-    time, so its path is supplied at run time via the
-    ``SABSIM_CASCADE_MLIP_MODEL`` environment variable rather than checked
-    in. A missing path is a LOUD failure naming the variable and the model —
-    the same no-hidden-defaults discipline as the rest of the pipeline, so a
-    cascade never silently runs under the wrong (or no) model.
+    The registry pins the model IDENTITY (name/branch/version); the weights
+    themselves are a large deploy-time artifact rather than a checked-in
+    file, so their path is supplied at run time via the
+    ``SABSIM_CASCADE_MLIP_MODEL`` environment variable. The expected form is
+    a portable PyTorch ``.pth``, which ``pair_style deepmd`` loads directly
+    on any GPU; an architecture-specific AOT ``.pt2`` also works and is
+    faster, but must be rebuilt per GPU type. A missing path is a LOUD
+    failure naming the variable and the model — the same no-hidden-defaults
+    discipline as the rest of the pipeline, so a cascade never silently runs
+    under the wrong (or no) model.
     """
     model_path = os.environ.get(_UNIVERSAL_MODEL_PATH_VARIABLE)
     if not model_path:
         raise RuntimeError(
             f"the universal cascade model '{model.name}' needs its "
-            f"AOTInductor .pt2 path, but {_UNIVERSAL_MODEL_PATH_VARIABLE} is "
-            f"unset. That package is GPU-architecture-specific and built at "
-            f"deploy time (DESIGN §4.7), so point the variable at the .pt2 "
-            f"compiled for this machine, or request a classical potential "
-            f"explicitly.")
+            f"weights, but {_UNIVERSAL_MODEL_PATH_VARIABLE} is unset. The "
+            f"weights are a deploy-time artifact, not a checked-in file "
+            f"(DESIGN §4.7), so point the variable at this model's .pth (or "
+            f"an architecture-matched .pt2), or request a classical "
+            f"potential explicitly.")
     return model_path
 
 
@@ -724,7 +750,7 @@ def _assemble_universal_overlay(
         short_core: tuple) -> ForceModel:
     """Build the universal-MLIP ``hybrid/overlay`` ForceModel (§4.7 default).
 
-    The base sub-style is ``deepmd <model.pt2>``, and EVERY LAMMPS type is
+    The base sub-style is ``deepmd <model>``, and EVERY LAMMPS type is
     mapped to its real element — the universal model covers the whole
     periodic table, projectile included, and deepmd's element map has no
     ``NULL`` slot the way a classical form does. The near-equilibrium MLIP is

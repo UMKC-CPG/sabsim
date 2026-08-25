@@ -1771,6 +1771,24 @@ foundations, interaction rules. -->
 
 <!-- Tasks related to algorithm specifications. -->
 
+- [ ] **§11 gap: Collection 1's dynamics families name no force model.**
+      `GenerationPlan` carries `cascade_model` and `protocol_model`, but
+      both describe COLLECTION 2 (§4.8 part 5). Collection 1 has two
+      families that also require dynamics — family 3, the bulk
+      melt-quench amorphous network, and family 6, the warm NVT/NPT runs
+      — and neither `QuenchSpec` nor `WarmRunSpec` carries a model field,
+      so the chain never says what generates them. By the STRUCTURAL-1b
+      argument that put the foundation MLIP in `protocol_model` it should
+      be the foundation MLIP here too (generating training configs with
+      the model being trained is the circularity 1b exists to break), but
+      an argument is not a specification. Fix is one field: either a
+      `generator_model` on each of the two records, or a single
+      `collection_one_model` on `GenerationPlan` covering both. Prefer
+      the latter unless the melt-quench and the warm runs could ever want
+      different generators — they could, since a melt visits chemistry a
+      warm crystal never does, so decide that explicitly rather than by
+      default. Found 2026-08-25 reading the chain against the code.
+
 - [ ] First PSEUDOCODE pass follows `ARCHITECTURE.md` §5.4 — **breadth-
       first shallow, then depth-first per module.** Pass 1 covers only
       control flow and the seam schemas (Tier-A sequencer, member-spec
@@ -1904,6 +1922,20 @@ foundations, interaction rules. -->
 ## CODE
 
 <!-- Tasks related to implementation. -->
+
+- [ ] **Dead code: `_reanneal_force_model` has no callers.**
+      `pipeline/live_stages.py:677` still defines the gentle re-anneal's
+      force-model resolver, but nothing calls it — the 2026-08-08
+      cascade-only re-arch (§3.4) moved the heal and the §3.5 gate into
+      the bond job, which left this helper orphaned. It is not harmless:
+      it reads as the live re-anneal path to anyone tracing which
+      potential the activate stage uses, and it resolves a CLASSICAL
+      form, so it actively suggests the activate job still needs
+      `LAMMPS_POTENTIALS` when §3.4 says it does not. Delete it, or — if
+      the classical in-process path still wants it — call it from there
+      and say so, since `driver/cascade.py:379` does still issue
+      `reanneal_commands` on that path. Check which before removing.
+      Found 2026-08-25.
 
 - [ ] **PROPAGATE UP THE CHAIN: two changes landed in CODE on 2026-07-22
       that the documents above do not yet describe.** Both are real

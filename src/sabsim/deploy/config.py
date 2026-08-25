@@ -180,7 +180,7 @@ class UsageBlock:
     the launch — the machine-specific knobs a job needs that are NOT science
     settings: e.g. the universal-cascade activate job points
     ``SABSIM_CASCADE_ENGINE_PREFIX`` at the deepmd bundle and
-    ``SABSIM_CASCADE_MLIP_MODEL`` at its ``.pt2`` (ARCHITECTURE §4.4). It is
+    ``SABSIM_CASCADE_MLIP_MODEL`` at its weights (ARCHITECTURE §4.4). It is
     stored as a sorted tuple of ``(name, value)`` pairs so the emitted script
     is deterministic. Unlike the fields above it is OPTIONAL — plumbing, not
     a physics knob — so a block that needs no extra environment simply omits

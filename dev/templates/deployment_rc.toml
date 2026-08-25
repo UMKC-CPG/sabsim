@@ -83,11 +83,14 @@ modules   = []
 # [ADAPT] every path to this cluster.
 [usage.activate.environment]
 # The deepmd bundle (its own torch/LAMMPS/MPI) that runs the universal
-# cascade, and the GPU-architecture-specific `.pt2` model it loads.
+# cascade, and the model weights it loads. The `.pth` is PORTABLE — the
+# same file runs on V100, A100 and H100 — so unlike an AOT-compiled `.pt2`
+# it needs no per-GPU rebuild and no per-partition variant of this block.
 SABSIM_CASCADE_ENGINE_PREFIX = "/cluster/VAST/rulisp-lab/cpg/programs/deepmd-kit-3.2.0b0-cuda129"
-SABSIM_CASCADE_MLIP_MODEL = "/cluster/VAST/rulisp-lab/cpg/share/models/dpa2.4-7m/DPA-2.4-7M.pt2"
-# DPA-2.4-7M has not yet cleared the §3.5 gate, so the default cascade is
-# EXPLORATORY until it does; drop this once validated=True (DESIGN §4.7).
+SABSIM_CASCADE_MLIP_MODEL = "/cluster/VAST/rulisp-lab/cpg/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
+# DPA-3.1-3M passes the Tier-0 inherent-structure screen but has not yet
+# cleared the §3.5 activation gate, so the default cascade is EXPLORATORY
+# until it does; drop this once validated=True (DESIGN §4.7).
 SABSIM_ALLOW_UNVALIDATED_POTENTIAL = "1"
 
 [usage.bond]

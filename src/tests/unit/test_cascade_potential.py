@@ -28,9 +28,9 @@ from sabsim.driver.cascade_potential import (
 # A silicon slab bombarded by argon: substrate type 1, projectile type 2.
 SILICON_ARGON_TYPE_MAP = {"Si": 1, "Ar": 2}
 
-# A fake .pt2 path so the universal assembler can resolve a model without a
-# real (GPU-architecture-specific) artifact present.
-FAKE_MODEL_PATH = "/models/DPA-2.4-7M.pt2"
+# A fake weights path so the universal assembler can resolve a model
+# without the real (tens-of-MB) artifact present.
+FAKE_MODEL_PATH = "/models/dpa3.pth"
 
 
 # ---------------------------------------------------------------------
@@ -127,7 +127,7 @@ def test_universal_carries_the_same_two_cores_as_classical(monkeypatch):
 
 
 def test_universal_missing_model_path_is_a_loud_stop(monkeypatch):
-    """No .pt2 path is a loud failure, not a silent default (§4.7)."""
+    """No weights path is a loud failure, not a silent default (§4.7)."""
     monkeypatch.delenv("SABSIM_CASCADE_MLIP_MODEL", raising=False)
     with pytest.raises(RuntimeError) as caught:
         resolve_cascade_generator(
@@ -138,10 +138,24 @@ def test_universal_missing_model_path_is_a_loud_stop(monkeypatch):
 
 def test_universal_model_is_pinned_and_unvalidated():
     """The universal entry pins name+branch+version and is not yet validated."""
-    assert UNIVERSAL_CASCADE_MODEL.name == "DPA-2.4-7M"
+    assert UNIVERSAL_CASCADE_MODEL.name == "DPA-3.1-3M"
     assert UNIVERSAL_CASCADE_MODEL.model_branch == "MP_traj_v024_alldata_mixu"
     assert UNIVERSAL_CASCADE_MODEL.version                 # non-empty
     assert UNIVERSAL_CASCADE_MODEL.validated is False
+
+
+def test_universal_model_is_not_the_tier0_failing_model():
+    """The universal default must never regress to DPA-2.4-7M (§4.7).
+
+    That model FAILS the Tier-0 inherent-structure screen on silicon — it
+    ranks a damaged slab 0.378 eV/atom BELOW the perfect crystal (LEDGER
+    T-21) — so a surface under it has a thermodynamic incentive to destroy
+    itself and an activation self-heats instead of amorphizing. The swap to
+    DPA-3.1-3M was a physics correction, and this pins it so a future
+    convenience edit (an easier export, a faster model) cannot quietly undo
+    it without a test saying why it must not.
+    """
+    assert UNIVERSAL_CASCADE_MODEL.name != "DPA-2.4-7M"
 
 
 # ---------------------------------------------------------------------

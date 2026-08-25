@@ -1363,7 +1363,8 @@ committee in the bond job (§3.4).
 Once the §2.2 bulk relax derives the working lattice under the universal
 MLIP rather than a classical seed (`DESIGN.md` §2.2/§4.7 — so the cell and
 the cascade agree), it inherits the same out-of-process necessity: the
-`.pt2` will not load in-process. So the DEFAULT derivation is assembled as a
+bundle's model will not load in-process. So the DEFAULT derivation is
+assembled as a
 standalone `fix box/relax` + `minimize` script
 (`driver/bulk_relax.bulk_relax_subprocess_script`) and run through the same
 `driver/cascade_subprocess.run_activate_subprocess` the cascade uses. The
