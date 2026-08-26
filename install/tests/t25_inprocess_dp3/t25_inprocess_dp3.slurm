@@ -20,10 +20,12 @@ export T25_WORK="$SABSIM_REPO/jobs/t25_inprocess_dp3/work"
 export T25_MODEL="$SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
 mkdir -p "$T25_WORK"
 echo "=== node / gpu ==="; nvidia-smi -L || true
-# The dp3 venv (built on the bundle's python) + the in-process engine module.
-source "$SHARE/virtual_envs/sabsim-dp3/bin/activate"
+# The in-process engine module FIRST (it prepends the bundle's bin for
+# mpirun/lmp), THEN the dp3 venv, whose activate prepends its own bin so
+# `python` is the venv interpreter that carries sabsim + pymatgen.
 module use "$SHARE/modulefiles"
 module load cpg_lammps_conda/deepmd-kit-3.2.0b0
+source "$SHARE/virtual_envs/sabsim-dp3/bin/activate"
 module list 2>&1 || true
 echo "python=$(command -v python)"
 unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU

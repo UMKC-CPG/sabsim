@@ -60,7 +60,7 @@ def test_activate_script_directives_and_run_line(roots_set, tmp_path):
     assert "#SBATCH --nodes=1" in text                # activate nodes
     assert "#SBATCH --ntasks-per-node=1" in text      # one rank, one GPU
     assert "#SBATCH --mem=48G" in text                # activate memory 48 GB
-    assert "#SBATCH --gres=gpu:1" in text             # one accelerator
+    assert "#SBATCH --gres=gpu:H100:1" in text        # one H100 (gpu_type)
     assert "#SBATCH --time=12:00:00" in text          # activate walltime 12h
     assert "module use /cluster/VAST/rulisp-lab/cpg/modulefiles" in text
     # NO in-process LAMMPS module: the engine is the deepmd bundle, reached
@@ -90,7 +90,7 @@ def test_bond_script_is_gpu(roots_set, tmp_path):
 
     assert "#SBATCH --partition=gpu,requeue" in text
     assert "#SBATCH --ntasks-per-node=4" in text     # bond tasks_per_node
-    assert "#SBATCH --gres=gpu:4" in text            # one GPU per rank
+    assert "#SBATCH --gres=gpu:H100:4" in text       # one H100 per rank
     assert "#SBATCH --mem=32G" in text               # bond memory 32 GB
     assert "#SBATCH --time=18:00:00" in text         # bond walltime 18h
     assert "module load cpg_lammps_conda/2024.08.29-deepmd" in text

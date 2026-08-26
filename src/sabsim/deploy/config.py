@@ -154,6 +154,13 @@ class Partition:
     name: str
     capacity: dict[str, float]
     max_walltime: Duration
+    # The scheduler's name for the accelerator MODEL on this partition
+    # (e.g. ``"H100"``), so a GPU request reads ``gpu:H100:N`` rather than
+    # the ambiguous ``gpu:N`` that lands on whatever card is free — on a
+    # mixed pool that meant a 2.5x slower L40S for a job sized for an
+    # H100 (job 16820522). Optional: empty means "any card", the v1
+    # behaviour.
+    gpu_type: str = ""
 
 
 @dataclass(frozen=True)
@@ -346,19 +353,22 @@ def _partition_from_table(
         resource_class: str, table: dict, context: str) -> Partition:
     """Build one Partition from its ``[hardware.partitions.<class>]``.
 
-    ``name`` and ``max_walltime`` are named fields; every OTHER key is
-    read as a per-node capacity number (``cores_per_node``,
-    ``gpus_per_node``, …), so a site may state whatever counts its
-    partition has without this loader enumerating them all.
+    ``name``, ``max_walltime`` and the optional ``gpu_type`` are named
+    fields; every OTHER key is read as a per-node capacity number
+    (``cores_per_node``, ``gpus_per_node``, …), so a site may state
+    whatever counts its partition has without this loader enumerating
+    them all.
     """
     name = str(_require(table, "name", context))
     max_walltime = _require_duration(table, "max_walltime", context)
+    gpu_type = str(table.get("gpu_type", ""))
     capacity = {
         key: float(value)
         for key, value in table.items()
-        if key not in ("name", "max_walltime")}
+        if key not in ("name", "max_walltime", "gpu_type")}
     return Partition(
-        name=name, capacity=capacity, max_walltime=max_walltime)
+        name=name, capacity=capacity, max_walltime=max_walltime,
+        gpu_type=gpu_type)
 
 
 def _usage_from_table(

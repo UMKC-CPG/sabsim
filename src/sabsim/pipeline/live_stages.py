@@ -795,7 +795,7 @@ def _assemble_on_one_rank(
 # BondDebondResult, a fresh engine per pull rung (PSEUDOCODE.md §9.1).
 # ---------------------------------------------------------------------
 
-def _bonded_force_model(potential) -> ForceModel:
+def _bonded_force_model(potential, type_map: dict) -> ForceModel:
     """The potential the bonded pair heals, presses and pulls under (§4.5).
 
     ``potential`` is the study's ``[potential]`` block; the pair runs under
@@ -803,9 +803,11 @@ def _bonded_force_model(potential) -> ForceModel:
     committee of one), later the ALF-trained committee the member's
     ``potential_ref`` resolves to — behind the ``pair_style`` seam. The
     file's existence was checked at load time (phase three), so a missing
-    model stops on the login node, never here.
+    model stops on the login node, never here. ``type_map`` is the
+    assembled pair's, so the elements ride the ``pair_coeff`` line in type
+    order (see :func:`~sabsim.driver.commands.deepmd_model`).
     """
-    return deepmd_model(potential.production_weights)
+    return deepmd_model(potential.production_weights, type_map)
 
 
 def run_bond_debond_md_live(
@@ -838,7 +840,7 @@ def run_bond_debond_md_live(
     )
 
     built = structure.built
-    force_model = _bonded_force_model(member.potential)
+    force_model = _bonded_force_model(member.potential, built.type_map)
     seed = member.ensemble.master_seed
     reference_file = os.path.join(scratch_directory, "settled_reference.data")
 

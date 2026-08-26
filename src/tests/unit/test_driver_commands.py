@@ -111,9 +111,9 @@ def test_deepmd_force_model():
     plugin, so the model carries the ``plugin load`` that registers its
     pair style (the path read from the environment, ARCHITECTURE §4.4).
     """
-    model = deepmd_model("committee.pb")
+    model = deepmd_model("committee.pb", {"Si": 1})
     assert model.pair_style == "deepmd committee.pb"
-    assert model.pair_coeff == ("* *",)
+    assert model.pair_coeff == ("* * Si",)
     assert model.preload == (
         "variable dp getenv DEEPMD_LMP_PLUGIN", "plugin load ${dp}")
 
@@ -135,12 +135,12 @@ def test_force_model_commands_emit_plugin_load_before_pair_style():
     The ``deepmd`` pair style does not exist until the plugin registers it,
     so the generator emits the preload first, then the pair_style/coeff.
     """
-    commands = force_model_commands(deepmd_model("committee.pb"))
+    commands = force_model_commands(deepmd_model("committee.pb", {"Si": 1}))
     assert commands == [
         "variable dp getenv DEEPMD_LMP_PLUGIN",
         "plugin load ${dp}",
         "pair_style deepmd committee.pb",
-        "pair_coeff * *"]
+        "pair_coeff * * Si"]
     # And the ordering invariant explicitly: load precedes the style.
     assert (commands.index("plugin load ${dp}")
             < commands.index("pair_style deepmd committee.pb"))

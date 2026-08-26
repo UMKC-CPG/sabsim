@@ -152,12 +152,17 @@ class ForceModel:
     needs_atom_map: bool = False
 
 
-def deepmd_model(model_path: str) -> ForceModel:
-    """The trained DeePMD committee potential (DESIGN.md §4, §9.8).
+def deepmd_model(model_path: str, type_map: dict) -> ForceModel:
+    """A DeePMD model — the production potential (DESIGN.md §4, §9.8).
 
-    The generator emits these lines exactly as it does the classical
-    stand-in's; only the value differs. ``pair_coeff * *`` is DeePMD's
-    convention (the type map is baked into the model file). The ``preload``
+    ``type_map`` maps every element symbol in the cell to its LAMMPS type
+    id, and the elements are written on the ``pair_coeff`` line IN TYPE
+    ORDER. This is not optional: a deepmd model carries its own element
+    list, and without the names LAMMPS type 1 is taken to be the model's
+    FIRST element — harmless for a one-element silicon ``graph.pb``, but
+    for a 118-element universal model that first element is hydrogen, and
+    a silicon cell is then simulated as hydrogen (T-25, job 16822060: the
+    box collapsed to a third of its volume). The ``preload``
     registers the ``deepmd`` pair style before it is named: DeePMD ships as
     a runtime LAMMPS PLUGIN, so the engine must ``plugin load`` it first
     (proven job 15686597). The plugin's path is read from the environment
@@ -165,9 +170,11 @@ def deepmd_model(model_path: str) -> ForceModel:
     ARCHITECTURE.md §4.4) rather than hard-coded, so one engine rebuild
     retargets it in one place; ``getenv`` resolves it inside LAMMPS.
     """
+    elements = " ".join(
+        sorted(type_map, key=lambda symbol: type_map[symbol]))
     return ForceModel(
         pair_style=f"deepmd {model_path}",
-        pair_coeff=("* *",),
+        pair_coeff=(f"* * {elements}",),
         preload=(
             "variable dp getenv DEEPMD_LMP_PLUGIN",
             "plugin load ${dp}"),

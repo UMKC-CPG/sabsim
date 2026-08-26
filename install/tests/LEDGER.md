@@ -1117,3 +1117,62 @@ silicon as a function of energy, and which energy brackets the 7 Å
   reach, skin, dose, or the gate beyond what T-22 already recorded,
   except the 100 eV scatter noted above. No render was produced — the
   dumps are for rendering elsewhere.
+
+## T-25 — jobs 16822060 (failed, diagnostic) + 16822116 (stands) — 2026-08-26
+
+*(Option (a) of the A′ decision: the deepmd-kit 3.2 bundle as SABSIM's
+IN-PROCESS engine, so `pair_style deepmd` can load a DPA `.pth` — and
+later the ALF-trained committee — inside the interactive press/pull.)*
+
+**Question.** Can SABSIM's own `LammpsEngine` (the Python binding, one
+persistent instance per rank) run the universal DPA-3.1-3M model, on the
+GPU, under the bundle's OpenMPI, with no LAMMPS compiled?
+
+- **What was built.** No compile: the bundle is a complete conda
+  environment (Python 3.12, OpenMPI 5.0.10 + mpi4py, a LAMMPS 2024.08.29
+  Python binding, the deepmd pair style as the plugin
+  `lib/deepmd_lmp/dpplugin.so` with a PyTorch/CUDA backend). A venv
+  `virtual_envs/sabsim-dp3` layered on the bundle's python
+  (`--system-site-packages`; pymatgen + pytest + sabsim editable on top)
+  and a module `cpg_lammps_conda/deepmd-kit-3.2.0b0` (bundle bin/lib on
+  the path, `DEEPMD_LMP_PLUGIN` set, `LAMMPS_PLUGIN_PATH` unset — the
+  explicit-`plugin load` discipline). Load the module FIRST, then
+  activate the venv.
+- **As-run scripts:** `install/tests/t25_inprocess_dp3/`
+  (`t25_inprocess_dp3.slurm`, `probe_inprocess_dp3.py`). The probe uses
+  the real pieces: `bulk_type_map`/`write_bulk_data` for a 216-atom Si
+  block, `deepmd_model`, `bulk_relax_commands`, `LammpsEngine`; then
+  200 steps of NVE at 300 K, judged on total-energy drift.
+- **16822060 (FAILED — a real bug, fixed).** The 1-rank and 2-rank
+  probes both died in the NVE run with `Lost atoms: original 216
+  current 198`. The log showed why: the box/relax minimize had collapsed
+  the cell from 4323 to 628 Å³ at −1.21 → −2.48 eV/atom. Cause:
+  `deepmd_model` emitted `pair_coeff * *` with NO element list, which
+  maps LAMMPS type 1 to the model's FIRST element — hydrogen, for a
+  118-element universal model. Silicon was simulated as hydrogen.
+  Harmless for the one-element `graph.pb` this helper was written for;
+  fatal here. Fix: `deepmd_model(model_path, type_map)` now writes the
+  elements in type order on the `pair_coeff` line (commit with this
+  entry). An earlier 16822052 failed on a PATH-order slip (module loaded
+  after the venv, so `python` lacked sabsim) — fixed in the slurm.
+- **16822116 (PASS, g040 L40S, 1 rank then 2 ranks under
+  `srun --mpi=pmix`).** Verbatim:
+
+  ```
+  T25RESULT rank=0 ranks=1 atoms=216 a=5.5164 etot0=-1159.8996 etot1=-1159.8968 drift_eV_per_atom=1.30e-05
+  T25RESULT rank=1 ranks=2 atoms=216 a=5.5164 etot0=-1159.8996 etot1=-1159.8968 drift_eV_per_atom=1.30e-05
+  T25RESULT rank=0 ranks=2 atoms=216 a=5.5164 etot0=-1159.8996 etot1=-1159.8968 drift_eV_per_atom=1.30e-05
+  === T-25 exit 1rank=0 2ranks=0 ===
+  ```
+  Plugin registered in-process, model on GPU 0, box relaxed to
+  a = 5.5164 Å (the out-of-process derivation gave 5.5147 — same
+  physics, a different minimizer stopping point), −5.37 eV/atom, and
+  1.3e-5 eV/atom drift over 200 NVE steps. The two ranks agree to every
+  printed digit, so the domain decomposition under the bundle's MPI is
+  sound.
+- **Verdict.** Option (a) is DONE as an environment, not a build: the
+  bond stage can run a DPA `.pth` in-process by switching the install to
+  the `sabsim-dp3` venv + this module. **Scope NOT covered:** the real
+  bond stage (heal → gate → press → pull) has not yet run under it —
+  that is the C bond job, next; `graph.pb` (TF backend) under the
+  3.2 plugin is untested; larger cells / multi-GPU untested.

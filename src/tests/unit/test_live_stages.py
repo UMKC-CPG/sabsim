@@ -105,9 +105,9 @@ def test_bonded_force_model_uses_the_studys_production_model(tmp_path):
     """
     model_file = tmp_path / "graph.pb"
     model_file.write_bytes(b"\x00")        # a stand-in file; only its path
-    model = _bonded_force_model(_potential_spec(str(model_file)))
+    model = _bonded_force_model(_potential_spec(str(model_file)), {"Si": 1})
     assert model.pair_style == f"deepmd {model_file}"
-    assert model.pair_coeff == ("* *",)
+    assert model.pair_coeff == ("* * Si",)
     assert "plugin load ${dp}" in model.preload
 
 

@@ -11,8 +11,8 @@
 --
 -- Pairs with the venv virtual_envs/sabsim-dp3, built on the bundle's
 --   python (--system-site-packages) so numpy/ase/mpi4py/torch come from
---   the bundle and only pymatgen + sabsim are layered on top.  Activate
---   that venv, then load this module.
+--   the bundle and only pymatgen + sabsim are layered on top.  Load this
+--   module FIRST, then activate that venv (so its python wins on PATH).
 --
 -- The plugin is loaded EXPLICITLY by a LAMMPS input line (variable dp
 --   getenv DEEPMD_LMP_PLUGIN; plugin load ${dp}), never auto-loaded via
@@ -24,7 +24,7 @@
 help([[
 deepmd-kit 3.2.0b0 bundle as the in-process SABSIM engine: LAMMPS
 2024.08.29 Python binding + deepmd plugin (PyTorch backend, CUDA 12.9).
-Activate virtual_envs/sabsim-dp3 first, then load this module; a LAMMPS
+Load this module, THEN activate virtual_envs/sabsim-dp3; a LAMMPS
 input then does
    variable dp getenv DEEPMD_LMP_PLUGIN
    plugin load ${dp}

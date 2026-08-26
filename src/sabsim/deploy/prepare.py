@@ -148,7 +148,7 @@ def render_job_script(
     # A GPU request is emitted ONLY when the job asks for accelerators
     # (usage.gpus_per_node > 0); a CPU job states 0 and gets no --gres
     # line, so the scheduler does not route it to a GPU node needlessly.
-    gres = _slurm_gres(usage)
+    gres = _slurm_gres(usage, partition)
     if gres is not None:
         lines.append(f"#SBATCH --gres={gres}")
     lines += [
@@ -272,19 +272,21 @@ def _check_walltime_ceiling(
             f"the partition's max_walltime.")
 
 
-def _slurm_gres(usage: UsageBlock) -> str | None:
+def _slurm_gres(usage: UsageBlock, partition: Partition) -> str | None:
     """Format a usage block's GPU request as a SLURM ``--gres`` value.
 
-    Returns ``"gpu:<count>"`` when the job asks for accelerators, or
-    ``None`` when it asks for none (a CPU-only job), so the caller emits
-    the directive only for a GPU job. The count is what the person wrote
-    in ``gpus_per_node`` — the writer requests it verbatim and predicts
-    nothing, exactly as it does for ranks and walltime (DESIGN.md §10.6).
-    v1 requests GPUs by count only; pinning a device TYPE (e.g. a
-    particular card on a heterogeneous partition) is a later refinement.
+    Returns ``"gpu:<count>"`` — or ``"gpu:<type>:<count>"`` when the
+    partition names its card model (``gpu_type``) — when the job asks for
+    accelerators, or ``None`` when it asks for none (a CPU-only job), so
+    the caller emits the directive only for a GPU job. The count is what
+    the person wrote in ``gpus_per_node`` — the writer requests it
+    verbatim and predicts nothing, exactly as it does for ranks and
+    walltime (DESIGN.md §10.6).
     """
     if usage.gpus_per_node <= 0:
         return None
+    if partition.gpu_type:
+        return f"gpu:{partition.gpu_type}:{usage.gpus_per_node}"
     return f"gpu:{usage.gpus_per_node}"
 
 

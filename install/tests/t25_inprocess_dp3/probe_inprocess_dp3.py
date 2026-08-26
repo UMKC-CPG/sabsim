@@ -42,7 +42,7 @@ def main() -> int:
     if rank == 0:
         write_bulk_data(crystal, CELLS_PER_AXIS, data_file)
     comm.Barrier()
-    model = deepmd_model(MODEL)
+    model = deepmd_model(MODEL, bulk_type_map(crystal, CELLS_PER_AXIS))
     engine = LammpsEngine(
         command_line_args=["-screen", "none", "-log",
                            os.path.join(WORK, f"log.t25")],

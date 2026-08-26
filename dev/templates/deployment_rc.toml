@@ -41,6 +41,10 @@ module_paths    = ["/cluster/VAST/rulisp-lab/cpg/modulefiles"]
 
   [hardware.partitions.gpu]
   name          = "gpu,requeue"
+  # The card MODEL to request (SLURM gres type), so a job sized for an
+  # H100 does not land on a slower card in this mixed pool; leave empty
+  # for "any card".
+  gpu_type      = "H100"
   gpus_per_node = 4
   max_walltime  = { value = 24.0, unit = "h" }
 
