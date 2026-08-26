@@ -47,6 +47,7 @@ from ase.io import read as ase_read
 from mpi4py import MPI
 
 from sabsim.deploy.scratch import job_scratch
+from sabsim.driver.commands import stage_dump_file
 from sabsim.pipeline.exec_artifacts import HalfHandle
 from sabsim.pipeline.live_stages import activate_one_half
 from sabsim.pipeline.run_options import (
@@ -313,15 +314,20 @@ def main() -> None:
         print(f"SCANNOTE energy_eV={0 if is_null else energy:.0f} "
               f"{result.note}", flush=True)
         if wants_movie:
-            # `stage_dump_file` names it for the member and the stage,
-            # so this is where the cascade's frames landed. Reported
-            # with its FRAME COUNT so the log itself says whether a
-            # movie exists, rather than leaving that to be discovered
-            # at render time.
-            movie = os.path.join(
-                output, f"{base.name}_activation_a.dump")
-            print(f"SCANMOVIE energy_eV={energy:.0f} "
-                  f"frames={count_frames(movie)} "
+            # Ask the SAME helper the pipeline names its dumps with,
+            # for the SAME stage string the subprocess activate passes
+            # it ("activate_a" for wafer A) -- rather than spelling the
+            # filename out here a second time. The first version of
+            # this block guessed "activation_a", found no such file,
+            # and died on the report AFTER the cascade and its frames
+            # were safely written: trap 5 of this harness's own README,
+            # committed twice.
+            movie = stage_dump_file(output, base.name, "activate_a")
+            # A report must never be able to kill a run that already
+            # produced its result, so a missing movie is stated rather
+            # than raised. `frames=0` says the switch did not take.
+            frames = count_frames(movie) if os.path.exists(movie) else 0
+            print(f"SCANMOVIE energy_eV={energy:.0f} frames={frames} "
                   f"stride={MOVIE_FRAME_STRIDE} path={movie}", flush=True)
 
 

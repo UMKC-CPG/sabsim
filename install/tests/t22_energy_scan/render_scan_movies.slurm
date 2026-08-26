@@ -51,7 +51,7 @@ export OVITO_THREAD_COUNT=8
 # substrate and frames on the ATOMS rather than the simulation box, so
 # the slab fills the frame instead of floating in a band of vacuum.
 for energy in 040 100 200; do
-    dump="$FRAMES/movie_e${energy}/si-si-reference_activation_a.dump"
+    dump="$FRAMES/movie_e${energy}/si-si-reference_activate_a.dump"
     if [ ! -f "$dump" ]; then
         echo "=== ${energy} eV: no dump at $dump -- skipped ==="
         continue

@@ -107,7 +107,22 @@ is what makes the movie legible — but no velocity can be read off it.
 **The count is reported, not assumed.** Each movie task prints a
 `SCANMOVIE` line carrying the dump's actual frame count, so the log
 says whether a movie exists rather than leaving that to be found out at
-render time. A count of 1 means the switch did not take effect.
+render time. A count of 0 means the switch did not take effect.
+
+That reporting line is itself where trap 5 struck a second time (job
+16816216, LEDGER T-23): it spelled the dump's name out by hand as
+`..._activation_a.dump`, while the subprocess activate names the stage
+`activate_a`, and every task exited 1 on it AFTER the cascade and its
+frames were safely written. Ask `stage_dump_file` for the path rather
+than repeating it, and report a missing file rather than raising on
+it — a report must not be able to kill a run that already has its
+result.
+
+**Expect about 56 frames, not 200.** `fix cascade_halt` caps the
+cascade at 0.5 ps, which lands near step 5130; with the 500-step relax
+that is 5630 steps, so `MOVIE_FRAME_STRIDE = 100` yields 56 frames —
+under three seconds at 20 fps. Lower the stride if a longer movie is
+wanted; the cost is file size, not wall clock.
 
 The renderer itself (`render.py`, `bombardment` mode: argon amber
 against muted silicon, framed on the atoms rather than the vacuum-

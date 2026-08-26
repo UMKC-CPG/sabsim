@@ -1064,3 +1064,56 @@ silicon as a function of energy, and which energy brackets the 7 Å
   30-39 Å "skin" at 20 eV before that was caught. Single seed
   throughout; no oxide; DPA-3.1 still `validated=False`, and this scan
   does not change that (the §3.5 gate is a bond-flow measurement).
+
+## T-23 — job 16816216 — 2026-08-26
+
+- **What ran:** three of T-22's scanned points re-run in MOVIE MODE —
+  the cascade recording frames — so the bombardment can be watched.
+  `install/tests/t22_energy_scan/energy_scan_movie.slurm`, array tasks
+  2/7/11 = 40/100/200 eV, `run_energy_scan.py <task> --movie`. Same
+  model (DPA-3.1-3M `.pth`, out-of-process), same 1960-atom cell, same
+  seed 12345, same durations as job 16795220. Only the recording
+  differs. This is NOT a new measurement.
+- **Result: three trajectories, 56 frames each, 3.2 MB each.**
+
+  | E (eV) | frames | atoms @ f0 | reach (Å) | node |
+  |-------:|-------:|-----------:|----------:|:-----|
+  |     40 |     56 |       1961 |      4.14 | g029 |
+  |    100 |     56 |       1961 |      5.51 | g018 |
+  |    200 |     56 |       1961 |     13.79 | g020 |
+
+  1961 at frame 0 is 1960 Si plus the argon, so both species are
+  present in the first frame and a species-coloured render works. The
+  count drops to 1960 at the cleanup, which strips the projectile.
+- **56 frames, not ~200, and that is the halt doing its job.** The
+  cascade is capped by `fix cascade_halt` at 0.5 ps, which fired on
+  step 5130 (value 0.5008); with the 500-step relax that is 5630 steps
+  and, at `MOVIE_FRAME_STRIDE = 100`, 56 frames. At 20 fps that is
+  under three seconds of video. Lowering the stride is the knob.
+- **Frames are evenly spaced in STEPS, not in time.** `fix dt/reset`
+  floats the step between 1e-5 and 0.1 ps, so the frames sample the
+  violent opening densely and the cooling tail sparsely. Legible as
+  slow-motion; useless for reading velocity.
+- **Reproducibility note: 100 eV came back 5.51 Å, not the 6.89 Å both
+  earlier runs gave.** 40 eV (4.14) and 200 eV (13.79) match job
+  16795220 exactly. This run landed on H100s where both earlier ones
+  used other hardware, and recording frames does not perturb the
+  dynamics — so this is the same single-seed scatter T-22 already
+  documented, now visible at a point that had looked stable across two
+  runs. It does not overturn the 100-140 eV bracket, which rests on a
+  plateau of three energies, but it does weaken "6.89 Å reproducibly"
+  to "6.89 Å in two runs of three". Seeds at the chosen point are the
+  measurement that would settle it.
+- **A reporting bug recurred and cost nothing this time.** Every task
+  exited 1 on the `SCANMOVIE` line: it spelled the dump's name out by
+  hand as `..._activation_a.dump` when the subprocess activate names
+  the stage `activate_a`. The cascades, the frames and every
+  `SCANRESULT` line were already written. Fixed by asking
+  `stage_dump_file` for the path instead of guessing it, and by
+  reporting a missing movie as `frames=0` rather than raising — a
+  report must not be able to kill a run that already has its result.
+  This is trap 5 of the T-22 README, committed a second time.
+- **Scope NOT covered:** no physics. Nothing here is evidence about
+  reach, skin, dose, or the gate beyond what T-22 already recorded,
+  except the 100 eV scatter noted above. No render was produced — the
+  dumps are for rendering elsewhere.
