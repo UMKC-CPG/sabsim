@@ -170,7 +170,13 @@ def deepmd_model(model_path: str) -> ForceModel:
         pair_coeff=("* *",),
         preload=(
             "variable dp getenv DEEPMD_LMP_PLUGIN",
-            "plugin load ${dp}"))
+            "plugin load ${dp}"),
+        # A DPA-style graph network gathers per-atom features across the
+        # neighbor graph and needs the global atom map to exist before the
+        # atoms are created; ``atom_modify map yes`` is harmless for the
+        # older descriptor-based graph.pb, so it is set for every deepmd
+        # model rather than guessed from the file name.
+        needs_atom_map=True)
 
 
 # ---------------------------------------------------------------------
