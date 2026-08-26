@@ -19,7 +19,10 @@
 #SBATCH --exclude=g003
 #SBATCH --mem=48G
 #SBATCH --time=04:00:00
-#SBATCH --array=0-11
+# Twelve energies (tasks 0-11) plus the zero-impact NULL CONTROL
+# (task 12), which measures the vacated-site floor the pre-relax
+# alone produces so the bombarded points are read against it.
+#SBATCH --array=0-12
 # Log paths are relative to the SUBMISSION directory (the repo
 # root); mkdir -p the directory before submitting.
 #SBATCH --output=jobs/bulk_si/scan_logs/escan-%A_%a.out

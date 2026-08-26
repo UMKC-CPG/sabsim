@@ -973,3 +973,94 @@ or the model itself?
   still live under `$CPG_SHARE`, not `install/tests/`; DPA-3.1 has no
   `.pt2`, so it runs 2.47x slower than it could until the `network.py`
   patch in `dev/notes/mlip-cascade-integration.md` is applied.
+
+## T-22 — jobs 16733423 (crashed) + 16795220 (stands) — 2026-08-25
+
+*(Tier-1 energy scan: bombardment energy -> reachable damage depth,
+under DPA-3.1-3M.)*
+
+**Question.** How deep does a single Ar impact reach into DPA-3.1
+silicon as a function of energy, and which energy brackets the 7 Å
+`expected_activated_depth` the build sizes slabs against?
+
+- **As-run scripts:** `install/tests/t22_energy_scan/`
+  (`energy_scan.slurm`, `run_energy_scan.py`, `analyze_energy_scan.py`).
+- **16733423 (first attempt, 12 tasks, RETRACTED as a result).** All
+  twelve cascades RAN; every task then died in reporting on
+  `AttributeError: 'CascadeOutcome' object has no attribute 'verdict'`.
+  Activation became cascade-only in the 2026-08-08 re-arch and the §3.5
+  gate moved to the bond flow, so `activate_one_half` returns a bare
+  `CascadeOutcome`; the harness still reached for a gate verdict. The
+  physics was fine and nothing was reported. Structures preserved under
+  `$SCRATCH/jobs/bulk_si/t22_attempt1_16733423/`.
+- **16795220 (13 tasks, ALL COMPLETED, 31-54 min each).** 12 energies
+  x 1 impact x 1 seed, plus a zero-impact NULL CONTROL. Si(001),
+  1960 atoms, 745 Å², cut on DPA-3.1's own working lattice
+  (a = 5.5147 Å, DESIGN §2.2). Judged FROM THE STRUCTURES:
+
+  | E (eV) | vacated | above null | reach (Å) |
+  |---|---|---|---|
+  | null |  28 |  0 |  0.00 |
+  |   20 |  30 |  2 |  0.00 |
+  |   30 |  30 |  2 |  2.76 |
+  |   40 |  36 |  8 |  4.14 |
+  |   50 |  35 |  7 |  2.76 |
+  |   60 |  45 | 17 |  4.14 |
+  |   70 |  44 | 16 |  5.51 |
+  |   85 |  42 | 14 |  2.76 |
+  |  100 |  53 | 25 |  6.89 |
+  |  120 |  49 | 21 |  6.89 |
+  |  140 |  51 | 23 |  6.89 |
+  |  170 |  72 | 44 | 19.30 |
+  |  200 | 104 | 76 | 13.79 |
+
+  - **Zero sputtering at every energy** — survivors 1960/1960
+    throughout, so up to 200 eV the upper bracket is NOT set by atom
+    loss.
+  - **The null earns its place.** 28 of the ~30 sites "vacated" at
+    20 eV are the pre-relax's own surface settling, so the low-energy
+    vacancy COUNT is almost entirely floor. Its subsurface reach is
+    exactly 0.00 Å, so REACH is uncontaminated: relaxation empties
+    surface sites only, and any nonzero reach is genuine damage.
+  - Reach quantizes onto multiples of 1.379 Å = a/4, the Si(001)
+    plane spacing, as vacated lattice sites must.
+- **Run-to-run scatter, from the two runs as an unintended replicate**
+  (same seed 12345, same energies; they differ only by `caf7208`'s
+  relax timestep and GPU nondeterminism):
+
+  | E (eV) | attempt 1 reach | 16795220 reach |
+  |---|---|---|
+  |  20 |  1.38 |  0.00 |
+  |  30 |  2.76 |  2.76 |
+  |  40 |  2.76 |  4.14 |
+  |  50 |  4.14 |  2.76 |
+  |  60 |  2.76 |  4.14 |
+  |  70 |  4.14 |  5.51 |
+  |  85 |  4.14 |  2.76 |
+  | 100 |  6.89 |  6.89 |
+  | 120 |  6.89 |  6.89 |
+  | 140 |  6.89 |  6.89 |
+  | 170 | 11.03 | 19.30 |
+  | 200 | 11.03 | 13.79 |
+
+  Below 100 eV the two agree to ±1 lattice plane (±1.4 Å). At
+  100/120/140 eV BOTH runs give 6.89 Å — the only stable plateau in
+  the scan. At 170/200 eV they diverge by up to 8 Å, which is what
+  single-seed sampling of a CRYSTALLINE target looks like when an ion
+  finds a channel.
+- **Verdict: the bracket is 100-140 eV.** Reach there is reproducibly
+  6.89 Å against the spec's `expected_activated_depth = 7.0 Å`
+  (`dev/templates/study_spec.toml:295`), and 100 eV is the cheapest
+  point on that plateau. Below 100 eV reach falls short and is
+  seed-noisy; above 170 eV it is deep, erratic, and would drive damage
+  past the skin the build sizes for.
+- **Scope NOT covered:** SKIN DEPTH — this is REACH from ONE impact,
+  which bounds the skin but is not it; amorphization is cumulative
+  (the classical sweep used 15-44 impacts) and a dosed run at 100 eV
+  is the next measurement. The disorder-profile half of the analyzer
+  reports NO result: its zero-impact null runs no MD (the relaxation
+  is inside the impact loop) so it sits near 0 K against ~1 ps of warm
+  MD, and differencing the two measures temperature — it reported a
+  30-39 Å "skin" at 20 eV before that was caught. Single seed
+  throughout; no oxide; DPA-3.1 still `validated=False`, and this scan
+  does not change that (the §3.5 gate is a bond-flow measurement).

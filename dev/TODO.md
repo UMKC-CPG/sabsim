@@ -1921,6 +1921,23 @@ foundations, interaction rules. -->
 
 ## CODE
 
+- **Zero-impact runs skip the relaxation, so a null control comes out
+  athermal.** `run_cascade_to_fluence` and the out-of-process script
+  builder both put the between-impact relaxation INSIDE the per-impact
+  loop, so a zero-fluence run issues no `run` command at all and ends
+  minimized, near 0 K. That makes the natural null control — same path,
+  no bombardment — unusable as a background for any temperature-sensitive
+  measure: T-22's coordination profile differenced a 0 K null against
+  ~1 ps of warm MD and reported a 30-39 Å "amorphized skin" at 20 eV,
+  where the ion cannot have reached. It is still a valid floor for
+  vacancy/reach, which is what T-22's headline result rests on. Decide
+  whether a zero-impact cascade SHOULD still relax. It is arguably the
+  physically honest answer — "no impacts" ought to mean an equilibrated
+  surface, not an unequilibrated one — but zero fluence is not a
+  production case, so this may be a harness concern rather than a
+  mainline one. Do not change mainline cascade code purely to serve a
+  test harness without settling that first.
+
 <!-- Tasks related to implementation. -->
 
 - [ ] **Dead code: `_reanneal_force_model` has no callers.**

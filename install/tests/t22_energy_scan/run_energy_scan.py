@@ -10,15 +10,17 @@ chosen point only (Paul, 2026-08-23).
 
 Each array task runs ONE energy through the mainline pipeline call
 (`activate_one_half`), so this is the real cascade path and not a
-one-off script. Two depths are recorded because they answer different
-questions at one impact:
+one-off script. One extra task past the energies is a NULL CONTROL: the
+same path with zero impacts, which measures how much of the signal the
+pre-relax alone would have produced.
 
-  * the §3.5 gate's `activated_depth`, which is a SLAB-AVERAGED skin
-    thickness and therefore reads low when a single impact leaves most
-    of the surface pristine; and
-  * the maximum depth of any displaced substrate atom, measured here
-    against the pristine slab, which is the ion-range proxy the energy
-    bracket actually needs.
+What is recorded is REACH — the depth of the deepest lattice site the
+cascade emptied — and NOT a skin thickness. The distinction matters at
+one impact. A single ion empties a scattering of sites along one track;
+it does not dissolve a layer, so any slab-averaged skin measure (the
+§3.5 gate's `activated_depth` among them) reads essentially zero and
+says nothing about where the ion stopped. Reach is what brackets the
+operating energy; the skin needs dose, which is a later run.
 
 The slab is rescaled to the WORKING LATTICE OF THE MODEL BEING USED
 (DESIGN §2.2) before it is cut. Bombarding a cell cut on the CIF's
@@ -80,7 +82,19 @@ SEED = 12345
 # under. DPA-2.4-7M's 5.3475 A is NOT usable: it fails Tier-0.
 MODEL_LATTICE_ANGSTROM = 5.5147
 CIF_LATTICE_ANGSTROM = 5.4300     # what the CIF ships (for contrast)
-DISPLACEMENT_THRESHOLD = 1.0     # A: beyond thermal rattle
+SUBSTRATE_SYMBOL = "Si"          # the species whose sites are counted
+VACANCY_THRESHOLD = 1.0          # A: beyond thermal rattle
+
+# The NULL CONTROL runs as one extra array task past the energies: the
+# identical path with ZERO impacts, so the slab still gets read, gets its
+# §2.4 pre-relax, gets cleaned up and gets written out -- everything the
+# bombarded points get EXCEPT the bombardment. Its vacated-site count is
+# the measurement's false-positive floor, which is what turns "31 sites
+# vacated at 20 eV" from a number into a number above a measured
+# background. Without it the pre-relax's own settling is indistinguishable
+# from damage, and comparing against an as-cut file instead (the first
+# analysis did) measures RELAXATION, not damage.
+NULL_TASK_INDEX = len(SCAN_ENERGIES_EV)
 
 
 def member_for(base: MemberSpecification, energy: float,
@@ -99,35 +113,60 @@ def member_for(base: MemberSpecification, energy: float,
     return dataclasses.replace(base, protocol=protocol)
 
 
-def deepest_displacement(pristine_file: str, amorphized_file: str) -> float:
-    """Depth below the pristine surface of the deepest displaced atom.
+def damage_reach(pristine_file: str, amorphized_file: str) -> tuple:
+    """How deep the damage reached, measured by VACATED LATTICE SITES.
 
-    Atoms are paired BY ORDER after both files are read with the same
-    reader and the same sorting, which holds because the cascade writes
-    an id-sorted structure and no substrate atom is created. Any atom
-    that lost more than the thermal-rattle threshold counts as
-    displaced; the deepest such atom marks how far the damage reached.
-    Lateral wrap is folded to the nearest image before the distance is
-    taken, since x and y are periodic.
+    The obvious measurement — pair each atom with its own former self and
+    ask how far it moved — is not available here, and quietly produces
+    nonsense if attempted. The cascade cleanup strips the projectile and
+    RENUMBERS what is left, so final id ``N`` carries the input's id
+    ``N + 1``; pairing the two files row for row therefore compares each
+    atom against its neighbour's site and reports the whole slab moving
+    a lattice spacing at every energy (LEDGER T-22).
+
+    Vacancy sidesteps the correspondence problem entirely. For every site
+    in the PRISTINE slab this asks how far away the nearest atom in the
+    DAMAGED slab is, whichever atom that turns out to be. A site with no
+    atom within ``VACANCY_THRESHOLD`` was emptied — its occupant left and
+    nothing took its place — and that judgement needs no id agreement
+    between the files at all. The deepest emptied site is how far the
+    damage reached, which is the ion-range proxy the energy bracket
+    needs.
+
+    Note this is a REACH measure, not a skin thickness: a single impact
+    empties a scattering of sites along one track rather than dissolving
+    a layer. Returns ``(reach_angstrom, vacated_count)``.
     """
     pristine = ase_read(pristine_file, format="lammps-data",
                         Z_of_type={1: 18, 2: 14}, parallel=False)
     damaged = ase_read(amorphized_file, parallel=False)
-    pristine_positions = pristine.get_positions()
-    damaged_positions = damaged.get_positions()
-    shared = min(len(pristine_positions), len(damaged_positions))
-    cell = np.diag(pristine.get_cell())
-    surface_z = float(pristine_positions[:, 2].max())
+    # Both slabs are filtered to the SUBSTRATE species: the projectile is
+    # neither present in the pristine cut nor kept past the cleanup, and
+    # a stray argon would otherwise read as an occupied silicon site.
+    pristine_sites = pristine.get_positions()[
+        np.array(pristine.get_chemical_symbols()) == SUBSTRATE_SYMBOL]
+    damaged_atoms = damaged.get_positions()[
+        np.array(damaged.get_chemical_symbols()) == SUBSTRATE_SYMBOL]
+    cell = np.diag(np.asarray(pristine.get_cell()))
+    surface_z = float(pristine_sites[:, 2].max())
 
-    separation = damaged_positions[:shared] - pristine_positions[:shared]
-    for axis in (0, 1):
-        separation[:, axis] -= cell[axis] * np.round(
-            separation[:, axis] / cell[axis])
-    distance = np.linalg.norm(separation, axis=1)
-    moved = distance > DISPLACEMENT_THRESHOLD
-    if not np.any(moved):
-        return 0.0
-    return float(surface_z - pristine_positions[:shared][moved, 2].min())
+    # Nearest damaged atom to each pristine site. x and y are periodic,
+    # so every separation is folded to its nearest image first; z is the
+    # open direction (`p p f`) and is left alone.
+    nearest_distance = np.empty(len(pristine_sites))
+    for index, site in enumerate(pristine_sites):
+        separation = damaged_atoms - site
+        for axis in (0, 1):
+            separation[:, axis] -= cell[axis] * np.round(
+                separation[:, axis] / cell[axis])
+        nearest_distance[index] = np.sqrt(
+            np.min(np.einsum("ij,ij->i", separation, separation)))
+
+    vacated = nearest_distance > VACANCY_THRESHOLD
+    if not np.any(vacated):
+        return 0.0, 0
+    deepest = float(surface_z - pristine_sites[vacated, 2].min())
+    return deepest, int(np.count_nonzero(vacated))
 
 
 def main() -> None:
@@ -135,7 +174,10 @@ def main() -> None:
     communicator = MPI.COMM_WORLD
     rank = communicator.Get_rank()
     task_index = int(sys.argv[1])
-    energy = SCAN_ENERGIES_EV[task_index]
+    # The null control borrows the lowest energy so the member it builds
+    # is a well-formed one; with zero impacts that energy is never used.
+    is_null = task_index == NULL_TASK_INDEX
+    energy = SCAN_ENERGIES_EV[0 if is_null else task_index]
 
     study = load_and_validate_study(STUDY_SPEC)
     base = next(m for m in study.members if m.name == "si-si-reference")
@@ -156,12 +198,14 @@ def main() -> None:
 
     cell = half.atoms.get_cell()
     area = float(abs(np.cross(cell[0], cell[1])[2]))
-    # Exactly one impact, whatever the cell came out to.
-    fluence = 1.0 / area
+    # Exactly one impact, whatever the cell came out to -- or none at
+    # all for the null control, which the impact loop honours by simply
+    # never entering (it iterates the per-impact seeds).
+    fluence = 0.0 if is_null else 1.0 / area
 
     scratch = job_scratch(JOB_DIR) if rank == 0 else None
     scratch = communicator.bcast(scratch, root=0)
-    label = f"scan_e{int(energy):03d}"
+    label = "scan_null" if is_null else f"scan_e{int(energy):03d}"
     data_file = os.path.join(scratch, f"scan_slab_{label}.data")
     output = os.path.join(scratch, label)
     if rank == 0:
@@ -177,7 +221,8 @@ def main() -> None:
         print(f"SCAN point {label}: {len(half.atoms)} Si atoms, "
               f"{float(cell[0][0]):.1f} A wide, area {area:.0f} A^2, "
               f"lattice {MODEL_LATTICE_ANGSTROM} A, "
-              f"fluence {fluence:.6f} -> 1 impact", flush=True)
+              f"fluence {fluence:.6f} -> "
+              f"{0 if is_null else 1} impact(s)", flush=True)
 
     started = time.perf_counter()
     result, amorphized_file = activate_one_half(
@@ -186,25 +231,27 @@ def main() -> None:
     elapsed = time.perf_counter() - started
 
     if rank == 0:
-        verdict = result.verdict
+        # `activate_one_half` returns the driver's CascadeOutcome itself.
+        # It carries NO gate verdict, and that is by design rather than
+        # by omission: the 2026-08-08 re-arch made activation
+        # cascade-only and moved the §3.5 gate into the bond flow, where
+        # a per-wafer reference can be applied to an assembled pair. The
+        # earlier version of this harness still reached for
+        # `result.verdict` and killed all twelve tasks after their
+        # cascades had already run (LEDGER T-22).
         survivors = len(ase_read(amorphized_file, parallel=False))
-        reach = deepest_displacement(data_file, amorphized_file)
+        reach, vacated = damage_reach(data_file, amorphized_file)
         sputtered = len(half.atoms) - survivors
-        print(f"SCANRESULT energy_eV={energy:.0f} "
-              f"impacts={result.cascade.impacts_run} "
+        print(f"SCANRESULT energy_eV={0 if is_null else energy:.0f} "
+              f"null={int(is_null)} "
+              f"impacts={result.impacts_run} "
               f"atoms={len(half.atoms)} survivors={survivors} "
               f"sputtered={sputtered} "
-              f"gate_depth={verdict.activated_depth:.3f} "
-              f"reach_depth={reach:.3f} "
-              f"gate_passed={verdict.passed} seconds={elapsed:.0f}",
+              f"vacated_sites={vacated} "
+              f"reach_depth={reach:.3f} seconds={elapsed:.0f}",
               flush=True)
-        for name, metric in verdict.per_metric.items():
-            measured = (f"{metric.measured:.4f}"
-                        if isinstance(metric.measured, (int, float))
-                        else "curve")
-            print(f"SCANMETRIC energy_eV={energy:.0f} {name}={measured} "
-                  f"threshold={metric.threshold} passed={metric.passed}",
-                  flush=True)
+        print(f"SCANNOTE energy_eV={0 if is_null else energy:.0f} "
+              f"{result.note}", flush=True)
 
 
 if __name__ == "__main__":
