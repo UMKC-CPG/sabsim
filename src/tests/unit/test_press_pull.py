@@ -742,3 +742,61 @@ def test_positions_with_tags_is_identity_without_loss():
     _frame, aligned_tags = _positions_with_tags(engine, full_tags)
 
     np.testing.assert_array_equal(aligned_tags, full_tags)
+
+
+# ---------------------------------------------------------------------
+# §5.6 atom conservation is judged against the ASSEMBLED pair at every
+# stage boundary, not only across the pull (the T-18 blind spot).
+# ---------------------------------------------------------------------
+
+def test_press_that_loses_atoms_is_void_even_when_contact_fires():
+    """A disintegrating pair can fire the stress criterion; it is VOID."""
+    frames = [_frame(15.0), _frame(13.0), _frame(11.0)]
+    # The assembled pair has 200 atoms (100 per wafer); the engine reports
+    # only 150 survivors by the end of the press.
+    engine = MockEngine(
+        positions=frames, normal_stress=[-1.0, 0.5, 1.0], atom_count=150)
+    result = press_and_bond(
+        engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
+    assert result.contact_reached           # the criterion did fire...
+    assert result.atoms_conserved is False  # ...but the result is void
+    assert "LOST ATOMS" in result.note
+
+
+def test_press_that_keeps_every_atom_is_conserved():
+    """With every assembled atom still present the press is a measurement."""
+    frames = [_frame(15.0), _frame(13.0), _frame(11.0)]
+    engine = MockEngine(
+        positions=frames, normal_stress=[-1.0, 0.5, 1.0], atom_count=200)
+    result = press_and_bond(
+        engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
+    assert result.atoms_conserved is True
+    assert "LOST ATOMS" not in result.note
+
+
+def test_settle_checks_conservation_against_the_assembled_count():
+    """The settle reports a lost atom against the assembled baseline."""
+    engine = MockEngine(
+        energies=[-100.0, -100.0, -100.0, -100.0],
+        bottom_reaction=[0.0] * 4, top_reaction=[0.0] * 4,
+        atom_count=199)
+    result = settle_reference(
+        engine, _member(), expected_atom_count=200)
+    assert result.atoms_conserved is False
+
+
+def test_pull_uses_the_assembled_count_as_its_baseline(tmp_path):
+    """An atom lost BEFORE the pull started still voids the rung.
+
+    The engine holds 200 atoms throughout the pull — so a pull-start
+    baseline would call it conserved — but the pair was assembled with
+    201, so against the §5.6 baseline the rung is void.
+    """
+    frames = [_frame(11.0), _frame(20.0), _frame(30.0), _frame(40.0),
+              _frame(50.0)]
+    engine = MockEngine(positions=frames, top_reaction=[0.0] * 5)
+    result = pull_at_rate(
+        engine, _fake_built(), _member(), _MODEL, "reference.data",
+        Quantity(1.0, "m/s"), seed=1, output_directory=str(tmp_path),
+        expected_atom_count=201)
+    assert result.atoms_conserved is False

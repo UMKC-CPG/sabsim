@@ -55,8 +55,8 @@ def test_activate_script_directives_and_run_line(roots_set, tmp_path):
 
     # The DEFAULT activate is the universal cascade — a GPU job that runs the
     # deepmd bundle out-of-process (§4.1, §3.4 cascade-only).
-    assert "#SBATCH --partition=gpu" in text          # gpu partition name
-    assert "#SBATCH --account=cpg" in text            # default_account
+    assert "#SBATCH --partition=gpu,requeue" in text          # gpu partition name
+    assert "#SBATCH --account=general" in text            # default_account
     assert "#SBATCH --nodes=1" in text                # activate nodes
     assert "#SBATCH --ntasks-per-node=1" in text      # one rank, one GPU
     assert "#SBATCH --mem=48G" in text                # activate memory 48 GB
@@ -88,7 +88,7 @@ def test_bond_script_is_gpu(roots_set, tmp_path):
     member = _members()[0]
     text = (tmp_path / f"{member}_bond.slurm").read_text()
 
-    assert "#SBATCH --partition=gpu" in text
+    assert "#SBATCH --partition=gpu,requeue" in text
     assert "#SBATCH --ntasks-per-node=4" in text     # bond tasks_per_node
     assert "#SBATCH --gres=gpu:4" in text            # one GPU per rank
     assert "#SBATCH --mem=32G" in text               # bond memory 32 GB

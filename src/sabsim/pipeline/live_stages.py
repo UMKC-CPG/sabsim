@@ -856,21 +856,33 @@ def run_bond_debond_md_live(
         press_engine, built, member, force_model, structure.data_file, seed,
         trajectory_file=press_trajectory,
         trajectory_stride=press_stride)
+    # The §5.6 conservation baseline is the ASSEMBLED pair, checked at every
+    # stage boundary from here on — a pair that lost atoms in the press is
+    # VOID, not "bonded" (the T-18 blind spot: the old baseline was taken
+    # at pull start, after the press had already ejected 93 % of the atoms).
+    assembled_atom_count = len(built.atoms.get_tags())
     reference = None
-    if press.contact_reached:
+    if press.contact_reached and press.atoms_conserved:
         reference = settle_reference(
-            press_engine, member, reference_data_file=reference_file)
+            press_engine, member, reference_data_file=reference_file,
+            expected_atom_count=assembled_atom_count)
     press_engine.close()
 
     ladder = member.numerical.pull_rate_ladder
-    if not press.contact_reached or reference is None:
+    void = (not press.atoms_conserved
+            or (reference is not None and not reference.atoms_conserved))
+    if void or not press.contact_reached or reference is None:
+        why = ("LOST ATOMS before the pull — result VOID (§5.6)" if void
+               else "no contact under the press — not pulled (§5.2)")
+        note = press.note
+        if reference is not None and not reference.atoms_conserved:
+            note = f"{press.note}; settle LOST ATOMS — VOID (§5.6)"
         pulls = tuple(
             PullOutcome(
-                rate_value=rate.value, rate_unit=rate.unit,
-                note="no contact under the press — not pulled (§5.2)")
+                rate_value=rate.value, rate_unit=rate.unit, note=why)
             for rate in ladder)
         return BondDebondResult(
-            press=PressOutcome(bonded=False, note=press.note),
+            press=PressOutcome(bonded=False, note=note),
             reference_ok=False, pulls=pulls,
             activation_a=press.activation_a,
             activation_b=press.activation_b)
@@ -891,7 +903,8 @@ def run_bond_debond_md_live(
             seed, output_directory=rung.directory,
             trajectory_file=rung.trajectory_file,
             trajectory_stride=rung.trajectory_stride,
-            checkpoint_dir=rung.checkpoint_directory)
+            checkpoint_dir=rung.checkpoint_directory,
+            expected_atom_count=assembled_atom_count)
         pull_engine.close()
         pulls.append(PullOutcome(
             rate_value=rate.value, rate_unit=rate.unit,

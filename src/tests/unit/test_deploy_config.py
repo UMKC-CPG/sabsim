@@ -91,7 +91,7 @@ def test_template_loads_into_a_config():
     assert isinstance(config, DeploymentConfig)
     assert config.cluster_name == "pixstor"
     assert config.scheduler == "slurm"
-    assert config.default_account == "cpg"
+    assert config.default_account == "general"
     assert config.module_paths == (
         "/cluster/VAST/rulisp-lab/cpg/modulefiles",)
 
@@ -107,7 +107,7 @@ def test_partitions_carry_name_capacity_and_ceiling():
     assert cpu.max_walltime.in_hours() == 48.0
 
     gpu = config.partitions["gpu"]
-    assert gpu.name == "gpu"
+    assert gpu.name == "gpu,requeue"
     assert gpu.capacity == {"gpus_per_node": 4.0}
     assert gpu.max_walltime.in_hours() == 24.0
 
@@ -156,8 +156,8 @@ def test_partition_for_joins_usage_to_hardware():
     """A member job resolves to its real partition through the class seam."""
     config = load_deployment(_TEMPLATE_PATH)
 
-    assert config.partition_for("activate").name == "gpu"
-    assert config.partition_for("bond").name == "gpu"
+    assert config.partition_for("activate").name == "gpu,requeue"
+    assert config.partition_for("bond").name == "gpu,requeue"
     assert config.partition_for("analyze").name == "general"
 
 

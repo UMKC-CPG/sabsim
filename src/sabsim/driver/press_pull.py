@@ -151,6 +151,12 @@ class PressResult:
     note: str
     activation_a: ActivationVerdict | None = None
     activation_b: ActivationVerdict | None = None
+    # Whether the pair still holds every atom it was assembled with, read
+    # at the END of the press phase (heal, gate, scissor, press, hold). A
+    # press that ejected atoms is VOID (DESIGN §5.6), whatever
+    # ``contact_reached`` says — a flying fragment can fire the stress
+    # criterion on a pair that has disintegrated (LEDGER T-18).
+    atoms_conserved: bool = True
 
 
 @dataclass(frozen=True)
@@ -167,6 +173,9 @@ class ReferenceResult:
     report: SettleReport
     potential_energy: float
     reference_data_file: str | None = None
+    # Conservation against the ASSEMBLED count (§5.6), checked here too so
+    # an atom lost during the settle is caught before any pull starts.
+    atoms_conserved: bool = True
 
 
 @dataclass(frozen=True)
@@ -399,6 +408,15 @@ def press_and_bond(
     engine.commands(
         _press_setup(built, member, force_model, data_file, seed, geometry,
                      trajectory_file, trajectory_stride))
+    # The §5.6 conservation baseline is the ASSEMBLED pair — the count the
+    # structure was built with — not whatever the engine holds later. Every
+    # exit below reports conservation against it, so an atom ejected in the
+    # heal, the scissor, or the press is never invisible to the analyzer.
+    assembled_atom_count = len(built.atoms.get_tags())
+
+    def conserved_now() -> bool:
+        return atom_count_conserved(
+            assembled_atom_count, engine.atom_count())
 
     # HEAL the gapped pair, then GATE each healed surface (§3.4): both moved
     # into the bond flow. The heal runs ONLY when the two surfaces are
@@ -434,7 +452,8 @@ def press_and_bond(
             return PressResult(
                 contact_reached=False, chunks_to_contact=None,
                 note=f"activation gate failed (§3.5): {failing.reason}",
-                activation_a=activation_a, activation_b=activation_b)
+                activation_a=activation_a, activation_b=activation_b,
+                atoms_conserved=conserved_now())
         # Cut the vacuum the relax needed so the load-press starts near
         # contact at rest, never accelerating the grip across empty space
         # (mode = load, §9.3). Δz is measured from the RELAXED positions.
@@ -463,21 +482,27 @@ def press_and_bond(
         return PressResult(
             contact_reached=False, chunks_to_contact=None,
             note="no contact within the chunk budget (§9.3)",
-            activation_a=activation_a, activation_b=activation_b)
+            activation_a=activation_a, activation_b=activation_b,
+            atoms_conserved=conserved_now())
 
     hold_steps = _steps(member.protocol.press_duration, numerical.md_timestep)
     engine.commands([f"run {hold_steps}"])
+    conserved = conserved_now()
     return PressResult(
         contact_reached=True, chunks_to_contact=contact_chunk,
-        note="contact on the dual criterion, held at temperature (§9.3)",
-        activation_a=activation_a, activation_b=activation_b)
+        note=("contact on the dual criterion, held at temperature (§9.3)"
+              if conserved else
+              "LOST ATOMS during the press — result VOID (§5.6)"),
+        activation_a=activation_a, activation_b=activation_b,
+        atoms_conserved=conserved)
 
 
 def settle_reference(
         engine: Engine,
         member: MemberSpecification,
         control: RunControl = RunControl(),
-        reference_data_file: str | None = None) -> ReferenceResult:
+        reference_data_file: str | None = None,
+        expected_atom_count: int | None = None) -> ReferenceResult:
     """Minimize and equilibrate to a GATED zero-load reference (§9.4).
 
     Runs on the SAME engine as the preceding press (the settle re-reads no
@@ -501,6 +526,10 @@ def settle_reference(
     since the pull runs on a fresh engine and reads a file (§9.6). Handing
     the pull the ORIGINAL pair data instead would silently discard the
     whole press.
+
+    ``expected_atom_count`` is the ASSEMBLED pair's count (§5.6); when
+    given, the settled state is also checked for conservation against it,
+    and a settle that lost an atom reports ``atoms_conserved=False``.
     """
     numerical = member.numerical
     engine.commands(press_release_commands(member))
@@ -526,10 +555,14 @@ def settle_reference(
 
     if reference_data_file is not None:
         engine.commands([f"write_data {reference_data_file}"])
+    conserved = (
+        atom_count_conserved(expected_atom_count, engine.atom_count())
+        if expected_atom_count is not None else True)
     return ReferenceResult(
         settled=report.settled, report=report,
         potential_energy=energies[-1] if energies else engine.energy(),
-        reference_data_file=reference_data_file)
+        reference_data_file=reference_data_file,
+        atoms_conserved=conserved)
 
 
 def _pull_fixture_commands(
@@ -667,7 +700,8 @@ def pull_at_rate(
         output_directory: str,
         trajectory_file: str | None = None,
         trajectory_stride: int | None = None,
-        checkpoint_dir: str | None = None) -> PullResult:
+        checkpoint_dir: str | None = None,
+        expected_atom_count: int | None = None) -> PullResult:
     """Pull apart at one rate until complete separation, then reduce (§9.5).
 
     Sets up (or resumes) the pull, then advances in chunks, recording into
@@ -683,6 +717,11 @@ def pull_at_rate(
     there every ``control.checkpoint_cadence`` steps, and if one is already
     present the pull RESUMES from it rather than starting over (§13.3). A
     strided trajectory is written only when ``trajectory_file`` names one.
+
+    ``expected_atom_count`` is the ASSEMBLED pair's count. When given it is
+    the §5.6 conservation baseline instead of the count at pull start, so
+    an atom lost anywhere between assembly and separation voids the rung;
+    the pull-start count is only a fallback for a rung run on its own.
     """
     numerical = member.numerical
     timestep = to_metal(numerical.md_timestep, "time")
@@ -758,8 +797,9 @@ def pull_at_rate(
                 break
 
     final_atom_count = int(np.asarray(engine.positions()).shape[0])
-    conserved = atom_count_conserved(
-        ledger.starting_atom_count, final_atom_count)
+    baseline = (expected_atom_count if expected_atom_count is not None
+                else ledger.starting_atom_count)
+    conserved = atom_count_conserved(baseline, final_atom_count)
 
     grip_curve, averaged = averaged_force_curve(
         ledger.displacement, ledger.force, window)
