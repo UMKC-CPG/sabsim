@@ -253,7 +253,7 @@ def derive_lattices_live(
     cells: dict = {}
     provenance: list = []
     use_classical = _classical_cascade_requested()
-    allow_unvalidated = _unvalidated_potentials_allowed()
+    allow_unvalidated = member.potential.allow_unvalidated
     rank = comm.Get_rank() if comm is not None else 0
     # The §2.2 bulk-relax block size is a spec knob (numerical), not pinned.
     bulk_cells = member.numerical.bulk_cells_per_axis
@@ -290,7 +290,8 @@ def derive_lattices_live(
             # Universal-first default (§4.7): relax under the foundation MLIP
             # out-of-process in its bundle, read the relaxed cell back.
             model = universal_force_model(
-                type_map, allow_unvalidated=allow_unvalidated)
+                type_map, member.potential.universal_weights,
+                allow_unvalidated=allow_unvalidated)
             relaxed_file = os.path.join(
                 str(scratch_directory), f"relaxed_bulk_{wafer.identity}.data")
             script = bulk_relax_subprocess_script(
@@ -541,23 +542,6 @@ def build_halves(
 # registry before the evidence exists, and because it must be set in the
 # job script it stays visible in the run's own record. Anything produced
 # under it is PROVISIONAL and must be reported that way.
-_UNVALIDATED_POTENTIAL_VARIABLE = "SABSIM_ALLOW_UNVALIDATED_POTENTIAL"
-
-
-def _unvalidated_potentials_allowed() -> bool:
-    """Whether this run may use a not-yet-gate-cleared potential."""
-    setting = os.environ.get(_UNVALIDATED_POTENTIAL_VARIABLE, "")
-    return setting.strip().lower() in {"1", "true", "yes", "on"}
-
-
-# The cascade potential is UNIVERSAL by default (DESIGN §4.7): the
-# chemistry-agnostic foundation MLIP drives every material's amorphization.
-# A curated classical form (silicon's Stillinger-Weber, a cascade-validated
-# Tersoff) is the OPTION, chosen only on explicit request. Like the flags
-# above it lives in the environment so the choice to depart from the
-# universal default stays visible in the run's own record. The classical
-# form still needs its (species, domain) registry key, which comes from the
-# member's ``material_domain`` as before — this flag only flips WHICH path.
 _CASCADE_CLASSICAL_VARIABLE = "SABSIM_CASCADE_CLASSICAL"
 
 
@@ -576,26 +560,6 @@ def _classical_cascade_requested() -> bool:
 # potential-quality gate, so anything produced under it is provisional;
 # like the unvalidated-potential flag above, it lives in the environment
 # so a run that used it shows the override in its own record.
-_DEEPMD_MODEL_OVERRIDE_VARIABLE = "SABSIM_DEEPMD_MODEL"
-
-
-def _deepmd_model_override() -> str | None:
-    """The frozen DeePMD model path this run was told to bond under, or None.
-
-    Returns the model file named by ``SABSIM_DEEPMD_MODEL`` after checking
-    it exists — a named-but-absent model is a loud stop, never a silent
-    fall-through to the classical stand-in, because that would quietly run
-    a different experiment than the one the override asked for.
-    """
-    model_path = os.environ.get(_DEEPMD_MODEL_OVERRIDE_VARIABLE, "").strip()
-    if not model_path:
-        return None
-    if not os.path.isfile(model_path):
-        raise FileNotFoundError(
-            f"{_DEEPMD_MODEL_OVERRIDE_VARIABLE} names a DeePMD model that "
-            f"does not exist: {model_path}")
-    return model_path
-
 
 def _stage_trajectory(
         output_directory: str,
@@ -729,7 +693,8 @@ def _activate_one_half_subprocess(
     # run opted into the not-yet-gate-cleared model (§4.7).
     cascade_force_model = resolve_cascade_generator(
         built.type_map, _projectile_species(member),
-        allow_unvalidated=_unvalidated_potentials_allowed(),
+        weights_path=member.potential.universal_weights,
+        allow_unvalidated=member.potential.allow_unvalidated,
         domain=member.material_domain, use_classical=False)
 
     spec = derive_bombardment_spec(built, member)
@@ -828,7 +793,7 @@ def activate_one_half(
     cascade_outcome = activate_surface(
         engine, built, member, handle.data_file, seed,
         _GEOMETRY, _CONTROL,
-        allow_unvalidated_potential=_unvalidated_potentials_allowed(),
+        allow_unvalidated_potential=member.potential.allow_unvalidated,
         use_classical_cascade=_classical_cascade_requested(),
         trajectory_file=trajectory_file, trajectory_stride=stride)
     # Snapshot BEFORE closing: the amorphized (substrate-only, re-numbered)
@@ -998,35 +963,24 @@ def _bonded_force_model(
         type_map: dict,
         substrate,
         domain: str,
+        potential,
         allow_unvalidated: bool = False) -> ForceModel:
-    """The potential the bonded pair presses and pulls under (§4.5).
+    """The potential the bonded pair heals, presses and pulls under (§4.5).
 
-    Resolved from the material's registry entry, the same way the
-    re-anneal is, so the pair is pressed and pulled under exactly the
-    potential its surfaces were annealed under.
+    ``potential`` is the study's ``[potential]`` block. When it names a
+    ``production_weights`` file the pair runs under THAT frozen DeePMD
+    model — today a committee of one, later the ALF-trained committee the
+    member's ``potential_ref`` resolves to — dropping in behind the same
+    ``pair_style`` seam. The file's existence was checked at load time
+    (phase three), so a missing model stops on the login node, never here.
 
-    This previously mapped EVERY declared type to ``Si`` — harmless for
-    the Si/Si null test, where that is the truth, but wrong for any other
-    material: it would have described a silica wafer as though every
-    oxygen were a silicon. Each type now carries its own element, and a
-    projectile type still declared with no atoms left becomes ``NULL``.
-    The trained MLIP drops in behind this same ``pair_style`` seam.
-
-    ``domain`` is the member's declared regime (DESIGN.md §4.8), and
-    passing the SAME one the re-anneal used is what makes the promise
-    above literal — anneal and press resolve to one registry entry.
-
-    The one exception is the EXPLICIT deepmd override
-    (:func:`_deepmd_model_override`): when a run names a frozen DeePMD
-    model, the pair presses and pulls under THAT model — the trained-MLIP
-    force path this stand-in is a placeholder for — dropping in behind the
-    very ``pair_style`` seam the docstring promises. This validates the
-    deepmd path end-to-end (job 15686597 proved the engine alone); the
-    §11 bootstrap replaces the override with a resolved committee later.
+    With no production model named the classical registry form is used, so
+    the pair is described by the same entry everywhere. Each type carries
+    its own element and a projectile type still declared with no atoms
+    left becomes ``NULL``.
     """
-    model_path = _deepmd_model_override()
-    if model_path is not None:
-        return deepmd_model(model_path)
+    if potential.production_weights:
+        return deepmd_model(potential.production_weights)
     return classical_force_model(
         type_map, substrate, allow_unvalidated=allow_unvalidated,
         domain=domain)
@@ -1067,7 +1021,8 @@ def run_bond_debond_md_live(
         built.type_map,
         frozenset(built.type_map) - _projectile_species(member),
         member.material_domain,
-        allow_unvalidated=_unvalidated_potentials_allowed())
+        member.potential,
+        allow_unvalidated=member.potential.allow_unvalidated)
     seed = member.ensemble.master_seed
     reference_file = os.path.join(scratch_directory, "settled_reference.data")
 

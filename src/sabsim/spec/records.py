@@ -183,6 +183,43 @@ class EnsembleKnobs:
 
 
 @dataclass(frozen=True)
+class PotentialSpec:
+    """Which force models a study runs under (DESIGN.md §1.6, §4.7).
+
+    A study-level block, shared by every member (DESIGN.md §1.1: the
+    members of one study share ONE potential), and the reason it lives in
+    the study file rather than in the environment: the study file is the
+    provenance record, so anything that changes the physics must be
+    written there, never picked up silently from a shell variable.
+
+    Two models are named, because the pipeline deliberately uses two:
+
+    * ``universal_model`` / ``universal_weights`` — the pre-trained
+      foundation model that derives the working lattice (§2.2) and runs
+      the ion-beam cascade spliced with ZBL cores (§4.7). The name must
+      match the identity the code pins (``UNIVERSAL_CASCADE_MODEL``), so
+      a study cannot silently run under a different release than the one
+      the code was validated against; the weights path says where that
+      model's file is on this machine (``$SABSIM_SHARE`` and the other
+      roots are expanded by the loader).
+    * ``production_weights`` — the model the gentle stages (heal, press,
+      settle, pull) run under. The design target is the ALF-trained
+      DeePMD committee named by each member's ``potential_ref``; until
+      the bootstrap that manufactures one exists, this names a single
+      frozen DeePMD file (a committee of one) and is the ONLY place that
+      choice is recorded.
+
+    ``allow_unvalidated`` is the on-the-record opt-in to run a model that
+    has not yet cleared the §3.5 activation gate. Every result produced
+    under it is exploratory and is reported as such.
+    """
+    universal_model: str             # pinned identity, e.g. "DPA-3.1-3M"
+    universal_weights: str           # path to that model's weights file
+    production_weights: str          # frozen DeePMD model for heal/press/pull
+    allow_unvalidated: bool          # exploratory opt-in (DESIGN.md §4.7)
+
+
+@dataclass(frozen=True)
 class MemberSpecification:
     """One member: a facing pair run under one protocol (PSEUDOCODE §2).
 
@@ -222,6 +259,7 @@ class MemberSpecification:
     ensemble: EnsembleKnobs          # which realizations to sample
     potential_ref: str               # the potential generation it uses
     material_domain: str             # the structural/chemical regime
+    potential: PotentialSpec         # the force models it runs under
 
 
 @dataclass(frozen=True)

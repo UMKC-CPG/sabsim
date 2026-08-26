@@ -49,8 +49,6 @@ export PYTHONPATH="$REPO/src"
 # Universal cascade, out-of-process in the deepmd bundle, DPA-3.1-3M as
 # a .pth (no AOT .pt2 exists for it -- the network.py `u0` bug).
 export SABSIM_CASCADE_ENGINE_PREFIX="$SHARE/programs/deepmd-kit-3.2.0b0-cuda129"
-export SABSIM_CASCADE_MLIP_MODEL="$FIX/dpa3.pth"
-export SABSIM_ALLOW_UNVALIDATED_POTENTIAL=1
 unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU
 
 cd "$REPO"

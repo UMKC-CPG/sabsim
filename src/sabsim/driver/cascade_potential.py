@@ -66,20 +66,16 @@ _LONG_CORE_INDEX = 1
 _SHORT_CORE_INDEX = 2
 
 
-# The environment variable that names the universal cascade model's ON-DISK
-# weights. The registry entry below PINS the model's identity (name, branch,
-# version) for reproducibility, but the weights themselves are a large
-# deploy-time artifact (tens of MB) rather than a checked-in file, so the
-# path is supplied at run time here — the same override-by-environment
-# discipline the bespoke committee model uses (``SABSIM_DEEPMD_MODEL``).
-#
-# The artifact is a PyTorch ``.pth``, which LAMMPS loads directly through
-# ``pair_style deepmd`` and which is NOT tied to a GPU architecture: the
-# same file runs on V100, A100 and H100 alike. An AOT-compiled ``.pt2`` is
-# roughly 2.5x faster per step but IS architecture-locked and must be
-# rebuilt per GPU type, so it is an optional deploy-time optimisation, not
-# the contract (DESIGN §4.7).
-_UNIVERSAL_MODEL_PATH_VARIABLE = "SABSIM_CASCADE_MLIP_MODEL"
+# WHERE the universal model's weights live is a study-file decision, not
+# an environment one: the study's ``[potential]`` block names the weights
+# path (``universal_weights``) beside the pinned model identity, so the
+# provenance record says which file ran (DESIGN §1.6). The registry entry
+# below pins the IDENTITY (name, branch, version); the loader hands the
+# path in. The artifact is a PyTorch ``.pth``, which LAMMPS loads directly
+# through ``pair_style deepmd`` and which is NOT tied to a GPU
+# architecture; an AOT-compiled ``.pt2`` is ~2.5x faster but is
+# architecture-locked, so it is an optional optimisation, not the
+# contract (DESIGN §4.7).
 
 
 @dataclass(frozen=True)
@@ -105,8 +101,8 @@ class UniversalCascadeModel:
     ``validated`` follows the SAME gate-not-warn discipline as the classical
     registry: it stays ``False`` until a full activation under this model has
     cleared the §3.5 gate on a real material, and until then the resolver
-    refuses unless the run opts in with ``SABSIM_ALLOW_UNVALIDATED_POTENTIAL``
-    — the on-the-record path §4.7 defines for bringing up any new material.
+    refuses unless the study's ``[potential] allow_unvalidated`` opts in —
+    the on-the-record path §4.7 defines for bringing up any new material.
     """
 
     name: str                 # e.g. "DPA-3.1-3M"
@@ -154,37 +150,30 @@ UNIVERSAL_CASCADE_MODEL = UniversalCascadeModel(
            "been screened, and passing Tier-0 is a floor, not a validation. "
            "It has NOT yet cleared the §3.5 activation gate on any material, "
            "so validated stays False: a default cascade refuses unless the "
-           "run sets SABSIM_ALLOW_UNVALIDATED_POTENTIAL, and results obtained "
-           "that way are EXPLORATORY. The weights are a portable PyTorch "
-           ".pth; its path is given via SABSIM_CASCADE_MLIP_MODEL.",
+           "study opts in with [potential] allow_unvalidated, and results "
+           "obtained that way are EXPLORATORY. The weights are a portable "
+           "PyTorch .pth named by the study's [potential] universal_weights.",
     validated=False)
 
 
 def resolve_universal_model_path(
+        weights_path: str,
         model: UniversalCascadeModel = UNIVERSAL_CASCADE_MODEL) -> str:
-    """Resolve the on-disk weights for the universal cascade model.
+    """Check the weights path the study file gave for the universal model.
 
-    The registry pins the model IDENTITY (name/branch/version); the weights
-    themselves are a large deploy-time artifact rather than a checked-in
-    file, so their path is supplied at run time via the
-    ``SABSIM_CASCADE_MLIP_MODEL`` environment variable. The expected form is
-    a portable PyTorch ``.pth``, which ``pair_style deepmd`` loads directly
-    on any GPU; an architecture-specific AOT ``.pt2`` also works and is
-    faster, but must be rebuilt per GPU type. A missing path is a LOUD
-    failure naming the variable and the model — the same no-hidden-defaults
-    discipline as the rest of the pipeline, so a cascade never silently runs
-    under the wrong (or no) model.
+    The registry pins the model IDENTITY (name/branch/version); the study
+    file's ``[potential] universal_weights`` says where its file is on this
+    machine. An empty path is a LOUD failure naming the model — the same
+    no-hidden-defaults discipline as the rest of the pipeline, so a cascade
+    never silently runs under the wrong (or no) model. Existence of the
+    file is checked at load time by the phase-three reference check.
     """
-    model_path = os.environ.get(_UNIVERSAL_MODEL_PATH_VARIABLE)
-    if not model_path:
+    if not weights_path:
         raise RuntimeError(
             f"the universal cascade model '{model.name}' needs its "
-            f"weights, but {_UNIVERSAL_MODEL_PATH_VARIABLE} is unset. The "
-            f"weights are a deploy-time artifact, not a checked-in file "
-            f"(DESIGN §4.7), so point the variable at this model's .pth (or "
-            f"an architecture-matched .pt2), or request a classical "
-            f"potential explicitly.")
-    return model_path
+            f"weights, but the study's [potential] universal_weights is "
+            f"empty (DESIGN §4.7).")
+    return weights_path
 
 
 @dataclass(frozen=True)
@@ -483,6 +472,7 @@ def resolve_parameter_file(param_file: str) -> str:
 def resolve_cascade_generator(
         type_map: dict,
         projectile_species,
+        weights_path: str = "",
         long_core: tuple = (_LONG_CORE_INNER_STANDIN,
                             _LONG_CORE_OUTER_STANDIN),
         short_core: tuple = (_SHORT_CORE_INNER_STANDIN,
@@ -512,13 +502,18 @@ def resolve_cascade_generator(
     other half of the CLASSICAL registry key. It is consulted only when
     ``use_classical=True``; a universal model has no species/domain key.
 
+    ``weights_path`` is the universal model's weights file, taken from the
+    study's ``[potential] universal_weights`` (the study file is the
+    provenance record, DESIGN §1.6); it is only consulted on the universal
+    path.
+
     ``allow_unvalidated`` is the deliberate escape hatch for EXPLORATORY
     work — the first run of a new material (or, for the universal model, its
     first activation), whose whole purpose is to produce the evidence the
-    §3.5 gate would judge. It is a caller-side decision, never a default. The
-    universal model has RUN but not yet cleared that gate, so a DEFAULT
-    cascade refuses unless this is set — the same on-the-record opt-in the
-    classical registry uses. Anything returned under it is PROVISIONAL.
+    §3.5 gate would judge. It comes from the study's ``[potential]
+    allow_unvalidated``, never a default. The universal model has RUN but
+    not yet cleared that gate, so a DEFAULT cascade refuses unless this is
+    set. Anything returned under it is PROVISIONAL.
 
     On success it returns a :class:`~sabsim.driver.commands.ForceModel` the
     driver emits through ``force_model_commands`` unchanged — the base form
@@ -539,10 +534,12 @@ def resolve_cascade_generator(
                 f"(DESIGN §4.7) but has NOT yet cleared the §3.5 activation "
                 f"gate: {model.caveat} To run it as EXPLORATORY bring-up — "
                 f"whose results are provisional and must be reported as such "
-                f"— set SABSIM_ALLOW_UNVALIDATED_POTENTIAL. Or request a "
-                f"validated classical form explicitly (use_classical=True).")
+                f"— set allow_unvalidated = true in the study's [potential] "
+                f"block. Or request a validated classical form explicitly "
+                f"(use_classical=True).")
         return _assemble_universal_overlay(
-            model, type_map, projectile, long_core, short_core)
+            model, weights_path, type_map, projectile, long_core,
+            short_core)
 
     # Explicit classical request (DESIGN §4.7, "classical by choice"): the
     # per-material registry, keyed by (substrate species, domain).
@@ -555,6 +552,7 @@ def resolve_cascade_generator(
 
 def universal_force_model(
         type_map: dict,
+        weights_path: str,
         allow_unvalidated: bool = False,
         model: UniversalCascadeModel = UNIVERSAL_CASCADE_MODEL) -> ForceModel:
     """The universal MLIP ALONE — no ZBL — for the QUIET stages (§4.7).
@@ -581,6 +579,7 @@ def universal_force_model(
     it follows the gate-not-warn discipline — the universal model is
     unvalidated until it clears the §3.5 gate, so a bulk derivation refuses
     unless ``allow_unvalidated`` opts into the same on-the-record bring-up.
+    ``weights_path`` is the study's ``[potential] universal_weights``.
     """
     if not model.validated and not allow_unvalidated:
         raise NotImplementedError(
@@ -588,12 +587,11 @@ def universal_force_model(
             f"derivation default (DESIGN §4.7) but has NOT yet cleared the "
             f"§3.5 activation gate: {model.caveat} To derive under it as "
             f"EXPLORATORY bring-up — provisional, reported as such — set "
-            f"SABSIM_ALLOW_UNVALIDATED_POTENTIAL, or request a validated "
-            f"classical form explicitly (SABSIM_CASCADE_CLASSICAL).")
+            f"allow_unvalidated = true in the study's [potential] block.")
     # Element labels in LAMMPS type-id order; deepmd needs no NULL slot.
     symbols_in_order = sorted(type_map, key=lambda symbol: type_map[symbol])
     element_labels = " ".join(symbols_in_order)
-    model_path = resolve_universal_model_path(model)
+    model_path = resolve_universal_model_path(weights_path, model)
     return ForceModel(
         pair_style=f"deepmd {model_path}",
         pair_coeff=(f"* * {element_labels}",),
@@ -744,6 +742,7 @@ def _assemble_classical_overlay(
 
 def _assemble_universal_overlay(
         model: UniversalCascadeModel,
+        weights_path: str,
         type_map: dict,
         projectile: frozenset,
         long_core: tuple,
@@ -769,7 +768,7 @@ def _assemble_universal_overlay(
     # covers the projectile too, and the long ZBL core dominates the collision.
     symbols_in_order = sorted(type_map, key=lambda symbol: type_map[symbol])
     element_labels = " ".join(symbols_in_order)
-    model_path = resolve_universal_model_path(model)
+    model_path = resolve_universal_model_path(weights_path, model)
     deepmd_coeff = f"* * deepmd {element_labels}"
 
     zbl_style, zbl_coeffs = _zbl_overlay(

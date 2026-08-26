@@ -143,3 +143,28 @@ def test_search_locations_are_not_repeated(tmp_path, monkeypatch):
     listed = [line.strip() for line in str(caught.value).splitlines()
               if line.strip().endswith("nope.cif")]
     assert len(listed) == len(set(listed))
+
+
+def test_wrong_universal_model_name_is_rejected():
+    """The study's universal model must be the identity the code pins."""
+    from dataclasses import replace
+    study = load_and_validate_study(_TEMPLATE_PATH)
+    wrong = replace(study.members[0].potential, universal_model="MACE-MP-0")
+    members = tuple(
+        replace(member, potential=wrong) for member in study.members)
+    with pytest.raises(SpecificationError) as caught:
+        check_study_references(replace(study, members=members))
+    assert "DPA-3.1-3M" in str(caught.value)
+
+
+def test_missing_model_file_is_rejected_on_the_login_node():
+    """A weights file that is not there fails phase three, not a GPU job."""
+    from dataclasses import replace
+    study = load_and_validate_study(_TEMPLATE_PATH)
+    absent = replace(
+        study.members[0].potential, production_weights="/no/such/model.pb")
+    members = tuple(
+        replace(member, potential=absent) for member in study.members)
+    with pytest.raises(SpecificationError) as caught:
+        check_study_references(replace(study, members=members))
+    assert "/no/such/model.pb" in str(caught.value)

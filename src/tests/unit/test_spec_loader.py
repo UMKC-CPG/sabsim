@@ -221,3 +221,44 @@ def test_empty_material_domain_is_rejected(tmp_path):
     assert "material_domain" in message
     # The message explains WHY the species alone will not do.
     assert "species" in message
+
+
+# ---------------------------------------------------------------------
+# [potential] — the force models the study runs under (§1.6, §4.7). A
+# study-level block, required in full, with location roots expanded.
+# ---------------------------------------------------------------------
+
+def test_template_potential_block_names_both_models():
+    """Every member carries the study's [potential] block, roots expanded."""
+    study = load_and_validate_study(_TEMPLATE_PATH)
+    for member in study.members:
+        potential = member.potential
+        assert potential.universal_model == "DPA-3.1-3M"
+        assert potential.universal_weights.endswith("dpa3.pth")
+        assert "$" not in potential.universal_weights    # root expanded
+        assert potential.production_weights.endswith("graph.pb")
+        assert potential.allow_unvalidated is True
+
+
+def test_missing_potential_block_is_rejected(tmp_path):
+    """A study with no [potential] block cannot say what it runs under."""
+    text = _template_text().replace("[potential]", "[potential_gone]", 1)
+    spec = tmp_path / "spec.toml"
+    spec.write_text(text)
+    with pytest.raises(SpecificationError) as caught:
+        load_and_validate_study(spec)
+    assert "potential" in str(caught.value)
+
+
+def test_unset_location_root_in_a_weights_path_is_rejected(
+        tmp_path, monkeypatch):
+    """A weights path using an unset root fails now, not inside LAMMPS."""
+    monkeypatch.delenv("SABSIM_NOWHERE", raising=False)
+    text = _template_text().replace(
+        'production_weights = "$SABSIM_SHARE',
+        'production_weights = "$SABSIM_NOWHERE', 1)
+    spec = tmp_path / "spec.toml"
+    spec.write_text(text)
+    with pytest.raises(SpecificationError) as caught:
+        load_and_validate_study(spec)
+    assert "sabsimrc" in str(caught.value)

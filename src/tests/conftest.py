@@ -16,3 +16,11 @@ _SRC_ROOT = os.path.abspath(
 
 if _SRC_ROOT not in sys.path:
     sys.path.insert(0, _SRC_ROOT)
+
+# The study-spec TEMPLATE the tests load names its model files relative to
+# the SABSIM_SHARE location root (ARCHITECTURE §4.1), exactly as a real
+# study does, and the loader refuses a root that is not set. A test shell
+# that has not sourced sabsimrc gets the lab's share root here so the
+# template still loads; the phase-three existence check then genuinely
+# looks for the files, which is the honest behaviour on any machine.
+os.environ.setdefault("SABSIM_SHARE", "/cluster/VAST/rulisp-lab/cpg")

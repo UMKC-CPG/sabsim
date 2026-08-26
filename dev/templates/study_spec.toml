@@ -151,6 +151,37 @@ material_domain = "silicon-and-silica"
   face      = [0, 0, 1]
 
 # ---------------------------------------------------------------------
+# POTENTIAL block (§1.6, §4.7): WHICH force models the study runs under.
+# Written here, and only here, because the study file is the provenance
+# record — a model chosen by a shell variable would be a hidden default
+# (§1.4). One block for the whole study: the members of a study share
+# one potential (§1.1). Paths may use the location roots ($SABSIM_SHARE
+# etc., ARCHITECTURE §4.1); the loader expands them.
+# ---------------------------------------------------------------------
+[potential]
+# The universal foundation model that derives each material's working
+# lattice (§2.2) and runs the ion-beam cascade spliced with ZBL cores
+# (§4.7). The name must match the identity pinned in the code
+# (driver/cascade_potential.py, UNIVERSAL_CASCADE_MODEL) so a study
+# cannot quietly run under a different release than the validated one.
+universal_model   = "DPA-3.1-3M"
+# Its weights: a portable PyTorch .pth that pair_style deepmd loads on
+# any GPU (an architecture-specific .pt2 also works, faster, per-GPU).
+universal_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
+# The PRODUCTION model for the gentle stages — heal, press, settle, pull
+# (§3.4, §5). The design target is the ALF-trained DeePMD committee each
+# member's potential_ref will name (§4.5); until that bootstrap exists
+# this names ONE frozen DeePMD file, a committee of one, and results
+# under it carry no committee uncertainty.
+production_weights = "$SABSIM_SHARE/share/train_deepmd_si/graph.pb"
+# The universal model has passed the Tier-0 crystal-below-damaged screen
+# on silicon but has NOT cleared the §3.5 activation gate on any
+# material, so it is still marked unvalidated in the code. Running it
+# needs this explicit, on-the-record opt-in; everything produced under
+# it is EXPLORATORY. Set false once validated=True is flipped (§4.7).
+allow_unvalidated = true
+
+# ---------------------------------------------------------------------
 # PROTOCOL group (§1.2): HOW the experiment is performed. Every knob
 # here is a physics choice — its influence on the answer IS the result,
 # so it is frozen by being written down, not by being hidden.

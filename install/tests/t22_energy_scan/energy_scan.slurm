@@ -41,13 +41,13 @@ module load cpg_lammps_conda/2024.08.29-deepmd
 source "$SHARE/virtual_envs/sabsim/bin/activate"
 export PYTHONPATH="$REPO/src"
 
-# Universal cascade, out-of-process in the deepmd bundle. The model is
+# Universal cascade, out-of-process in the deepmd bundle. The MODEL is
+# named by the study file's [potential] block (dev/templates/study_spec
+# .toml), not here. It is
 # DPA-3.1-3M as a .pth: no AOT .pt2 exists for it (the network.py `u0`
 # bug, diagnosed in dev/notes/mlip-cascade-integration.md) but lmp loads
 # .pth directly with energy conserved.
 export SABSIM_CASCADE_ENGINE_PREFIX="$SHARE/programs/deepmd-kit-3.2.0b0-cuda129"
-export SABSIM_CASCADE_MLIP_MODEL="$FIX/dpa3.pth"
-export SABSIM_ALLOW_UNVALIDATED_POTENTIAL=1
 unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU
 
 cd "$REPO"

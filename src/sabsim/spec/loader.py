@@ -31,6 +31,7 @@ per-member override is a later-wave extension of this reader.
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 
@@ -40,6 +41,7 @@ from sabsim.spec.records import (
     MaterialKnobs,
     MemberSpecification,
     NumericalKnobs,
+    PotentialSpec,
     ProtocolKnobs,
     Quantity,
     Relation,
@@ -274,6 +276,49 @@ def _ensemble_from_table(table: dict, context: str) -> EnsembleKnobs:
     )
 
 
+def _expand_roots(path: str, context: str) -> str:
+    """Expand ``$SABSIM_SHARE``-style roots in a weights path.
+
+    A study file may name a model file relative to one of the three
+    location roots (ARCHITECTURE.md §4.1) so the same study runs on any
+    machine that sources its ``sabsimrc``. A root that is referenced but
+    not set in the environment is rejected here, because a path with a
+    literal ``$SABSIM_SHARE`` left in it would fail much later, inside
+    LAMMPS, with a far less helpful message.
+    """
+    expanded = os.path.expandvars(path)
+    if "$" in expanded:
+        raise SpecificationError(
+            f"{context}: '{path}' names a location root that is not set "
+            f"in the environment; source your sabsimrc first (§4.1)")
+    return expanded
+
+
+def _potential_from_table(table: dict, context: str) -> PotentialSpec:
+    """Assemble the study-level PotentialSpec from the ``[potential]`` block.
+
+    Every key is required (no hidden defaults, DESIGN.md §1.4): the
+    universal model's pinned name and weights, the production model's
+    weights, and the explicit unvalidated opt-in. The weights paths have
+    their location roots expanded here so every later consumer sees a
+    plain path.
+    """
+    allow = _require(table, "allow_unvalidated", context)
+    if not isinstance(allow, bool):
+        raise SpecificationError(
+            f"{context} -> allow_unvalidated: expected true or false")
+    return PotentialSpec(
+        universal_model=str(_require(table, "universal_model", context)),
+        universal_weights=_expand_roots(
+            str(_require(table, "universal_weights", context)),
+            f"{context} -> universal_weights"),
+        production_weights=_expand_roots(
+            str(_require(table, "production_weights", context)),
+            f"{context} -> production_weights"),
+        allow_unvalidated=allow,
+    )
+
+
 # ---------------------------------------------------------------------
 # The executability checks (DESIGN.md §1.5) — reject a spec that cannot
 # be RUN, with a message that says why.
@@ -391,13 +436,16 @@ def load_and_validate_study(spec_path: str | Path) -> Study:
 
     # v1 shares one protocol, numerical, and ensemble block across all
     # members (DESIGN.md §1.1), so they are read once at study level and
-    # distributed. Material and potential_ref are per member.
+    # distributed, as is the [potential] block that names the force
+    # models. Material and potential_ref are per member.
     protocol = _protocol_from_tables(
         _require(raw, "protocol", "top level"), "protocol")
     numerical = _numerical_from_table(
         _require(raw, "numerical", "top level"), "[numerical]")
     ensemble = _ensemble_from_table(
         _require(raw, "ensemble", "top level"), "[ensemble]")
+    potential = _potential_from_table(
+        _require(raw, "potential", "top level"), "[potential]")
 
     member_tables = _require(raw, "member", "top level")
     members = []
@@ -421,6 +469,7 @@ def load_and_validate_study(spec_path: str | Path) -> Study:
                 member_table, "potential_ref", context)),
             material_domain=str(_require(
                 member_table, "material_domain", context)),
+            potential=potential,
         )
         _reject_if_not_executable(member)
         members.append(member)

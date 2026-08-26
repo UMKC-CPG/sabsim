@@ -87,38 +87,37 @@ def test_coupling_for_matches_the_cell_symmetry():
     assert _coupling_for(trigonal) == "tri"      # a non-right angle
 
 
-def test_bonded_force_model_is_classical_without_override(monkeypatch):
-    """With no deepmd override, the pair bonds under the classical stand-in."""
-    monkeypatch.delenv("SABSIM_DEEPMD_MODEL", raising=False)
+def _potential_spec(production_weights: str):
+    """A [potential] block naming (or not naming) a production model."""
+    from sabsim.spec.records import PotentialSpec
+    return PotentialSpec(
+        universal_model="DPA-3.1-3M", universal_weights="/models/dpa3.pth",
+        production_weights=production_weights, allow_unvalidated=True)
+
+
+def test_bonded_force_model_is_classical_without_production_model():
+    """With no production model named, the pair bonds under the stand-in."""
     model = _bonded_force_model(
-        {"Si": 1}, {"Si"}, "diamond-cubic", allow_unvalidated=True)
+        {"Si": 1}, {"Si"}, "diamond-cubic", _potential_spec(""),
+        allow_unvalidated=True)
     assert model.pair_style == "sw"        # Stillinger-Weber, no plugin
     assert model.preload == ()
 
 
-def test_bonded_force_model_uses_deepmd_override(monkeypatch, tmp_path):
-    """An explicit SABSIM_DEEPMD_MODEL bonds under THAT deepmd model.
+def test_bonded_force_model_uses_the_studys_production_model(tmp_path):
+    """The study's [potential] production_weights bonds under THAT model.
 
     The trained-MLIP force path drops in behind the same seam: the pair
     style becomes ``deepmd <path>`` and the model carries its plugin load.
     """
     model_file = tmp_path / "graph.pb"
     model_file.write_bytes(b"\x00")        # a stand-in file; only its path
-    monkeypatch.setenv("SABSIM_DEEPMD_MODEL", str(model_file))
     model = _bonded_force_model(
-        {"Si": 1}, {"Si"}, "diamond-cubic", allow_unvalidated=True)
+        {"Si": 1}, {"Si"}, "diamond-cubic", _potential_spec(str(model_file)),
+        allow_unvalidated=True)
     assert model.pair_style == f"deepmd {model_file}"
     assert model.pair_coeff == ("* *",)
     assert "plugin load ${dp}" in model.preload
-
-
-def test_bonded_force_model_override_missing_file_is_a_loud_stop(
-        monkeypatch):
-    """A named-but-absent deepmd model stops, never silently falls back."""
-    monkeypatch.setenv("SABSIM_DEEPMD_MODEL", "/no/such/model.pb")
-    with pytest.raises(FileNotFoundError, match="does not exist"):
-        _bonded_force_model(
-            {"Si": 1}, {"Si"}, "diamond-cubic", allow_unvalidated=True)
 
 
 def test_pull_rung_paths_are_self_contained(tmp_path):
@@ -650,8 +649,6 @@ def test_derive_lattices_live_universal_runs_out_of_process(
     from sabsim.pipeline import live_stages
     import sabsim.driver.lammps_engine as lammps_engine_module
 
-    monkeypatch.setenv("SABSIM_CASCADE_MLIP_MODEL", "/models/dpa3.pth")
-    monkeypatch.setenv("SABSIM_ALLOW_UNVALIDATED_POTENTIAL", "1")
     monkeypatch.delenv("SABSIM_CASCADE_CLASSICAL", raising=False)
 
     scripts = []

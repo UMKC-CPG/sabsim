@@ -32,6 +32,8 @@ Two deliberate behaviours:
 
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 
 from sabsim.driver.cascade_potential import (
@@ -190,6 +192,34 @@ def _species_union_or_none(member: MemberSpecification):
     return frozenset(symbols)
 
 
+def _potential_problems(study: Study) -> list:
+    """Report a ``[potential]`` block the run could not execute (§4.7).
+
+    The universal model's NAME must be the identity the code pins, so a
+    study never silently runs under a different release than the one the
+    cascade was validated against; and both weights files must exist,
+    because a missing model file would otherwise surface an hour into a
+    GPU job as a LAMMPS error rather than on the login node now.
+    """
+    from sabsim.driver.cascade_potential import UNIVERSAL_CASCADE_MODEL
+    spec = study.members[0].potential if study.members else None
+    if spec is None:
+        return []
+    problems = []
+    if spec.universal_model != UNIVERSAL_CASCADE_MODEL.name:
+        problems.append(
+            f"[potential] universal_model '{spec.universal_model}' is not "
+            f"the pinned universal model '{UNIVERSAL_CASCADE_MODEL.name}' "
+            f"(DESIGN §4.7: a universal entry pins the model version)")
+    for key, path in (("universal_weights", spec.universal_weights),
+                      ("production_weights", spec.production_weights)):
+        if not os.path.isfile(path):
+            problems.append(
+                f"[potential] {key} names a model file that does not "
+                f"exist: {path}")
+    return problems
+
+
 def check_study_references(study: Study) -> None:
     """Phase three: every artifact a study POINTS AT must be there.
 
@@ -207,6 +237,7 @@ def check_study_references(study: Study) -> None:
     for member in study.members:
         problems.extend(_crystal_problems(member))
         problems.extend(_domain_problems(member))
+    problems.extend(_potential_problems(study))
 
     if problems:
         listed = "\n  - ".join(problems)

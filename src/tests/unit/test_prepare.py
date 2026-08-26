@@ -67,10 +67,11 @@ def test_activate_script_directives_and_run_line(roots_set, tmp_path):
     # out-of-process by the env below, not `module load`.
     assert "module load cpg_lammps" not in text
     # The per-kind [usage.activate.environment] rides as `export` lines; NO
-    # LAMMPS_POTENTIALS (activate is cascade-only, §3.4).
+    # LAMMPS_POTENTIALS (activate is cascade-only, §3.4), and NO model
+    # choice — which model runs is the study file's [potential] block.
     assert "export SABSIM_CASCADE_ENGINE_PREFIX=" in text
-    assert "export SABSIM_CASCADE_MLIP_MODEL=" in text
-    assert 'export SABSIM_ALLOW_UNVALIDATED_POTENTIAL="1"' in text
+    assert "SABSIM_CASCADE_MLIP_MODEL" not in text
+    assert "SABSIM_ALLOW_UNVALIDATED_POTENTIAL" not in text
     assert "LAMMPS_POTENTIALS" not in text
     assert 'export SABSIM_SHARE="/cluster/VAST/rulisp-lab/cpg"' in text
     # The launcher clears the mutually-exclusive memory exports first, or
