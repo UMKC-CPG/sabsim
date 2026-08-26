@@ -20,7 +20,6 @@ from sabsim.structure.amorphized_assembly import (
     assemble_amorphized_pair,
     drop_disconnected,
     flip_in_z,
-    snapshot_amorphized_half,
 )
 from sabsim.structure.slab_builder import (
     WAFER_A_TAG,
@@ -55,50 +54,6 @@ def _grid_slab(cell_side: float, tag: int | None = None) -> Atoms:
     if tag is not None:
         slab.set_tags([tag] * len(slab))
     return slab
-
-
-# ---------------------------------------------------------------------
-# snapshot_amorphized_half — the engine -> ASE read-back.
-# ---------------------------------------------------------------------
-
-def test_snapshot_maps_types_to_species_and_tags():
-    """The read-back rebuilds species from type ids and tags the wafer."""
-    positions = np.array([
-        [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
-    # Type ids 1->Si, 2->O; the frame is Si, O, Si.
-    type_ids = np.array([1, 2, 1])
-    box = np.diag([5.0, 5.0, 20.0])
-    engine = MockEngine(
-        box=box, positions=[positions], types=[type_ids])
-
-    half = snapshot_amorphized_half(
-        engine, type_map={"Si": 1, "O": 2}, wafer_tag=WAFER_A_TAG)
-
-    assert half.get_chemical_symbols() == ["Si", "O", "Si"]
-    assert list(half.get_tags()) == [WAFER_A_TAG] * 3
-    assert np.allclose(half.get_cell(), box)
-    assert list(half.get_pbc()) == [True, True, False]
-    assert np.allclose(half.get_positions(), positions)
-
-
-def test_snapshot_survives_projectile_deletion():
-    """A composition the cascade changed reads back from type ids alone.
-
-    The type map still carries the projectile (Ar), but no Ar atom
-    survives the re-anneal, so the read-back is substrate-only — proving
-    positions plus type ids reconstitute the half without the pre-cascade
-    species list.
-    """
-    positions = np.zeros((2, 3))
-    engine = MockEngine(
-        box=np.eye(3), positions=[positions], types=[np.array([1, 2])])
-
-    half = snapshot_amorphized_half(
-        engine, type_map={"O": 1, "Si": 2, "Ar": 3},
-        wafer_tag=WAFER_B_TAG)
-
-    assert half.get_chemical_symbols() == ["O", "Si"]
-    assert "Ar" not in half.get_chemical_symbols()
 
 
 # ---------------------------------------------------------------------

@@ -95,13 +95,6 @@ def _potential_spec(production_weights: str):
         production_weights=production_weights, allow_unvalidated=True)
 
 
-def test_bonded_force_model_is_classical_without_production_model():
-    """With no production model named, the pair bonds under the stand-in."""
-    model = _bonded_force_model(
-        {"Si": 1}, {"Si"}, "diamond-cubic", _potential_spec(""),
-        allow_unvalidated=True)
-    assert model.pair_style == "sw"        # Stillinger-Weber, no plugin
-    assert model.preload == ()
 
 
 def test_bonded_force_model_uses_the_studys_production_model(tmp_path):
@@ -112,9 +105,7 @@ def test_bonded_force_model_uses_the_studys_production_model(tmp_path):
     """
     model_file = tmp_path / "graph.pb"
     model_file.write_bytes(b"\x00")        # a stand-in file; only its path
-    model = _bonded_force_model(
-        {"Si": 1}, {"Si"}, "diamond-cubic", _potential_spec(str(model_file)),
-        allow_unvalidated=True)
+    model = _bonded_force_model(_potential_spec(str(model_file)))
     assert model.pair_style == f"deepmd {model_file}"
     assert model.pair_coeff == ("* *",)
     assert "plugin load ${dp}" in model.preload
@@ -568,7 +559,8 @@ def test_both_halves_declare_the_member_species_union(tmp_path):
 def test_same_material_member_declares_only_its_own_species(tmp_path):
     """The union changes nothing for a same-material pair (no bloat)."""
     handle_a, _, _ = build_halves(
-        _si_si_member(),         derived_lattices=_derived_lattices(_si_si_member()),
+        _si_si_member(),
+        derived_lattices=_derived_lattices(_si_si_member()),
         scratch_directory=str(tmp_path))
     assert set(handle_a.type_map) == {"Ar", "Si"}
 
@@ -612,26 +604,6 @@ def test_dissimilar_halves_emerge_commensurate(tmp_path):
 # subprocess and the in-process engine are both stubbed.
 # ---------------------------------------------------------------------
 
-class _FakeInProcessEngine:
-    """Stands in for LammpsEngine on the login node (classical branch)."""
-
-    def __init__(self, *args, **kwargs):
-        self.received = []
-
-    def commands(self, command_stream):
-        self.received.extend(command_stream)
-
-    def box(self):
-        return np.diag([10.8618, 10.8618, 10.8618])
-
-    def energy(self):
-        return -296.0
-
-    def atom_count(self):
-        return 64
-
-    def close(self):
-        pass
 
 
 def test_derive_lattices_live_universal_runs_out_of_process(
@@ -641,7 +613,6 @@ def test_derive_lattices_live_universal_runs_out_of_process(
     from sabsim.pipeline import live_stages
     import sabsim.driver.lammps_engine as lammps_engine_module
 
-    monkeypatch.delenv("SABSIM_CASCADE_CLASSICAL", raising=False)
 
     scripts = []
 
@@ -673,26 +644,3 @@ def test_derive_lattices_live_universal_runs_out_of_process(
         line.startswith("pair_style deepmd ") for line in scripts[0])
     assert "universal MLIP (out-of-process)" in result.provenance
 
-
-def test_derive_lattices_live_classical_uses_the_in_process_engine(
-        monkeypatch, tmp_path):
-    """An explicit classical request takes the in-process path and spawns
-    no subprocess (DESIGN §4.7, 'classical by choice')."""
-    from sabsim.pipeline import live_stages
-    import sabsim.driver.lammps_engine as lammps_engine_module
-
-    monkeypatch.setenv("SABSIM_CASCADE_CLASSICAL", "1")
-    monkeypatch.setattr(
-        lammps_engine_module, "LammpsEngine", _FakeInProcessEngine)
-
-    def forbid_subprocess(*args, **kwargs):
-        raise AssertionError(
-            "the classical path must not spawn a subprocess")
-
-    monkeypatch.setattr(
-        live_stages, "run_activate_subprocess", forbid_subprocess)
-
-    result = live_stages.derive_lattices_live(
-        _si_si_member(), scratch_directory=str(tmp_path))
-
-    assert "classical seed" in result.provenance

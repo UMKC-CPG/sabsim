@@ -1921,6 +1921,26 @@ foundations, interaction rules. -->
 
 ## CODE
 
+- [x] **Three small wins landed 2026-08-26 (Paul's direction).** (1) The
+      force models are named in the study file's `[potential]` block
+      (`universal_model`, `universal_weights`, `production_weights`,
+      `allow_unvalidated`); the environment variables
+      `SABSIM_CASCADE_MLIP_MODEL`, `SABSIM_DEEPMD_MODEL`, and
+      `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` are gone, and phase-three
+      validation checks the model name and that both weights files exist.
+      (2) The passed-along `potential` object and the placeholder
+      `resolve_potential` stage are gone; every stage reads
+      `member.potential`. (3) Classical potentials are REMOVED from the
+      code (registry, `classical_force_model`, the in-process cascade and
+      lattice-derivation paths, `mlip_reanneal`/`reanneal_commands`,
+      `_reanneal_force_model`, `classical_si_stand_in`,
+      `snapshot_amorphized_half`, `share/potentials/`) and marked
+      deprecated in DESIGN §3.3/§4.5/§4.7, PSEUDOCODE §10.2, and
+      ARCHITECTURE §2.1/§2.2/§4.1/§4.4. `material_domain` stays in the
+      spec as recorded provenance for the §4.8 recipe; no code reads it.
+      Items below that ask for classical-path work are moot. See
+      `dev/notes/state-of-sabsim-2026-08-26.md`.
+
 - **Zero-impact runs skip the relaxation, so a null control comes out
   athermal.** `run_cascade_to_fluence` and the out-of-process script
   builder both put the between-impact relaxation INSIDE the per-impact

@@ -225,7 +225,7 @@ def run_analyzer(
         realization_count=seeds,
         unit_native="eV/angstrom^2",
         unit_si="J/m^2",
-        fidelity="classical-stand-in",
+        fidelity="placeholder",
         method="walking-skeleton stub",
         status=MeasureStatus.OK)
     thermodynamic = Measure(

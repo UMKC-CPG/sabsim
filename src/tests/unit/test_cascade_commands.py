@@ -164,7 +164,8 @@ def test_cascade_setup_opens_the_top_and_defines_elapsed_time():
     """Setup uses the open p p f box and defines the halt's time variable."""
     member = _template_member()
     force_model = resolve_cascade_generator(
-        {"Si": 1, "Ar": 2}, projectile_species={"Ar"}, use_classical=True)
+        {"Si": 1, "Ar": 2}, projectile_species={"Ar"},
+        weights_path="/models/dpa3.pth", allow_unvalidated=True)
     commands = cascade_setup_commands(
         member, force_model, data_file="slab.data",
         base_low=10.0, surface_high=40.0, seed=7)
@@ -172,9 +173,10 @@ def test_cascade_setup_opens_the_top_and_defines_elapsed_time():
     assert "boundary p p f" in commands
     # The cascade-clock variable the per-impact halt watches.
     assert "variable elapsed_cascade equal time-v_cascade_start" in commands
-    # The classical + ZBL force model is loaded, and the heat-sink
+    # The universal MLIP + ZBL force model is loaded, and the heat-sink
     # integrators are present — one coherent setup.
-    assert "pair_style hybrid/overlay sw zbl 0.5 2 zbl 0.5 1.2" in commands
+    assert ("pair_style hybrid/overlay deepmd /models/dpa3.pth "
+            "zbl 0.5 2 zbl 0.5 1.2") in commands
     assert "fix nve_all all nve" in commands
     assert "fix freeze_base frozen_base setforce 0.0 0.0 0.0" in commands
 

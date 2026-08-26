@@ -13,16 +13,17 @@ The build->amorphize->assemble chain here is exactly ARCHITECTURE.md §4.3:
   LAMMPS data file under the member's scratch, and returns a
   :class:`~sabsim.pipeline.exec_artifacts.HalfHandle` per half — the
   build->amorphize file handoff. Login-node work (no LAMMPS).
-* the activation stage (step 4) opens a ``LammpsEngine`` per half, re-reads
-  the pristine half from its handle, runs the cascade -> re-anneal -> gate
-  driver, and writes the amorphized half back. Compute-node work.
+* the activation stage (step 4) re-reads each pristine half from its
+  handle, runs the cascade OUT-OF-PROCESS under the universal MLIP (the
+  deepmd bundle's own LAMMPS), and writes the amorphized half back.
+  Compute-node work; cascade-only (§3.4).
 * the assembly stage (step 5) reads both amorphized halves back and stacks
   them into a facing pair (:mod:`sabsim.structure.amorphized_assembly`).
 
 The module imports cleanly with NO LAMMPS present — ``LammpsEngine``
 imports the binding lazily inside its constructor — so the login node can
-build halves and review the whole chain; only the activation stage's
-``LammpsEngine(...)`` call needs a compute node.
+build halves and review the whole chain; only the stages that open an
+engine or spawn the bundle need a compute node.
 
 SIZING is carried by the study's ``[numerical]`` spec block, not pinned in
 this module. Slab thickness is the §2.5 CRITERION — enough undamaged
@@ -50,7 +51,6 @@ from sabsim.driver.cascade import (
     CascadeControl,
     CascadeOutcome,
     _projectile_species,
-    activate_surface,
     build_activate_script,
     derive_bombardment_spec,
     derive_seeds,
@@ -59,11 +59,9 @@ from sabsim.driver.bulk_relax import (
     bulk_relax_subprocess_script,
     conventional_cell,
     cubic_lattice_constant,
-    derive_lattice,
     read_data_box,
 )
 from sabsim.driver.cascade_potential import (
-    classical_force_model,
     resolve_cascade_generator,
     universal_force_model,
 )
@@ -96,7 +94,6 @@ from sabsim.spec.records import MemberSpecification
 from sabsim.structure.amorphized_assembly import (
     amorphized_half_from_arrays,
     assemble_amorphized_pair,
-    snapshot_amorphized_half,
 )
 from sabsim.structure.slab_builder import (
     WAFER_A_TAG,
@@ -242,16 +239,12 @@ def derive_lattices_live(
     (ARCHITECTURE §4.1/§4.4), so the universal derivation runs OUT-OF-
     PROCESS through the same file handoff as ``activate``
     (:func:`~sabsim.driver.bulk_relax.bulk_relax_subprocess_script`, read
-    back by :func:`~sabsim.driver.bulk_relax.read_data_box`). Only an
-    explicit classical cascade takes the in-process ``LammpsEngine`` path,
-    under :func:`~sabsim.driver.cascade_potential.classical_force_model`.
-    Compute-node work: the ``LammpsEngine`` import is lazy, the bulk data
-    file is written by one rank, and the one GPU subprocess is driven by
-    the primary rank while peers wait at a barrier.
+    back by :func:`~sabsim.driver.bulk_relax.read_data_box`). Compute-node
+    work: the bulk data file is written by one rank, and the one GPU
+    subprocess is driven by the primary rank while peers wait at a barrier.
     """
     cells: dict = {}
     provenance: list = []
-    use_classical = _classical_cascade_requested()
     allow_unvalidated = member.potential.allow_unvalidated
     rank = comm.Get_rank() if comm is not None else 0
     # The §2.2 bulk-relax block size is a spec knob (numerical), not pinned.
@@ -267,46 +260,26 @@ def derive_lattices_live(
         _publish_file(comm, lambda: write_bulk_data(
             crystal, bulk_cells, bulk_file))
 
-        if use_classical:
-            # Explicit classical request: the in-process engine, no ZBL.
-            from sabsim.driver.lammps_engine import LammpsEngine
-            seed = classical_force_model(
-                type_map, frozenset(type_map),
-                domain=member.material_domain,
-                allow_unvalidated=allow_unvalidated)
-            log_file = os.path.join(
-                str(scratch_directory), f"log.derive_{wafer.identity}")
-            engine = LammpsEngine(
-                command_line_args=["-screen", "none", "-log", log_file],
-                comm=comm)
-            result = derive_lattice(
-                engine, bulk_file, seed, bulk_cells, coupling=coupling)
-            engine.close()
-            derived_cell = result.conventional_cell
-            lattice_edge = result.lattice_constant
-            note = "classical seed"
-        else:
-            # Universal-first default (§4.7): relax under the foundation MLIP
-            # out-of-process in its bundle, read the relaxed cell back.
-            model = universal_force_model(
-                type_map, member.potential.universal_weights,
-                allow_unvalidated=allow_unvalidated)
-            relaxed_file = os.path.join(
-                str(scratch_directory), f"relaxed_bulk_{wafer.identity}.data")
-            script = bulk_relax_subprocess_script(
-                bulk_file, model, relaxed_file, coupling=coupling)
-            if rank == 0:
-                run_activate_subprocess(
-                    script, str(scratch_directory), relaxed_file,
-                    script_name=f"derive_{wafer.identity}.in",
-                    log_name=f"log.derive_{wafer.identity}")
-            if comm is not None:
-                comm.Barrier()
-            relaxed_block_cell, _ = read_data_box(relaxed_file)
-            derived_cell = conventional_cell(relaxed_block_cell, bulk_cells)
-            lattice_edge = cubic_lattice_constant(
-                relaxed_block_cell, bulk_cells)
-            note = "universal MLIP (out-of-process)"
+        # Relax under the foundation MLIP out-of-process in its bundle
+        # (§4.7), then read the relaxed cell back.
+        model = universal_force_model(
+            type_map, member.potential.universal_weights,
+            allow_unvalidated=allow_unvalidated)
+        relaxed_file = os.path.join(
+            str(scratch_directory), f"relaxed_bulk_{wafer.identity}.data")
+        script = bulk_relax_subprocess_script(
+            bulk_file, model, relaxed_file, coupling=coupling)
+        if rank == 0:
+            run_activate_subprocess(
+                script, str(scratch_directory), relaxed_file,
+                script_name=f"derive_{wafer.identity}.in",
+                log_name=f"log.derive_{wafer.identity}")
+        if comm is not None:
+            comm.Barrier()
+        relaxed_block_cell, _ = read_data_box(relaxed_file)
+        derived_cell = conventional_cell(relaxed_block_cell, bulk_cells)
+        lattice_edge = cubic_lattice_constant(relaxed_block_cell, bulk_cells)
+        note = "universal MLIP (out-of-process)"
 
         cells[wafer.identity] = tuple(
             tuple(float(component) for component in row)
@@ -527,37 +500,10 @@ def build_halves(
 
 
 # ---------------------------------------------------------------------
-# Step 4 — the engine-provider activation stage (COMPUTE NODE). Opens a
-# LammpsEngine per half, re-reads the pristine half, runs the driver's
-# cascade -> re-anneal -> gate, and writes the amorphized half back.
+# Step 4 — the activation stage (COMPUTE NODE). For each half: re-read the
+# pristine half, run the cascade out-of-process under the universal MLIP,
+# and write the amorphized half back (cascade-only, §3.4).
 # ---------------------------------------------------------------------
-
-# Bringing up a NEW material means running a potential that has not yet
-# cleared the §3.5 activation gate — the run is what PRODUCES the evidence
-# the gate would judge. The registry refuses such a form by default. This
-# environment variable is the deliberate, per-run override: it lives
-# outside the code so nobody is tempted to flip ``validated=True`` in the
-# registry before the evidence exists, and because it must be set in the
-# job script it stays visible in the run's own record. Anything produced
-# under it is PROVISIONAL and must be reported that way.
-_CASCADE_CLASSICAL_VARIABLE = "SABSIM_CASCADE_CLASSICAL"
-
-
-def _classical_cascade_requested() -> bool:
-    """Whether this run cascades under a classical form, not universal."""
-    setting = os.environ.get(_CASCADE_CLASSICAL_VARIABLE, "")
-    return setting.strip().lower() in {"1", "true", "yes", "on"}
-
-
-# An EXPLICIT deepmd-model override, for validating the trained-MLIP force
-# path through the pipeline BEFORE the §11 bootstrap resolves a committee
-# (the seam the classical stand-in normally fills, §4.5). When set to a
-# frozen model file, the bonded pair presses and pulls under THAT DeePMD
-# model instead of the classical registry entry. It is a validation hook,
-# not the production path — the model it names has NOT cleared the §7
-# potential-quality gate, so anything produced under it is provisional;
-# like the unvalidated-potential flag above, it lives in the environment
-# so a run that used it shows the override in its own record.
 
 def _stage_trajectory(
         output_directory: str,
@@ -636,37 +582,7 @@ def _pull_note(result) -> str:
     return note
 
 
-def _reanneal_force_model(
-        type_map: dict,
-        substrate: set,
-        domain: str,
-        allow_unvalidated: bool = False) -> ForceModel:
-    """The gentle re-anneal potential, NULLing the deleted beam type.
-
-    v1's 'MLIP' is a classical stand-in (DESIGN.md §4.5), resolved from
-    the material's registry entry rather than hard-coded — silicon gets
-    Stillinger-Weber, silicon+oxygen gets the Munetoh Tersoff, and a new
-    material needs a registry row rather than a code change.
-
-    After the cascade deletes the beam atoms the beam TYPE is still
-    declared, so the classical form maps it to NULL and a no-op ``zero``
-    pair style is overlaid to satisfy those dead type pairs. That
-    bookkeeping now lives in
-    :func:`~sabsim.driver.cascade_potential.classical_force_model`, which
-    the press/pull stages share, so both describe a material identically.
-
-    ``domain`` comes from the member specification (DESIGN.md §4.8) and
-    selects among forms registered for the same species. It is passed
-    rather than inferred because the cell cannot reveal it: a silica
-    wafer and a silicon wafer facing a silica wafer present the same
-    species set and want different forms.
-    """
-    return classical_force_model(
-        type_map, substrate, allow_unvalidated=allow_unvalidated,
-        domain=domain)
-
-
-def _activate_one_half_subprocess(
+def activate_one_half(
         handle: HalfHandle,
         member: MemberSpecification,
         seed: int,
@@ -692,8 +608,7 @@ def _activate_one_half_subprocess(
     cascade_force_model = resolve_cascade_generator(
         built.type_map, _projectile_species(member),
         weights_path=member.potential.universal_weights,
-        allow_unvalidated=member.potential.allow_unvalidated,
-        domain=member.material_domain, use_classical=False)
+        allow_unvalidated=member.potential.allow_unvalidated)
 
     spec = derive_bombardment_spec(built, member)
     projectile_types = [
@@ -705,8 +620,7 @@ def _activate_one_half_subprocess(
     dump_path = os.path.join(output_directory, f"activated_{role}.dump")
     # Honour the invocation's trajectory switch (run_options): with frames
     # on, the out-of-process cascade records the WHOLE bombardment as a
-    # movie, the same as the in-process stages — so a universal activate can
-    # be watched, not only the classical one.
+    # movie, the same as the in-process press and pull stages.
     trajectory_file, trajectory_stride = _stage_trajectory(
         output_directory, member, f"activate_{role}")
     script = build_activate_script(
@@ -741,81 +655,6 @@ def _activate_one_half_subprocess(
     amorphized_file = os.path.join(
         output_directory, f"amorphized_{role}.extxyz")
     if rank == 0:
-        ase_write(amorphized_file, amorphized_atoms,
-                  format="extxyz", parallel=False)
-    if comm is not None:
-        comm.Barrier()
-    return cascade_outcome, amorphized_file
-
-
-def activate_one_half(
-        handle: HalfHandle,
-        member: MemberSpecification,
-        seed: int,
-        output_directory: str,
-        comm=None) -> tuple:
-    """Amorphize ONE half on its own engine, write it back (§4.3, §10.1).
-
-    Opens a ``LammpsEngine`` (compute node), RE-READS the pristine half
-    from its handle's data file (never a warm object), runs the driver's
-    CASCADE (cascade-only, §3.4 — the heal and the §3.5 gate moved to the
-    bond flow), then SNAPSHOTS the amorphized, substrate-only surface out of
-    the still-open engine and writes it back as the amorphized half (an
-    extended-XYZ file, which round-trips the wafer tag the assembly reads).
-    Returns the driver's :class:`~sabsim.driver.cascade.CascadeOutcome`
-    (provenance) and the amorphized file's path. The ``LammpsEngine`` import
-    inside is lazy, so this module still loads with no LAMMPS present.
-
-    The DEFAULT universal-MLIP cascade cannot run in this process (its
-    deepmd bundle has its own torch/MPI, ARCHITECTURE §4.1/§4.4), so that
-    path is dispatched to :func:`_activate_one_half_subprocess`, which runs
-    the whole LAMMPS half out-of-process and hands the structure back
-    through a file. Only an explicit classical cascade takes the in-process
-    path below.
-    """
-    if not _classical_cascade_requested():
-        return _activate_one_half_subprocess(
-            handle, member, seed, output_directory, comm)
-
-    from sabsim.driver.lammps_engine import LammpsEngine
-
-    built = read_standalone_half(
-        handle.data_file, handle.type_map, handle.identity)
-
-    role = "a" if handle.wafer_tag == WAFER_A_TAG else "b"
-    log_file = os.path.join(output_directory, f"log.activation_{role}")
-    engine = LammpsEngine(
-        command_line_args=["-screen", "none", "-log", log_file], comm=comm)
-    trajectory_file, stride = _stage_trajectory(
-        output_directory, member, f"activation_{role}")
-    cascade_outcome = activate_surface(
-        engine, built, member, handle.data_file, seed,
-        _GEOMETRY, _CONTROL,
-        allow_unvalidated_potential=member.potential.allow_unvalidated,
-        use_classical_cascade=_classical_cascade_requested(),
-        trajectory_file=trajectory_file, trajectory_stride=stride)
-    # Snapshot BEFORE closing: the amorphized (substrate-only, re-numbered)
-    # state is still live here — the cascade cleanup left it ready.
-    amorphized_atoms = snapshot_amorphized_half(
-        engine, handle.type_map, handle.wafer_tag)
-    engine.close()
-
-    # The snapshot above is COLLECTIVE — under multiple MPI ranks every
-    # rank holds the full atom set — but only ONE rank may write the file,
-    # or the ranks race on it. Rank 0 writes; the barrier makes the file
-    # visible to every rank before any returns (so a caller that reads it
-    # back on any rank finds it there).
-    amorphized_file = os.path.join(
-        output_directory, f"amorphized_{role}.extxyz")
-    rank = comm.Get_rank() if comm is not None else 0
-    if rank == 0:
-        # parallel=False is REQUIRED here, not optional. Under MPI, ASE
-        # turns a write into a collective in which process zero writes
-        # and then broadcasts to its peers — but this call sits inside a
-        # guard that only process zero enters, so that broadcast would
-        # wait forever on peers that are sitting at the barrier just
-        # below. See the note beside the ASE imports in
-        # sabsim.structure.slab_builder for the whole story.
         ase_write(amorphized_file, amorphized_atoms,
                   format="extxyz", parallel=False)
     if comm is not None:
@@ -956,31 +795,17 @@ def _assemble_on_one_rank(
 # BondDebondResult, a fresh engine per pull rung (PSEUDOCODE.md §9.1).
 # ---------------------------------------------------------------------
 
-def _bonded_force_model(
-        type_map: dict,
-        substrate,
-        domain: str,
-        potential,
-        allow_unvalidated: bool = False) -> ForceModel:
+def _bonded_force_model(potential) -> ForceModel:
     """The potential the bonded pair heals, presses and pulls under (§4.5).
 
-    ``potential`` is the study's ``[potential]`` block. When it names a
-    ``production_weights`` file the pair runs under THAT frozen DeePMD
-    model — today a committee of one, later the ALF-trained committee the
-    member's ``potential_ref`` resolves to — dropping in behind the same
-    ``pair_style`` seam. The file's existence was checked at load time
-    (phase three), so a missing model stops on the login node, never here.
-
-    With no production model named the classical registry form is used, so
-    the pair is described by the same entry everywhere. Each type carries
-    its own element and a projectile type still declared with no atoms
-    left becomes ``NULL``.
+    ``potential`` is the study's ``[potential]`` block; the pair runs under
+    its ``production_weights`` — today a single frozen DeePMD file (a
+    committee of one), later the ALF-trained committee the member's
+    ``potential_ref`` resolves to — behind the ``pair_style`` seam. The
+    file's existence was checked at load time (phase three), so a missing
+    model stops on the login node, never here.
     """
-    if potential.production_weights:
-        return deepmd_model(potential.production_weights)
-    return classical_force_model(
-        type_map, substrate, allow_unvalidated=allow_unvalidated,
-        domain=domain)
+    return deepmd_model(potential.production_weights)
 
 
 def run_bond_debond_md_live(
@@ -1013,12 +838,7 @@ def run_bond_debond_md_live(
     )
 
     built = structure.built
-    force_model = _bonded_force_model(
-        built.type_map,
-        frozenset(built.type_map) - _projectile_species(member),
-        member.material_domain,
-        member.potential,
-        allow_unvalidated=member.potential.allow_unvalidated)
+    force_model = _bonded_force_model(member.potential)
     seed = member.ensemble.master_seed
     reference_file = os.path.join(scratch_directory, "settled_reference.data")
 
@@ -1157,7 +977,7 @@ def run_analyzer_live(
         name="mechanical_work_of_separation",
         value=value, uncertainty=0.0, realization_count=seeds,
         unit_native="eV/angstrom^2", unit_si="J/m^2",
-        fidelity="classical-stand-in", method=method, status=status)
+        fidelity="deepmd-committee-of-one", method=method, status=status)
     thermodynamic = Measure(
         name="work_of_adhesion_mlip",
         value=None, uncertainty=None, realization_count=seeds,

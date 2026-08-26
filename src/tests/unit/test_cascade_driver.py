@@ -1,7 +1,7 @@
 """Unit tests for the cascade orchestration (PSEUDOCODE.md §10.3-§10.4).
 
-The driver runs entirely against the ``Engine`` seam, so these exercise it
-with ``MockEngine`` and no LAMMPS: the impact plan derived from the real
+The driver only assembles command streams, so these run with no LAMMPS:
+the impact plan derived from the real
 study-spec knobs (dose to count, seeds from the master seed, projectile
 mass from the species), the reproducible impact sampling (normal incidence
 aims straight down; a seed replays exactly), and the per-impact command
@@ -22,21 +22,15 @@ from sabsim.driver.cascade import (
     BombardmentSpec,
     CascadeControl,
     CascadeOutcome,
-    activate_surface,
     build_activate_script,
     cascade_cleanup_commands,
     derive_bombardment_spec,
     derive_seeds,
-    mlip_reanneal,
-    reanneal_commands,
-    run_cascade_to_fluence,
     sample_impact_position,
     sample_impact_velocity,
 )
-from sabsim.driver.commands import classical_si_stand_in
 from sabsim.driver.cascade_potential import resolve_cascade_generator
 from sabsim.driver.commands import CascadeGeometry
-from sabsim.driver.engine import MockEngine
 from sabsim.spec.loader import load_and_validate_study
 
 _TEMPLATE_PATH = os.path.abspath(os.path.join(
@@ -154,77 +148,10 @@ def _small_spec():
         between_impact_relaxation=7.0)
 
 
-def test_loop_opens_the_driver_then_runs_each_impact():
-    """Setup once, then insert/cascade/relax per impact, fire-and-forget."""
-    engine = MockEngine()
-    built = _cascade_built()
-    member = _template_member()
-    force_model = resolve_cascade_generator(
-        built.type_map, projectile_species={"Ar"}, use_classical=True)
-
-    outcome = run_cascade_to_fluence(
-        engine, built, member, force_model, data_file="slab.data",
-        spec=_small_spec(), seed=99, geometry=CascadeGeometry(),
-        control=CascadeControl())
-
-    stream = engine.received_commands
-    # The one-time setup opened the box and loaded the classical + ZBL model.
-    assert "boundary p p f" in stream
-    assert "pair_style hybrid/overlay sw zbl 0.5 2 zbl 0.5 1.2" in stream
-    # Two impacts, each creating a projectile of type 2.
-    assert sum(1 for line in stream
-               if line.startswith("create_atoms 2 single")) == 2
-    # Each impact toggles the adaptive step on for the cascade and off for
-    # the relaxation, so both fixes appear twice.
-    assert stream.count("unfix cascade_dt") == 2
-    assert sum(1 for line in stream
-               if line.startswith("fix cascade_dt all dt/reset")) == 2
-    # Two runs per impact (cascade + relax): four numbered runs total.
-    assert sum(1 for line in stream if line.startswith("run ")) == 4
-    assert outcome.impacts_run == 2
 
 
-def test_loop_orders_cascade_before_relax_within_each_impact():
-    """The halted cascade run precedes the fixed-step relaxation run."""
-    engine = MockEngine()
-    built = _cascade_built()
-    run_cascade_to_fluence(
-        engine, built, _template_member(),
-        resolve_cascade_generator(
-            built.type_map, projectile_species={"Ar"}, use_classical=True),
-        data_file="slab.data", spec=_small_spec(), seed=99)
-
-    stream = engine.received_commands
-    # Within the first impact: the time-halt is installed, the capped
-    # cascade runs, the halt is released, THEN the fixed step is restored
-    # before the relaxation run.
-    halt = stream.index("fix cascade_halt all halt 10 "
-                        "v_elapsed_cascade > 7 error continue")
-    release = stream.index("unfix cascade_halt")
-    restore = stream.index("unfix cascade_dt")
-    assert halt < release < restore
 
 
-def test_slab_is_prerelaxed_before_the_first_impact():
-    """The §2.4 pre-cascade minimize runs once, ahead of any projectile."""
-    engine = MockEngine()
-    built = _cascade_built()
-    run_cascade_to_fluence(
-        engine, built, _template_member(),
-        resolve_cascade_generator(
-            built.type_map, projectile_species={"Ar"}, use_classical=True),
-        data_file="slab.data", spec=_small_spec(), seed=99)
-
-    stream = engine.received_commands
-    # The relaxation is issued exactly once (the one-time setup, not per
-    # impact) and BEFORE the first projectile is ever created, so a strained
-    # slab settles out of plane before it is bombarded (§2.4 / §2.7 step 2).
-    assert stream.count("minimize 1e-8 1e-8 1000 10000") == 1
-    minimize_at = stream.index("minimize 1e-8 1e-8 1000 10000")
-    first_impact = next(
-        index for index, line in enumerate(stream)
-        if line.startswith("create_atoms 2 single"))
-    assert minimize_at < first_impact
 
 
 # ---------------------------------------------------------------------
@@ -243,7 +170,8 @@ def test_build_activate_script_emits_setup_impacts_cleanup_and_handoff():
     member = _template_member()
     spec = _small_spec()
     cascade = resolve_cascade_generator(
-        built.type_map, projectile_species={"Ar"}, use_classical=True)
+        built.type_map, projectile_species={"Ar"},
+        weights_path="/models/dpa3.pth", allow_unvalidated=True)
 
     script = build_activate_script(
         built, member, cascade, data_file="slab.data", spec=spec,
@@ -254,7 +182,8 @@ def test_build_activate_script_emits_setup_impacts_cleanup_and_handoff():
     assert all(isinstance(line, str) for line in script)
     # The box is opened once and the cascade + ZBL model is loaded (setup).
     assert "boundary p p f" in script
-    assert "pair_style hybrid/overlay sw zbl 0.5 2 zbl 0.5 1.2" in script
+    assert ("pair_style hybrid/overlay deepmd /models/dpa3.pth "
+            "zbl 0.5 2 zbl 0.5 1.2") in script
     # One projectile is created per impact (the small spec delivers two).
     assert sum(1 for line in script
                if line.startswith("create_atoms 2 single")) == spec.impact_count
@@ -279,7 +208,8 @@ def test_activate_script_records_a_trajectory_when_asked():
     member = _template_member()
     spec = _small_spec()
     cascade = resolve_cascade_generator(
-        built.type_map, projectile_species={"Ar"}, use_classical=True)
+        built.type_map, projectile_species={"Ar"},
+        weights_path="/models/dpa3.pth", allow_unvalidated=True)
 
     quiet = build_activate_script(
         built, member, cascade, data_file="slab.data", spec=spec,
@@ -303,69 +233,12 @@ def test_activate_script_records_a_trajectory_when_asked():
     assert dump_lines[0] < first_impact
 
 
-def test_activate_script_matches_the_live_command_stream():
-    """The script runs the SAME commands the in-process path issues.
-
-    The out-of-process path must be identical physics to the live one — it
-    only moves execution to another engine. So the script's cascade prefix
-    is exactly what run_cascade_to_fluence issues, and its cleanup tail is
-    exactly what cascade_cleanup_commands returns (cascade-only, §3.4).
-    """
-    built = _cascade_built()
-    member = _template_member()
-    spec = _small_spec()
-    cascade = resolve_cascade_generator(
-        built.type_map, projectile_species={"Ar"}, use_classical=True)
-
-    engine = MockEngine()
-    run_cascade_to_fluence(
-        engine, built, member, cascade, data_file="slab.data", spec=spec,
-        seed=99, geometry=CascadeGeometry(), control=CascadeControl())
-    live_cascade = engine.received_commands
-
-    script = build_activate_script(
-        built, member, cascade, data_file="slab.data", spec=spec,
-        seed=99, projectile_types=[2],
-        output_structure_file="activated.dump")
-
-    # The script opens with exactly the live cascade stream...
-    assert script[:len(live_cascade)] == live_cascade
-    # ...and its remainder is exactly the cleanup block plus the handoff.
-    tail = script[len(live_cascade):]
-    assert tail[:-1] == cascade_cleanup_commands([2])
-    assert tail[-1].startswith("write_dump all custom activated.dump")
 
 
 # ---------------------------------------------------------------------
 # The MLIP re-anneal (§10.5).
 # ---------------------------------------------------------------------
 
-def test_reanneal_strips_projectile_then_relaxes_under_the_mlip():
-    """The re-anneal drops the ZBL fixes and Ar, then gently relaxes."""
-    engine = MockEngine()
-    member = _template_member()
-    mlip = classical_si_stand_in({"Si": 1})
-    mlip_reanneal(engine, member, mlip, seed=3, projectile_types=[2])
-
-    stream = engine.received_commands
-    # The cascade's ballistic integrator and border thermostat are gone;
-    # the frozen base is NOT torn down (it anchors the bulk).
-    assert "unfix nve_all" in stream
-    assert "unfix langevin_border" in stream
-    assert "unfix freeze_base" not in stream
-    # EVERY projectile atom is stripped BY TYPE (not just the last impact's
-    # spawn-group atom) before the Si-only MLIP relax.
-    assert "group cascade_projectiles type 2" in stream
-    assert "delete_atoms group cascade_projectiles compress yes" in stream
-    assert "group mobile subtract all frozen_base" in stream
-    # A minimize, then a hold and a quench (two nvt setpoints), then release.
-    assert "minimize 1e-8 1e-8 1000 10000" in stream
-    nvt = [line for line in stream if line.startswith("fix reanneal mobile")]
-    assert len(nvt) == 2                          # hold, then quench
-    assert "unfix reanneal" in stream
-    # Ids are renumbered consecutively before the gate reads positions
-    # (sputtering + deletion leave gaps that gather_atoms rejects).
-    assert "reset_atoms id" in stream
 
 
 # ---------------------------------------------------------------------
@@ -392,36 +265,3 @@ def _crystal_slab(spacing=2.5, n_lateral=4, n_layers=8):
 # ---------------------------------------------------------------------
 # Activating one surface end to end (§10.1).
 # ---------------------------------------------------------------------
-
-def test_activate_surface_runs_cascade_only():
-    """One surface: bombard, then cleanup — cascade-only (§3.4).
-
-    Revised 2026-08-08: activate_surface no longer re-anneals or gates (both
-    moved to the bond flow). It returns the CascadeOutcome; the amorphized,
-    substrate-only surface is left live in the engine for the caller.
-    """
-    points, cell = _crystal_slab()
-    engine = MockEngine()
-    built = SimpleNamespace(
-        atoms=SimpleNamespace(
-            get_cell=lambda: cell,
-            get_positions=lambda: points),
-        type_map={"Si": 1, "Ar": 2})
-    member = _template_member()
-
-    outcome = activate_surface(
-        engine, built, member, data_file="slab.data", seed=5,
-        use_classical_cascade=True)
-
-    # It returns the cascade provenance, not a gate verdict.
-    assert isinstance(outcome, CascadeOutcome)
-    # Bombarded to the dose: the areal fluence over this toy cell's small
-    # lateral area works out to 2 impacts (see the spec test above).
-    assert outcome.impacts_run == 2
-    # The command stream shows the cascade then the cleanup (strip + renumber);
-    # NO heal (the anneal's nvt fix) is issued.
-    stream = engine.received_commands
-    assert any(line.startswith("create_atoms 2 single") for line in stream)
-    assert "delete_atoms group cascade_projectiles compress yes" in stream
-    assert "reset_atoms id" in stream
-    assert not any("fix reanneal" in line for line in stream)

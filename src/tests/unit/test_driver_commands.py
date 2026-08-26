@@ -17,10 +17,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from tests.unit.support import stand_in_force_model
+
 from sabsim.driver.commands import (
     ForceModel,
     RegionGeometry,
-    classical_si_stand_in,
     combined_cell_relax_commands,
     deepmd_model,
     force_model_commands,
@@ -98,7 +99,7 @@ def test_normal_force_from_pressure():
 
 def test_classical_stand_in_force_model():
     """The classical stand-in is Stillinger-Weber over the type map."""
-    model = classical_si_stand_in({"Si": 1})
+    model = stand_in_force_model({"Si": 1})
     assert model.pair_style == "sw"
     assert model.pair_coeff == ("* * Si.sw Si",)
 
@@ -178,7 +179,7 @@ def test_preamble_adds_atom_map_only_for_a_message_passing_model():
             < with_map.index("read_data pair.data"))
 
     # A classical model never asks for it, so the block is unchanged.
-    classical = classical_si_stand_in({"Si": 1})
+    classical = stand_in_force_model({"Si": 1})
     without_map = preamble_commands("pair.data", Quantity(1.0, "fs"), classical)
     assert "atom_modify map yes" not in without_map
 
@@ -305,7 +306,7 @@ def test_press_release_unfixes_drive_and_load_integrator():
 def test_press_script_is_ordered_and_runs_the_hold():
     """The press script sets up, drives, approaches, and holds in order."""
     member = _template_member()
-    model = classical_si_stand_in({"Si": 1})
+    model = stand_in_force_model({"Si": 1})
     commands = press_script(
         _fake_pair(), member, model, "pair.data", seed=7)
 
@@ -322,7 +323,7 @@ def test_press_script_is_ordered_and_runs_the_hold():
 def test_pull_script_records_and_runs_the_distance(tmp_path):
     """The pull script drives, records strided frames, and runs once."""
     member = _template_member()
-    model = classical_si_stand_in({"Si": 1})
+    model = stand_in_force_model({"Si": 1})
     commands = pull_script(
         _fake_pair(), member, model, "reference.data",
         rate=Quantity(3.2, "m/s"),

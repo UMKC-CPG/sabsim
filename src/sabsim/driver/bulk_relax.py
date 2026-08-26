@@ -6,8 +6,8 @@ a model has its OWN equilibrium spacing, and building on someone else's
 leaves it strained (prior art's −30 to −40 GPa at step zero). So the
 working lattice is DERIVED here: relax a bulk block to zero pressure
 under the current model and read the equilibrium cell back. At the cold
-start (§2.2) "the current model" is the classical stand-in; the same
-routine re-derives the lattice under the trained committee once it
+start (§2.2) "the current model" is the universal foundation MLIP; the
+same routine re-derives the lattice under the trained committee once it
 exists. This is exactly where the walking skeleton's hardcoded 5.43 Å is
 retired.
 
@@ -25,7 +25,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from sabsim.driver.commands import ForceModel, force_model_commands
-from sabsim.driver.engine import Engine
 
 
 @dataclass(frozen=True)
@@ -86,8 +85,7 @@ def bulk_relax_commands(
     inserted right after ``atom_style`` and BEFORE the ``read_data`` that
     creates the atoms: the graph network gathers per-atom features across
     the neighbor graph, so the global atom map must already exist. A
-    classical form leaves the preamble untouched (its ``needs_atom_map`` is
-    false), which is why the in-process classical path never needed this.
+    model whose ``needs_atom_map`` is false leaves the preamble untouched.
     """
     lines = [
         "units metal",
@@ -197,34 +195,3 @@ def cubic_lattice_constant(
     :func:`conventional_cell`. Kept for the report and the cubic case.
     """
     return float(np.linalg.norm(cell[0]) / cells_per_axis)
-
-
-def derive_lattice(
-        engine: Engine,
-        data_file: str,
-        force_model: ForceModel,
-        cells_per_axis: int,
-        settings: MinimizeSettings = MinimizeSettings(),
-        coupling: str = "iso") -> BulkRelaxation:
-    """Relax a bulk block and read the derived lattice back (§2.2).
-
-    Named for its purpose — deriving the working lattice the structure
-    builder cuts on — not for the mechanism (it was ``relax_bulk``, a near
-    reversal of this module's name). Issues the relaxation command stream
-    through the engine seam, then reads the relaxed box, energy, and atom
-    count and derives BOTH the full conventional cell (any symmetry) and
-    the cubic-convenience constant. ``coupling`` should match the crystal's
-    symmetry — ``iso`` cubic, ``aniso`` orthogonal, ``tri`` general — and
-    is the caller's choice. Because it talks only to :class:`Engine`, this
-    runs identically against ``MockEngine`` (login node) and the real
-    LAMMPS adapter (compute node).
-    """
-    engine.commands(
-        bulk_relax_commands(data_file, force_model, settings, coupling))
-    cell = np.asarray(engine.box(), dtype=float)
-    return BulkRelaxation(
-        relaxed_cell=cell,
-        conventional_cell=conventional_cell(cell, cells_per_axis),
-        lattice_constant=cubic_lattice_constant(cell, cells_per_axis),
-        potential_energy=engine.energy(),
-        atom_count=engine.atom_count())

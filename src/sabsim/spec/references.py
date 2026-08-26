@@ -36,10 +36,6 @@ import os
 
 from pathlib import Path
 
-from sabsim.driver.cascade_potential import (
-    domains_for_species,
-    registered_material_domains,
-)
 from sabsim.spec.loader import SpecificationError
 from sabsim.spec.records import MemberSpecification, Study
 
@@ -115,60 +111,6 @@ def _crystal_problems(member: MemberSpecification) -> list:
     return problems
 
 
-def _domain_problems(member: MemberSpecification) -> list:
-    """Report a material domain no registry entry can satisfy.
-
-    Two strengths of check, and which one runs depends on whether the
-    crystals could be read. If they could, the species union is known
-    and the check is exact: is (union, domain) an actual registry key?
-    That is precisely the lookup the force-model resolvers will perform,
-    so passing here means they cannot fail there. If the crystals could
-    not be read, their absence is already reported by
-    :func:`_crystal_problems`, and the weaker check still catches a
-    misspelled domain — is this domain registered for ANY species?
-    """
-    registered_anywhere = {
-        domain for _species, domain in _registry_keys()}
-
-    if not member.material_domain:
-        return []          # the loader's static pass already rejected it
-
-    species_union = _species_union_or_none(member)
-    if species_union is None:
-        if member.material_domain not in registered_anywhere:
-            return [
-                f"member '{member.name}': material_domain "
-                f"'{member.material_domain}' is not registered for any "
-                f"material; registered domains are "
-                f"{sorted(registered_anywhere)} (DESIGN §4.8)"]
-        return []
-
-    available = domains_for_species(species_union)
-    if not available:
-        return [
-            f"member '{member.name}': no force model is registered for "
-            f"species {sorted(species_union)}; registered materials are: "
-            f"{', '.join(registered_material_domains())} (DESIGN §4.7)"]
-
-    if member.material_domain not in available:
-        return [
-            f"member '{member.name}': material_domain "
-            f"'{member.material_domain}' is not registered for species "
-            f"{sorted(species_union)}; the registered domains for those "
-            f"species are {available} (DESIGN §4.8)"]
-    return []
-
-
-def _registry_keys():
-    """The registry's (species, domain) keys, imported lazily.
-
-    Kept behind a function so this module can be imported for its path
-    resolver alone without pulling the driver package in at import time.
-    """
-    from sabsim.driver.cascade_potential import CASCADE_GENERATOR_REGISTRY
-    return CASCADE_GENERATOR_REGISTRY.keys()
-
-
 def _species_union_or_none(member: MemberSpecification):
     """The elements both wafers contribute, or None if unreadable.
 
@@ -236,7 +178,6 @@ def check_study_references(study: Study) -> None:
     problems = []
     for member in study.members:
         problems.extend(_crystal_problems(member))
-        problems.extend(_domain_problems(member))
     problems.extend(_potential_problems(study))
 
     if problems:

@@ -2280,6 +2280,19 @@ function energetic_particle_bombardment(slab, member_specification,
 
 ### 10.2 open_cascade_driver — the correctness core
 
+> **Deprecated 2026-08-26 (Paul):** classical analytic potentials
+> (Stillinger-Weber, Tersoff, Vashishta, Buckingham) are no longer part of
+> SABSIM. The classical cascade path was validated for silicon only, the
+> classical stand-in for the gentle stages was never going to be the
+> production model, and keeping both made the potential story hard to
+> follow. The code now has exactly two force models: the universal
+> foundation MLIP + ZBL for the lattice derivation and the cascade, and
+> the DeePMD production model (a committee once ALF trains one; a single
+> frozen file until then), both named in the study file's `[potential]`
+> block. Text below that describes a classical option, a classical
+> registry, or `SABSIM_CASCADE_CLASSICAL` / `SABSIM_DEEPMD_MODEL` /
+> `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` is historical.
+
 This is the part prior art gets wrong (`DESIGN.md` §3.3). It mirrors
 §9.2's persistent-driver discipline, but the potential and the boundaries
 are cascade-specific.
@@ -2291,17 +2304,13 @@ function open_cascade_driver(slab, potential, member_specification):
     # antipattern, DESIGN §3.3 — the same one §9.2 refuses). At the doses
     # SAB needs (thousands of impacts) that overhead is prohibitive.
     #
-    # POTENTIAL: hybrid/overlay of the §4.7-selected generator — the
-    # UNIVERSAL FOUNDATION MLIP by default, a config-selected classical
-    # model the secondary fallback (Stillinger-Weber for SILICON; BKS or
-    # Vashishta for silica, Munetoh-Tersoff a further fallback; Buckingham
-    # for ionic — DESIGN §3.3, §4.7) — with TWO ZBL hard cores. The
-    # generator does the bonding; ZBL #1 (longer cutoff) the
-    # projectile-substrate collision; ZBL #2 (short cutoff, below the
-    # bond) a hard core on every substrate-substrate pair, because the
-    # generators (foundation MLIP or classical alike) have only FINITE,
-    # soft short-range repulsion and would otherwise let cascade atoms
-    # fuse (PRIOR_ART §1.9).
+    # POTENTIAL: hybrid/overlay of the UNIVERSAL FOUNDATION MLIP (DESIGN
+    # §4.7; the classical alternative was deprecated 2026-08-26) with TWO
+    # ZBL hard cores. The MLIP does the bonding; ZBL #1 (longer cutoff)
+    # the projectile-substrate collision; ZBL #2 (short cutoff, below the
+    # bond) a hard core on every substrate-substrate pair, because a
+    # near-equilibrium model has only FINITE, soft short-range repulsion
+    # and would otherwise let cascade atoms fuse (PRIOR_ART §1.9).
     # The ZBL Z-pair channels are DERIVED from the species set (§10.3),
     # never hand-enumerated (prior art's argon-only failure).
     #

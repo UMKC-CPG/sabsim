@@ -969,6 +969,19 @@ classical MD, and both are just one setting of the projectile spec below.
 
 ### 3.3 The cascade engine — heat-sink and boundary design
 
+> **Deprecated 2026-08-26 (Paul):** classical analytic potentials
+> (Stillinger-Weber, Tersoff, Vashishta, Buckingham) are no longer part of
+> SABSIM. The classical cascade path was validated for silicon only, the
+> classical stand-in for the gentle stages was never going to be the
+> production model, and keeping both made the potential story hard to
+> follow. The code now has exactly two force models: the universal
+> foundation MLIP + ZBL for the lattice derivation and the cascade, and
+> the DeePMD production model (a committee once ALF trains one; a single
+> frozen file until then), both named in the study file's `[potential]`
+> block. Text below that describes a classical option, a classical
+> registry, or `SABSIM_CASCADE_CLASSICAL` / `SABSIM_DEEPMD_MODEL` /
+> `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` is historical.
+
 This is the correctness core, and the part prior art gets wrong. The
 cascade runs on a **universal foundation MLIP + ZBL** (STRUCTURAL 1b;
 selected per material by the §4.7 generator seam), with a **classical +
@@ -1461,12 +1474,13 @@ cascade already runs on the universal foundation MLIP + ZBL (§4.7), and
 the 2026-08-21 decision makes that **same foundation model the
 generator for the gentle stages too** — the re-anneal of §3.4 and the
 press, settle and pull of §5 — as it is wired in. Until that lands,
-those stages fall back to a CLASSICAL potential resolved per material
-from the SAME registry the cascade generator reads (§4.7;
-`driver/cascade_potential.classical_force_model`). That is a deliberate
-stand-in rather than a second design: it wears the same `ForceModel` /
-`pair_style` seam the trained committee will, which is precisely what
-lets the swap be deferred without disturbing anything upstream of it.
+those stages run under ONE frozen DeePMD file named by the study file's
+`[potential] production_weights` (a committee of one, no uncertainty;
+revised 2026-08-26 — the classical stand-in that previously filled this
+slot is deprecated and removed). That is a deliberate stand-in rather
+than a second design: it wears the same `ForceModel` / `pair_style` seam
+the trained committee will, which is precisely what lets the swap be
+deferred without disturbing anything upstream of it.
 Two consequences are worth stating plainly. First, a material is now
 described in exactly ONE place: the re-anneal and the press/pull each
 used to hard-code `sw Si.sw`, and one of the three copies mapped EVERY
@@ -1496,6 +1510,19 @@ designed" must not be read as "the MLIP runs."
   STRUCTURAL 1b/3 DESIGN follow-on, not fixed here.
 
 ### 4.7 The cascade-potential generator: selection, acceptance, fallback
+
+> **Deprecated 2026-08-26 (Paul):** classical analytic potentials
+> (Stillinger-Weber, Tersoff, Vashishta, Buckingham) are no longer part of
+> SABSIM. The classical cascade path was validated for silicon only, the
+> classical stand-in for the gentle stages was never going to be the
+> production model, and keeping both made the potential story hard to
+> follow. The code now has exactly two force models: the universal
+> foundation MLIP + ZBL for the lattice derivation and the cascade, and
+> the DeePMD production model (a committee once ALF trains one; a single
+> frozen file until then), both named in the study file's `[potential]`
+> block. Text below that describes a classical option, a classical
+> registry, or `SABSIM_CASCADE_CLASSICAL` / `SABSIM_DEEPMD_MODEL` /
+> `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` is historical.
 
 Sections §3.3 and `PSEUDOCODE.md` §10 run the surface-activation cascade
 on a *rough* potential spliced with ZBL, deliberately not the production
@@ -1590,12 +1617,11 @@ form whose
 fidelity nobody yet has evidence for. But a material's FIRST activation
 run is precisely what produces that evidence, so the refusal cannot be
 absolute or no new material could ever be brought up. The escape hatch
-is an environment variable, `SABSIM_ALLOW_UNVALIDATED_POTENTIAL`, read
-once per run (`pipeline/live_stages.py`) and passed down as an explicit
-argument. It lives outside the code deliberately, for two reasons: no
-one is tempted to flip `validated=True` in the registry before the
-evidence exists, and because it must be set in the job script the choice
-stays in the run's own permanent record. Anything produced under it is
+is the study file's `[potential] allow_unvalidated = true` (revised
+2026-08-26; it was an environment variable before). It lives in the study
+file deliberately: no one is tempted to flip `validated=True` in the code
+before the evidence exists, and because the study file is the provenance
+record (§1.6) the choice stays in the run's own permanent record. Anything produced under it is
 EXPLORATORY, and both the run and any report drawn from it must say so.
 
 **The cascade-potential ladder: universal by default, classical by
@@ -1710,8 +1736,9 @@ Because that engine is a self-contained bundle with its own
 torch and MPI, the universal cascade runs OUT-OF-PROCESS — the LAMMPS
 cascade is scripted and run as the bundle's `lmp` in a subprocess, its
 structure handed back through a file (ARCHITECTURE §4.1/§4.4, §4.3). The
-activate job sets `SABSIM_CASCADE_ENGINE_PREFIX` (the bundle) and
-`SABSIM_CASCADE_MLIP_MODEL` (the weights). Per §3.4 the activate stage is
+activate job sets `SABSIM_CASCADE_ENGINE_PREFIX` (the bundle); the
+weights are named by the study file's `[potential] universal_weights`
+(revised 2026-08-26). Per §3.4 the activate stage is
 cascade-ONLY — the heal and the §3.5 gate ride the bond job — so the
 subprocess needs no classical potential and the activate job carries no
 `LAMMPS_POTENTIALS`. (The intermediate first node-validated on a V100 ran
@@ -1721,14 +1748,12 @@ bond job, leaving activate cascade-only — a code change in flight.)
 
 It is registered `validated=False` because it has not yet
 cleared the §3.5 gate on any material, so a DEFAULT (universal) cascade
-REFUSES unless the run sets `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` — the same
-exploratory opt-in the classical registry uses. Its first gate-passing
-activation is what licenses flipping the flag; until then the validated
-silicon/SW path remains the certified regression anchor, reached with
-`SABSIM_CASCADE_CLASSICAL`. The weights are a large deploy-time artifact
-rather than a checked-in file, so the registry pins the model IDENTITY
-(name/branch/version) and the concrete artifact path is supplied via
-`SABSIM_CASCADE_MLIP_MODEL`.
+REFUSES unless the study sets `[potential] allow_unvalidated = true`. Its
+first gate-passing activation is what licenses flipping the flag. The
+weights are a large deploy-time artifact rather than a checked-in file, so
+the code pins the model IDENTITY (name/branch/version) and the study file
+names the concrete artifact path (`[potential] universal_weights`, which
+phase-three validation checks exists and whose name must match).
 
 Remaining v1 follow-ons (logged in `TODO.md`): running DPA-3.1-3M through a
 full activation to clear the §3.5 gate (then `validated=True`); pinning the

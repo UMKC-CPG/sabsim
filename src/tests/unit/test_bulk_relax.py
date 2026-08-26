@@ -14,15 +14,14 @@ from sabsim.driver.bulk_relax import (
     bulk_relax_commands,
     conventional_cell,
     cubic_lattice_constant,
-    derive_lattice,
 )
-from sabsim.driver.commands import classical_si_stand_in
+from tests.unit.support import stand_in_force_model
 from sabsim.driver.engine import MockEngine
 
 
 def test_bulk_relax_commands_are_periodic_and_relax_the_box():
     """A p p p box, the force model, box/relax, and a minimize line."""
-    model = classical_si_stand_in({"Si": 1})
+    model = stand_in_force_model({"Si": 1})
     commands = bulk_relax_commands("bulk.data", model)
     assert "boundary p p p" in commands
     assert "pair_style sw" in commands
@@ -33,7 +32,7 @@ def test_bulk_relax_commands_are_periodic_and_relax_the_box():
 
 def test_minimize_line_carries_the_settings():
     """The minimize command reflects the convergence settings."""
-    model = classical_si_stand_in({"Si": 1})
+    model = stand_in_force_model({"Si": 1})
     settings = MinimizeSettings(
         energy_tolerance=1e-6, force_tolerance=1e-6,
         max_iterations=500, max_evaluations=5000)
@@ -56,25 +55,6 @@ def test_conventional_cell_divides_a_general_box_by_replication():
         derived, [[4.0, 0.2, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 5.0]])
 
 
-def test_derive_lattice_reads_the_relaxed_box_into_a_relaxation():
-    """derive_lattice reads the mock's box/energy into a BulkRelaxation."""
-    # The mock pretends the relaxation reached a=5.4309 (SW Si), a value
-    # DIFFERENT from the CIF's 5.43 starting scale — the point of §2.2.
-    edge = 5.4309 * 2
-    engine = MockEngine(
-        energy=-296.0, box=np.diag([edge, edge, edge]), atom_count=64)
-    model = classical_si_stand_in({"Si": 1})
-
-    result = derive_lattice(engine, "bulk.data", model, cells_per_axis=2)
-
-    assert result.lattice_constant == 5.4309
-    # The full conventional cell is derived too (the non-cubic path).
-    assert np.allclose(result.conventional_cell, np.diag([5.4309] * 3))
-    assert result.potential_energy == -296.0
-    assert result.atom_count == 64
-    # The orchestration really issued the relaxation stream to the engine.
-    assert "fix relax_box all box/relax iso 0.0 vmax 0.001" in (
-        engine.received_commands)
 
 
 def _deepmd_bulk_model():
@@ -100,12 +80,6 @@ def test_bulk_relax_commands_map_the_atoms_for_a_deepmd_model():
         "read_data bulk.data")
 
 
-def test_bulk_relax_commands_omit_the_map_for_a_classical_model():
-    """A classical form leaves the preamble untouched (no atom map)."""
-    from sabsim.driver.commands import classical_si_stand_in
-    model = classical_si_stand_in({"Si": 1})
-    commands = bulk_relax_commands("bulk.data", model)
-    assert "atom_modify map yes" not in commands
 
 
 def test_subprocess_script_ends_by_writing_the_relaxed_data():

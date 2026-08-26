@@ -84,9 +84,9 @@ controls = ["protocol", "potential"]
 [[member]]
 name          = "si-sio2"
 potential_ref = "PENDING-BOOTSTRAP"    # resolved by §11 on convergence
-# Elemental silicon on one side, silica on the other, so the form must
-# span BOTH plus the interface (§4.8). The silica-only alternative
-# cannot describe elemental silicon at all.
+# Elemental silicon on one side, silica on the other, so the declared
+# regime must span BOTH plus the interface (§4.8). Recorded provenance
+# for the force-model recipe; no code selects a potential from it today.
 material_domain = "silicon-and-silica"
   [member.wafer_a]
   material  = "Si"
@@ -127,17 +127,14 @@ material_domain = "diamond-cubic"      # {Si} has one registered domain
 # and the one that proves the machinery is not silicon-only. Same-material
 # on both faces (§2.7), so it needs no lattice matching between unlike
 # crystals and isolates ONE question: does activation work on a compound,
-# multi-species surface? It runs on the Munetoh Tersoff of DESIGN §4.7,
-# which is registered but has NOT cleared the §3.5 gate, so anything it
-# produces is EXPLORATORY and provisional (the run is what generates the
-# evidence the gate would eventually judge).
+# multi-species surface? It runs under the same universal model as every
+# other member; no oxide has yet cleared the §3.5 gate, so anything it
+# produces is EXPLORATORY and provisional.
 [[member]]
 name          = "sio2-sio2-reference"
 potential_ref = "PENDING-BOOTSTRAP"    # the SAME generation as above
-# Silica on both faces, but still the silicon-and-silica form: the
-# comment above records why (the silica-only Vashishta entry carries its
-# own steric wall, so a ZBL overlay would double-count the repulsion).
-# A pure-silica member sits INSIDE this domain (§4.8 containment).
+# Silica on both faces still declares the silicon-and-silica regime: a
+# pure-silica member sits INSIDE that domain (§4.8 containment).
 material_domain = "silicon-and-silica"
   [member.wafer_a]
   material  = "SiO2"

@@ -46,13 +46,6 @@ export SABSIM_SHARE="/cluster/VAST/rulisp-lab/cpg"
 # so an override stays auditable rather than silent.
 # export SABSIM_LOCAL="$HOME/data/sabsim-local"
 
-# --- Engine reference data (derived from SABSIM_SHARE) ---------------
-# Where LAMMPS looks for its bundled potential files (Si.sw, etc.). Read
-# through the `current` symlink so a LAMMPS rebuild retargets this in one
-# place rather than in every rc and script.
-export LAMMPS_POTENTIALS=\
-"$SABSIM_SHARE/programs/lammps/current/share/lammps/potentials"
-
 # --- The layered runtime environment --------------------------------
 # This reproduces the proven two-step interactive activation (the `sabsim`
 # then `ssabsim` aliases): a full `conda activate` of the mamba env, then

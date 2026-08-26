@@ -65,33 +65,6 @@ _LATERAL_CELL_TOLERANCE = 1.0e-6
 # an ASE half. Everything below this is pure geometry (§2.6).
 # ---------------------------------------------------------------------
 
-def snapshot_amorphized_half(
-        engine: Engine,
-        type_map: dict,
-        wafer_tag: int) -> Atoms:
-    """Read one amorphized half back off an engine as an ASE ``Atoms``.
-
-    The activation stage left the damaged, re-annealed slab live in its
-    engine; this reconstitutes it as an ASE object the assembly can stack.
-    It reads three things across the seam — the positions, the per-atom
-    LAMMPS type ids, and the box — because positions ALONE cannot rebuild
-    the half: sputtering and the projectile deletion changed the
-    composition, so the pre-cascade species list no longer describes the
-    survivors. The type ids are mapped back to chemical symbols through
-    ``type_map`` (the cascade cell's symbol->id map, inverted here), and
-    the whole half is tagged ``wafer_tag`` so its provenance survives into
-    the assembled pair (§6).
-
-    The box is carried in as the ASE cell with the slab periodicity
-    (periodic in the plane, open along z), matching how the half was
-    simulated. Assembly re-solves the z-box once both halves are placed;
-    the lateral cell is what the commensurability assertion checks.
-    """
-    return amorphized_half_from_arrays(
-        engine.positions(), engine.types(), engine.box(),
-        type_map, wafer_tag)
-
-
 def amorphized_half_from_arrays(
         positions,
         type_ids,
@@ -100,7 +73,7 @@ def amorphized_half_from_arrays(
         wafer_tag: int) -> Atoms:
     """Reconstitute one amorphized half from raw arrays (§6, §4.3).
 
-    The array-only core of :func:`snapshot_amorphized_half`, split out so
+    The array-only read-back of an amorphized half, written so
     the SAME reconstruction serves both activate paths: the in-process one
     passes the live engine's read-backs, the out-of-process one passes the
     positions and type ids parsed from the subprocess's dump file plus the

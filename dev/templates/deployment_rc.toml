@@ -58,12 +58,7 @@ module_paths    = ["/cluster/VAST/rulisp-lab/cpg/modulefiles"]
 # them together. The DEFAULT cascade is the universal foundation MLIP, which
 # runs OUT-OF-PROCESS on a GPU under the deepmd bundle (ARCHITECTURE §4.4;
 # §4.1: the activate class FOLLOWS the cascade potential). Activation is
-# CASCADE-ONLY (§3.4) — the heal and the §3.5 gate moved to the bond job — so
-# this job needs no classical potential and carries NO LAMMPS_POTENTIALS.
-# For a validated CLASSICAL (CPU) cascade instead, set
-# SABSIM_CASCADE_CLASSICAL, route this to a CPU class with gpus_per_node = 0
-# and tasks_per_node = 32, and load a classical engine module (e.g.
-# "cpg_lammps_conda/22Jul2025").
+# CASCADE-ONLY (§3.4) — the heal and the §3.5 gate moved to the bond job.
 partition = "gpu"
 nodes     = 1
 # One rank: sabsim builds the slab and spawns ONE deepmd-bundle `lmp`

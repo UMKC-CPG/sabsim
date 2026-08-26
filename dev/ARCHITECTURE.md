@@ -59,7 +59,8 @@ machinery we drive but do not write).
 2. Train a machine-learned interatomic potential (MLIP)
 3. Build wafer slab models
 4. Amorphize ("activate") the model surfaces
-   (classical+ZBL cascade, then a gentle MLIP anneal — see §2.3)
+   (universal MLIP + ZBL cascade; the gentle heal rides the bond
+   stage — see §2.3)
 5. Build the facing-pair (two amorphized surfaces toward each other)
    (the ORDER is fixed by the physics — each surface is activated alone
    in vacuum before the two halves ever meet; what IS a setting is
@@ -97,8 +98,8 @@ and Kaleidoscope are our own prior tools, so we *reuse* them as the
 engine (ADOPT) and build the step-8 characterization batch on top
 (BUILD) — that batch is our edge. Step 4's LAMMPS row hides a potential
 split (§2.3): the violent Ar cascade runs on a **universal foundation
-MLIP + ZBL** (a broad pre-trained model; a classical + ZBL potential is
-the secondary fallback), while the **per-pair committee** the pipeline
+MLIP + ZBL** (a broad pre-trained model; the classical + ZBL fallback
+was deprecated 2026-08-26), while the **per-pair committee** the pipeline
 trains is never asked to reproduce cascades — only the foundation model
 is.
 
@@ -961,29 +962,24 @@ Settings / deployment-separation module (§2.3), and is emphatically
 details into emitted scripts (`PRIOR_ART.md` §1.2 item 7). Routing is
 **per job, not per step**, because the pipeline is CPU/GPU-heterogeneous
 and step 4 in particular can straddle both — its cascade runs on a
-universal MLIP (GPU, the default) or a classical form (CPU, opt-in), with
-the gentle re-anneal riding along after:
+universal MLIP on a GPU (the classical CPU option was deprecated
+2026-08-26), with the gentle heal riding the bond job:
 
 | Work                                   | Resource class |
 |----------------------------------------|----------------|
 | VASP labeling (step 1 / inside ALF)    | CPU (MPI)      |
 | DeePMD training (inside ALF)           | GPU            |
-| Ar cascade — universal MLIP + ZBL (default) | GPU       |
-| Ar cascade — classical + ZBL (opt-in)  | CPU            |
+| Ar cascade — universal MLIP + ZBL      | GPU            |
 | MLIP heal + §3.5 gate (§3.4)            | rides BOND (pre-press) |
 | Press / settle / pull (bond)           | GPU (`deepmd`) |
 | Imago (step 8)                         | CPU            |
 
 **Settled (this table ↔ `DESIGN.md` §10.2): the activate job's class
 follows the cascade potential.** Step 4's cascade dominates the activate
-job, so the job is routed by whichever cascade form it uses — the default
-universal MLIP makes activate GPU work; an opt-in classical form makes it
-CPU. Because the default cascade is universal, activate is GPU by default; a
-deployment opts an individual member down to CPU only by choosing a
-validated classical form for that material, through the per-usage
-`gpus_per_node` knob — a config choice, not a code change. (Resolved
-2026-08-06, superseding the earlier CPU-only-activate assumption, which held
-only while the cascade was classical.)
+job, and the cascade runs on the universal MLIP, so activate is GPU work.
+(Resolved 2026-08-06, superseding the earlier CPU-only-activate
+assumption; the classical CPU opt-in that briefly existed was deprecated
+2026-08-26.)
 
 **The heal + gate ride the BOND job, not activate (revised 2026-08-08).**
 The earlier design ran a per-slab MLIP re-anneal as a tail of the activate
@@ -1372,8 +1368,7 @@ one difference from the cascade handoff is the read-back: a box relax
 CHANGES the cell, so the script ends with `write_data` and the caller reads
 the relaxed cell (and atom count) back with `bulk_relax.read_data_box` —
 whereas the cascade leaves the box fixed and reads only atoms from a dump.
-An explicit classical derivation (`SABSIM_CASCADE_CLASSICAL`) keeps the
-small in-process `LammpsEngine` path. The primary rank drives the one GPU
+The primary rank drives the one GPU
 subprocess while peers wait at a barrier, then every rank reads the same
 handoff file — deterministic, so the derived cell agrees across ranks.
 

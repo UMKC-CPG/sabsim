@@ -230,16 +230,13 @@ class MemberSpecification:
     upstream artifact (DESIGN.md §1.3, §1.6).
 
     ``material_domain`` names the structural and chemical REGIME this
-    member's structures occupy (DESIGN.md §4.8). It is the other half of
-    the force-model lookup key, and it exists because a species set does
-    not identify a material model on its own: silicon-and-oxygen is
-    covered by one form that spans a silicon wafer, a silica wafer and
-    the interface between them, and by another that is better for
-    amorphous silica but cannot describe elemental silicon at all.
-    Nothing in a cell's composition distinguishes those cases, so the
-    specification must say which is meant. Like ``potential_ref`` it is a
-    pointer rather than a knob — refining it does not converge anything,
-    it selects a different description of the material.
+    member's structures occupy (DESIGN.md §4.8). It exists because a
+    species set does not identify a material model on its own: carbon
+    spans diamond and graphite, silica runs from quartz to an amorphous
+    network, and a model trained on one regime is confidently wrong in
+    another. Today no code consumes it — it is RECORDED provenance that
+    the §4.8 force-model recipe will be keyed on once the bootstrap
+    exists. Like ``potential_ref`` it is a pointer rather than a knob.
 
     A note on where this field will eventually live. §4.8 keys the
     force-model RECIPE on (species union, domain) too, so once that

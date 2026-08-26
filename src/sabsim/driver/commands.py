@@ -152,21 +152,6 @@ class ForceModel:
     needs_atom_map: bool = False
 
 
-def classical_si_stand_in(type_map: dict) -> ForceModel:
-    """The wave-0 classical stand-in: Stillinger-Weber silicon (§9.8).
-
-    The element list in the ``pair_coeff`` follows ``type_map`` so LAMMPS
-    type ids line up with the species order the structure was written
-    with. This is the honest wave-0 placeholder the trained committee
-    replaces behind the SAME :class:`ForceModel` seam.
-    """
-    elements = " ".join(
-        sorted(type_map, key=lambda symbol: type_map[symbol]))
-    return ForceModel(
-        pair_style="sw",
-        pair_coeff=(f"* * Si.sw {elements}",))
-
-
 def deepmd_model(model_path: str) -> ForceModel:
     """The trained DeePMD committee potential (DESIGN.md §4, §9.8).
 
@@ -857,7 +842,7 @@ def pull_script(
 # ---------------------------------------------------------------------
 # The surface-activation cascade command block (PSEUDOCODE.md §10). These
 # generators produce the pure command strings for the step-4 amorphization
-# cascade — the classical + ZBL potential (resolved by cascade_potential.
+# cascade — the universal MLIP + ZBL potential (resolved by cascade_potential.
 # resolve_cascade_generator, DESIGN.md §4.7) driving an energetic-particle
 # bombardment. Like the press/pull block above, nothing here runs a
 # simulator; the per-impact SEQUENCING (insert -> cascade -> relax, with
@@ -1102,7 +1087,7 @@ def cascade_setup_commands(
     """The one-time cascade setup, before any impact runs (§10.2).
 
     Sets the box up (``p p f`` open top so sputtered atoms LEAVE, §3.3),
-    loads the resolved classical + ZBL force model, carves the standalone
+    loads the resolved universal MLIP + ZBL force model, carves the standalone
     slab's regions and the projectile-spawn scaffolding, and starts the
     frozen-base / Langevin-border / NVE-all integrators. It also defines
     ``elapsed_cascade`` — the simulated-time variable :func:`cascade_halt_

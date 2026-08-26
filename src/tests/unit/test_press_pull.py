@@ -14,7 +14,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from sabsim.driver.commands import RegionGeometry, classical_si_stand_in
+from sabsim.driver.commands import RegionGeometry
+from tests.unit.support import stand_in_force_model
 from sabsim.driver.engine import MockEngine
 from sabsim.driver.activation_gate import ActivationVerdict
 from sabsim.driver.press_pull import (
@@ -60,7 +61,7 @@ _TEMPLATE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
     "..", "..", "..", "dev", "templates", "study_spec.toml"))
 
-_MODEL = classical_si_stand_in({"Si": 1})
+_MODEL = stand_in_force_model({"Si": 1})
 _LOWER_Z = np.linspace(0.0, 10.0, 100)   # a wafer-A slab, top surface ~10
 
 

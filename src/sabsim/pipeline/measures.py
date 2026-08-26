@@ -42,7 +42,7 @@ class Measure:
     realization_count: int         # how many seeds this averaged over
     unit_native: str               # the unit it was computed in
     unit_si: str                   # the same quantity in SI, for reading
-    fidelity: str                  # e.g. "classical-stand-in", "mlip"
+    fidelity: str                  # e.g. "deepmd-committee-of-one", "mlip"
     method: str                    # a short note on how it was produced
     status: MeasureStatus          # ok / unresolved / rejected
     inputs: tuple[str, ...] = ()   # fingerprints of what fed this measure

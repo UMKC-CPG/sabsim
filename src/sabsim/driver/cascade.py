@@ -1,29 +1,24 @@
-"""The persistent surface-activation cascade driver (PSEUDOCODE.md §10).
+"""The surface-activation cascade driver (PSEUDOCODE.md §10).
 
 This is the step-4 counterpart of the press/pull driver
-(:mod:`sabsim.driver.press_pull`): the orchestration that opens a cascade
-driver on a STANDALONE slab in vacuum and bombards its surface to the
-target dose, tying slice 2's cascade command generation and the §4.7
-classical + ZBL force model together into the per-impact loop DESIGN.md §3
-specifies. Like the press/pull driver it is written ENTIRELY against the
-:class:`~sabsim.driver.engine.Engine` seam, so every branch is tested
-against ``MockEngine`` with no LAMMPS; the real adapter drops in unchanged
-on a compute node.
+(:mod:`sabsim.driver.press_pull`): it turns a member's bombardment
+protocol into the per-impact LAMMPS command stream DESIGN.md §3
+specifies — the impact plan derived from the fluence, the seeded impact
+positions and velocities, and the cleanup that strips the projectile.
 
-Two things it does NOT do live one slice up and land next: the MLIP
-re-anneal (§10.5, which relaxes the disorder this authored) and the
-activation gate (§10.6, the pass/fail check on the re-annealed structure).
+The cascade runs on the universal foundation MLIP spliced with ZBL cores
+(DESIGN §4.7). That model lives in deepmd's own bundle and cannot load
+into this process (ARCHITECTURE §4.1/§4.4), so the whole activate run is
+assembled here as ONE self-contained script (:func:`build_activate_script`)
+and executed out-of-process, its amorphized structure handed back through
+a file. Nothing is read back mid-run: every impact's position and
+velocity is derived from a seed, and the physical-time halt (§10.4) ends
+each ballistic phase from inside LAMMPS. The gentle heal and the §3.5 gate
+are NOT here — they run in the bond flow (§3.4, revised 2026-08-08).
+
 This module runs ONE amorphization realization; the ensemble that averages
 the bond metric over realizations (STRUCTURAL 4) is the sequencer's job,
 varying the master seed above this module (§10.8).
-
-The cascade differs from the press/pull loop in one structural way: each
-impact is FIRE-AND-FORGET. The press reads the state back between chunks to
-decide when contact is real; a cascade impact has no such mid-run decision
-— the physical-time halt (§10.4) ends the ballistic phase from inside
-LAMMPS — so the loop only ISSUES commands and never blocks on a read-back.
-The damaged state it leaves in the engine is what the re-anneal and gate
-read afterward.
 """
 
 from __future__ import annotations
@@ -34,7 +29,6 @@ from dataclasses import dataclass
 import numpy as np
 from ase.data import atomic_masses, atomic_numbers
 
-from sabsim.driver.cascade_potential import resolve_cascade_generator
 from sabsim.driver.commands import (
     CascadeGeometry,
     ForceModel,
@@ -45,12 +39,10 @@ from sabsim.driver.commands import (
     cascade_halt_release_commands,
     cascade_prerelax_commands,
     cascade_setup_commands,
-    force_model_commands,
     insert_projectile_commands,
     to_metal,
     trajectory_dump_commands,
 )
-from sabsim.driver.engine import Engine
 from sabsim.spec.records import MemberSpecification, Quantity
 
 # The energy of a 1 amu mass moving at 1 Å/ps, expressed in eV — the
@@ -246,212 +238,6 @@ def sample_impact_velocity(spec: BombardmentSpec, seed: int) -> tuple:
             -normal_speed)
 
 
-def run_cascade_to_fluence(
-        engine: Engine,
-        built,
-        member: MemberSpecification,
-        force_model: ForceModel,
-        data_file: str,
-        spec: BombardmentSpec,
-        seed: int,
-        geometry: CascadeGeometry = CascadeGeometry(),
-        control: CascadeControl = CascadeControl(),
-        trajectory_file: str | None = None,
-        trajectory_stride: int = 200) -> CascadeOutcome:
-    """Bombard the surface to the target dose (PSEUDOCODE.md §10.4).
-
-    Opens the cascade driver (the classical + ZBL force model, the
-    frozen-base / Langevin-border / NVE heat sink, the ``p p f`` open top),
-    then for each impact: inserts the projectile aimed at a fresh site,
-    runs the NVE cascade under the adaptive timestep until the physical-time
-    halt fires (§10.4), then removes the adaptive fix and relaxes under the
-    border thermostat at a fixed step so the next impact starts from an
-    equilibrated substrate. Every impact is fire-and-forget — the halt ends
-    the ballistic phase from inside LAMMPS — so the loop only issues
-    commands; the damaged state it leaves in the engine is what the
-    re-anneal (§10.5) and gate (§10.6) read next.
-
-    ``seed`` seeds the border thermostat; the per-impact position and
-    velocity seeds come from ``spec.impact_seeds``.
-
-    ``trajectory_file`` optionally records the whole bombardment for
-    visual inspection — one frame per ``trajectory_stride`` steps, held
-    open across every impact so the result is a single continuous movie
-    rather than one file per collision. It is off unless asked for: the
-    frames cost wall clock inside the hot cascade loop and the files are
-    large.
-    """
-    positions = np.asarray(built.atoms.get_positions())
-    base_low = float(positions[:, 2].min())
-    surface_high = float(positions[:, 2].max())
-
-    engine.commands(cascade_setup_commands(
-        member, force_model, data_file, base_low, surface_high, seed,
-        geometry))
-
-    # Relax the freshly-read slab under the cascade potential before the
-    # first impact (§2.4 / §2.7 step 2): a strained mismatched slab takes
-    # its out-of-plane Poisson response at fixed lateral cell here, rather
-    # than being bombarded while still stressed. The frozen base stays put
-    # (setforce), so only the surface settles. Issued before the dump opens
-    # so the recorded movie stays about the bombardment, not this settle.
-    engine.commands(cascade_prerelax_commands())
-
-    # Opened once, before the first impact, and deliberately never closed
-    # here: the re-anneal that follows runs on this same engine, so
-    # leaving the dump open captures the surface HEALING as well as being
-    # damaged — which is the more informative half of the movie.
-    if trajectory_file is not None:
-        engine.commands(
-            trajectory_dump_commands(trajectory_file, trajectory_stride))
-
-    # The between-impact relaxation runs at the ORDINARY MD step, not
-    # the tiny cascade step (see cascade_fixed_timestep_commands): the
-    # cascade has halted and the energy has thermalized, so the step
-    # count must be derived from the same step the relaxation is
-    # actually integrated with, or the requested duration is wrong.
-    relax_steps = max(1, round(
-        spec.between_impact_relaxation
-        / to_metal(member.numerical.md_timestep, "time")))
-
-    for impact_seed in spec.impact_seeds:
-        position = sample_impact_position(
-            built, geometry.spawn_height, impact_seed)
-        velocity = sample_impact_velocity(spec, impact_seed)
-        engine.commands(insert_projectile_commands(
-            spec.projectile_type, position, velocity))
-
-        # The violent NVE cascade under the adaptive step, ended by the
-        # physical-time halt (the step cap is only a backstop, §10.4).
-        engine.commands(cascade_adaptive_timestep_commands(member))
-        engine.commands(cascade_halt_commands(spec.cascade_duration))
-        engine.commands([f"run {control.cascade_step_cap}"])
-        engine.commands(cascade_halt_release_commands())
-
-        # The fixed-step border-thermostatted relaxation between impacts.
-        engine.commands(cascade_fixed_timestep_commands(member))
-        engine.commands([f"run {relax_steps}"])
-
-    return CascadeOutcome(
-        impacts_run=spec.impact_count,
-        note=f"delivered {spec.impact_count} impacts of "
-             f"{spec.projectile_symbol} at "
-             f"{spec.impact_energy:.0f} eV (§10.4)")
-
-
-# ---------------------------------------------------------------------
-# The MLIP re-anneal (PSEUDOCODE.md §10.5) — a stage prior art does NOT
-# have. The classical cascade AUTHORED the disorder; this gently settles
-# it under the MLIP so the final structure is MLIP/DFT-quality, before the
-# gate judges it. In v1 the "MLIP" is the classical stand-in (§4.5), so
-# this exercises the plumbing; the trained committee drops in unchanged.
-# ---------------------------------------------------------------------
-
-def mlip_reanneal(
-        engine: Engine,
-        member: MemberSpecification,
-        mlip_force_model: ForceModel,
-        seed: int,
-        projectile_types) -> None:
-    """Gently re-equilibrate the amorphized surface under the MLIP (§10.5).
-
-    First it tears down the cascade's machinery: the ZBL heat-sink fixes
-    are removed and EVERY projectile atom deleted, because the projectile
-    is NOT part of the activated surface (embedded or surface-adsorbed
-    argon is stripped, as prior art does with ejecta) and the Si-only MLIP
-    cannot see it. Deletion is BY TYPE (``projectile_types``, the LAMMPS
-    type ids of the projectile species), because the spawn-region
-    ``projectile`` group holds only the LAST impact's atom — it is cleared
-    and refilled each impact — so a group-based delete would leave the
-    earlier embedded projectiles behind. The frozen base is KEPT so the
-    bulk lattice anchors the gentle relaxation. It then loads the MLIP,
-    minimizes, holds the mobile atoms briefly at the anneal temperature,
-    and quenches back to room temperature (the ``reanneal_schedule``). A
-    kinetically trapped glass bounds how far this may go, so it is
-    deliberately mild — "re-annealed" means "as relaxed as this schedule
-    got it" (STRUCTURAL 1b).
-
-    The re-anneal runs at the MLIP MD step (``md_timestep``), not the tiny
-    cascade step, and the quench span reuses ``hold_duration`` as a
-    documented stand-in (the schedule carries no separate quench time).
-    """
-    engine.commands(
-        reanneal_commands(member, mlip_force_model, projectile_types))
-
-
-def reanneal_commands(
-        member: MemberSpecification,
-        mlip_force_model: ForceModel,
-        projectile_types) -> list:
-    """The re-anneal command block (§10.5), as one ordered list.
-
-    Split out of :func:`mlip_reanneal` so the SAME sequence can be either
-    issued to a live in-process engine (the classical-cascade path) OR
-    assembled into a self-contained script run out-of-process under the
-    universal-MLIP cascade engine (:func:`build_activate_script`,
-    ARCHITECTURE §4.3 file handoff). The commands are identical either way;
-    only who executes them differs.
-
-    The block: tear down the cascade's ballistic integrator and border
-    thermostat (the frozen base stays, anchoring the bulk), delete EVERY
-    projectile atom by type, load the MLIP, minimize, hold the mobile atoms
-    at the anneal temperature, quench toward room temperature, and RENUMBER
-    the survivors so the gate's ``gather_atoms`` read sees consecutive ids.
-    """
-    schedule = member.protocol.reanneal_schedule
-    hold_temperature = to_metal(schedule.hold_temperature, "temperature")
-    room_temperature = to_metal(member.protocol.press_temperature,
-                                "temperature")
-    damping = to_metal(member.numerical.langevin_damping, "time")
-    md_step = to_metal(member.numerical.md_timestep, "time")
-    hold_steps = max(1, round(
-        to_metal(schedule.hold_duration, "time") / md_step))
-
-    commands = [
-        # Drop the cascade's ballistic integrator and border thermostat;
-        # the frozen base stays (it anchors the bulk through the relax).
-        "unfix nve_all",
-        "unfix langevin_border",
-        "uncompute cascade_border_temp",
-        # The projectile is not part of the activated surface — strip EVERY
-        # projectile atom (by type, so embedded ones from earlier impacts go
-        # too, not just the last), then re-carve the mobile group without
-        # them.
-        f"group cascade_projectiles type "
-        f"{' '.join(str(type_id) for type_id in sorted(projectile_types))}",
-        # compress yes RENUMBERS the remaining atoms to consecutive ids —
-        # required because the gate reads positions with gather_atoms, which
-        # rejects the id gaps that sputtered (lost) atoms and this deletion
-        # would otherwise leave.
-        "delete_atoms group cascade_projectiles compress yes",
-        "group mobile subtract all frozen_base",
-    ]
-    commands += force_model_commands(mlip_force_model)
-    commands += [
-        f"timestep {_lammps_number(md_step)}",
-        "min_style cg",
-        "minimize 1e-8 1e-8 1000 10000",
-        # A gentle hold at the anneal temperature, mobile atoms only.
-        f"fix reanneal mobile nvt temp {_lammps_number(hold_temperature)} "
-        f"{_lammps_number(hold_temperature)} {_lammps_number(damping)}",
-        f"run {hold_steps}",
-        # Quench back toward room temperature (ramp the setpoint down).
-        f"fix reanneal mobile nvt temp {_lammps_number(hold_temperature)} "
-        f"{_lammps_number(room_temperature)} {_lammps_number(damping)}",
-        f"run {hold_steps}",
-        # Sputtering (during the cascade) and the projectile deletion leave
-        # the atom ids non-consecutive; the gate reads positions with
-        # gather_atoms, which requires consecutive ids, so RENUMBER the
-        # survivors here — the last touch of the atom set before the gate.
-        # Losing atoms is EXPECTED for an open `p p f` surface (§10.4), the
-        # OPPOSITE of the pull's closed-box atom-count gate; this only
-        # relabels the survivors 1..N, it changes no atom and hides no loss.
-        "unfix reanneal",
-        "reset_atoms id",
-    ]
-    return commands
-
-
 def cascade_cleanup_commands(projectile_types) -> list:
     """The cascade's own end-of-stage cleanup (§3.4), as one command list.
 
@@ -501,13 +287,12 @@ def build_activate_script(
         skip_prerelax: bool = False) -> list:
     """Assemble the CASCADE-ONLY activate run as one self-contained script.
 
-    This is the out-of-process twin of :func:`run_cascade_to_fluence` plus
-    :func:`cascade_cleanup_commands`. When the cascade runs on the
-    universal-MLIP engine — a separate deepmd bundle that cannot share this
-    process's LAMMPS (ARCHITECTURE §4.1/§4.4) — the cascade half of the
-    activate stage is emitted here as a script, run under that engine's
-    ``lmp`` in ONE subprocess, and its AMORPHIZED structure handed back
-    through a FILE (ARCHITECTURE §4.3). The sabsim process builds the slab
+    The cascade runs on the universal-MLIP engine — a separate deepmd
+    bundle that cannot share this process's LAMMPS (ARCHITECTURE §4.1/§4.4)
+    — so the whole activate stage is emitted here as a script, run under
+    that engine's ``lmp`` in ONE subprocess, and its AMORPHIZED structure
+    handed back through a FILE (ARCHITECTURE §4.3). The sabsim process builds
+    the slab
     before and reads the amorphized structure back after; nothing is read
     back mid-run. The heal and the §3.5 gate are NOT here — the §3.4 revision
     moved them to the bond flow (§9.1), so this stage is cascade-only.
@@ -517,9 +302,8 @@ def build_activate_script(
     (:func:`sample_impact_position` / :func:`sample_impact_velocity`), not
     from the live damaged state, so all impacts are precomputed here and the
     per-impact halt ends each cascade from inside LAMMPS. The command blocks
-    are the SAME ones the in-process path issues — setup, the §2.4 prerelax,
-    the per-impact insert -> adaptive cascade -> fixed-step relax loop, then
-    :func:`cascade_cleanup_commands` — so the two paths run identical physics.
+    are: setup, the §2.4 prerelax, the per-impact insert -> adaptive cascade
+    -> fixed-step relax loop, then :func:`cascade_cleanup_commands`.
 
     The script ends by writing the AMORPHIZED (substrate-only, re-numbered)
     structure to ``output_structure_file`` as a sorted custom dump
@@ -529,8 +313,8 @@ def build_activate_script(
     An optional ``trajectory_file`` records the WHOLE bombardment as one
     strided movie — a frame every ``trajectory_stride`` steps, opened after
     the prerelax and held open across every impact and the cleanup — so a
-    universal (out-of-process) cascade can be watched end to end, exactly as
-    the in-process path allows. It is off (``None``) by default because the
+    cascade can be watched end to end. It is off (``None``) by default
+    because the
     frames cost wall clock in the hot cascade loop (`run_options`).
     """
     positions = np.asarray(built.atoms.get_positions())
@@ -623,90 +407,3 @@ def _projectile_species(member: MemberSpecification) -> set:
     if cospecies and cospecies.lower() != "none":
         species.add(cospecies)
     return species
-
-
-def activate_surface(
-        engine: Engine,
-        built,
-        member: MemberSpecification,
-        data_file: str,
-        seed: int,
-        geometry: CascadeGeometry = CascadeGeometry(),
-        control: CascadeControl = CascadeControl(),
-        allow_unvalidated_potential: bool = False,
-        use_classical_cascade: bool = False,
-        trajectory_file: str | None = None,
-        trajectory_stride: int = 200) -> CascadeOutcome:
-    """Activate ONE surface: CASCADE ONLY (§10.1, revised 2026-08-08).
-
-    Resolves the cascade force model for this slab's species (the §4.7 seam
-    — never named here, only asked for), derives the impact plan, bombards
-    the surface to the dose, then runs the cascade CLEANUP (§3.4): strip the
-    projectile and renumber, leaving the surface SUBSTRATE-ONLY and ready to
-    snapshot. The heal and the §3.5 gate are NOT here — the §3.4 revision
-    moved them to the bond flow (§9.1). ``built.type_map`` must already
-    declare the projectile so the cascade can create those atoms.
-
-    Returns the :class:`CascadeOutcome` (provenance: impacts delivered); the
-    amorphized structure stays LIVE in the engine for the caller to snapshot.
-
-    ``allow_unvalidated_potential`` forwards the §4.7 escape hatch for
-    EXPLORATORY bring-up of a new material. It stays False unless a caller
-    deliberately asks, and results obtained under it are provisional.
-
-    ``use_classical_cascade`` selects a curated CLASSICAL cascade form
-    (silicon's Stillinger-Weber, keyed by the member's ``material_domain``)
-    instead of the DESIGN-default universal foundation MLIP (§4.7,
-    "universal by default, classical by choice"). It stays False so the
-    default is universal.
-
-    ``trajectory_file`` optionally records the bombardment as a movie, for
-    visual inspection only — nothing downstream reads it.
-    """
-    cascade_force_model = resolve_cascade_generator(
-        built.type_map, _projectile_species(member),
-        allow_unvalidated=allow_unvalidated_potential,
-        domain=member.material_domain,
-        use_classical=use_classical_cascade)
-    spec = derive_bombardment_spec(built, member)
-    cascade = run_cascade_to_fluence(
-        engine, built, member, cascade_force_model, data_file, spec, seed,
-        geometry, control, trajectory_file, trajectory_stride)
-    projectile_types = [
-        built.type_map[species]
-        for species in _projectile_species(member)
-        if species in built.type_map]
-    # Cascade cleanup (§3.4): strip the projectile + renumber survivors, so
-    # the surface left live in the engine is substrate-only and ready to
-    # snapshot. No heal, no gate — those moved to the bond flow (§9.1).
-    engine.commands(cascade_cleanup_commands(projectile_types))
-    return cascade
-
-
-def activate_surfaces(
-        engine_a: Engine,
-        engine_b: Engine,
-        built_a,
-        built_b,
-        member: MemberSpecification,
-        data_file_a: str,
-        data_file_b: str,
-        seed: int,
-        geometry: CascadeGeometry = CascadeGeometry(),
-        control: CascadeControl = CascadeControl()) -> tuple:
-    """Activate BOTH surfaces independently, in their own engines (§10.1).
-
-    Each surface is amorphized in vacuum on its OWN engine, BEFORE the two
-    ever face each other — the whole point of surface-activated bonding
-    (§3.1). Cascade-only (revised 2026-08-08, §3.4): returns the two
-    :class:`CascadeOutcome`\\ s (provenance); the amorphized structures stay
-    live in each engine for the caller to snapshot, and the heal + §3.5 gate
-    run later in the bond flow. The two are independent, so a future parallel
-    map may run them concurrently; the sequencer's realization ensemble
-    (STRUCTURAL 4) loops ABOVE this, varying the master seed (§10.8).
-    """
-    outcome_a = activate_surface(
-        engine_a, built_a, member, data_file_a, seed, geometry, control)
-    outcome_b = activate_surface(
-        engine_b, built_b, member, data_file_b, seed, geometry, control)
-    return outcome_a, outcome_b

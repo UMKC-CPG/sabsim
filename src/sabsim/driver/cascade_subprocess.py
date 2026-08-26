@@ -18,9 +18,8 @@ gates the written structure after; nothing is read back mid-run, which is
 sound because every impact is seed-derived and the per-impact halt ends each
 cascade from inside LAMMPS.
 
-The classical cascade is unaffected: it is a built-in LAMMPS pair style, so
-it keeps running in-process on CPU through :class:`~sabsim.driver.lammps_
-engine.LammpsEngine`. Only the universal path comes here.
+Every cascade comes here: the universal MLIP is the only cascade
+potential (classical forms were deprecated 2026-08-26).
 """
 
 from __future__ import annotations
@@ -52,8 +51,7 @@ def resolve_cascade_engine_prefix() -> str:
         raise RuntimeError(
             f"the universal cascade runs out-of-process under the deepmd "
             f"bundle, but {_CASCADE_ENGINE_PREFIX_VARIABLE} is unset. Point "
-            f"it at the bundle's conda prefix (the one with bin/lmp), or "
-            f"request a classical cascade (SABSIM_CASCADE_CLASSICAL).")
+            f"it at the bundle's conda prefix (the one with bin/lmp).")
     if not os.path.isdir(prefix):
         raise RuntimeError(
             f"{_CASCADE_ENGINE_PREFIX_VARIABLE} names a directory that does "

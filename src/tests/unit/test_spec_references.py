@@ -66,34 +66,8 @@ def test_missing_crystal_file_is_reported_with_every_path_tried():
     assert "Looked in" in message
 
 
-def test_domain_not_registered_for_the_members_species_is_rejected():
-    """A domain the species cannot satisfy fails before any run starts.
-
-    This is the exact lookup the force-model resolvers perform, hoisted
-    to validation: the Si/Si member's species are {Si}, which carries
-    only the diamond-cubic domain.
-    """
-    study = _template_study()
-    silicon = next(m for m in study.members if m.name == "si-si-reference")
-    mismatched = replace(silicon, material_domain="silica-only")
-
-    with pytest.raises(SpecificationError) as caught:
-        check_study_references(_with_members(study, [mismatched]))
-    message = str(caught.value)
-    assert "silica-only" in message
-    # It names the domains that WOULD work for these species.
-    assert "diamond-cubic" in message
 
 
-def test_misspelled_domain_is_rejected():
-    """A typo is caught even though the species set is registered."""
-    study = _template_study()
-    silicon = next(m for m in study.members if m.name == "si-si-reference")
-    typo = replace(silicon, material_domain="diamond-cubik")
-
-    with pytest.raises(SpecificationError) as caught:
-        check_study_references(_with_members(study, [typo]))
-    assert "diamond-cubik" in str(caught.value)
 
 
 def test_every_problem_is_reported_in_one_pass():
