@@ -15,11 +15,12 @@ rather than inheriting a warm in-memory object (§14.3, §14.6). Every
 stage is routed through the SAME ``run_to_contract`` guard the whole-chain
 run uses, so a bad artifact halts the job loudly (ARCHITECTURE.md §5.1).
 
-Nothing here trains a potential or chooses a physics default. The force
-model each job resolves is the ONE lookup every member does behind the §1
-``resolve_potential`` seam — the classical stand-in today, the trained
-committee once the bootstrap (a separate upstream process) produces one —
-so the same three jobs run either, unchanged (DESIGN.md §1.2, §14).
+Nothing here trains a potential or chooses a physics default. Which force
+models a member runs under is written in its study file (the
+``[potential]`` block, DESIGN.md §1.6) and read by each stage from
+``member.potential``; the trained committee the bootstrap (a separate
+upstream process) will produce drops in there, so the same three jobs run
+either, unchanged (DESIGN.md §1.2, §14).
 """
 
 from __future__ import annotations
@@ -39,7 +40,6 @@ from sabsim.pipeline.contracts import (
     BOND_DEBOND_CONTRACT,
     DERIVED_LATTICES_CONTRACT,
     MEASURE_VECTOR_CONTRACT,
-    POTENTIAL_CONTRACT,
     SLABS_CONTRACT,
     STRUCTURE_CONTRACT,
     run_to_contract,
@@ -119,13 +119,9 @@ def run_member_job(member, scratch_directory, job: JobKind,
 
     The three sub-stages reuse the sequencer's own stage calls (§1),
     differing only in that they start from ``scratch``'s artifact rather
-    than the previous in-memory handle. The potential is the lookup
-    every job does (``resolve_potential``): classical stand-in now,
-    trained committee later, the SAME seam.
+    than the previous in-memory handle. The force models come from the
+    member's study file (``member.potential``), the same in every job.
     """
-    potential = run_to_contract(
-        lambda: stage_set.resolve_potential(member), POTENTIAL_CONTRACT)
-
     if job.name == "activate":
         # Starts from the spec (reads = NONE): derive the working lattice
         # (step 2b, DESIGN.md §2.2) under the current model, build both
@@ -136,17 +132,15 @@ def run_member_job(member, scratch_directory, job: JobKind,
         # fails (the regression when step 2b was wired, commit cf92d30).
         derived_lattices = run_to_contract(
             lambda: stage_set.derive_lattices(
-                member, potential, scratch_directory, comm),
+                member, scratch_directory, comm),
             DERIVED_LATTICES_CONTRACT)
         handle_a, handle_b, shared = run_to_contract(
             lambda: stage_set.build(
-                member, potential, derived_lattices, scratch_directory,
-                comm),
+                member, derived_lattices, scratch_directory, comm),
             SLABS_CONTRACT)
         activated = run_to_contract(
             lambda: stage_set.activate(
-                handle_a, handle_b, member, potential,
-                scratch_directory, comm),
+                handle_a, handle_b, member, scratch_directory, comm),
             ACTIVATED_SLABS_CONTRACT)
         structure = run_to_contract(
             lambda: stage_set.assemble(
@@ -162,7 +156,7 @@ def run_member_job(member, scratch_directory, job: JobKind,
         structure = read_artifact(scratch_directory, ASSEMBLED_PAIR)
         bond_debond = run_to_contract(
             lambda: stage_set.bond_debond(
-                structure, potential, member, scratch_directory, comm),
+                structure, member, scratch_directory, comm),
             BOND_DEBOND_CONTRACT)
         _publish(comm, lambda: write_artifact(
             scratch_directory, PULL_RESULTS, bond_debond))
@@ -185,10 +179,10 @@ def run_member_job(member, scratch_directory, job: JobKind,
         measures = merge_measures(measures, characterization)
         # The gate READS the vector and REPORTS; in v1 it never acts (§7).
         from sabsim.pipeline.sequencer import evaluate_member_gates
-        gate = evaluate_member_gates(measures, member, potential)
+        gate = evaluate_member_gates(measures, member)
         result = MemberResult(
             specification=member,
-            potential=build_provenance(potential, member),
+            potential=build_provenance(member),
             measures=measures, gate=gate, trusted=False)
         _publish(comm, lambda: write_artifact(
             scratch_directory, MEASURE_VECTOR, result))

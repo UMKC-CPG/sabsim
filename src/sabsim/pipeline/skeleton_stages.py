@@ -20,7 +20,6 @@ from sabsim.pipeline.exec_artifacts import (
     BondDebondResult,
     DerivedLattices,
     HalfHandle,
-    Potential,
     PressOutcome,
     PullOutcome,
     Slab,
@@ -56,22 +55,6 @@ _LABELED_GROUPS = (
 )
 
 
-def resolve_potential(member: MemberSpecification) -> Potential:
-    """Look up the potential the member runs under (PSEUDOCODE.md §1).
-
-    In W0 this returns a classical ``pair_style`` stand-in regardless of
-    the member's ``potential_ref``: the bootstrap that manufactures the
-    real MLIP is a separate upstream process (DESIGN.md §4.5, §11) not
-    yet built. The stand-in satisfies the same POTENTIAL_CONTRACT the
-    trained potential will, which is what lets it be swapped in later.
-    """
-    return Potential(
-        kind="classical-stand-in",
-        pair_style="classical (walking-skeleton stand-in)",
-        loadable=True,
-    )
-
-
 def _placeholder_handle(
         wafer, beam: str, scratch_directory: str,
         wafer_tag: int) -> HalfHandle:
@@ -91,7 +74,6 @@ def _placeholder_handle(
 
 def derive_lattices(
         member: MemberSpecification,
-        potential: Potential,
         scratch_directory: str | None = None,
         comm=None) -> DerivedLattices:
     """Derive each material's working lattice (DESIGN.md §2.2 — W0 stub).
@@ -115,7 +97,6 @@ def derive_lattices(
 
 def build_slabs(
         member: MemberSpecification,
-        potential: Potential,
         derived_lattices: DerivedLattices,
         scratch_directory: str,
         comm=None) -> tuple[HalfHandle, HalfHandle, SharedCell]:
@@ -143,7 +124,6 @@ def activate_surfaces(
         handle_a: HalfHandle,
         handle_b: HalfHandle,
         member: MemberSpecification,
-        potential: Potential,
         scratch_directory: str | None = None,
         comm=None) -> ActivatedSlabs:
     """Amorphize each half's surface and gate it (DESIGN.md §3, §10.1).
@@ -190,7 +170,6 @@ def assemble_pair(
 
 def run_bond_debond_md(
         structure: Structure,
-        potential: Potential,
         member: MemberSpecification,
         scratch_directory: str | None = None,
         comm=None) -> BondDebondResult:
@@ -311,12 +290,11 @@ class StageSet:
     run.
     """
 
-    resolve_potential: Callable
-    derive_lattices: Callable      # (member, potential, scratch, comm)
-    build: Callable                # (member, pot, lattices, scratch, comm)
-    activate: Callable             # (h_a, h_b, member, pot, scratch, comm)
+    derive_lattices: Callable      # (member, scratch, comm)
+    build: Callable                # (member, lattices, scratch, comm)
+    activate: Callable             # (h_a, h_b, member, scratch, comm)
     assemble: Callable             # (activated, shared, member, scratch)
-    bond_debond: Callable          # (structure, pot, member, scratch, comm)
+    bond_debond: Callable          # (structure, member, scratch, comm)
     analyze: Callable              # (structure, bond_debond, member)
     characterize: Callable         # (structure, bond_debond, member)
 
@@ -324,7 +302,6 @@ class StageSet:
 # The walking-skeleton set: every stage a login-node stub (no LAMMPS), the
 # sequencer's default so W0 control-flow tests need no compute node.
 W0_STAGES = StageSet(
-    resolve_potential=resolve_potential,
     derive_lattices=derive_lattices,
     build=build_slabs,
     activate=activate_surfaces,

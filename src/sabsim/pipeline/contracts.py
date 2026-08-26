@@ -25,7 +25,6 @@ from sabsim.pipeline.exec_artifacts import (
     BondDebondResult,
     DerivedLattices,
     HalfHandle,
-    Potential,
     SharedCell,
     Structure,
 )
@@ -79,17 +78,6 @@ def run_to_contract(work: Callable[[], object], contract: Contract):
 # The named contracts referenced at the sequencer's call sites. Each is
 # the shape the NEXT stage depends on (PSEUDOCODE.md §1).
 # ---------------------------------------------------------------------
-
-def _validate_potential(artifact: object) -> str | None:
-    """A usable potential the member can load (POTENTIAL_CONTRACT, §1)."""
-    if not isinstance(artifact, Potential):
-        return "expected a Potential artifact"
-    if not artifact.loadable:
-        return "potential is not loadable"
-    if not artifact.pair_style:
-        return "potential has no pair_style interface"
-    return None
-
 
 def _validate_derived_lattices(artifact: object) -> str | None:
     """A model-relaxed cell per material (DERIVED_LATTICES_CONTRACT, §2.2).
@@ -185,7 +173,6 @@ def _validate_measure_vector(artifact: object) -> str | None:
     return None
 
 
-POTENTIAL_CONTRACT = Contract("POTENTIAL_CONTRACT", _validate_potential)
 DERIVED_LATTICES_CONTRACT = Contract(
     "DERIVED_LATTICES_CONTRACT", _validate_derived_lattices)
 SLABS_CONTRACT = Contract("SLABS_CONTRACT", _validate_slabs)

@@ -15,7 +15,7 @@ import pytest
 
 from sabsim.pipeline import exec_full_study
 from sabsim.pipeline.contracts import (
-    POTENTIAL_CONTRACT,
+    SLABS_CONTRACT,
     PipelineHalt,
     check_contract,
     run_to_contract,
@@ -125,7 +125,8 @@ def test_provenance_stamps_the_fingerprinted_protocol(job_home):
     report = exec_full_study(_TEMPLATE_PATH, job_home)
     provenance = report.member_results[0].potential
     assert provenance.protocol_fingerprint
-    assert provenance.potential_kind == "classical-stand-in"
+    assert provenance.universal_model == "DPA-3.1-3M"
+    assert provenance.production_weights.endswith("graph.pb")
     assert provenance.master_seed == 20260713
 
 
@@ -175,14 +176,14 @@ def test_fingerprint_is_stable_and_sensitive():
 def test_broken_contract_halts_the_pipeline():
     """A stage output that fails its contract raises PipelineHalt."""
     with pytest.raises(PipelineHalt):
-        run_to_contract(lambda: "not a potential", POTENTIAL_CONTRACT)
+        run_to_contract(lambda: "not slabs", SLABS_CONTRACT)
 
 
 def test_check_contract_names_the_failure():
     """check_contract returns a reason string for a bad artifact."""
-    reason = check_contract("not a potential", POTENTIAL_CONTRACT)
+    reason = check_contract("not slabs", SLABS_CONTRACT)
     assert reason is not None
-    assert "Potential" in reason
+    assert "handle" in reason
 
 
 def test_merge_measures_rejects_a_name_collision():

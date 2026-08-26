@@ -223,7 +223,6 @@ def _coupling_for(crystal) -> str:
 
 def derive_lattices_live(
         member: MemberSpecification,
-        potential,
         scratch_directory: str,
         comm=None) -> DerivedLattices:
     """Derive each material's working lattice under the model (§2.2, step 2b).
@@ -421,7 +420,6 @@ def _write_half(half, wafer, scratch_directory, wafer_tag, comm):
 
 def build_halves(
         member: MemberSpecification,
-        potential,
         derived_lattices: DerivedLattices,
         scratch_directory: str,
         comm=None) -> tuple[HalfHandle, HalfHandle, SharedCell]:
@@ -829,7 +827,6 @@ def activate_surfaces_live(
         handle_a: HalfHandle,
         handle_b: HalfHandle,
         member: MemberSpecification,
-        potential,
         scratch_directory: str,
         comm=None):
     """Amorphize BOTH halves independently (step 4, §10.1).
@@ -988,7 +985,6 @@ def _bonded_force_model(
 
 def run_bond_debond_md_live(
         structure: Structure,
-        potential,
         member: MemberSpecification,
         scratch_directory: str,
         comm=None):
@@ -1199,20 +1195,19 @@ def run_analyzer_live(
 
 # ---------------------------------------------------------------------
 # The live stage set (ARCHITECTURE.md §5.1). The real bodies for the steps
-# that have them, reusing the W0 stubs where no live body exists yet: the
-# potential is still the classical stand-in (resolve_potential), and step-8
-# characterization is still mocked (run_characterization). The sequencer
-# runs this set on a compute node; W0_STAGES on the login node.
+# that have them, reusing ONE W0 stub where no live body exists yet: step-8
+# characterization is still mocked (run_characterization) — a placeholder
+# a reader should know is one. The sequencer runs this set on a compute
+# node; W0_STAGES on the login node.
 # ---------------------------------------------------------------------
 
 from sabsim.pipeline.skeleton_stages import (        # noqa: E402
     StageSet,
-    resolve_potential,
     run_characterization,
 )
 
+
 LIVE_STAGES = StageSet(
-    resolve_potential=resolve_potential,
     derive_lattices=derive_lattices_live,
     build=build_halves,
     activate=activate_surfaces_live,

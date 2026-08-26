@@ -179,8 +179,7 @@ def test_build_halves_writes_two_handles(tmp_path):
     """Both wafers become standalone data files with real handles."""
     member = _si_si_member()
     handle_a, handle_b, shared = build_halves(
-        member, potential=None,
-        derived_lattices=_derived_lattices(member),
+        member,         derived_lattices=_derived_lattices(member),
         scratch_directory=str(tmp_path))
 
     # Two handles, tagged bottom A / top B, each naming a written file.
@@ -246,12 +245,10 @@ def test_target_footprint_area_scales_the_built_cell(tmp_path):
     os.makedirs(large_dir)
 
     handle_small, _, _ = build_halves(
-        small_member, potential=None,
-        derived_lattices=_derived_lattices(small_member),
+        small_member,         derived_lattices=_derived_lattices(small_member),
         scratch_directory=str(small_dir))
     handle_large, _, _ = build_halves(
-        large_member, potential=None,
-        derived_lattices=_derived_lattices(large_member),
+        large_member,         derived_lattices=_derived_lattices(large_member),
         scratch_directory=str(large_dir))
 
     atoms_small = len(read_standalone_half(
@@ -268,8 +265,7 @@ def test_built_half_declares_the_beam_and_is_orthogonal(tmp_path):
     """The written half declares the Ar type and has a tilt-free cell."""
     member = _si_si_member()
     handle_a, _, _ = build_halves(
-        member, potential=None,
-        derived_lattices=_derived_lattices(member),
+        member,         derived_lattices=_derived_lattices(member),
         scratch_directory=str(tmp_path))
 
     text = (tmp_path / handle_a.data_file.split("/")[-1]).read_text()
@@ -292,8 +288,7 @@ def test_read_standalone_half_round_trips_species(tmp_path):
     """read_standalone_half recovers positions and species from disk."""
     member = _si_si_member()
     handle_a, _, _ = build_halves(
-        member, potential=None,
-        derived_lattices=_derived_lattices(member),
+        member,         derived_lattices=_derived_lattices(member),
         scratch_directory=str(tmp_path))
 
     half = read_standalone_half(
@@ -552,8 +547,7 @@ def test_both_halves_declare_the_member_species_union(tmp_path):
     """
     member = _dissimilar_member()
     handle_a, handle_b, _ = build_halves(
-        member, potential=None,
-        derived_lattices=_derived_lattices(member),
+        member,         derived_lattices=_derived_lattices(member),
         scratch_directory=str(tmp_path))
 
     # Identical maps on both sides — same elements, same id for each.
@@ -574,8 +568,7 @@ def test_both_halves_declare_the_member_species_union(tmp_path):
 def test_same_material_member_declares_only_its_own_species(tmp_path):
     """The union changes nothing for a same-material pair (no bloat)."""
     handle_a, _, _ = build_halves(
-        _si_si_member(), potential=None,
-        derived_lattices=_derived_lattices(_si_si_member()),
+        _si_si_member(),         derived_lattices=_derived_lattices(_si_si_member()),
         scratch_directory=str(tmp_path))
     assert set(handle_a.type_map) == {"Ar", "Si"}
 
@@ -593,8 +586,7 @@ def test_dissimilar_halves_emerge_commensurate(tmp_path):
     """
     member = _dissimilar_member()
     handle_a, handle_b, shared = build_halves(
-        member, potential=None,
-        derived_lattices=_derived_lattices(member),
+        member,         derived_lattices=_derived_lattices(member),
         scratch_directory=str(tmp_path))
 
     # A genuine mismatch, not the identity null case, with real strain.
@@ -672,7 +664,7 @@ def test_derive_lattices_live_universal_runs_out_of_process(
         lammps_engine_module, "LammpsEngine", forbid_engine)
 
     result = live_stages.derive_lattices_live(
-        _si_si_member(), potential=None, scratch_directory=str(tmp_path))
+        _si_si_member(), scratch_directory=str(tmp_path))
 
     # Si/Si derives ONCE, out-of-process, under a deepmd box/relax.
     assert len(scripts) == 1
@@ -701,6 +693,6 @@ def test_derive_lattices_live_classical_uses_the_in_process_engine(
         live_stages, "run_activate_subprocess", forbid_subprocess)
 
     result = live_stages.derive_lattices_live(
-        _si_si_member(), potential=None, scratch_directory=str(tmp_path))
+        _si_si_member(), scratch_directory=str(tmp_path))
 
     assert "classical seed" in result.provenance

@@ -23,7 +23,6 @@ from sabsim.pipeline.contracts import (
     BOND_DEBOND_CONTRACT,
     DERIVED_LATTICES_CONTRACT,
     MEASURE_VECTOR_CONTRACT,
-    POTENTIAL_CONTRACT,
     SLABS_CONTRACT,
     STRUCTURE_CONTRACT,
     run_to_contract,
@@ -137,22 +136,12 @@ def exec_one_member(
     each seam, and ``comm`` is the MPI communicator its engines use (unused
     by the stubs). The control flow below is identical for either set.
     """
-    # The potential is a CONTRACT, not a fixed implementation. The
-    # skeleton satisfies it with a classical stand-in; the bootstrap
-    # wave later satisfies it with the trained MLIP through this seam.
-    potential = run_to_contract(
-        lambda: stage_set.resolve_potential(member),
-        POTENTIAL_CONTRACT)
-
-    # Step 2b (DESIGN.md §2.2): derive each material's WORKING LATTICE by
-    # relaxing a bulk block under the current model, so the slabs are cut
-    # on the model's own equilibrium spacing, not the CIF's published
-    # scale (which leaves the box stressed at step zero). A first-class
-    # compute-node step of its own — the smallest use of the engine —
-    # upstream of the build, which consumes its cells.
+    # Which force models this member runs under is written in its study
+    # file (the [potential] block, DESIGN.md §1.6); each stage reads
+    # member.potential itself, so nothing is looked up and passed along.
     derived_lattices = run_to_contract(
         lambda: stage_set.derive_lattices(
-            member, potential, scratch_directory, comm),
+            member, scratch_directory, comm),
         DERIVED_LATTICES_CONTRACT)
 
     # Steps 3-4-5. Their order is a setting (the builder and activator
@@ -163,7 +152,7 @@ def exec_one_member(
     # HANDLES (§7.1, the build->amorphize seam).
     handle_a, handle_b, shared = run_to_contract(
         lambda: stage_set.build(
-            member, potential, derived_lattices, scratch_directory, comm),
+            member, derived_lattices, scratch_directory, comm),
         SLABS_CONTRACT)
 
     # Cascade-only (§3.4, revised 2026-08-08): activation just amorphizes
@@ -174,7 +163,7 @@ def exec_one_member(
     # writes the amorphized half back for assembly to read.
     activated = run_to_contract(
         lambda: stage_set.activate(
-            handle_a, handle_b, member, potential, scratch_directory, comm),
+            handle_a, handle_b, member, scratch_directory, comm),
         ACTIVATED_SLABS_CONTRACT)
 
     # Assembly reads both amorphized halves back and stacks them; it
@@ -188,7 +177,7 @@ def exec_one_member(
     # BondDebondResult (§9.1), not a bare trajectory.
     bond_debond = run_to_contract(
         lambda: stage_set.bond_debond(
-            structure, potential, member, scratch_directory, comm),
+            structure, member, scratch_directory, comm),
         BOND_DEBOND_CONTRACT)
 
     # The analyzer turns that into a measure vector (DESIGN.md §6); in
@@ -206,11 +195,11 @@ def exec_one_member(
 
     # The gate READS the measure vector and REPORTS; in v1 it never acts
     # and never edits a measure (DESIGN.md §7).
-    gate = evaluate_member_gates(measures, member, potential)
+    gate = evaluate_member_gates(measures, member)
 
     result = MemberResult(
         specification=member,
-        potential=build_provenance(potential, member),
+        potential=build_provenance(member),
         measures=measures,
         gate=gate,
         trusted=False)              # walking-skeleton plumbing (§5.3)
@@ -220,8 +209,7 @@ def exec_one_member(
 
 def evaluate_member_gates(
         measures: MeasureVector,
-        member: MemberSpecification,
-        potential) -> GateReport:
+        member: MemberSpecification) -> GateReport:
     """Read the measure vector and report a verdict (DESIGN.md §7).
 
     In wave 0 the live gate and its five-way diagnosis (§7.7) are not
@@ -338,7 +326,8 @@ def _provenance_to_record(provenance: Provenance) -> dict:
     """Serialize the provenance stamp to a plain dict (§1.6)."""
     return {
         "potential_ref": provenance.potential_ref,
-        "potential_kind": provenance.potential_kind,
+        "universal_model": provenance.universal_model,
+        "production_weights": provenance.production_weights,
         "master_seed": provenance.master_seed,
         "protocol_fingerprint": provenance.protocol_fingerprint,
     }

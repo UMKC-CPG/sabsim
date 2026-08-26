@@ -29,7 +29,6 @@ from sabsim.pipeline.exec_artifacts import (
     BondDebondResult,
     DerivedLattices,
     HalfHandle,
-    Potential,
     PressOutcome,
     PullOutcome,
     SharedCell,
@@ -105,8 +104,6 @@ def _fake_stage_set() -> StageSet:
     and artifact hand-off can be tested on any machine.
     """
     return StageSet(
-        resolve_potential=lambda member: Potential(
-            kind="classical-stand-in", pair_style="sw", loadable=True),
         derive_lattices=lambda *a, **k: DerivedLattices(
             cells={"Si": ((5.43, 0.0, 0.0), (0.0, 5.43, 0.0),
                           (0.0, 0.0, 5.43))},
@@ -216,7 +213,7 @@ def test_activate_derives_lattices_and_passes_them_to_build(tmp_path):
     """
     seen = {}
 
-    def _checking_build(member, potential, lattices, scratch, comm=None):
+    def _checking_build(member, lattices, scratch, comm=None):
         seen["lattices_type"] = type(lattices).__name__
         seen["scratch"] = scratch
         return (

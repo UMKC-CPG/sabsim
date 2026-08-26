@@ -1,7 +1,7 @@
 """The typed records the pipeline produces during execution (§1).
 
 These are the outputs of executing a member: both the artifacts that
-flow BETWEEN stages (Potential, Slab, Structure, …) and the execution
+flow BETWEEN stages (Slab, Structure, …) and the execution
 RESULTS (MemberResult, StudyReport) that ``exec_one_member`` and
 ``exec_full_study`` return. They contrast with the input records in
 :mod:`sabsim.spec.records`, which a human writes; everything here the
@@ -44,26 +44,28 @@ def content_fingerprint(record: object) -> str:
 
 @dataclass(frozen=True)
 class Provenance:
-    """Which potential ran and the exact protocol it ran under (§1.6).
+    """Which force models ran and the exact protocol they ran under (§1.6).
 
     This is the stamp every :class:`MemberResult` carries so a number can
-    always be traced to the potential generation, the master seed, and
-    the fingerprinted protocol that produced it.
+    always be traced to the potential generation, the two model files the
+    study named, the master seed, and the fingerprinted protocol that
+    produced it. It is built from the member specification alone: the
+    study file is the provenance record, so nothing here is discovered at
+    run time.
     """
-
     potential_ref: str             # the potential generation identifier
-    potential_kind: str            # e.g. "classical-stand-in", "mlip"
+    universal_model: str           # the pinned universal model name
+    production_weights: str        # the frozen production model file
     master_seed: int               # reproduces the whole ensemble
     protocol_fingerprint: str      # content fingerprint of the protocol
 
 
-def build_provenance(
-        potential: "Potential",
-        member: MemberSpecification) -> Provenance:
+def build_provenance(member: MemberSpecification) -> Provenance:
     """Assemble the provenance stamp for one member's run (§1.6)."""
     return Provenance(
         potential_ref=member.potential_ref,
-        potential_kind=potential.kind,
+        universal_model=member.potential.universal_model,
+        production_weights=member.potential.production_weights,
         master_seed=member.ensemble.master_seed,
         protocol_fingerprint=content_fingerprint(member.protocol),
     )
@@ -73,19 +75,6 @@ def build_provenance(
 # Stage artifacts. Placeholders in W0, but each is the real seam the
 # later-wave module will produce (ARCHITECTURE.md §5.1).
 # ---------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class Potential:
-    """A loadable interatomic potential the member looks up (§1, §1.6).
-
-    The skeleton satisfies the POTENTIAL_CONTRACT with a classical
-    ``pair_style`` stand-in; the bootstrap wave later satisfies the same
-    contract with the trained MLIP, through this same artifact.
-    """
-
-    kind: str                      # "classical-stand-in" in the skeleton
-    pair_style: str                # the loadable interface (§1)
-    loadable: bool                 # False marks an unusable potential
 
 
 @dataclass(frozen=True)
