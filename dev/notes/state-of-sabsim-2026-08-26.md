@@ -452,3 +452,34 @@ under a modern DeePMD model.
    in the design documents; they would almost never be used and only
    create confusion.
 4. Next large piece of work: establish the ALF DeePMD committee.
+
+## 9. Decisions taken later on 2026-08-26 (Paul) — the road to ALF
+
+Order of work: **C** (one dosed 120 eV activation through the real gate,
+job 16820522, the first run through the `prepare` route since the
+re-architecture) and **E** (atom conservation baselined at the assembled
+pair; commit `b33d246`) first; then the two A′ decisions below; then the
+bootstrap.
+
+**Decision 1 — option (a):** build an in-process LAMMPS engine linked
+against deepmd-kit 3.x (a `cpg_lammps` module), so `pair_style deepmd`
+can load a DPA `.pth` and, later, the ALF-trained committee `.pth`
+inside SABSIM's own process. No rewrite of the press/pull loops. Claude
+attempts the build.
+
+**Decision 2 — a LEAN VASP labelling recipe, cheap first, dial up
+later.** Get the whole process to run end to end before spending on
+accuracy; the budget is learned by spending.
+- k-points: Γ only (a single k-point) for every system that is not a
+  bulk single crystal; a real k-spacing only for the bulk ground-state
+  and bulk strain families.
+- plane-wave cutoff on the low side (see the recipe note for numbers).
+- smearing and convergence criteria not demanding.
+- interface sub-cells for labelling: remove the deeper crystalline /
+  near-crystalline layers and keep only a couple of layers of ordered
+  material under each activated surface — the surface atoms are what the
+  training is for.
+- `material_domain` stays as it is (recorded, unread) for now.
+- the bootstrap lives in `src/sabsim/bootstrap/` behind a
+  `sabsim bootstrap` command, run as its own job(s), separate from the
+  three per-member jobs.
