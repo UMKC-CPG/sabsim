@@ -22,6 +22,12 @@ it does not dissolve a layer, so any slab-averaged skin measure (the
 says nothing about where the ion stopped. Reach is what brackets the
 operating energy; the skin needs dose, which is a later run.
 
+Passing ``--movie`` after the task index re-runs a point with the
+cascade recording frames, into its own `movie_e<energy>` directory so
+the measured evidence is never overwritten. That is for WATCHING, not
+for measuring: frames cost wall clock inside the cascade loop, and the
+adaptive timestep makes their spacing uneven in time.
+
 The slab is rescaled to the WORKING LATTICE OF THE MODEL BEING USED
 (DESIGN §2.2) before it is cut. Bombarding a cell cut on the CIF's
 published scale under a model with a different equilibrium leaves the
@@ -43,6 +49,10 @@ from mpi4py import MPI
 from sabsim.deploy.scratch import job_scratch
 from sabsim.pipeline.exec_artifacts import HalfHandle
 from sabsim.pipeline.live_stages import activate_one_half
+from sabsim.pipeline.run_options import (
+    TrajectoryOptions,
+    set_trajectory_options,
+)
 from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import MemberSpecification, Quantity
 from sabsim.structure.slab_builder import (
@@ -95,6 +105,29 @@ VACANCY_THRESHOLD = 1.0          # A: beyond thermal rattle
 # from damage, and comparing against an as-cut file instead (the first
 # analysis did) measures RELAXATION, not damage.
 NULL_TASK_INDEX = len(SCAN_ENERGIES_EV)
+
+# MOVIE MODE (`--movie`) re-runs a scan point with the cascade RECORDING
+# FRAMES, so the bombardment can be watched rather than only measured.
+# Trajectories are off by default everywhere in this code base for a
+# good reason -- writing a frame costs wall clock inside the hot cascade
+# loop and the files are large -- so recording is chosen per INVOCATION
+# and never by the specification: it is an operational property of this
+# run, not a physical property of the study (ARCHITECTURE §4).
+#
+# One frame per 100 STEPS is NOT one frame per fixed interval of TIME.
+# The cascade integrates under `fix dt/reset` with the step floating
+# between 1e-5 and 0.1 ps, so the violent opening of the cascade is
+# sampled densely and the cooling tail sparsely. That reads as natural
+# slow-motion on impact, which is what makes the movie legible -- but it
+# means frame spacing carries no velocity information at all.
+MOVIE_FRAME_STRIDE = 100
+
+# A movie run writes to its OWN directories (`movie_e100`, not
+# `scan_e100`) and its logs are kept out of the analyser's log glob, so
+# re-running a point for pictures can never overwrite or contaminate the
+# measured evidence job 16795220 left behind (LEDGER T-22).
+MOVIE_LABEL_PREFIX = "movie"
+MEASUREMENT_LABEL_PREFIX = "scan"
 
 
 def member_for(base: MemberSpecification, energy: float,
@@ -169,11 +202,35 @@ def damage_reach(pristine_file: str, amorphized_file: str) -> tuple:
     return deepest, int(np.count_nonzero(vacated))
 
 
+def count_frames(dump_file: str) -> int:
+    """How many frames a LAMMPS dump actually holds.
+
+    Worth checking rather than assuming. A movie is only evidence that
+    the run was watched if frames were really written, and a one-frame
+    dump is exactly what a mis-wired trajectory switch produces: the
+    MEASUREMENT run's `activated_a.dump` has a single frame, because it
+    is the closing `write_dump` of the final structure and not a
+    trajectory at all. Counting the frame headers tells the two apart.
+    """
+    with open(dump_file, encoding="utf-8") as stream:
+        return sum(1 for line in stream
+                   if line.startswith("ITEM: TIMESTEP"))
+
+
 def main() -> None:
     """Run the one energy this array task owns."""
     communicator = MPI.COMM_WORLD
     rank = communicator.Get_rank()
     task_index = int(sys.argv[1])
+    # The recording switch is read here, at the front door, and set
+    # once before any stage runs -- which is the contract `run_options`
+    # documents. The stages read it themselves; it is deliberately not
+    # threaded through `activate_one_half`, whose signature belongs to
+    # the physics.
+    wants_movie = "--movie" in sys.argv[2:]
+    if wants_movie:
+        set_trajectory_options(TrajectoryOptions(
+            enabled=True, stride=MOVIE_FRAME_STRIDE))
     # The null control borrows the lowest energy so the member it builds
     # is a well-formed one; with zero impacts that energy is never used.
     is_null = task_index == NULL_TASK_INDEX
@@ -205,7 +262,10 @@ def main() -> None:
 
     scratch = job_scratch(JOB_DIR) if rank == 0 else None
     scratch = communicator.bcast(scratch, root=0)
-    label = "scan_null" if is_null else f"scan_e{int(energy):03d}"
+    prefix = (MOVIE_LABEL_PREFIX if wants_movie
+              else MEASUREMENT_LABEL_PREFIX)
+    label = (f"{prefix}_null" if is_null
+             else f"{prefix}_e{int(energy):03d}")
     data_file = os.path.join(scratch, f"scan_slab_{label}.data")
     output = os.path.join(scratch, label)
     if rank == 0:
@@ -252,6 +312,17 @@ def main() -> None:
               flush=True)
         print(f"SCANNOTE energy_eV={0 if is_null else energy:.0f} "
               f"{result.note}", flush=True)
+        if wants_movie:
+            # `stage_dump_file` names it for the member and the stage,
+            # so this is where the cascade's frames landed. Reported
+            # with its FRAME COUNT so the log itself says whether a
+            # movie exists, rather than leaving that to be discovered
+            # at render time.
+            movie = os.path.join(
+                output, f"{base.name}_activation_a.dump")
+            print(f"SCANMOVIE energy_eV={energy:.0f} "
+                  f"frames={count_frames(movie)} "
+                  f"stride={MOVIE_FRAME_STRIDE} path={movie}", flush=True)
 
 
 if __name__ == "__main__":

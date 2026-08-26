@@ -69,3 +69,49 @@ before it was caught (LEDGER T-21, T-22):
    re-arch and the §3.5 gate moved to the bond flow, so
    `activate_one_half` returns a bare `CascadeOutcome`. The physics
    was fine; nothing was reported.
+
+## Movie mode — watching a point instead of measuring it
+
+The scan records numbers, not pictures. Trajectory recording is off by
+default across the whole code base (`sabsim.pipeline.run_options`)
+because frames cost wall clock inside the hot cascade loop and the
+files are large, so a measurement run writes exactly ONE frame: the
+closing `write_dump` of the final structure, which is a snapshot and
+not a trajectory. Job 16795220 therefore left nothing to animate.
+
+Passing `--movie` after the task index turns recording on for that
+invocation:
+
+```bash
+mkdir -p jobs/bulk_si/movie_logs jobs/bulk_si/movies
+sbatch install/tests/t22_energy_scan/energy_scan_movie.slurm
+sbatch --dependency=afterok:<job> \
+       install/tests/t22_energy_scan/render_scan_movies.slurm
+```
+
+Three things about it are deliberate.
+
+**It never touches the measurement.** Movie runs write to `movie_e100`
+rather than `scan_e100`, and their logs go to `movie_logs/` rather than
+`scan_logs/`. The analyser globs `escan-*.out` under `scan_logs/` and
+keeps only the NEWEST job's `SCANRESULT` lines, so a three-point movie
+run landing there would quietly replace the thirteen-point measured
+table with three rows and look entirely plausible doing it.
+
+**The frame spacing is not a clock.** The cascade integrates under
+`fix dt/reset` with the timestep floating between 1e-5 and 0.1 ps, so
+one frame per 100 STEPS samples the violent opening densely and the
+cooling tail sparsely. It reads as natural slow-motion on impact, which
+is what makes the movie legible — but no velocity can be read off it.
+
+**The count is reported, not assumed.** Each movie task prints a
+`SCANMOVIE` line carrying the dump's actual frame count, so the log
+says whether a movie exists rather than leaving that to be found out at
+render time. A count of 1 means the switch did not take effect.
+
+The renderer itself (`render.py`, `bombardment` mode: argon amber
+against muted silicon, framed on the atoms rather than the vacuum-
+filled box) is staged on scratch under `render_tools/` along with the
+pip OVITO wheel, which is a few hundred megabytes of Qt and does not
+belong in the repository. Moving `render.py` alone into the repo is
+worth doing and has not been done.
