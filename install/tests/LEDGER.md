@@ -1216,10 +1216,49 @@ crystals)?
 - **Scope NOT covered:** Collection 2 (needs a member run with
   `--dump-visuals`; C ran without), labels (T-27), any oxide phase.
 
-## T-27 — job 16823627 (array 0-51) — 2026-08-26 (in flight)
+## T-27 — jobs 16823627 (cancelled) + 16823654 (array 0-51, stands) — 2026-08-26
 
-`sabsim bootstrap label recipe.toml` on the T-26 structures: 52 tasks
-(bulk 1 + strain 10 with the 0.5 Å⁻¹ spacing under `vasp_std`; 41
-Γ-only under `vasp_gam`), `vasp/6.4.2_gcc_12.3.0_openmpi_4.1.5`, 32
-ranks/node, 2 h walltime each. The first real VASP cost numbers for the
-lean recipe. Harvest + verdict to follow.
+*(The bootstrap's direct VASP labeller on the T-26 structures: the first
+real labels, and the first real cost numbers, of the lean recipe.)*
+
+- **As-run:** `sabsim bootstrap label recipe.toml --rc deployment.toml`
+  from `jobs/bootstrap_si/`, which wrote 52 label directories and ONE
+  job array under the scratch mirror
+  (`.../bootstrap/si-lean-v0/labels/`); `sbatch` of that array;
+  `sabsim bootstrap harvest recipe.toml` afterwards. 52 tasks = bulk 1 +
+  strain 10 (real k-spacing, `vasp_std`) + melt_quench 10 + rattle 10 +
+  surface 1 + warm_nvt 10 + warm_npt 10 (Γ only, `vasp_gam`), module
+  `vasp/6.4.2_gcc_12.3.0_openmpi_4.1.5`, 32 ranks, one node each.
+- **16823627 — CANCELLED after 11 min, a real bug.** VASP reported
+  "32 mpi-ranks, with 32 threads/rank": the site build spawns an OpenMP
+  thread per core in every rank, 1024 threads on 64 cores, and no SCF
+  step had finished. The array writer now pins `OMP_NUM_THREADS=1`
+  (commit 28d8085).
+- **16823654 — 52/52 COMPLETED, 52/52 converged, 0 dropped.** Per-task
+  VASP wall time 12–21 s (bulk 21.4, melt-quench 15–20, strain 12.6,
+  warm 18.0). Judged from `labels.extxyz`:
+
+  ```
+  T27RESULT family=bulk         n= 1 atoms= 64 E/atom=[-5.319,-5.319] eV max|F|=0.00 eV/A
+  T27RESULT family=melt_quench  n=10 atoms= 64 E/atom=[-5.005,-4.599] eV max|F|=4.55 eV/A
+  T27RESULT family=rattle       n=10 atoms= 64 E/atom=[-4.978,-4.818] eV max|F|=17.08 eV/A
+  T27RESULT family=strain       n=10 atoms= 64 E/atom=[-5.319,-4.685] eV max|F|=0.85 eV/A
+  T27RESULT family=surface      n= 1 atoms=  8 E/atom=[-2.706,-2.706] eV max|F|=0.64 eV/A
+  T27RESULT family=warm_npt     n=10 atoms= 64 E/atom=[-5.234,-5.213] eV max|F|=3.52 eV/A
+  T27RESULT family=warm_nvt     n=10 atoms= 64 E/atom=[-5.238,-5.203] eV max|F|=2.81 eV/A
+  ```
+  Sanity: the relaxed bulk sits lowest with zero force; the amorphous
+  quench frames are 0.3–0.7 eV/atom above it and cool toward it along
+  the quench; the ±10 % strains reach +0.63 eV/atom; the 0.15 Å rattle
+  produces forces up to 17 eV/Å (large — a smaller amplitude is worth
+  considering for the next recipe); the 8-atom surface column is the
+  T-26 defect (two faces per eight atoms) and is dropped from the next
+  set by the lateral_repeat fix.
+- **Cost:** the whole lean Collection-1 label set is ~15 node-minutes
+  of VASP. The budget question is therefore entirely the interface
+  sub-cells (~150–250 atoms, Γ only), not these.
+- **Note for the reader of `labels.extxyz`:** ASE stores the energy and
+  forces as calculator results, so read them with
+  `get_potential_energy()` / `get_forces()`, not from `info`.
+- **Scope NOT covered:** Collection 2 (needs the dumped member run);
+  the audit block; any oxide.
