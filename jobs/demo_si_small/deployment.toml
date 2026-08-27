@@ -1,0 +1,164 @@
+# =====================================================================
+# SABSIM deployment configuration (the "rc" file) — machine-local
+# ---------------------------------------------------------------------
+# This is the ONLY input route outside the study spec (DESIGN.md §1.2),
+# and it is deployment-ONLY: it NEVER layers a scientific or numerical
+# default into the study, so nothing that moves the answer can hide here
+# (ARCHITECTURE.md §4.1). Physics lives in the CWD study spec; only
+# "where to run" lives here.
+#
+# It carries TWO concerns in ONE file:
+#   [hardware]   what this cluster HAS  (the per-cluster swap unit)
+#   [usage.*]    how to USE it, keyed by KIND OF MEMBER JOB (activate /
+#                bond / analyze), not by script or by tool
+# Routing is per job, not per step (§4.1). Move to a new machine by
+# swapping the [hardware] block; the usage map keeps working unchanged.
+#
+# EXCLUDED here on purpose: Tier-B tools that own their own Parsl/SLURM
+# (ALF, Kaleidoscope). There is no Parsl-in-Parsl (§4.1 wall 5), so we
+# do not route their internal steps. The values below are EXAMPLES for
+# the local admin to set; they are not defaults baked into the code.
+# =====================================================================
+
+[hardware]
+# The per-cluster swap unit: replace this block to move machines.
+# The tools to switch on are NOT listed here — they live per KIND OF
+# JOB, in each [usage.*] block below, so a job loads only what it needs
+# and nothing that could conflict with it (DESIGN.md §10.5).
+cluster_name    = "pixstor"
+scheduler       = "slurm"
+default_account = "general"
+# Extra MODULEPATH roots to `module use` before any `module load` below.
+# The CPG-owned modulefile tree that publishes the LAMMPS engines
+# (cpg_lammps_conda/*) is NOT on the default path, so it must be added here
+# (ARCHITECTURE.md §4.4). Stock site modules like VASP need none of this.
+module_paths    = ["/cluster/VAST/rulisp-lab/cpg/modulefiles"]
+
+  [hardware.partitions.cpu]
+  name           = "general"
+  cores_per_node = 64
+  max_walltime   = { value = 48.0, unit = "h" }
+
+  [hardware.partitions.gpu]
+  name          = "gpu,requeue"
+  # The card MODEL to request (SLURM gres type), so a job sized for an
+  # H100 does not land on a slower card in this mixed pool; leave empty
+  # for "any card".
+  gpu_type      = "H100"
+  gpus_per_node = 4
+  max_walltime  = { value = 24.0, unit = "h" }
+
+# ---------------------------------------------------------------------
+# Usage map: one block per KIND OF MEMBER JOB (DESIGN.md §10.2), NOT per
+# tool. The "partition" seam names an abstract resource class the
+# [hardware] section resolves, so the same map survives a hardware swap.
+# The three v1 job kinds are the ones `sabsim prepare` writes and
+# `sabsim run --activate|--bond|--analyze` executes (PSEUDOCODE.md §14):
+# activate, bond, analyze. (An earlier draft keyed this map by tool —
+# cascade-md / bond-md / vasp / sequence; DESIGN §10 replaced that axis.)
+# ---------------------------------------------------------------------
+[usage.activate]
+# Build both wafers, roughen both surfaces with the cascade (§3), and bring
+# them together. The DEFAULT cascade is the universal foundation MLIP, which
+# runs OUT-OF-PROCESS on a GPU under the deepmd bundle (ARCHITECTURE §4.4;
+# §4.1: the activate class FOLLOWS the cascade potential). Activation is
+# CASCADE-ONLY (§3.4) — the heal and the §3.5 gate moved to the bond job.
+partition = "gpu"
+nodes     = 1
+# One rank: sabsim builds the slab and spawns ONE deepmd-bundle `lmp`
+# subprocess that uses the GPU (the universal cascade is single-GPU here).
+tasks_per_node = 1
+# One accelerator for the out-of-process cascade (§4.1: activate GPU by
+# default, since the default cascade is the universal MLIP).
+gpus_per_node  = 1
+walltime  = { value = 4.0, unit = "h" }
+# A comfortable per-NODE ceiling — the DPA model wants generous RAM (a 16 GB
+# cap OOM-killed a DPA run mid-way), not a tuned figure.
+memory    = { value = 48.0, unit = "GB" }
+# NO in-process LAMMPS module on the universal path: the engine is the
+# deepmd bundle, reached out-of-process by prefix below, not `module load`.
+modules   = []
+# Machine-specific engine knobs the out-of-process cascade needs (§4.4).
+# [ADAPT] every path to this cluster.
+[usage.activate.environment]
+# The deepmd bundle (its own torch/LAMMPS/MPI) that runs the universal
+# cascade out-of-process. WHICH model runs, and where its weights are,
+# is a physics decision and so lives in the STUDY file's [potential]
+# block, not here (DESIGN §1.6): this block carries only where the
+# engine software is on this machine.
+SABSIM_CASCADE_ENGINE_PREFIX = "/cluster/VAST/rulisp-lab/cpg/programs/deepmd-kit-3.2.0b0-cuda129"
+
+[usage.bond]
+# Press, settle, and pull on the MLIP committee (§5): GPU-accelerated
+# DeePMD evaluation, all committee models in the one process (§10.2).
+partition = "gpu"
+nodes     = 1
+# ONE rank on ONE GPU: the bond stage runs a single DeePMD model (the
+# committee of one) in-process, and one H100 holds a ~4000-atom pair
+# comfortably. Asking for four GPUs — the earlier value, written for a
+# four-model committee that does not exist yet — made the job
+# unschedulable on this pool's 2-GPU H100 nodes while they sat idle
+# (job 16823752, 2026-08-26). Raise both together when the committee
+# lands and each rank owns a model.
+tasks_per_node = 1
+gpus_per_node  = 1
+walltime  = { value = 18.0, unit = "h" }
+# Per-node ceiling. The deepmd force model pulls in the TensorFlow/torch
+# host runtime on top of LAMMPS, and four ranks share the node, so this
+# sits above the CPU jobs. Provisional (no bond run has profiled it yet —
+# the §6 follow-up); raise it if a bond job trips the OOM killer.
+memory    = { value = 32.0, unit = "GB" }
+# The GPU force model is a DeePMD pair style hosted inside LAMMPS. It is
+# NOT a separate module: the engine here is a version of LAMMPS built to
+# ABI-match the prebuilt DeePMD plugin, and the LAMMPS input loads that
+# plugin at run time (variable dp getenv DEEPMD_LMP_PLUGIN; plugin load
+# ${dp}). The conda-derived engine needs NO libstdc++ preload (its env
+# already supplies the CXXABI the backend wants, ARCHITECTURE.md §4.4).
+# So this kind loads ONE engine module.
+modules   = ["cpg_lammps_conda/2024.08.29-deepmd"]
+
+[usage.analyze]
+# Reduce the run to results (§6, §8): CPU. Analyze owns the whole
+# measurement tail — the mechanical work-integral (M1), the structural
+# characterization (RDF, structural descriptors, §8/§12), and the report
+# plots (force, stress/strain) — all of which is the already-installed
+# Python stack (numpy/matplotlib/ASE), so v1 loads NO dedicated science
+# module. The all-electron characterization is Tier-B (Kaleidoscope/Imago
+# owns its own submission, ARCHITECTURE.md §4.1), so nothing is keyed for
+# it here; a DIRECT electronic-structure tool would be added only if one
+# is ever run outside that Parsl loop.
+partition = "cpu"
+nodes     = 1
+# Analyze's v1 work is the pure-Python mechanical measure (no LAMMPS, not
+# domain-decomposed), so ONE rank is right — extra ranks would just redo
+# the same serial reduction (§10.6; the §8 heavy characterization is
+# Tier-B, ARCHITECTURE.md §4.1).
+tasks_per_node = 1
+gpus_per_node  = 0    # pure-Python CPU measure, no accelerator (§10.2)
+walltime  = { value = 4.0, unit = "h" }
+# Per-node ceiling. Analyze is the pure-Python mechanical measure over the
+# reduced curves (no LAMMPS, one rank), so its footprint is the smallest
+# of the three; 8 GB is ample headroom for the numpy/ASE reduction.
+memory    = { value = 8.0, unit = "GB" }
+modules   = []
+
+# ---------------------------------------------------------------------
+# The bootstrap's VASP labelling array (`sabsim bootstrap label`,
+# DESIGN §4.8 / PSEUDOCODE §11.4). NOT a member job: routed here so the
+# machine facts stay in this file. `environment` names the two binaries;
+# the default CPU build below runs `vasp_gam` for every Gamma-only task.
+# For the CUDA build swap the module to "vasp/6.4.2_cuda", route to the
+# gpu class with gpus_per_node = 1 and tasks_per_node = 1 (one rank per
+# GPU is how the OpenACC VASP is run).
+# ---------------------------------------------------------------------
+[usage.label]
+partition      = "cpu"
+nodes          = 1
+tasks_per_node = 32
+gpus_per_node  = 0
+walltime       = { value = 2.0, unit = "h" }
+memory         = { value = 64.0, unit = "GB" }
+modules        = ["vasp/6.4.2_gcc_12.3.0_openmpi_4.1.5"]
+[usage.label.environment]
+VASP_GAMMA    = "vasp_gam"
+VASP_STANDARD = "vasp_std"
