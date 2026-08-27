@@ -63,7 +63,8 @@ class SubmissionEntry:
 
 
 def prepare(study_spec_path, deployment_rc_path,
-            job_directory) -> tuple[SubmissionEntry, ...]:
+            job_directory,
+            dump_visuals: bool = False) -> tuple[SubmissionEntry, ...]:
     """Write one script per (member, job) plus a guide (§14.4).
 
     ``job_directory`` is where the scripts and guide are written AND the
@@ -72,6 +73,11 @@ def prepare(study_spec_path, deployment_rc_path,
     order; also drops the guide beside the scripts. Raises
     :class:`~sabsim.deploy.config.DeploymentError` on the login-node gates
     (unset root, walltime over ceiling) before writing anything.
+
+    ``dump_visuals`` puts ``--dump-visuals`` on every generated run line,
+    so each dynamic stage (cascade, press, settle, pull) records a
+    trajectory for viewing — the standing rule (Paul, 2026-08-26) that a
+    dynamic run leaves a movie behind as its evidence.
     """
     job_directory = Path(job_directory)
 
@@ -99,7 +105,7 @@ def prepare(study_spec_path, deployment_rc_path,
             usage, partition = _resolve_usage_and_partition(deployment, job)
             script = render_job_script(
                 member, job, usage, partition, deployment, roots,
-                spec_path, job_directory)
+                spec_path, job_directory, dump_visuals=dump_visuals)
             script_name = _semantic_name(member.name, job.name)
             _write_script(job_directory / script_name, script)
             entries.append(SubmissionEntry(
@@ -113,7 +119,8 @@ def prepare(study_spec_path, deployment_rc_path,
 def render_job_script(
         member, job: JobKind, usage: UsageBlock, partition: Partition,
         deployment: DeploymentConfig, roots: LocationRoots,
-        spec_path: str, job_directory: Path) -> str:
+        spec_path: str, job_directory: Path,
+        dump_visuals: bool = False) -> str:
     """Render one job's submission script — the lean §10.5 form (§14.5).
 
     In order (§14.5): scheduler directives from the partition/usage/
@@ -210,7 +217,8 @@ def render_job_script(
         "# exclusive, which aborts the nested launch, so clear them first.",
         "unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU",
         f'srun --mpi=pmix -n "${{SLURM_NTASKS}}" python -m sabsim run \\',
-        f'    {spec_path} --{job.name} --only {member.name}',
+        f'    {spec_path} --{job.name} --only {member.name}'
+        + (" --dump-visuals" if dump_visuals else ""),
         "",
     ]
 

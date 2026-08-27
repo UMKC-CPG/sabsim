@@ -111,6 +111,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--rc", metavar="PATH", default="deployment.toml",
         help="the machine-local deployment rc (default: deployment.toml "
              "here) — the [hardware]/[usage.*] file this cluster provides")
+    prepare.add_argument(
+        "--dump-visuals", action="store_true",
+        help="put --dump-visuals on every generated run line, so each "
+             "dynamic stage records a trajectory for viewing (the "
+             "standing rule: a dynamic run leaves its movie behind)")
     bootstrap = subcommands.add_parser(
         "bootstrap",
         help="manufacture the production potential from a force-model "
@@ -363,7 +368,8 @@ def _prepare(args: argparse.Namespace) -> int:
 
     job_directory = os.getcwd()
     try:
-        entries = prepare(args.spec, args.rc, job_directory)
+        entries = prepare(args.spec, args.rc, job_directory,
+                          dump_visuals=args.dump_visuals)
     except Exception as failure:                       # noqa: BLE001
         # A gate failure (unset root, walltime over ceiling, bad rc) reports
         # WHY and exits non-zero, not a raw traceback (DESIGN.md §5.7).

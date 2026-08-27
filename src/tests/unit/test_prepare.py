@@ -184,3 +184,14 @@ def test_gpus_over_partition_stops_before_writing(roots_set, tmp_path):
     with pytest.raises(DeploymentError, match="over the"):
         prepare(_SPEC, rc, tmp_path)
     assert not list(tmp_path.glob("*.slurm"))
+
+
+def test_dump_visuals_rides_every_generated_run_line(roots_set, tmp_path):
+    """`prepare --dump-visuals` puts the flag on each job's run line."""
+    entries = prepare(_SPEC, _RC, tmp_path, dump_visuals=True)
+    for entry in entries:
+        text = (tmp_path / entry.script_name).read_text()
+        assert "--dump-visuals" in text
+    plain = prepare(_SPEC, _RC, tmp_path)
+    assert all("--dump-visuals" not in (tmp_path / e.script_name).read_text()
+               for e in plain)
