@@ -146,9 +146,37 @@ worth recording now that it is anchored:
 - **The ratio target:** Si–Si SAB is ~2× stronger than Si–SiO₂ ("SiO₂
   bonding about half of Si") — this IS the ~2:1 ratio v1 must reproduce.
 - **Absolute anchors:** SiO₂/SiO₂ ~1 J/m² [S6]; room-temperature
-  hydrophilic (unactivated) ~0.09 J/m² [S7]; Si–Si SAB approaching bulk
-  fracture. The exact SAB-regime numbers still need pinning from one
-  specific paper (the standing `VISION.md` TODO).
+  hydrophilic (unactivated) ~0.09 J/m² [S7].
+- **Si–Si SAB absolute anchor — PINNED 2026-08-27** (looked up and
+  verified through Crossref; earlier text said "approaching bulk
+  fracture, exact number still to pin"):
+  - The founding paper [S8] (Takagi, Kikuchi, Maeda, Chung, Suga, *Appl. Phys.
+    Lett.* 68, 2222 (1996)) reports that in tensile tests of Ar-beam
+    activated Si–Si pairs bonded at room temperature "fracture occurred
+    not at the interface but mainly in the bulk of silicon" — the
+    interface is at least as strong as bulk silicon. No J/m² is quoted
+    there; the same bulk-fracture result at 4-inch wafer scale is [S9]
+    (Takagi, Maeda, Suga, *Sens. Actuators A* 105, 98 (2003)).
+  - A quoted room-temperature SAB Si–Si **bonding energy of more than
+    1.95 J/m²** (vacuum 2.5 × 10⁻⁶ Pa; bonding strength 16.0 MPa) is
+    in [S10] (Taniyama, Wang, Fujino, Suga, *IEEE 9th VLSI Packaging
+    Workshop of Japan*, 141 (2008)) — read from the paper's abstract as
+    indexed; the measurement method is not stated in the abstract and
+    the full text was not accessible from the cluster.
+  - So the working anchor is: **Si–Si SAB ≳ 2 J/m², approaching the
+    bulk fracture energy of silicon** (≈ 2 × the (100) surface energy of
+    ~1.2–1.4 J/m², i.e. ~2.5 J/m²). This is what the "Si–Si about 2×
+    Si–SiO₂" ratio above is measured against.
+  - The Si–SiO₂ SAB number is NOT yet pinned to a paper: the "about a
+    half of Si" statement is quoted from the abstract of [S11] (Takagi,
+    Maeda, Suga, *J. Micromech. Microeng.* 11, 348 (2001)) as indexed,
+    and a patent [S12] states Ar-beam-activated oxide-covered wafers
+    bond at "a few hundred mJ/m²" at ambient temperature versus "more
+    than 4 J/m²" for bare silicon. A journal value for Si–SiO₂ SAB with
+    its measurement method is still wanted.
+  - Bond energies in this literature are crack-opening (razor-blade /
+    Maszara) measurements, [S13] (Maszara, Goetz, Caviglia, McKitterick,
+    *J. Appl. Phys.* 64, 4943 (1988)) — the "Maszara" of §7.4.
 
 ## Open forks for the PI — RESOLVED (2026-07-13)
 
@@ -202,3 +230,9 @@ Vashishta) behind the bootstrap generator.
 [S5]: https://www.mdpi.com/2072-666X/11/5/454
 [S6]: https://iopscience.iop.org/article/10.7567/JJAP.55.026503
 [S7]: https://arxiv.org/pdf/0807.3215
+[S8]: https://doi.org/10.1063/1.115865
+[S9]: https://doi.org/10.1016/S0924-4247(03)00087-6
+[S10]: https://doi.org/10.1109/vpwj.2008.4762236
+[S11]: https://doi.org/10.1088/0960-1317/11/4/311
+[S12]: https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/9922954
+[S13]: https://doi.org/10.1063/1.342443
