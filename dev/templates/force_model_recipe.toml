@@ -86,6 +86,10 @@ face              = [1, 0, 0]
 termination_index = 0
 slab_thickness    = { value = 10.0, unit = "angstrom" }
 vacuum            = { value = 12.0, unit = "angstrom" }
+# In-plane tiling: the primitive Si(100) slab cell is 3.9 A wide, so a
+# 1x1 column has every atom seeing its own image inside the 6 A
+# descriptor cutoff (T-26 produced an 8-atom column). 3x3 = 11.6 A.
+lateral_repeat    = 3
 
 [collection1.rattle]
 # Family 5 — seeded static displacements about the cold bulk cell.

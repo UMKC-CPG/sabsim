@@ -169,6 +169,9 @@ def test_surface_family_cuts_a_slab_with_vacuum():
     assert family == "surface" and "(100)" in source
     z = slab.get_positions()[:, 2]
     assert slab.get_cell()[2, 2] - (z.max() - z.min()) >= 12.0 - 1e-6
+    # Tiled 3x3 in plane so the cell is wider than twice the 6 A cutoff.
+    assert np.linalg.norm(slab.get_cell()[0]) > 11.0
+    assert len(slab) == 9 * 8                    # 8-atom column x 3 x 3
 
 
 def _model():

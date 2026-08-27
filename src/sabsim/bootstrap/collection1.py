@@ -201,6 +201,8 @@ def surface_family(recipe: ForceModelRecipe, lattices: dict) -> list:
             min_slab_thickness=to_metal(surface.slab_thickness, "distance"),
             min_vacuum=to_metal(surface.vacuum, "distance"),
             termination_index=surface.termination_index)
+        repeat = max(1, surface.lateral_repeat)
+        slab = slab * (repeat, repeat, 1)
         face = "".join(str(component) for component in surface.face)
         structures.append(("surface", f"{surface.phase}:({face})", slab))
     return structures

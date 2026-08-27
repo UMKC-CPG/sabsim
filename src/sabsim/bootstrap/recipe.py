@@ -87,6 +87,11 @@ class SurfaceSpec:
     termination_index: int
     slab_thickness: Quantity
     vacuum: Quantity
+    lateral_repeat: int         # in-plane tiling of the primitive slab
+                                # cell, so the cell is wider than twice
+                                # the descriptor cutoff (a 1x1 Si(100)
+                                # column is 3.9 A wide: every atom would
+                                # see its own image, T-26)
 
 
 @dataclass(frozen=True)
@@ -276,7 +281,8 @@ def _collection_from_table(table: dict, context: str) -> StartingCollection:
                 surface, "termination_index", where),
             slab_thickness=_require_quantity(
                 surface, "slab_thickness", where),
-            vacuum=_require_quantity(surface, "vacuum", where)))
+            vacuum=_require_quantity(surface, "vacuum", where),
+            lateral_repeat=_require_int(surface, "lateral_repeat", where)))
     warm_runs = []
     for index, warm in enumerate(_require(table, "warm_runs", context)):
         where = f"{context}.warm_runs[{index}]"

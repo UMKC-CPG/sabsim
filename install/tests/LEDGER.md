@@ -1176,3 +1176,50 @@ GPU, under the bundle's OpenMPI, with no LAMMPS compiled?
   bond stage (heal → gate → press → pull) has not yet run under it —
   that is the C bond job, next; `graph.pb` (TF backend) under the
   3.2 plugin is untested; larger cells / multi-GPU untested.
+
+## T-26 — job 16823583 — 2026-08-26
+
+*(The bootstrap's first slice: `sabsim bootstrap generate
+--skip-collection2` builds Collection 1 of the silicon recipe for real.)*
+
+**Question.** Does the recipe → Collection-1 path run end to end on a
+GPU node under DPA-3.1-3M out-of-process, and do the two dynamic
+families produce what they claim (a real amorphous network; warm
+crystals)?
+
+- **As-run:** `install/tests/t26_bootstrap_generate/t26_generate.slurm`
+  from `jobs/bootstrap_si/` (recipe.toml = the template with absolute
+  study/job/reference paths; deployment.toml with `[usage.label]`).
+  H100 g032, 28 min 31 s, exit 0.
+- **Result, judged from `structures.extxyz`:**
+
+  ```
+  T26RESULT family=bulk count=1 atoms=64
+  T26RESULT family=melt_quench count=10 atoms=64
+  T26RESULT family=rattle count=10 atoms=64
+  T26RESULT family=strain count=18 atoms=64
+  T26RESULT family=surface count=1 atoms=8
+  T26RESULT family=warm_npt count=10 atoms=64
+  T26RESULT family=warm_nvt count=10 atoms=64
+  ```
+  Lattice derived at a = 5.5164 Å (T-25's in-process value; the study
+  pipeline's derivation gave 5.5147). The melt-quench frames were
+  checked for disorder as PSEUDOCODE §11.1 demands: first quench frame
+  mean coordination 4.31 with 56 % of atoms off four-fold, last frame
+  4.22 / 20 % — an amorphous network, not a rattled crystal.
+- **One defect, fixed in the same commit:** the clean surface came out
+  as a single 8-atom column (the primitive Si(100) slab cell, 3.9 Å
+  wide) — every atom inside its own periodic image at a 6 Å cutoff. The
+  surface family now carries a required `lateral_repeat` (template: 3,
+  → 72 atoms, 11.6 Å wide). The 8-atom surface stays in T-27's label
+  set as one plumbing task; the next generate replaces it.
+- **Scope NOT covered:** Collection 2 (needs a member run with
+  `--dump-visuals`; C ran without), labels (T-27), any oxide phase.
+
+## T-27 — job 16823627 (array 0-51) — 2026-08-26 (in flight)
+
+`sabsim bootstrap label recipe.toml` on the T-26 structures: 52 tasks
+(bulk 1 + strain 10 with the 0.5 Å⁻¹ spacing under `vasp_std`; 41
+Γ-only under `vasp_gam`), `vasp/6.4.2_gcc_12.3.0_openmpi_4.1.5`, 32
+ranks/node, 2 h walltime each. The first real VASP cost numbers for the
+lean recipe. Harvest + verdict to follow.
