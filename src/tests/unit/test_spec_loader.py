@@ -236,7 +236,7 @@ def test_template_potential_block_names_both_models():
         assert potential.universal_model == "DPA-3.1-3M"
         assert potential.universal_weights.endswith("dpa3.pth")
         assert "$" not in potential.universal_weights    # root expanded
-        assert potential.production_weights.endswith("graph.pb")
+        assert potential.production_weights.endswith("dpa3.pth")
         assert potential.allow_unvalidated is True
 
 

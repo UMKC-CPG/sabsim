@@ -126,7 +126,7 @@ def test_provenance_stamps_the_fingerprinted_protocol(job_home):
     provenance = report.member_results[0].potential
     assert provenance.protocol_fingerprint
     assert provenance.universal_model == "DPA-3.1-3M"
-    assert provenance.production_weights.endswith("graph.pb")
+    assert provenance.production_weights.endswith("dpa3.pth")
     assert provenance.master_seed == 20260713
 
 
