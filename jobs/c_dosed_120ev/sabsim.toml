@@ -234,7 +234,7 @@ between_impact_relaxation = { value = 0.5, unit = "ps" }   # border cool
 # only has to relieve the cascade's leftover strain in a ~10 A skin, not
 # re-equilibrate a thick damaged layer, and a longer gentle hold risks
 # un-trapping the very disorder the quench froze in.
-hold_temperature = { value = 500.0, unit = "K" }   # top of ~300-500 K
+hold_temperature = { value = 300.0, unit = "K" }   # settle cool (Paul, 2026-08-26)
 hold_duration    = { value = 2.0,   unit = "ps" }  # sweep-pinned
 ensemble         = "nvt"                            # constant-volume hold
 
@@ -252,7 +252,7 @@ initial_gap = { value = 10.0, unit = "angstrom" }
 mode        = "load"           # load- vs displacement-controlled press
 pressure    = { value = 1.0,   unit = "MPa" }   # ~1 MPa (ratified)
 temperature = { value = 300.0, unit = "K" }     # room temperature (SAB)
-duration    = { value = 150.0, unit = "ps" }    # hold; ~100-200 ps band
+duration    = { value = 10.0, unit = "ps" }     # DEMO-SCALE for the first C bond (production: 150 ps)
 # Displacement-mode target: unused while mode = "load", but written so
 # the Si/Si reference's displacement cross-check (§5.9) has its value.
 depth        = { value = 5.0, unit = "angstrom" }
@@ -282,10 +282,10 @@ langevin_damping = { value = 0.5, unit = "ps" }
 # lives in NUMERICAL (§2) because it is a convergence instrument — M3
 # reports the remaining distance to the quasi-static limit, and the
 # answer should stop moving as the rate falls.
-pull_rate_ladder = [
-  { value = 1.0,  unit = "m/s" },
-  { value = 3.2,  unit = "m/s" },
-  { value = 10.0, unit = "m/s" },
+pull_rate_ladder = [   # DEMO-SCALE: fast rungs (production: 1 / 3.2 / 10 m/s)
+  { value = 20.0,  unit = "m/s" },
+  { value = 50.0,  unit = "m/s" },
+  { value = 100.0, unit = "m/s" },
 ]
 # Averaging window for the pull force, in grip-DISPLACEMENT units
 # (§5.4, §9.5): the force-vs-displacement curve is smoothed over a fixed
