@@ -160,6 +160,8 @@ def run_member_job(member, scratch_directory, job: JobKind,
             BOND_DEBOND_CONTRACT)
         _publish(comm, lambda: write_artifact(
             scratch_directory, PULL_RESULTS, bond_debond))
+        if comm is None or comm.Get_rank() == 0:
+            _report_bond(member.name, bond_debond)
         return JobRunResult(member.name, job.name, PULL_RESULTS)
 
     if job.name == "analyze":
@@ -191,6 +193,33 @@ def run_member_job(member, scratch_directory, job: JobKind,
     raise ValueError(
         f"run_member_job does not know job kind '{job.name}'; the "
         f"registry defines {[j for j in ('activate', 'bond', 'analyze')]}")
+
+
+def _report_bond(member_name: str, bond_debond) -> None:
+    """Print the bond job's verdicts so the job log states them plainly.
+
+    The §3.5 gate verdict per surface (with its measured skin depth), the
+    press outcome, and each pull rung's note — the facts a reader wants
+    from the job output without opening the manifest.
+    """
+    print(f"\nbond verdicts for member '{member_name}':")
+    for role, verdict in (("A", bond_debond.activation_a),
+                          ("B", bond_debond.activation_b)):
+        if verdict is None:
+            print(f"  surface {role}: not gated")
+            continue
+        state = "PASSED" if verdict.passed else "FAILED"
+        print(f"  surface {role}: gate {state}, activated depth "
+              f"{verdict.activated_depth:.1f} A"
+              + (f" — {verdict.reason}" if verdict.reason else ""))
+        for name, metric in verdict.per_metric.items():
+            print(f"    {name:22s} measured={metric.measured} "
+                  f"threshold={metric.threshold} "
+                  f"{'ok' if metric.passed else 'FAIL'}")
+    print(f"  press: bonded={bond_debond.press.bonded} — "
+          f"{bond_debond.press.note}")
+    for pull in bond_debond.pulls:
+        print(f"  pull {pull.rate_value:g} {pull.rate_unit}: {pull.note}")
 
 
 def _select_members(validated, only):

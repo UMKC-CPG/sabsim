@@ -180,3 +180,43 @@ def test_reading_a_missing_artifact_is_a_loud_stop(tmp_path):
     """A job asked to start from an unwritten artifact halts, naming it."""
     with pytest.raises(HandoffError, match=PULL_RESULTS):
         read_artifact(tmp_path, PULL_RESULTS)
+
+
+def test_pull_results_carry_the_activation_verdicts(tmp_path):
+    """The §3.5 verdicts ride the manifest and round-trip (2026-08-26)."""
+    from sabsim.driver.activation_gate import (
+        ActivationVerdict,
+        MetricVerdict,
+    )
+    from sabsim.pipeline.exec_artifacts import (
+        BondDebondResult,
+        PressOutcome,
+        PullOutcome,
+    )
+    from sabsim.pipeline.handoff import read_pull_results, write_pull_results
+    verdict = ActivationVerdict(
+        passed=False, activated_depth=5.5,
+        per_metric={
+            "coordination": MetricVerdict(
+                name="coordination", measured=0.91,
+                reference="share/activation/Si.toml", threshold=(0.05, 0.6),
+                passed=False),
+            "amorphization_depth": MetricVerdict(
+                name="amorphization_depth", measured=5.5,
+                reference="share/activation/Si.toml", threshold=7.0,
+                passed=False)},
+        reason="coordination: measured 0.91 vs (0.05, 0.6)")
+    result = BondDebondResult(
+        press=PressOutcome(bonded=False, note="gate failed"),
+        reference_ok=False,
+        pulls=(PullOutcome(rate_value=1.0, rate_unit="m/s", note="void"),),
+        activation_a=verdict, activation_b=None)
+    write_pull_results(tmp_path, result)
+    back = read_pull_results(tmp_path)
+    assert back.activation_b is None
+    assert back.activation_a.passed is False
+    assert back.activation_a.activated_depth == 5.5
+    assert back.activation_a.per_metric["coordination"].threshold == (
+        0.05, 0.6)
+    assert back.activation_a.per_metric["amorphization_depth"].measured == 5.5
+    assert "coordination" in back.activation_a.reason

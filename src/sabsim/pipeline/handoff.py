@@ -222,6 +222,16 @@ def write_pull_results(
         "reference_ok": bool(bond_debond.reference_ok),
         "pulls": [_pull_to_dict(pull) for pull in bond_debond.pulls],
     }
+    # The §3.5 gate verdicts, one per healed surface, ride the manifest
+    # so the verdict a run reached is on disk beside the press it gated —
+    # not only in the halt message. Absent when the flow did not gate.
+    activation = {
+        role: _activation_to_dict(verdict)
+        for role, verdict in (("a", bond_debond.activation_a),
+                              ("b", bond_debond.activation_b))
+        if verdict is not None}
+    if activation:
+        manifest["activation"] = activation
     _write_toml(scratch / _PULL_RESULTS_MANIFEST, manifest)
 
 
@@ -237,12 +247,59 @@ def read_pull_results(scratch_directory) -> BondDebondResult:
     manifest = _read_manifest(scratch / _PULL_RESULTS_MANIFEST,
                               PULL_RESULTS, scratch)
     press = manifest["press"]
+    activation = manifest.get("activation", {})
     return BondDebondResult(
         press=PressOutcome(
             bonded=bool(press["bonded"]), note=press["note"]),
         reference_ok=bool(manifest["reference_ok"]),
         pulls=tuple(_pull_from_dict(pull) for pull in manifest["pulls"]),
+        activation_a=_activation_from_dict(activation.get("a")),
+        activation_b=_activation_from_dict(activation.get("b")),
     )
+
+
+def _activation_to_dict(verdict) -> dict:
+    """One surface's §3.5 verdict as a small table (curves left out)."""
+    metrics = {}
+    for name, metric in verdict.per_metric.items():
+        threshold = metric.threshold
+        if isinstance(threshold, (tuple, list)):
+            threshold = [float(t) for t in threshold]
+        metrics[name] = {
+            "measured": metric.measured,
+            "threshold": threshold,
+            "reference": metric.reference,
+            "passed": bool(metric.passed),
+        }
+    return {
+        "passed": bool(verdict.passed),
+        "activated_depth": float(verdict.activated_depth),
+        "reason": verdict.reason,
+        "metrics": metrics,
+    }
+
+
+def _activation_from_dict(data):
+    """Rebuild an ActivationVerdict from its table, or None if absent."""
+    if data is None:
+        return None
+    from sabsim.driver.activation_gate import (
+        ActivationVerdict,
+        MetricVerdict,
+    )
+    per_metric = {}
+    for name, metric in data.get("metrics", {}).items():
+        threshold = metric.get("threshold")
+        if isinstance(threshold, list):
+            threshold = tuple(threshold)
+        per_metric[name] = MetricVerdict(
+            name=name, measured=metric.get("measured"),
+            reference=metric.get("reference", ""), threshold=threshold,
+            passed=bool(metric["passed"]))
+    return ActivationVerdict(
+        passed=bool(data["passed"]),
+        activated_depth=float(data["activated_depth"]),
+        per_metric=per_metric, reason=data.get("reason", ""))
 
 
 def _pull_to_dict(pull: PullOutcome) -> dict:
