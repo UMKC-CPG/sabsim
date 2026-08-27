@@ -98,6 +98,11 @@ class RunControl:
     max_chunks: int = 500
     stress_window: int = 5
     gap_window: int = 3                # chunks the opening is averaged over
+    # Minimum |running-average normal stress| (bar) for a closed gap to
+    # count as contact, of either sign (compression, or the adhesive
+    # tension of surfaces that have already bonded, 2026-08-27). An
+    # asperity touch reads near zero; a real interface reads kbar.
+    contact_stress_floor: float = 500.0
     equilibrate_chunks: int = 20
     # How many chunks the pre-press contact RELAX holds at temperature
     # after its minimize (§5, relax-press-settle-pull). Kept short: the
@@ -490,7 +495,8 @@ def press_and_bond(
         # chunk let the wafers touch without contact ever being declared.
         opening = trailing_mean(opening_series, control.gap_window)
         if contact_reached(opening, gap_threshold, stress_series,
-                           control.stress_window):
+                           control.stress_window,
+                           control.contact_stress_floor):
             contact_chunk = chunk
             break
 

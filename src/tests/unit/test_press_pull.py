@@ -102,7 +102,7 @@ def test_press_stops_on_the_dual_contact_criterion():
     frames = [_frame(15.0), _frame(13.0), _frame(11.0), _frame(11.0),
               _frame(11.0)]
     engine = MockEngine(
-        positions=frames, normal_stress=[-1.0, 0.5, 1.0, 1.0, 1.0])
+        positions=frames, normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0])
 
     result = press_and_bond(
         engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
@@ -759,7 +759,7 @@ def test_press_that_loses_atoms_is_void_even_when_contact_fires():
     # The assembled pair has 200 atoms (100 per wafer); the engine reports
     # only 150 survivors by the end of the press.
     engine = MockEngine(
-        positions=frames, normal_stress=[-1.0, 0.5, 1.0, 1.0, 1.0],
+        positions=frames, normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0],
         atom_count=150)
     result = press_and_bond(
         engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
@@ -773,7 +773,7 @@ def test_press_that_keeps_every_atom_is_conserved():
     frames = [_frame(15.0), _frame(13.0), _frame(11.0), _frame(11.0),
               _frame(11.0)]
     engine = MockEngine(
-        positions=frames, normal_stress=[-1.0, 0.5, 1.0, 1.0, 1.0],
+        positions=frames, normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0],
         atom_count=200)
     result = press_and_bond(
         engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)

@@ -1621,7 +1621,8 @@ is the study file's `[potential] allow_unvalidated = true` (revised
 2026-08-26; it was an environment variable before). It lives in the study
 file deliberately: no one is tempted to flip `validated=True` in the code
 before the evidence exists, and because the study file is the provenance
-record (§1.6) the choice stays in the run's own permanent record. Anything produced under it is
+record (§1.6) the choice stays in the run's own permanent record.
+Anything produced under it is
 EXPLORATORY, and both the run and any report drawn from it must say so.
 
 **The cascade-potential ladder: universal by default, classical by
@@ -2210,7 +2211,12 @@ design worth taking: the primary test is that the gap has closed to a
 threshold, and the confirmatory test is that a running average of the
 normal stress has turned positive. The confirmation earns its keep,
 because a gap can close on a single asperity, whereas a positive normal
-stress means the two surfaces are genuinely loading each other. (Prior
+stress means the two surfaces are genuinely loading each other. (Revised
+2026-08-27: the confirming stress may be of either sign above a floor —
+a sustained *tensile* stress across a closed gap is two surfaces that
+have already bonded and are pulling on each other, the opposite of an
+asperity; a press too weak to register as compression on a small
+footprint otherwise never declares contact, T-30.) (Prior
 art measures its gap between extremal atoms, which is exactly the
 asperity failure the stress criterion guards against; we fix both.)
 

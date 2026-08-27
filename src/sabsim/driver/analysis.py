@@ -273,18 +273,28 @@ def contact_reached(
         opening: float,
         gap_threshold: float,
         normal_stress_series,
-        window: int) -> bool:
+        window: int,
+        stress_floor: float = 0.0) -> bool:
     """The DUAL contact criterion (PSEUDOCODE.md §9.3, DESIGN.md §5.2).
 
     Contact is real only when BOTH hold: the surface-to-surface opening
     has closed to the gap threshold (PRIMARY), and the running-average
-    normal stress has turned positive (CONFIRM). A gap can close on one
-    asperity; positive normal stress means the surfaces genuinely load
-    each other, so neither test alone is trusted.
+    normal stress shows the surfaces genuinely LOADING each other
+    (CONFIRM). A gap can close on one asperity, and an asperity carries
+    almost no stress — that is what the confirmation guards against.
+
+    Revised 2026-08-27: the confirming stress may be of EITHER sign, as
+    long as its magnitude clears ``stress_floor``. Compressive (positive)
+    stress is the press doing its work; a sustained TENSILE stress across
+    a closed gap is the opposite of an asperity — the two surfaces have
+    already bonded and are pulling on each other, which a press too weak
+    to register as compression (1 MPa on a 137 Å² demo footprint, T-30)
+    left reading as "no contact" indefinitely.
     """
     gap_closed = opening <= gap_threshold
-    stress_positive = trailing_mean(normal_stress_series, window) > 0.0
-    return gap_closed and stress_positive
+    mean_stress = trailing_mean(normal_stress_series, window)
+    loading = (mean_stress > stress_floor) or (mean_stress < -stress_floor)
+    return gap_closed and loading
 
 
 # ---------------------------------------------------------------------

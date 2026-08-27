@@ -93,7 +93,14 @@ def test_contact_needs_both_gap_and_positive_stress():
     # Gap closed and stress positive: contact.
     assert contact_reached(2.0, 2.5, positive, window=2)
     # Gap closed but stress not yet positive: no contact (one asperity).
-    assert not contact_reached(2.0, 2.5, negative, window=2)
+    # A closed gap under sustained TENSION is a bonded interface, not an
+    # asperity: it counts (2026-08-27) — unless a stress floor says the
+    # magnitude is asperity-sized noise.
+    assert contact_reached(2.0, 2.5, negative, window=2)
+    assert not contact_reached(2.0, 2.5, negative, window=2,
+                               stress_floor=10.0)
+    assert not contact_reached(2.0, 2.5, [0.0, 0.0], window=2,
+                               stress_floor=100.0)
     # Stress positive but gap still open: no contact.
     assert not contact_reached(3.0, 2.5, positive, window=2)
 
