@@ -217,6 +217,12 @@ def write_label_array(
     for name, value in sorted(environment.items()):
         lines.append(f'export {name}="{value}"')
     lines += [
+        # One OpenMP thread per MPI rank. Without this the site build
+        # spawns a thread per core in EVERY rank — 32 ranks x 32 threads
+        # on a 64-core node (T-27's first attempt, job 16823627): the
+        # first SCF step had not finished after ten minutes. A rank per
+        # core with no threading is the plain, fast layout for VASP.
+        "export OMP_NUM_THREADS=1",
         "unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU",
         f'TASKS="{out_dir}/{_MANIFEST}"',
         'DIRECTORY=$(python - "$SLURM_ARRAY_TASK_ID" "$TASKS" <<\'EOF\'',
