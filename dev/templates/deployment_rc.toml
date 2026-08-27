@@ -93,11 +93,15 @@ SABSIM_CASCADE_ENGINE_PREFIX = "/cluster/VAST/rulisp-lab/cpg/programs/deepmd-kit
 # DeePMD evaluation, all committee models in the one process (§10.2).
 partition = "gpu"
 nodes     = 1
-tasks_per_node = 4    # one MPI rank per GPU on the node (§10.6)
-# GPUs per node — one per rank for the DeePMD committee (§10.2). prepare
-# emits this as `#SBATCH --gres=gpu:4`; it must not exceed the partition's
-# gpus_per_node (the §10.6 login-node ceiling check catches it if it does).
-gpus_per_node  = 4
+# ONE rank on ONE GPU: the bond stage runs a single DeePMD model (the
+# committee of one) in-process, and one H100 holds a ~4000-atom pair
+# comfortably. Asking for four GPUs — the earlier value, written for a
+# four-model committee that does not exist yet — made the job
+# unschedulable on this pool's 2-GPU H100 nodes while they sat idle
+# (job 16823752, 2026-08-26). Raise both together when the committee
+# lands and each rank owns a model.
+tasks_per_node = 1
+gpus_per_node  = 1
 walltime  = { value = 18.0, unit = "h" }
 # Per-node ceiling. The deepmd force model pulls in the TensorFlow/torch
 # host runtime on top of LAMMPS, and four ranks share the node, so this

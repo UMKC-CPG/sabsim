@@ -139,8 +139,8 @@ def test_usage_is_keyed_by_member_job():
     bond = config.usage["bond"]
     assert bond.resource_class == "gpu"
     assert bond.nodes == 1
-    assert bond.tasks_per_node == 4          # one rank per GPU
-    assert bond.gpus_per_node == 4           # one GPU per rank (committee)
+    assert bond.tasks_per_node == 1          # one rank (committee of one)
+    assert bond.gpus_per_node == 1           # one GPU for that rank
     assert bond.walltime.in_hours() == 18.0
     assert bond.memory.in_megabytes() == 32 * 1024.0       # deepmd + TF/torch
     assert bond.modules == ("cpg_lammps_conda/2024.08.29-deepmd",)

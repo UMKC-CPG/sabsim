@@ -89,8 +89,8 @@ def test_bond_script_is_gpu(roots_set, tmp_path):
     text = (tmp_path / f"{member}_bond.slurm").read_text()
 
     assert "#SBATCH --partition=gpu,requeue" in text
-    assert "#SBATCH --ntasks-per-node=4" in text     # bond tasks_per_node
-    assert "#SBATCH --gres=gpu:H100:4" in text       # one H100 per rank
+    assert "#SBATCH --ntasks-per-node=1" in text      # one rank, one GPU
+    assert "#SBATCH --gres=gpu:H100:1" in text       # the committee of one
     assert "#SBATCH --mem=32G" in text               # bond memory 32 GB
     assert "#SBATCH --time=18:00:00" in text         # bond walltime 18h
     assert "module load cpg_lammps_conda/2024.08.29-deepmd" in text
@@ -175,9 +175,10 @@ def test_walltime_over_ceiling_stops_before_writing(roots_set, tmp_path):
 
 def test_gpus_over_partition_stops_before_writing(roots_set, tmp_path):
     """A per-kind GPU request over its partition's count is refused (§10.6)."""
-    # bond runs on the gpu partition (4 gpus_per_node); ask for 8.
+    # The gpu partition has 4 gpus_per_node; ask the GPU jobs (which
+    # state "gpus_per_node  = 1", two spaces) for 8 each.
     rc_text = open(_RC, encoding="utf-8").read().replace(
-        "gpus_per_node  = 4", "gpus_per_node  = 8")
+        "gpus_per_node  = 1", "gpus_per_node  = 8")
     rc = tmp_path / "deployment.toml"
     rc.write_text(rc_text, encoding="utf-8")
 
