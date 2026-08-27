@@ -393,6 +393,26 @@ is.
   *pattern* is pair-generic — the universal foundation model is the
   default generator for every pair — and a classical potential or a DFT
   melt-quench is the fallback where the foundation model is untrusted.
+- **Bootstrap — the potential manufactory [BUILD, 2026-08-26].** The
+  code that runs steps 1–2: it reads a FORCE-MODEL RECIPE (the third
+  input file, `DESIGN.md` §4.8; template `dev/templates/
+  force_model_recipe.toml`), manufactures the training structures,
+  writes and harvests the VASP labels, and — later — hands the labels to
+  ALF to train the committee and refines by uncertainty. It lives in
+  `src/sabsim/bootstrap/` behind its own verb, `sabsim bootstrap`, with
+  one sub-verb per phase (`generate`, `label`, `harvest`; `train` and
+  `refine` follow), because the bootstrap runs on a third clock — once
+  per material domain, before any study — and must never be confused
+  with the three per-member jobs. Like `sabsim prepare` it is a WRITER:
+  `label` writes a VASP job array and submits nothing. Its runs are
+  their own jobs, routed by a `[usage.label]` block of the deployment rc
+  (CPU `vasp_gam` by default; the CUDA build is a switch of the same
+  block), never by the member map (§4.1). The generation phase does no
+  MD of its own for the hard configurations: it harvests the frames the
+  ordinary member jobs record when run with `--dump-visuals` under the
+  universal model (`PSEUDOCODE.md` §11.3, "generate mode is a consumer
+  difference"), and builds only the calm Collection-1 structures itself.
+  First slice built: recipe + generate + label/harvest, silicon only.
 - **Bond characterization — Imago + Kaleidoscope
   [engine ADOPT · protocol BUILD · our edge].**
   Kaleidoscope fans the chosen step-8 snapshots out as a batch of
@@ -1035,10 +1055,13 @@ the VASP-inside-ALF labeling) and Kaleidoscope (Imago characterization)
 each own their own Parsl + SLURM submission (the "no Parsl in Parsl" rule
 and wall 5), so the deployment config *points at* their configs rather
 than duplicating them — DeePMD GPU counts live in ALF's Parsl config, not
-here. The bootstrap's direct VASP seed jobs (steps 1-2) are likewise NOT
-among the three member jobs and NOT keyed here (`PSEUDOCODE.md` §14.5):
-manufacturing the potential is a separate upstream process, and this
-usage map routes only its three consumers.
+here. The bootstrap's direct VASP labelling jobs (steps 1-2) are likewise NOT
+among the three member jobs (`PSEUDOCODE.md` §14.5): manufacturing the
+potential is a separate upstream process. They ARE routed by this same
+rc, through their own `[usage.label]` block (partition, module, binary
+— `vasp_gam` on the CPU build by default, the CUDA build as a switch),
+which `sabsim bootstrap label` reads to write its job array
+(2026-08-26); the member map still routes only its three consumers.
 
 **Execution walls, flagged for DESIGN.**
 1. **Parsl-in-Parsl** — avoided by the tier separation above.
@@ -1483,8 +1506,11 @@ Every step is present from the start; fidelity rises in waves.
   live.
 - **Wave 2 — the bootstrap, for real (steps 1+2 together).** VASP
   labeling + ALF + the DeePMD committee + UDD; the trained MLIP replaces
-  the classical stand-in **behind the same `pair_style` seam**, and the
-  potential-quality gate's bulk/surface half switches on.
+  the stand-in **behind the same `pair_style` seam**, and the
+  potential-quality gate's bulk/surface half switches on. Started
+  2026-08-26 with the recipe, the Collection-1 generators, the frame
+  harvester and the VASP labeller on silicon (`src/sabsim/bootstrap/`);
+  the ALF training bridge and the refine loop follow.
 - **Wave 3 — the Si/Si → Si/SiO2 transition.** A *milestone, not a step*,
   and the single most important "prove it here" gate: the coincidence
   matcher (step 5), the real dissimilar amorphous–amorphous interface, and

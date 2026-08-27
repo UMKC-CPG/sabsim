@@ -3161,8 +3161,9 @@ record ForceModelRecipe:
 ```
 
 **Validation, mirroring §2's three phases.** A recipe is rejected if any
-field is absent (§1.4's no-hidden-defaults applies here exactly as it
-does to a study), if `domain` names a regime no registry entry covers,
+field of parts 1–6 is absent (§1.4's no-hidden-defaults applies here
+exactly as it does to a study; parts 7–8 are required once `train` and
+`refine` are built, 2026-08-26), if `domain` is empty,
 if `species_union` disagrees with the phases listed in the starting
 collection, or if `production_settings.audited` is false without the
 run having declared itself exploratory. The third phase — does every
@@ -3242,6 +3243,22 @@ function seed_committee(force_model_recipe, reference_data):
 
 ### 11.3 generate_hard_configs — reuse §9/§10 in "generate" mode
 
+> **Built 2026-08-26, first slice (silicon).** `sabsim bootstrap
+> generate` does two things. (1) It BUILDS Collection 1 itself, on disk,
+> from the recipe: the bulk ground state at the model-derived lattice
+> (§2.2), the strain sweep (static tensors applied to that cell), the
+> rattled snapshots (seeded static displacements), the clean surfaces
+> (the §7 slab builder), and the melt-quench and warm-run families as
+> short LAMMPS scripts run out-of-process under the universal model
+> with strided dumps. (2) It HARVESTS Collection 2 from an existing
+> member run's recorded trajectories — the activate dumps (family 7),
+> the press dump (families 8–10, told apart by the press chunk they
+> fall in) and the pull dumps (family 11) — cut to the §6.4 sub-cell
+> with `bootstrap/subcell.py`. The member run is an ordinary
+> `sabsim run --dump-visuals` under the universal model; nothing forks.
+> The committee-of-one below is that model until ALF trains one.
+
+
 The one genuinely OURS step, and the one worth stating carefully: the
 bootstrap has NO cascade and NO MD of its own. It RUNS the activation
 (§10) and bond/debond (§9) stages and HARVESTS the configurations they
@@ -3282,6 +3299,22 @@ function generate_hard_configs(committee, force_model_recipe):
 ```
 
 ### 11.4 label_convert_retrain — VASP truth, then ALF retrains
+
+> **Built 2026-08-26, first slice: the DIRECT labeller.** Until ALF's
+> `QM_task` is wired, `sabsim bootstrap label` writes one VASP
+> directory per selected structure (POSCAR from the structure; INCAR
+> and KPOINTS from the recipe's production block — Γ only off-bulk,
+> `KSPACING` for the two bulk families; POTCAR concatenated from the
+> recipe's PAW choices in POSCAR species order) plus ONE SLURM job
+> array routed by the rc's `[usage.label]` block, and submits nothing.
+> `sabsim bootstrap harvest` reads each `vasprun.xml`, drops any cell
+> that did not converge, and writes the labels as an extended-XYZ set
+> (energy, forces, stress per frame) — the form the prototype's
+> ANI-HDF5 converter consumes, so `train` can follow without a format
+> change. Selection in this slice is the budget alone (the first N of
+> each family, evenly strided); the interface-preference and
+> uncertainty terms of `SelectionRule` engage once a committee exists.
+
 
 ```
 function label_convert_retrain(candidates, store, force_model_recipe):

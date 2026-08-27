@@ -137,3 +137,24 @@ walltime  = { value = 4.0, unit = "h" }
 # of the three; 8 GB is ample headroom for the numpy/ASE reduction.
 memory    = { value = 8.0, unit = "GB" }
 modules   = []
+
+# ---------------------------------------------------------------------
+# The bootstrap's VASP labelling array (`sabsim bootstrap label`,
+# DESIGN §4.8 / PSEUDOCODE §11.4). NOT a member job: routed here so the
+# machine facts stay in this file. `environment` names the two binaries;
+# the default CPU build below runs `vasp_gam` for every Gamma-only task.
+# For the CUDA build swap the module to "vasp/6.4.2_cuda", route to the
+# gpu class with gpus_per_node = 1 and tasks_per_node = 1 (one rank per
+# GPU is how the OpenACC VASP is run).
+# ---------------------------------------------------------------------
+[usage.label]
+partition      = "cpu"
+nodes          = 1
+tasks_per_node = 32
+gpus_per_node  = 0
+walltime       = { value = 2.0, unit = "h" }
+memory         = { value = 64.0, unit = "GB" }
+modules        = ["vasp/6.4.2_gcc_12.3.0_openmpi_4.1.5"]
+[usage.label.environment]
+VASP_GAMMA    = "vasp_gam"
+VASP_STANDARD = "vasp_std"

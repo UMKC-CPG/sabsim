@@ -111,7 +111,72 @@ def _build_parser() -> argparse.ArgumentParser:
         "--rc", metavar="PATH", default="deployment.toml",
         help="the machine-local deployment rc (default: deployment.toml "
              "here) — the [hardware]/[usage.*] file this cluster provides")
+    bootstrap = subcommands.add_parser(
+        "bootstrap",
+        help="manufacture the production potential from a force-model "
+             "recipe (DESIGN §4.8): generate -> label -> harvest")
+    phases = bootstrap.add_subparsers(dest="phase")
+    generate = phases.add_parser(
+        "generate",
+        help="build Collection 1 (needs a compute node for its dynamics) "
+             "and harvest Collection 2 from the member run the recipe "
+             "names; writes structures.extxyz")
+    generate.add_argument("recipe", help="the force-model recipe TOML")
+    generate.add_argument(
+        "--skip-collection1", action="store_true",
+        help="harvest Collection 2 only (no dynamics; login-node safe)")
+    generate.add_argument(
+        "--skip-collection2", action="store_true",
+        help="build Collection 1 only (no member dumps needed)")
+    label_parser = phases.add_parser(
+        "label",
+        help="write one VASP directory per selected structure and ONE "
+             "SLURM job array (submits nothing)")
+    label_parser.add_argument("recipe", help="the force-model recipe TOML")
+    label_parser.add_argument(
+        "--rc", metavar="PATH", default="deployment.toml",
+        help="the deployment rc whose [usage.label] block routes the array")
+    harvest_parser = phases.add_parser(
+        "harvest",
+        help="read the finished VASP runs, drop the unconverged, write "
+             "labels.extxyz")
+    harvest_parser.add_argument("recipe", help="the force-model recipe TOML")
     return parser
+
+
+def _bootstrap(args: argparse.Namespace) -> int:
+    """Execute one ``sabsim bootstrap`` phase from the job home (CWD)."""
+    from sabsim.bootstrap import command
+    job_directory = os.getcwd()
+    try:
+        if args.phase == "generate":
+            summary = command.generate(
+                args.recipe, job_directory,
+                collection1=not args.skip_collection1,
+                collection2=not args.skip_collection2)
+            print("sabsim bootstrap generate: structures per family")
+            for family, count in sorted(summary.items()):
+                print(f"  {family:20s} {count}")
+            return 0
+        if args.phase == "label":
+            tasks, script = command.label(
+                args.recipe, args.rc, job_directory)
+            print(f"sabsim bootstrap label: {len(tasks)} VASP task(s); "
+                  f"submit with: sbatch {script}")
+            return 0
+        if args.phase == "harvest":
+            kept, dropped = command.harvest(args.recipe, job_directory)
+            print(f"sabsim bootstrap harvest: {kept} label(s) kept, "
+                  f"{len(dropped)} dropped")
+            for directory, reason in dropped:
+                print(f"  dropped {directory}: {reason}")
+            return 0
+    except Exception as failure:                       # noqa: BLE001
+        print(f"sabsim: bootstrap halted — {failure}", file=sys.stderr)
+        return 1
+    print("sabsim bootstrap: give a phase — generate, label or harvest",
+          file=sys.stderr)
+    return 2
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -321,5 +386,7 @@ def main(argv=None) -> int:
         return _run(args)
     if args.command == "prepare":
         return _prepare(args)
+    if args.command == "bootstrap":
+        return _bootstrap(args)
     parser.print_help()
     return 2

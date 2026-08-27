@@ -71,10 +71,13 @@ def test_usage_environment_is_optional_and_sorted(tmp_path):
 
 def test_usage_environment_rejects_a_non_table(tmp_path):
     """A non-table environment is a loud stop, not a silent skip."""
-    # The template ends inside the [usage.analyze] block, so this appended
-    # key lands there as a STRING environment — which the parser must reject
-    # as not a name -> value table.
-    text = _template_text() + '\nenvironment = "oops"\n'
+    # Replace the [usage.label] block's environment TABLE with a STRING
+    # environment — which the parser must reject as not a name -> value
+    # table.
+    text = _template_text().replace(
+        '[usage.label.environment]\nVASP_GAMMA    = "vasp_gam"\n'
+        'VASP_STANDARD = "vasp_std"\n', 'environment = "oops"\n')
+    assert 'environment = "oops"' in text
     with pytest.raises(DeploymentError):
         load_deployment(_write_rc(tmp_path, text))
 
@@ -113,10 +116,11 @@ def test_partitions_carry_name_capacity_and_ceiling():
 
 
 def test_usage_is_keyed_by_member_job():
-    """The usage map keys are the three member jobs, not tool kinds."""
+    """The usage map keys are the member jobs (plus the bootstrap's
+    labelling array, routed by the same rc), not tool kinds."""
     config = load_deployment(_TEMPLATE_PATH)
 
-    assert set(config.usage) == {"activate", "bond", "analyze"}
+    assert set(config.usage) == {"activate", "bond", "analyze", "label"}
 
     activate = config.usage["activate"]
     assert activate.resource_class == "gpu"  # universal cascade -> GPU (§4.1)
