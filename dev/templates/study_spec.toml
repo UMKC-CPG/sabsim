@@ -168,9 +168,13 @@ universal_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
 # The PRODUCTION model for the gentle stages — heal, press, settle, pull
 # (§3.4, §5). The design target is the ALF-trained DeePMD committee each
 # member's potential_ref will name (§4.5); until that bootstrap exists
-# this names ONE frozen DeePMD file, a committee of one, and results
-# under it carry no committee uncertainty.
-production_weights = "$SABSIM_SHARE/share/train_deepmd_si/graph.pb"
+# this is the SAME universal model that made the surfaces (§4.5, the
+# 2026-08-21 decision), so the heal relaxes structures the model already
+# knows. A model trained elsewhere (the borrowed silicon graph.pb) was
+# tried first and compacted the DPA-amorphized surfaces into unphysical
+# clumps at the heal (Paul, 2026-08-26, demo press dumps). Results under
+# a single model carry no committee uncertainty.
+production_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
 # The universal model has passed the Tier-0 crystal-below-damaged screen
 # on silicon but has NOT cleared the §3.5 activation gate on any
 # material, so it is still marked unvalidated in the code. Running it

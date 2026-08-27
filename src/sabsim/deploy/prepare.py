@@ -176,6 +176,12 @@ def render_job_script(
         lines += [f"module use {path}"
                   for path in deployment.module_paths]
         lines += [f"module load {name}" for name in usage.modules]
+        if usage.venv:
+            lines += [
+                "# This job's own Python environment, activated AFTER the",
+                "# modules so its interpreter wins on PATH (§4.4).",
+                f'source "{usage.venv}/bin/activate"',
+            ]
         lines.append("")
 
     # (3) The three roots, FROZEN at prepare time (§10.5, §1.4): the script

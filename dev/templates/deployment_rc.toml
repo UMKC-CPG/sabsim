@@ -108,14 +108,16 @@ walltime  = { value = 18.0, unit = "h" }
 # sits above the CPU jobs. Provisional (no bond run has profiled it yet —
 # the §6 follow-up); raise it if a bond job trips the OOM killer.
 memory    = { value = 32.0, unit = "GB" }
-# The GPU force model is a DeePMD pair style hosted inside LAMMPS. It is
-# NOT a separate module: the engine here is a version of LAMMPS built to
-# ABI-match the prebuilt DeePMD plugin, and the LAMMPS input loads that
-# plugin at run time (variable dp getenv DEEPMD_LMP_PLUGIN; plugin load
-# ${dp}). The conda-derived engine needs NO libstdc++ preload (its env
-# already supplies the CXXABI the backend wants, ARCHITECTURE.md §4.4).
-# So this kind loads ONE engine module.
-modules   = ["cpg_lammps_conda/2024.08.29-deepmd"]
+# The in-process engine for the bond job (2026-08-26, T-25/T-28): the
+# deepmd-kit 3.2 bundle's LAMMPS Python binding with the deepmd pair
+# style as a plugin, which loads a DPA `.pth` — the universal model the
+# study file's [potential] production_weights names until the ALF
+# committee exists — and, later, the committee's own `.pth`. The LAMMPS
+# input loads the plugin explicitly (variable dp getenv DEEPMD_LMP_PLUGIN;
+# plugin load ${dp}). Module first, then the venv built on the bundle's
+# Python (its interpreter must win on PATH, ARCHITECTURE.md §4.4).
+modules   = ["cpg_lammps_conda/deepmd-kit-3.2.0b0"]
+venv      = "/cluster/VAST/rulisp-lab/cpg/virtual_envs/sabsim-dp3"
 
 [usage.analyze]
 # Reduce the run to results (§6, §8): CPU. Analyze owns the whole

@@ -203,6 +203,13 @@ class UsageBlock:
     memory: Memory
     modules: tuple[str, ...]
     environment: tuple[tuple[str, str], ...] = ()
+    # An optional Python virtual environment the job activates AFTER its
+    # modules, replacing the one the submitting shell had. The bond job
+    # needs this: its in-process engine is the deepmd-kit 3 bundle's
+    # LAMMPS binding, reachable only from a venv built on that bundle's
+    # Python (virtual_envs/sabsim-dp3, T-25), while the login shell's
+    # sabsimrc activates the older install. Empty means "inherit".
+    venv: str = ""
 
 
 @dataclass(frozen=True)
@@ -390,6 +397,7 @@ def _usage_from_table(
         memory=_require_memory(table, "memory", context),
         modules=_require_str_list(table, "modules", context),
         environment=_optional_str_map(table, "environment", context),
+        venv=str(table.get("venv", "")),
     )
 
 

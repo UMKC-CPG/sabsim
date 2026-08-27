@@ -55,7 +55,7 @@ def test_activate_script_directives_and_run_line(roots_set, tmp_path):
 
     # The DEFAULT activate is the universal cascade — a GPU job that runs the
     # deepmd bundle out-of-process (§4.1, §3.4 cascade-only).
-    assert "#SBATCH --partition=gpu,requeue" in text          # gpu partition name
+    assert "#SBATCH --partition=gpu,requeue" in text  # partition name
     assert "#SBATCH --account=general" in text            # default_account
     assert "#SBATCH --nodes=1" in text                # activate nodes
     assert "#SBATCH --ntasks-per-node=1" in text      # one rank, one GPU
@@ -93,7 +93,11 @@ def test_bond_script_is_gpu(roots_set, tmp_path):
     assert "#SBATCH --gres=gpu:H100:1" in text       # the committee of one
     assert "#SBATCH --mem=32G" in text               # bond memory 32 GB
     assert "#SBATCH --time=18:00:00" in text         # bond walltime 18h
-    assert "module load cpg_lammps_conda/2024.08.29-deepmd" in text
+    assert "module load cpg_lammps_conda/deepmd-kit-3.2.0b0" in text
+    # The bond job's own venv is activated AFTER the module (§4.4).
+    assert 'source "/cluster/VAST/rulisp-lab/cpg/virtual_envs/sabsim-dp3' \
+        '/bin/activate"' in text
+    assert text.index("module load") < text.index("source \"")
     assert f"--bond --only {member}" in text
 
 
