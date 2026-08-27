@@ -579,6 +579,53 @@ def contact_relax_commands(
     ]
 
 
+def heal_anneal_commands(member: MemberSpecification, seed: int) -> list:
+    """Settle the two activated surfaces with the study's re-anneal (§3.4).
+
+    The capped relax above only takes the edge off the cascade's leftover
+    strain; it leaves loosely bound atoms and small fragments standing
+    proud of each surface, and those are what mix first when the wafers
+    meet (Paul, 2026-08-26, the 50 eV demo press). This runs the
+    ``[protocol.reanneal]`` schedule the study file already carries —
+    hold the mobile atoms at ``hold_temperature`` for ``hold_duration``,
+    then cool to the press temperature over the same span, then a short
+    minimisation — on the ASSEMBLED pair at its wide gap, so each surface
+    heals as a free surface under the production model and its loose
+    atoms find bonds before any load is applied. Both grips stay pinned
+    (the bottom is already held) so the gap is preserved. The plain
+    integrators are restored afterwards.
+    """
+    schedule = member.protocol.reanneal_schedule
+    hold_kelvin = to_metal(schedule.hold_temperature, "temperature")
+    press_kelvin = to_metal(member.protocol.press_temperature, "temperature")
+    timestep = to_metal(member.numerical.md_timestep, "time")
+    hold_steps = max(1, round(
+        to_metal(schedule.hold_duration, "time") / timestep))
+    damping = to_metal(member.numerical.langevin_damping, "time")
+    return [
+        "fix heal_hold_top top_grip setforce 0.0 0.0 0.0",
+        "unfix nve_interior",
+        "unfix nve_border",
+        f"velocity interior create {_lammps_number(hold_kelvin)} {seed} "
+        f"dist gaussian",
+        f"fix heal_hold interior nvt temp {_lammps_number(hold_kelvin)} "
+        f"{_lammps_number(hold_kelvin)} {_lammps_number(damping)}",
+        "fix heal_border border nve",
+        f"run {hold_steps}",
+        "unfix heal_hold",
+        f"fix heal_quench interior nvt temp {_lammps_number(hold_kelvin)} "
+        f"{_lammps_number(press_kelvin)} {_lammps_number(damping)}",
+        f"run {hold_steps}",
+        "unfix heal_quench",
+        "unfix heal_border",
+        "min_style cg",
+        "minimize 1e-6 1e-6 200 2000",
+        "fix nve_interior interior nve",
+        "fix nve_border border nve",
+        "unfix heal_hold_top",
+    ]
+
+
 def scissors_commands(interface_z: float, delta_z: float) -> list:
     """Cut vacuum: slide the TOP wafer down by ``delta_z`` Å, no MD (§5).
 

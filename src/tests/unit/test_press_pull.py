@@ -99,15 +99,18 @@ def test_press_stops_on_the_dual_contact_criterion():
     # Openings ~6, ~4, ~2 (upper-bottom minus lower-top ~9.5); the gap
     # threshold is 2.5, so only the third frame is closed. The stress
     # turns positive over the same three chunks.
-    frames = [_frame(15.0), _frame(13.0), _frame(11.0)]
+    frames = [_frame(15.0), _frame(13.0), _frame(11.0), _frame(11.0),
+              _frame(11.0)]
     engine = MockEngine(
-        positions=frames, normal_stress=[-1.0, 0.5, 1.0])
+        positions=frames, normal_stress=[-1.0, 0.5, 1.0, 1.0, 1.0])
 
     result = press_and_bond(
         engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
 
     assert result.contact_reached
-    assert result.chunks_to_contact == 2
+    # The gap is a trailing mean over gap_window (3) chunks, so the closed
+    # 11.0 frame must hold for three chunks: contact on chunk 4.
+    assert result.chunks_to_contact == 4
     # After contact it holds for press_duration (150 ps / 1 fs steps).
     assert "run 150000" in engine.received_commands
 
@@ -751,11 +754,13 @@ def test_positions_with_tags_is_identity_without_loss():
 
 def test_press_that_loses_atoms_is_void_even_when_contact_fires():
     """A disintegrating pair can fire the stress criterion; it is VOID."""
-    frames = [_frame(15.0), _frame(13.0), _frame(11.0)]
+    frames = [_frame(15.0), _frame(13.0), _frame(11.0), _frame(11.0),
+              _frame(11.0)]
     # The assembled pair has 200 atoms (100 per wafer); the engine reports
     # only 150 survivors by the end of the press.
     engine = MockEngine(
-        positions=frames, normal_stress=[-1.0, 0.5, 1.0], atom_count=150)
+        positions=frames, normal_stress=[-1.0, 0.5, 1.0, 1.0, 1.0],
+        atom_count=150)
     result = press_and_bond(
         engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
     assert result.contact_reached           # the criterion did fire...
@@ -765,9 +770,11 @@ def test_press_that_loses_atoms_is_void_even_when_contact_fires():
 
 def test_press_that_keeps_every_atom_is_conserved():
     """With every assembled atom still present the press is a measurement."""
-    frames = [_frame(15.0), _frame(13.0), _frame(11.0)]
+    frames = [_frame(15.0), _frame(13.0), _frame(11.0), _frame(11.0),
+              _frame(11.0)]
     engine = MockEngine(
-        positions=frames, normal_stress=[-1.0, 0.5, 1.0], atom_count=200)
+        positions=frames, normal_stress=[-1.0, 0.5, 1.0, 1.0, 1.0],
+        atom_count=200)
     result = press_and_bond(
         engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
     assert result.atoms_conserved is True
@@ -800,3 +807,20 @@ def test_pull_uses_the_assembled_count_as_its_baseline(tmp_path):
         Quantity(1.0, "m/s"), seed=1, output_directory=str(tmp_path),
         expected_atom_count=201)
     assert result.atoms_conserved is False
+
+
+def test_heal_anneal_runs_the_studys_schedule_with_grips_pinned():
+    """The settle holds, quenches, minimises, and restores the integrators."""
+    from sabsim.driver.commands import heal_anneal_commands
+    commands = heal_anneal_commands(_member(), seed=7)
+    # Hold at the schedule's temperature (template: 500 K for 2 ps = 2000
+    # steps at 1 fs), then quench to the press temperature (300 K).
+    assert "fix heal_hold interior nvt temp 500 500 0.5" in commands
+    assert commands.count("run 2000") == 2
+    assert "fix heal_quench interior nvt temp 500 300 0.5" in commands
+    assert "fix heal_hold_top top_grip setforce 0.0 0.0 0.0" in commands
+    assert commands.index("unfix heal_hold_top") > commands.index(
+        "minimize 1e-6 1e-6 200 2000")
+    assert commands[-3:] == ["fix nve_interior interior nve",
+                             "fix nve_border border nve",
+                             "unfix heal_hold_top"]

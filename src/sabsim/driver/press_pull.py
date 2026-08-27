@@ -39,11 +39,13 @@ from sabsim.driver.analysis import (
     reference_is_settled,
     separation_point,
     SettleReport,
+    trailing_mean,
 )
 from sabsim.driver.commands import (
     ForceModel,
     RegionGeometry,
     contact_relax_commands,
+    heal_anneal_commands,
     force_model_commands,
     grip_hold_and_readback_commands,
     integrator_commands,
@@ -95,6 +97,7 @@ class RunControl:
     chunk_steps: int = 1000
     max_chunks: int = 500
     stress_window: int = 5
+    gap_window: int = 3                # chunks the opening is averaged over
     equilibrate_chunks: int = 20
     # How many chunks the pre-press contact RELAX holds at temperature
     # after its minimize (§5, relax-press-settle-pull). Kept short: the
@@ -434,6 +437,12 @@ def press_and_bond(
         # seam is proven and surfaces are activated under the committee.
         engine.commands(contact_relax_commands(
             member, seed, control.relax_chunks * control.chunk_steps))
+        # The study's re-anneal schedule then SETTLES both surfaces at the
+        # wide gap before anything is cut or pressed (§3.4): loose atoms
+        # and fragments the cascade left standing proud of each surface
+        # find bonds under the production model instead of mixing at the
+        # first touch (the 50 eV demo press, 2026-08-26).
+        engine.commands(heal_anneal_commands(member, seed))
         # One-time combined-cell relax (§5.6, §2.6): resize the shared
         # lateral cell to zero in-plane stress, then FREEZE it for the
         # press. The recorded relaxation that replaces the forbidden live
@@ -465,14 +474,21 @@ def press_and_bond(
     engine.commands(press_drive_commands(built, member))
     gap_threshold = to_metal(numerical.contact_gap_threshold, "distance")
     stress_series: list = []
+    opening_series: list = []
     contact_chunk = None
     for chunk in range(control.max_chunks):
         engine.commands([f"run {control.chunk_steps}"])
         frame, aligned_tags = _positions_with_tags(engine, tags)
         z_lower, z_upper = _wafer_z(frame, aligned_tags)
-        opening = interface_opening(
-            z_lower, z_upper, control.density_bin_width)
+        opening_series.append(interface_opening(
+            z_lower, z_upper, control.density_bin_width))
         stress_series.append(engine.normal_stress())
+        # The gap is judged on a TRAILING MEAN of the opening, as the
+        # stress already is: one chunk's density-surface reading jumps by
+        # ångströms when loose atoms drift through the gap (the 50 eV demo
+        # press, 2026-08-26), and demanding both conditions in the SAME
+        # chunk let the wafers touch without contact ever being declared.
+        opening = trailing_mean(opening_series, control.gap_window)
         if contact_reached(opening, gap_threshold, stress_series,
                            control.stress_window):
             contact_chunk = chunk
