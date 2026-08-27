@@ -115,14 +115,17 @@ def test_stage_trajectory_returns_no_path_when_recording_is_off(member):
     assert stride == 42
 
 
-def test_the_cli_exposes_the_switch_and_defaults_it_off():
-    """A flag nobody can reach is not a feature."""
+def test_the_cli_records_by_default_and_has_an_explicit_opt_out():
+    """Recording is ON unless a run says --no-dump-visuals (2026-08-26)."""
     from sabsim.cli import _build_parser
 
     parser = _build_parser()
     plain = parser.parse_args(["run", "spec.toml"])
-    assert plain.dump_visuals is False
+    assert plain.dump_visuals is True
     assert plain.dump_stride is None
+
+    declined = parser.parse_args(["run", "spec.toml", "--no-dump-visuals"])
+    assert declined.dump_visuals is False
 
     asked = parser.parse_args(
         ["run", "spec.toml", "--dump-visuals", "--dump-stride", "250"])

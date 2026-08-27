@@ -192,6 +192,6 @@ def test_dump_visuals_rides_every_generated_run_line(roots_set, tmp_path):
     for entry in entries:
         text = (tmp_path / entry.script_name).read_text()
         assert "--dump-visuals" in text
-    plain = prepare(_SPEC, _RC, tmp_path)
-    assert all("--dump-visuals" not in (tmp_path / e.script_name).read_text()
+    plain = prepare(_SPEC, _RC, tmp_path, dump_visuals=False)
+    assert all("--no-dump-visuals" in (tmp_path / e.script_name).read_text()
                for e in plain)

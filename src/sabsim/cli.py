@@ -85,12 +85,14 @@ def _build_parser() -> argparse.ArgumentParser:
              "vector (CPU); reads the pull results, writes the measures")
     run.set_defaults(job_flag=None)
     run.add_argument(
-        "--dump-visuals", action="store_true",
+        "--dump-visuals", action=argparse.BooleanOptionalAction,
+        default=True,
         help="record a trajectory for every dynamic stage — the "
-             "bombardment and re-anneal of each half, the press and "
-             "settle, and each pull rung — for viewing in Ovito. OFF by "
-             "default: the frames cost wall clock inside the MD loop and "
-             "the files are large (one pull rung ran to 1.3 GB)")
+             "bombardment of each half, the press and settle, and each "
+             "pull rung — for viewing in Ovito. ON by default (Paul, "
+             "2026-08-26: the movie is how a run is verified); pass "
+             "--no-dump-visuals to skip it when the frames' wall clock "
+             "and size (a pull rung can reach 1.3 GB) are not wanted")
     run.add_argument(
         "--dump-stride", type=int, metavar="STEPS",
         help="record one frame per STEPS of MD, overriding the spec's "
@@ -112,10 +114,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="the machine-local deployment rc (default: deployment.toml "
              "here) — the [hardware]/[usage.*] file this cluster provides")
     prepare.add_argument(
-        "--dump-visuals", action="store_true",
-        help="put --dump-visuals on every generated run line, so each "
-             "dynamic stage records a trajectory for viewing (the "
-             "standing rule: a dynamic run leaves its movie behind)")
+        "--dump-visuals", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="record a trajectory for every dynamic stage of every "
+             "generated job (ON by default — a dynamic run leaves its "
+             "movie behind); --no-dump-visuals writes scripts that skip it")
     bootstrap = subcommands.add_parser(
         "bootstrap",
         help="manufacture the production potential from a force-model "
