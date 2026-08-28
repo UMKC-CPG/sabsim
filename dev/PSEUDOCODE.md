@@ -16,7 +16,7 @@
 >
 > The skeleton runs the **Si/Si walking-skeleton thread**
 > (`ARCHITECTURE.md` §5.3, "Wave 0"):
-> steps 1-2 skipped behind a classical potential stand-in, step 4
+> steps 1-2 skipped behind a stand-in potential, step 4
 > stubbed, step 5 trivial (no lattice mismatch), step 8 mocked. Its
 > headline number is deliberately **not trusted** — the point of the
 > skeleton is that the data flows and the schemas hold.
@@ -99,10 +99,11 @@ function exec_one_member(member_specification, scratch_directory):
     # until a stage produces a contract-invalid artifact, then stops
     # loudly instead of corrupting everything downstream.
 
-    # The potential is a CONTRACT, not a fixed implementation. The
-    # walking skeleton satisfies it with a classical pair_style
-    # stand-in; the bootstrap wave (steps 1-2) later satisfies it with
-    # the trained MLIP through the SAME seam (ARCHITECTURE §5.1).
+    # The potential is a CONTRACT, not a fixed implementation. Today
+    # the universal foundation MLIP satisfies it as a committee of one
+    # (the study file's [potential] block names it); the bootstrap
+    # (steps 1-2) later satisfies it with the trained committee through
+    # the SAME seam (ARCHITECTURE §5.1).
     #
     # WHAT LIVES BEHIND THIS SEAM (the /refine marker). resolve_potential
     # LOOKS UP a fingerprinted, already-manufactured potential (the
@@ -118,8 +119,9 @@ function exec_one_member(member_specification, scratch_directory):
     # reason, not by oversight -- DESIGN §7.2's "gate the build" is
     # discharged upstream, where acting is still possible.
     potential = run_to_contract(
-        () -> resolve_potential(member_specification),   # skeleton:
-                                                          # classical
+        () -> resolve_potential(member_specification),   # today: the
+                                                          # foundation
+                                                          # MLIP, alone
         POTENTIAL_CONTRACT)
 
     # Steps 3-4-5 are three SEPARATE stages in a FIXED order:
@@ -142,13 +144,13 @@ function exec_one_member(member_specification, scratch_directory):
     # Step 4 — activate (amorphize) each slab's surface. A SEPARATE
     # module (DESIGN §3); in the skeleton it is stubbed. It does NOT assume
     # it ran before assembly (§5.3). Each call takes a HalfHandle, RE-READS
-    # the pristine half from its data file, runs the CASCADE ONLY, and writes
-    # the amorphized half back (§10.1). Revised 2026-08-08 (§3.4): the heal
-    # and the §3.5 gate no longer ride here — they moved to the bond flow,
-    # which heals the ASSEMBLED pair at a wide gap and gates the healed
-    # surfaces before pressing. So this stage returns ONE ActivatedSlabs
-    # (§10.1) carrying just the two amorphized slabs; its contract checks
-    # they are amorphized, not a gate verdict (that now falls in the bond).
+    # the pristine half from its data file, runs the cascade, the heal and
+    # the §3.5 gate in one session, and writes the healed half back
+    # (§10.1; revised 2026-08-28 (Paul) — from 2026-08-08 to then the heal
+    # and gate rode the bond flow). So this stage returns ONE
+    # ActivatedSlabs (§10.1) carrying the two healed slabs AND their two
+    # verdicts; its contract checks both are amorphized and both passed,
+    # and a failure HALTS here, before any assembly.
     activated = run_to_contract(
         () -> activate_surfaces(handle_A, handle_B, member_specification,
                                 potential),
@@ -162,14 +164,12 @@ function exec_one_member(member_specification, scratch_directory):
         STRUCTURE_CONTRACT)
 
     # Steps 6-7: the bond flow, on the MLIP committee (here, the stand-in).
-    # It FIRST heals the two assembled surfaces with one joint relax at the
-    # wide gap and runs the §3.5 activation gate on each healed surface
-    # (§3.4, revised 2026-08-08); a FAILED gate halts HERE, before any press
-    # — the checkpoint that used to sit at the activate seam now guards the
-    # bond's scarce GPU from inside it. Only a passing gate scissors the
-    # vacuum, then presses and pulls. The result is a BondDebondResult
-    # (§9.1): one press outcome + one reference + a per-rate list of pulls,
-    # NOT a bare Trajectory (§5.4's rate ladder).
+    # The pair arrives already healed and gated (§10, revised 2026-08-28
+    # (Paul): the heal and the §3.5 gate ride the activate stage again),
+    # so the bond flow is the one-time lateral cell relax (§9.1, DESIGN
+    # §5.6), then press, settle and pull. The result is a
+    # BondDebondResult (§9.1): one press outcome + one reference + a
+    # per-rate list of pulls, NOT a bare Trajectory (§5.4's rate ladder).
     bond_debond_trajectory = run_to_contract(
         () -> run_bond_debond_md(structure, potential, member_specification),
         BOND_DEBOND_CONTRACT)
@@ -310,8 +310,8 @@ record MemberSpecification:
     ensemble:      EnsembleKnobs   # master seed + two realization counts
     potential_ref: string         # WHICH potential generation this member
                                   # uses — a content fingerprint, or the
-                                  # classical stand-in marker in the
-                                  # skeleton. The potential's CONTENTS are
+                                  # foundation-MLIP stand-in's name
+                                  # today. The potential's CONTENTS are
                                   # not settings
                                   # (DESIGN §1.3); this POINTER is one,
                                   # for provenance (DESIGN §1.6, §6.6).
@@ -380,9 +380,17 @@ record NumericalKnobs:
     contact_grid_spacing:   number    # grid cell size for the bonded
                                       # contact-area fraction (§8.8,
                                       # DESIGN §6.4); ~one cutoff/cell
-    contact_gap_threshold:  number    # dividing-surface gap that, with a
-                                      # positive mean normal stress, marks
-                                      # contact (§9.3, DESIGN §5.2)
+    contact_gap_threshold:  number    # dividing-surface opening below
+                                      # which, with the stress confirmed,
+                                      # contact is declared (§9.3, §5.2)
+    contact_gap_window:     integer   # chunks the opening is averaged
+                                      # over before that test (§9.3);
+                                      # one reading jumps when a loose
+                                      # atom crosses the gap
+    contact_stress_floor:   number    # |running-mean normal stress| that
+                                      # confirms contact, of EITHER sign
+                                      # (compression, or the tension of
+                                      # an already-bonded interface)
     bonded_contact_threshold: number  # contact quality above which the
                                       # verdict is "bonded" (§9.3, §5.1)
     force_average_window:   number    # pull force-average window, in grip
@@ -845,7 +853,7 @@ exists so every seam is exercised under real data flow.
 
 ```
 # exec_one_member, each stage resolved to its walking-skeleton stand-in:
-    potential  = classical_pair_style(...)      # steps 1-2 SKIPPED
+    potential  = stand_in_pair_style(...)       # steps 1-2 SKIPPED
     (handle_A, handle_B, shared) = build_slabs(...)  # step 3, real
     activated  = stub_activate(handle_A, handle_B)   # step 4, STUB:
     slab_A     = activated.slab_A               # returns an ActivatedSlabs
@@ -868,7 +876,7 @@ moved to the bond flow), so the contract checks amorphization, not a
 verdict — and it satisfies the same contract the real activation does, so
 §1's unpack is exercised, not special-cased; `mock_characterization`
 returns
-schema-valid `unresolved` MeasureRecords (§4); `classical_pair_style`
+schema-valid `unresolved` MeasureRecords (§4); `stand_in_pair_style`
 satisfies the same potential contract the trained MLIP will; and
 `press_then_pull` writes the strided atomic-coordinate dump so
 `Trajectory.frames` (§3) is populated even though no walking-skeleton
@@ -1009,12 +1017,10 @@ function solve_shared_cell(material_A, material_B, potential,
     # cascade — so the derived cell and the amorphizing potential agree
     # (DESIGN §2.2/§4.7: a cell equilibrated under one description and
     # bombarded under another starts stressed, the oxide-bring-up offset).
-    # A classical seed is used only on explicit request. Because the
-    # universal .pt2 loads only in the deepmd bundle, the DEFAULT
+    # Because the universal model loads only in the deepmd bundle, the
     # relaxation runs OUT-OF-PROCESS (box/relax + minimize + write_data,
     # read back with read_data_box; ARCHITECTURE §4.4), mirroring the
-    # cascade handoff; the classical path stays an in-process minimization
-    # (§9.7). The relaxed-vs-VASP disagreement is itself a potential-
+    # cascade handoff. The relaxed-vs-VASP disagreement is itself a potential-
     # quality measure (DESIGN §2.2, §7-of-DESIGN) — recorded, not discarded.
     lattice_A = relaxed_lattice(material_A, potential)   # vs VASP
     lattice_B = relaxed_lattice(material_B, potential)
@@ -1125,13 +1131,13 @@ function assemble_pair(slab_A, slab_B, shared, member_specification):
     slab_B = drop_disconnected(slab_B)
 
     # Place B facing A at the configured initial gap, measured between the
-    # two dividing surfaces. Revised 2026-08-08 (§3.4): this gap must be
-    # WIDER than the MLIP interaction cutoff, because the bond flow heals the
-    # two surfaces here BEFORE pressing (§9.1) and a wide gap is what makes
-    # each heal as an effectively-free surface; the bond flow later scissors
-    # it down to the press start distance (§2.6). Then check the minimum
-    # cross-slab distance; if it violates the clash floor, back the gap off
-    # and RECORD the adjustment rather than aborting the member (DESIGN §2.6).
+    # two dividing surfaces. Revised 2026-08-28 (Paul, §3.4): both halves
+    # arrive HEALED and GATED from the activate stage, so this gap is the
+    # opening the press starts from — near contact, the two faces within
+    # range but not yet loading each other (DESIGN §2.6). Then check the
+    # minimum cross-slab distance; if it violates the clash floor, back
+    # the gap off and RECORD the adjustment rather than aborting the
+    # member (DESIGN §2.6).
     pair = place_facing(slab_A, slab_B, surface_A, surface_B,
                         member_specification.protocol.initial_gap)
     pair = relieve_clash(pair,
@@ -1501,7 +1507,7 @@ function m2_on(cell_structure, trajectory, kind):
         # Additionally ANNEAL so surfaces reorganize and dangling bonds
         # pair — the reference that connects to W = gA + gB - gAB
         # (DELEGATE: anneal; its SCHEDULE is a recorded knob, DESIGN §6.4).
-        relaxed_pieces = map(minimize_then_anneal, pieces)
+        relaxed_pieces = map(anneal_then_minimize, pieces)
     e1, e2 = potential_energy(relaxed_pieces[0]),
              potential_energy(relaxed_pieces[1])
     return work_of_adhesion(bonded, e1, e2, interface_area(cell_structure))
@@ -1693,7 +1699,7 @@ union-find, trapezoid) with a resolved/unresolved branch.
 
 `[DELEGATE -> MINIMIZER / anneal, shared with the MD pass §5-of-DESIGN,
 not yet written]` `minimize_local` (as_fractured pieces and the M3
-relaxed snapshots), `minimize_then_anneal` (relaxed pieces; SCHEDULE is a
+relaxed snapshots), `anneal_then_minimize` (relaxed pieces; SCHEDULE is a
 recorded knob), and `minimize_at_fixed_opening` (M3's constrained ladder).
 
 `[DELEGATE -> CHARACTERIZATION module, DESIGN §8, not yet written]` the
@@ -1745,15 +1751,12 @@ state, and a LIST of per-rate pulls — not a single trajectory.
 ```
 record BondDebondResult:
     # The concrete form of the §3 press/pull stage output (what §1 calls
-    # BOND_DEBOND_CONTRACT). One press, one reference, many pulls — plus,
-    # from 2026-08-08 (§3.4), the two §3.5 activation verdicts, because the
-    # heal and gate moved into this flow, so the pass/fail activation result
-    # is a bond artifact now (it used to ride ActivatedSlabs, §10.1).
+    # BOND_DEBOND_CONTRACT). One press, one reference, many pulls. The
+    # §3.5 activation verdicts ride ActivatedSlabs (§10.1) again from
+    # 2026-08-28; between 2026-08-08 and then they rode this record.
     press:        PressOutcome         # step 6 (§5.1, §5.2)
     reference:    StateRef             # gated zero-load reference (§5.3)
     pulls:        list of Trajectory   # one §3 Trajectory per pull rate
-    activation_A: ActivationVerdict    # A's healed-surface gate (§10.6)
-    activation_B: ActivationVerdict    # B's healed-surface gate
 
 record PressOutcome:
     bonded:           boolean   # verdict at the specified load (§5.1)
@@ -1761,6 +1764,20 @@ record PressOutcome:
     bonded_structure: StateRef  # the held, relaxed bonded state
     load_reached:     number    # BOTH load AND depth are reported (§5.2)
     depth_reached:    number
+    stage_steps:      StageLedger  # the MD step each phase began/ended
+                                   # at (DESIGN §5.5, §5.7, 2026-08-28)
+
+record StageLedger:
+    # The press and settle RECORD where their phases fall in the MD step
+    # count, so a consumer of the recorded trajectory — the analyzer, a
+    # viewer, the bootstrap harvest (§11.3) — keys a frame to its phase
+    # by the step every dump frame carries, never by guessing from its
+    # position in the file. Written into the bond result manifest.
+    press_start:     integer   # drive installed, first press chunk begins
+    contact:         integer   # the dual criterion fired (§9.3)
+    hold_end:        integer   # end of the hold at temperature
+    settle_start:    integer   # drive released, settle minimize begins
+    settle_end:      integer   # the gated reference written (§9.4)
 ```
 
 ```
@@ -1768,32 +1785,14 @@ function run_bond_debond_md(structure, potential, member_specification):
     driver = open_lammps_driver(structure, potential,
                                 member_specification)   # §9.2, persistent
 
-    # HEAL + GATE (moved here 2026-08-08, §3.4). The structure is the two
-    # amorphized surfaces assembled at a gap WIDER than the MLIP cutoff.
-    # First heal them with ONE joint relax at that gap — because the gap
-    # exceeds the cutoff, each heals as an effectively-free surface (§10.5,
-    # delegating to §9.7's minimize_then_anneal on the joint cell). Then GATE
-    # each healed surface (§3.5, §10.6), told apart by its wafer tag; a
-    # FAILED gate HALTS before any press — the §3.5 checkpoint, now guarding
-    # the bond's scarce GPU from inside it (§9.1 <-> ARCHITECTURE §4.1). The
-    # crystalline self-reference each metric needs is resolved from share/
-    # by species (§10.6), as it always was.
-    heal_assembled_surfaces(driver, member_specification)         # §10.5
-    activation_A = activation_gate(surface_by_tag(driver, WAFER_A),
-                                   crystalline_reference(member_specification,
-                                                         WAFER_A),
-                                   member_specification)          # §10.6
-    activation_B = activation_gate(surface_by_tag(driver, WAFER_B),
-                                   crystalline_reference(member_specification,
-                                                         WAFER_B),
-                                   member_specification)
-    if not (activation_A.passed and activation_B.passed):
-        halt_pipeline(reason = failing_metric(activation_A,
-                                              activation_B))   # gate, not warn
-
-    # Only a passing gate SCISSORS the wide vacuum gap down to the press
-    # start distance (§2.6), bringing the two healed surfaces into range.
-    scissor_vacuum_gap(driver, member_specification)              # §2.6
+    # The structure arrives HEALED and GATED (§10, revised 2026-08-28
+    # (Paul)): each half was annealed, minimized and judged in its own
+    # cascade session, and the pair is assembled at the press-start
+    # opening (§7.5). The bond flow's first act is the ONE-TIME lateral
+    # cell relax of DESIGN §5.6 — the shared in-plane cell to zero
+    # in-plane stress, then FROZEN for the whole press, settle and pull;
+    # it needs the joint cell, which is why it cannot ride activation.
+    relax_lateral_cell_once(driver)                               # §5.6
 
     # Step 6: press the two healed surfaces together and let them bond.
     press = press_and_bond(driver, member_specification)          # §9.3
@@ -1808,9 +1807,7 @@ function run_bond_debond_md(structure, potential, member_specification):
         pulls.append(pull_at_rate(driver, reference, rate,
                                   member_specification))     # §9.5, §9.6
     return BondDebondResult{ press: press, reference: reference,
-                            pulls: pulls,
-                            activation_A: activation_A,
-                            activation_B: activation_B }
+                            pulls: pulls }
 ```
 
 `[SEAM — resolved]` this refines the §3 trajectory seam. `Trajectory`
@@ -1901,18 +1898,29 @@ function press_and_bond(driver, member_specification):
     thermostat_border_bias_removed(driver, protocol.press_temperature)
 
     # CONTACT ON A DUAL CRITERION (§5.2, adapted from prior art's one good
-    # idea, find_contact_step): PRIMARY = the gap between the two §2.6
-    # density dividing surfaces has closed to a threshold; CONFIRM = a
-    # running average of the normal stress has turned positive. A gap can
-    # close on ONE asperity; positive normal stress means the surfaces
-    # genuinely load each other. Gap measured surface-to-surface, NOT
+    # idea, find_contact_step; revised 2026-08-28 (Paul)): PRIMARY = the
+    # opening between the two §2.6 density dividing surfaces, averaged
+    # over the last contact_gap_window chunks, has closed to the
+    # threshold (one reading jumps by angstroms when a loose atom crosses
+    # the gap); CONFIRM = the running-average normal stress is SUSTAINED
+    # above contact_stress_floor in magnitude, of EITHER sign. A gap can
+    # close on ONE asperity; compression above the floor means the
+    # surfaces genuinely load each other, and sustained TENSION across a
+    # closed gap means they have already bonded and pull on each other —
+    # the opposite of an asperity. Gap measured surface-to-surface, NOT
     # between extremal atoms (prior art's asperity failure).
+    stage_steps.press_start = current_step(driver)
     run_until(driver,
-        gap_between_dividing_surfaces(driver) <= numerical.contact_gap_threshold
-        and mean_normal_stress_positive(driver))
+        trailing_mean(opening_between_dividing_surfaces(driver),
+                      numerical.contact_gap_window)
+            <= numerical.contact_gap_threshold
+        and abs(running_mean_normal_stress(driver))
+            >= numerical.contact_stress_floor)
+    stage_steps.contact = current_step(driver)
 
     # The HOLD at temperature is where bonding actually happens (§5.2).
     hold_at_temperature(driver, protocol.press_duration)
+    stage_steps.hold_end = current_step(driver)
 
     # The bonded/not-bonded VERDICT and graded contact quality (§5.1),
     # reusing the §8.3/§8.8 geometric machinery rather than a second
@@ -1924,7 +1932,8 @@ function press_and_bond(driver, member_specification):
         bonded: quality >= threshold, contact_quality: quality,
         bonded_structure: snapshot(driver),
         load_reached: measured_load(driver),
-        depth_reached: measured_depth(driver) }
+        depth_reached: measured_depth(driver),
+        stage_steps: stage_steps }
 ```
 
 ### 9.4 settle_reference — a gated zero-load state (`DESIGN.md` §5.3)
@@ -1946,8 +1955,10 @@ function settle_reference(driver, press, member_specification):
     # equilibrate WHILE STILL BEING PRESSED and the zero-load gate would
     # be a lie.
     release_press_drive(driver, member_specification)
+    press.stage_steps.settle_start = current_step(driver)   # ledger, §9.3
     minimize(driver)                          # to a local minimum
     equilibrate_under_thermostat(driver)      # settle at temperature
+    press.stage_steps.settle_end = current_step(driver)
     # ASSERT the press actually settled; if not, REPORT, do not integrate
     # over it (§5.3). Force floor reuses the pull's noise floor.
     assert net_grip_force(driver) <= numerical.noise_floor
@@ -2082,11 +2093,16 @@ function minimize_local(fragment_or_frame, potential):
     # snapshots). Surfaces are left as the pull/press left them.
     return minimized_state
 
-function minimize_then_anneal(fragment, potential, anneal_schedule):
-    # minimize_local, then a short ANNEAL so surface atoms reorganize and
-    # dangling bonds pair (§8.5 relaxed reference). The SCHEDULE is a
-    # recorded knob: an amorphous surface is kinetically trapped, so
-    # "relaxed" means "as relaxed as this schedule got it" (DESIGN §6.4).
+function anneal_then_minimize(fragment, potential, anneal_schedule):
+    # A short ANNEAL on the recorded schedule — hold hot, cool to the
+    # press temperature — so surface atoms reorganize and dangling bonds
+    # pair, THEN minimize_local so the result is a 0 K structure (§8.5
+    # relaxed reference; the §10.5 heal). Anneal first because the heat
+    # is what lets loose atoms find bonds; minimize last so what the
+    # gate judges is at rest (order settled 2026-08-28 (Paul)). The
+    # SCHEDULE is a recorded knob: an amorphous surface is kinetically
+    # trapped, so "relaxed" means "as relaxed as this schedule got it"
+    # (DESIGN §6.4).
     return annealed_state
 
 function minimize_at_fixed_opening(structure, opening, potential):
@@ -2132,9 +2148,10 @@ This is the **fourth (and final) depth-first module pass**
 `activate_surfaces` body — §1's step-4 seam, guarded by
 `ACTIVATED_SLABS_CONTRACT` — to code-readiness, and it defines the
 concrete form of that contract. Like §9 it runs on a persistent LAMMPS
-driver, but the cascade runs under a `hybrid/overlay` ZBL + classical
-splice, **not** the MLIP; the MLIP enters only at the re-anneal (§10.5),
-which delegates back to §9.7.
+driver, and the cascade runs under a `hybrid/overlay` splice of the
+universal foundation MLIP with two ZBL cores, **not** the committee
+(DESIGN §4.7); the heal (§10.5), on the same model, delegates back to
+§9.7.
 
 Prior art built and RAN this stage, so its failures are concrete
 (`PRIOR_ART.md` §1.2, §1.5): argon-only ZBL channels, SiO₂-hardcoded
@@ -2149,24 +2166,33 @@ routine below refuses one of those.
 
 Activation is **per-wafer**: each surface is amorphized independently in
 vacuum, BEFORE the two ever face each other — that is the whole point of
-surface-activated bonding (`DESIGN.md` §3.1). **Revised 2026-08-08 (§3.4):
-activation is now CASCADE-ONLY.** The heal and the §3.5 gate moved to the
-bond flow (§9), which heals the ASSEMBLED pair at a gap wider than the MLIP
-cutoff — so the two surfaces still heal as independent free surfaces, never
-co-activated — and gates each healed surface before pressing. So
-`activate_surfaces` amorphizes the two slabs and returns the concrete form
-of `ACTIVATED_SLABS_CONTRACT`, which now carries just the two amorphized
-slabs; the pass/fail verdict is a bond-flow artifact (§9.1).
+surface-activated bonding (`DESIGN.md` §3.1). **Revised 2026-08-28 (Paul,
+§3.4): activation is cascade + heal + gate again.** Each half is
+bombarded, stripped of the projectile, healed (anneal then minimize,
+§10.5) and judged by the §3.5 gate (§10.6) in its own session, and only
+two passing halves are assembled. So `activate_surfaces` returns the
+concrete form of `ACTIVATED_SLABS_CONTRACT` carrying the two HEALED
+slabs and their two verdicts; a failed verdict halts at this seam,
+before any assembly. (From 2026-08-08 to 2026-08-28 the heal and gate
+rode the bond flow on the assembled pair at a wide gap; that placement
+existed only because the heal then ran under a potential whose engine
+lived in the bond job, and one universal model for cascade and heal
+dissolved the reason.)
 
 ```
 record ActivatedSlabs:
-    # The concrete form of §1's ACTIVATED_SLABS_CONTRACT. Revised 2026-08-08
-    # (§3.4): activation is cascade-only, so this carries just the two
-    # amorphized slabs — the heal and the §3.5 gate moved to the bond flow
-    # (§9.1), and the pass/fail VERDICT rides the bond output now, not this
-    # seam. The contract here checks only that both slabs are amorphized.
-    slab_A:    Structure           # amorphized slab A (grips still unset)
-    slab_B:    Structure           # amorphized slab B
+    # The concrete form of §1's ACTIVATED_SLABS_CONTRACT (revised
+    # 2026-08-28): two HEALED slabs and the §3.5 verdict for each. The
+    # contract checks both slabs are amorphized AND both verdicts passed;
+    # a failure halts the member here, before assemble_pair.
+    slab_A:    Structure           # healed slab A (grips still unset)
+    slab_B:    Structure           # healed slab B
+    verdict_A: ActivationVerdict   # A's healed-surface gate (§10.6)
+    verdict_B: ActivationVerdict   # B's healed-surface gate
+    # Each slab also records the MD step at which its heal began
+    # (heal_start_step), written by the cascade session as a marker
+    # beside its recording, so a consumer of the activate movie can
+    # tell the cascade-hot frames from the healed ones (§11.3).
 
 record ActivationVerdict:
     passed:          boolean    # AND over every registered metric (§10.6)
@@ -2181,15 +2207,12 @@ record MetricVerdict:
     passed:    boolean
 ```
 
-`[SEAM — rippled in code, 2026-07-18; re-scoped 2026-08-08]` the sequencer
-runs `activate_surfaces` to one `ActivatedSlabs` and rebinds `slab_A` /
-`slab_B` from it to feed `assemble_pair`. Originally the
-`ACTIVATED_SLABS_CONTRACT` also gated on `.verdict_A.passed` /
-`.verdict_B.passed` here; the §3.4 revision moved the heal and the §3.5 gate
-into the bond flow, so this seam now checks only that both slabs are
-amorphized, and the pass/fail HALT rides the bond flow instead — a failed
-gate there aborts before the press (§9.1), the same "gate, not warn"
-discipline, one seam later.
+`[SEAM — rippled in code, 2026-07-18; re-scoped 2026-08-08; restored
+2026-08-28]` the sequencer runs `activate_surfaces` to one
+`ActivatedSlabs`, HALTS unless `.verdict_A.passed` and
+`.verdict_B.passed` (the "gate, not warn" discipline at the seam where
+failure is cheapest), and rebinds `slab_A` / `slab_B` from it to feed
+`assemble_pair`.
 
 ```
 function activate_surfaces(handle_A, handle_B, member_specification,
@@ -2219,25 +2242,24 @@ function activate_surfaces(handle_A, handle_B, member_specification,
     activated_B = activate_surface(handle_B, member_specification,
                                    potential)
     return ActivatedSlabs{
-        slab_A: activated_A.slab, slab_B: activated_B.slab }
+        slab_A: activated_A.slab, slab_B: activated_B.slab,
+        verdict_A: activated_A.verdict, verdict_B: activated_B.verdict }
 ```
 
-`[DISTILLATION — in code, 2026-07-19; re-scoped 2026-08-08]` originally the
-driver (`driver/cascade.py`) re-annealed and gated each half and returned an
-`ActivationResult` carrying the rich `ActivationVerdict`, which the pipeline
-distilled to the contract `Verdict` at THIS seam. With the §3.4 revision the
-activate driver runs the cascade only and returns the amorphized slab; the
-rich `ActivationVerdict` above is still the gate's output, but it is now
-produced in the BOND flow (§9.1), on each healed surface, and distilled onto
-the bond output — not here. So `exec_artifacts.ActivatedSlabs` carries no
-verdict, and the gate HALT moves to the bond flow.
+`[DISTILLATION — in code, 2026-07-19; re-scoped 2026-08-08; restored
+2026-08-28]` the driver (`driver/cascade.py`) runs the cascade and the
+heal, and the gate judges the healed half as it is read back, returning
+an `ActivationResult` carrying the rich `ActivationVerdict`; the pipeline
+distills that to the contract `Verdict` at THIS seam, so
+`exec_artifacts.ActivatedSlabs` carries both verdicts and the HALT is
+here.
 
 The mechanism is a SEAM, not a hard-coded procedure (`DESIGN.md` §3.1).
 v1 registers one mechanism — energetic-particle bombardment — but plasma
 or reactive activation slot in behind the SAME signature without touching
 step 4's consumers. An ion beam and a fast-atom beam are identical in
-classical MD, so both are just one setting of the projectile spec (§10.3),
-not separate mechanisms.
+molecular dynamics, so both are one setting of the projectile spec
+(§10.3), not separate mechanisms.
 
 ```
 function activate_surface(handle, member_specification, potential):
@@ -2262,36 +2284,33 @@ function activate_surface(handle, member_specification, potential):
 ```
 function energetic_particle_bombardment(slab, member_specification,
                                         potential):
-    # The v1 mechanism (DESIGN §3.2–§3.4). Revised 2026-08-08: CASCADE-ONLY.
-    # Derive the concrete impact plan and run the cascade (default universal
-    # MLIP + ZBL, or a classical form + ZBL) to the target fluence; the heal
-    # and the §3.5 gate no longer run here — they moved to the bond flow
-    # (§9.1), which heals the assembled pair and gates each healed surface.
+    # The v1 mechanism (DESIGN §3.2–§3.5). Revised 2026-08-28 (Paul):
+    # cascade, strip, HEAL and GATE, all in this one session. Derive the
+    # concrete impact plan and run the cascade (universal MLIP + ZBL,
+    # §4.7) to the target fluence; strip the projectile; heal (§10.5);
+    # gate the healed surface (§10.6). The verdict travels with the slab.
     spec    = derive_bombardment_spec(slab, member_specification)   # §10.3
     driver  = open_cascade_driver(slab, potential,
                                   member_specification)             # §10.2
     damaged = run_cascade_to_fluence(driver, spec)                  # §10.4
-    # The skin label records what the cascade amorphized; the MEASURED depth
-    # is a gate metric, so on the cascade-only path the label carries the
-    # a-priori estimate (§2.5) and the gate re-labels it post-heal (§9.1).
-    amorphized = label_activated_skin(damaged, estimated_depth)     # §10.7
-    return record{ slab: amorphized }
+    damaged = strip_projectile(damaged)                # DESIGN §3.4 cleanup
+    healed  = heal_surface(driver, member_specification)            # §10.5
+    verdict = activation_gate(healed,
+                              crystalline_reference(member_specification),
+                              member_specification)                 # §10.6
+    # The skin label records what the cascade amorphized, at the depth the
+    # gate MEASURED (§10.7).
+    healed  = label_activated_skin(healed, verdict.activated_depth)  # §10.7
+    return record{ slab: healed, verdict: verdict }
 ```
 
 ### 10.2 open_cascade_driver — the correctness core
 
-> **Deprecated 2026-08-26 (Paul):** classical analytic potentials
-> (Stillinger-Weber, Tersoff, Vashishta, Buckingham) are no longer part of
-> SABSIM. The classical cascade path was validated for silicon only, the
-> classical stand-in for the gentle stages was never going to be the
-> production model, and keeping both made the potential story hard to
-> follow. The code now has exactly two force models: the universal
-> foundation MLIP + ZBL for the lattice derivation and the cascade, and
-> the DeePMD production model (a committee once ALF trains one; a single
-> frozen file until then), both named in the study file's `[potential]`
-> block. Text below that describes a classical option, a classical
-> registry, or `SABSIM_CASCADE_CLASSICAL` / `SABSIM_DEEPMD_MODEL` /
-> `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` is historical.
+> **Revised 2026-08-26/28 (Paul).** The cascade has exactly ONE
+> generator: the universal foundation MLIP the study file names, with
+> the two ZBL cores spliced in (DESIGN §4.7). The analytic forms an
+> earlier draft carried were removed on 2026-08-26 and nothing falls
+> back to anything.
 
 This is the part prior art gets wrong (`DESIGN.md` §3.3). It mirrors
 §9.2's persistent-driver discipline, but the potential and the boundaries
@@ -2304,9 +2323,10 @@ function open_cascade_driver(slab, potential, member_specification):
     # antipattern, DESIGN §3.3 — the same one §9.2 refuses). At the doses
     # SAB needs (thousands of impacts) that overhead is prohibitive.
     #
-    # POTENTIAL: hybrid/overlay of the UNIVERSAL FOUNDATION MLIP (DESIGN
-    # §4.7; the classical alternative was deprecated 2026-08-26) with TWO
-    # ZBL hard cores. The MLIP does the bonding; ZBL #1 (longer cutoff)
+    # POTENTIAL: hybrid/overlay of the UNIVERSAL FOUNDATION MLIP the
+    # study file names (DESIGN §4.7; one row of the supported-model
+    # table, never a hard-coded model) with TWO ZBL hard cores. The MLIP
+    # does the bonding; ZBL #1 (longer cutoff)
     # the projectile-substrate collision; ZBL #2 (short cutoff, below the
     # bond) a hard core on every substrate-substrate pair, because a
     # near-equilibrium model has only FINITE, soft short-range repulsion
@@ -2427,35 +2447,45 @@ function run_cascade_to_fluence(driver, spec):
     return damaged_slab_snapshot(driver)
 ```
 
-### 10.5 The MLIP heal — moved to the bond flow (`DESIGN.md` §3.4)
+### 10.5 heal_surface — anneal, then minimize (`DESIGN.md` §3.4)
 
 A stage prior art does NOT have (DESIGN §3.4): the cascade MADE the
-disorder; the heal re-equilibrates GENTLY under the MLIP so the final
-structure is MLIP/DFT-quality, not cascade-quality — the first rung of the
-fidelity ladder (§4.5).
+disorder; the heal re-equilibrates GENTLY under the same universal model
+so the surface the gate judges and the press meets is settled, not
+cascade-hot — the first rung of the fidelity ladder (§4.5).
 
-**Revised 2026-08-08: retired here, relocated to the bond flow.** A
-PER-SLAB `mlip_reanneal` used to run in the activate stage, right after the
-cascade. It is replaced by a SINGLE joint heal on the ASSEMBLED pair, at a
-gap wider than the MLIP cutoff, as the first phase of the bond flow (§9.1):
-each surface still heals as an effectively-free surface, but now the §3.5
-gate can judge the surface the pipeline actually presses. The heal still
-DELEGATES to §9.7's `minimize_then_anneal` — the same MLIP driver, a
-near-equilibrium schedule; a kinetically trapped glass will not fully
-rearrange, so the cascade start must be a reasonable basin (STRUCTURAL 1b) —
-only the input is now the joint cell at the wide gap, not one slab. See
-§9.1 for where it is called and §9.3 for the scissor+press that follow.
+**Revised 2026-08-28 (Paul): back in the activate stage, per half.** The
+heal runs at the end of each half's own cascade session, in vacuum, on
+the SAME driver (§10.2): after the projectile strip, the study's
+`[protocol.reanneal]` schedule is applied — hold the mobile atoms hot,
+cool to the press temperature — and THEN the slab is minimized. It
+DELEGATES to §9.7's `anneal_then_minimize`. A kinetically trapped glass
+will not fully rearrange, so the cascade start must be a reasonable
+basin (STRUCTURAL 1b). (From 2026-08-08 to 2026-08-28 a single joint
+heal ran on the assembled pair at a wide gap in the bond flow; that
+existed only because the heal then ran under a potential whose engine
+lived in the bond job.)
+
+```
+function heal_surface(driver, member_specification):
+    # Same driver, same universal model, after the last impact and the
+    # projectile strip. The frozen base stays frozen; the mobile atoms
+    # take the recorded schedule; the result is a 0 K healed half.
+    schedule = member_specification.protocol.reanneal_schedule
+    return anneal_then_minimize(current_slab(driver), driver.potential,
+                                schedule)                          # §9.7
+```
 
 ### 10.6 activation_gate — pass/fail with pluggable metrics (`§3.5`)
 
 ```
 function activation_gate(healed_surface, crystalline_slab,
                          member_specification):
-    # A GATE, not a report (DESIGN §3.5). Revised 2026-08-08: it is now
-    # CALLED FROM THE BOND FLOW (§9.1), once per surface, on each HEALED
-    # surface picked out of the assembled+relaxed pair by its wafer tag —
-    # not on a per-slab re-anneal in the activate stage. The metrics and
-    # thresholds are unchanged; only the call site and the input moved.
+    # A GATE, not a report (DESIGN §3.5). Revised 2026-08-28 (Paul): it
+    # is called from the ACTIVATE stage (§10.1), once per half, on the
+    # HEALED half as it is read back from its cascade session — before
+    # assembly, where a failure is cheapest. The metrics and thresholds
+    # are unchanged; only the call site and the input moved (back).
     # Judgment is PER REALIZATION: each metric judges ONE healed surface;
     # the seed-ensemble spread is taken ABOVE (§10.8). Prior art only
     # PRINTED an unthresholded g(r) RMSD (PRIOR_ART §1.8). Each metric
@@ -2606,15 +2636,15 @@ species-derived metrics and their AND (§10.6); and the activated-skin
 labeling (§10.7). Each is a LAMMPS-driver operation or a metric plus a
 threshold.
 
-`[DELEGATE -> §9.7]` the MLIP re-anneal (§10.5) reuses
-`minimize_then_anneal` — the same MLIP driver, a near-equilibrium
-schedule. Activation AUTHORED the disorder; §9.7 relaxes it.
+`[DELEGATE -> §9.7]` the heal (§10.5) reuses `anneal_then_minimize` —
+the same driver, a near-equilibrium schedule. Activation AUTHORED the
+disorder; §9.7 relaxes it.
 
 `[DELEGATE -> POTENTIAL, DESIGN §4]` the cascade generator — the
-universal foundation MLIP by default, a config-selected classical model
-(BKS/Vashishta/Munetoh-Tersoff/Buckingham) the fallback, via the §4.7
-generator seam — and the per-pair MLIP committee (step 2) are §4
-concerns; this module CONSUMES both, never authors them.
+universal foundation MLIP the study file names, via the §4.7 generator
+seam and its supported-model table — and the per-pair MLIP committee
+(step 2) are §4 concerns; this module CONSUMES both, never authors
+them.
 
 `[ABOVE this module]` the ensemble (STRUCTURAL 4: averaging the bond
 metric over amorphization realizations, `DESIGN.md` §3.2) is looped by the
@@ -2671,10 +2701,10 @@ is why this is a LOOP and not a straight line.
 
 ### 11.1 The module's top-level shape
 
-The loop is seed -> generate -> label -> retrain -> refine, repeated
-until the potential passes BOTH convergence tests (§11.6). This is one
-pass of the OUTER loop (`VISION.md` principle 5), run by hand in v1: the
-inner refine-loop iterates, but re-entry for MORE pairs or study-driven
+The loop is generate -> label -> train -> refine, repeated until the
+potential passes BOTH convergence tests (§11.6). This is one pass of the
+OUTER loop (`VISION.md` principle 5), run by hand in v1: the inner
+refine-loop iterates, but re-entry for MORE pairs or study-driven
 weaknesses is manual.
 
 **The INPUT record, which every function below threads.** This object
@@ -2882,11 +2912,11 @@ record GenerationPlan:
     # protocol stages run purely to harvest frames, on WHICH force model
     # each runs, how many, and under what conditions.
     harvest_stages: list of string   # the five families of part 5:
-                                     # amorphized surface, initial joint
-                                     # cell, relaxed joint cell, pressed
-                                     # cell, pulled cell
-    cascade_model:  string           # the §4.7 foundation MLIP + ZBL
-                                     # (classical + ZBL the fallback),
+                                     # healed activated surface, pair
+                                     # at press start, settled zero-load
+                                     # reference, pressed cell, pulled
+                                     # cell
+    cascade_model:  string           # the §4.7 foundation MLIP + ZBL,
                                      # named the way a member's
                                      # potential_ref is (§2)
     protocol_model: string           # the SAME foundation MLIP for the
@@ -3110,18 +3140,18 @@ record ForceModelRecipe:
 
     # --- Part 5: how the hard configurations are made (§11.3). ---
     # COLLECTION 2 of the settled recipe, five families, ALL REQUIRED
-    # (DESIGN §4.8 part 5, settled 2026-08-23): the amorphized surface,
-    # the initial joint cell (assembled at the wide gap, before any
-    # relaxation), the relaxed joint cell (in contact, not yet loaded),
-    # the pressed cell, and the pulled cell THROUGH failure. The two
-    # joint cells are named because "press and pull" does not imply
-    # them: they are the un-loaded contact chemistries, visited once on
-    # the way in and never again.
+    # (DESIGN §4.8 part 5, settled 2026-08-23, definitions revised
+    # 2026-08-28): the HEALED activated surface, the assembled pair at
+    # press start (before any dynamics), the SETTLED zero-load reference
+    # (§9.4), the pressed cell, and the pulled cell THROUGH failure. The
+    # two un-loaded cells are named because "press and pull" does not
+    # imply them: they are the un-loaded contact chemistries, visited
+    # once each and never again.
     generation_plan: GenerationPlan  # which stages run to harvest, on
                                      # WHICH force model each runs (the
-                                     # cascade on the §4.7 foundation
-                                     # MLIP + ZBL, classical + ZBL the
-                                     # fallback; the press/pull on the
+                                     # cascade and heal on the §4.7
+                                     # foundation MLIP + ZBL; the
+                                     # press/settle/pull on the
                                      # SAME foundation MLIP -- not a
                                      # committee, which is what breaks
                                      # the circularity), how many, and
@@ -3185,25 +3215,24 @@ record BootstrapResult:
 
 ```
 function bootstrap_potential(force_model_recipe, reference_data):
-    # STEP 1 (seed): a committee that just does not explode near
-    # equilibrium; its only job is to survive step-2 generation (§11.2).
-    committee = seed_committee(force_model_recipe, reference_data)   # §11.2
-    store = new_training_store(reference_data)   # ANI-style HDF5 (§4.3),
-                                                 # primed with the seed labels
+    # STEP 1 (generate, ONCE, on the universal foundation MLIP): build
+    # Collection 1 from the recipe (§11.2) and harvest Collection 2 from
+    # a member run recorded under that same model (§11.3). No committee
+    # exists yet and none is needed -- the foundation model is the
+    # generator (DESIGN §4.5 step 1), which is what breaks the
+    # circularity.
+    configs  = build_collection1(force_model_recipe)                # §11.2
+    configs += generate_hard_configs(force_model_recipe)            # §11.3
+    store = new_training_store(reference_data)   # ANI-style HDF5 (§4.3)
 
-    # STEP 2 (generate the hard configs cheaply, ONCE): the violent cascade
-    # on the classical+ZBL potential (no MLIP), the interface/separation on
-    # the seed committee — the configurations the potential must cover but a
-    # near-equilibrium seed has never seen (§11.3).
-    configs = generate_hard_configs(committee, force_model_recipe)   # §11.3
-
-    # STEP 3 (label, convert, retrain): VASP labels a selected subset, the
-    # converter folds it into the store, ALF retrains -> the first committee
-    # that has actually SEEN the hard region (§11.4).
+    # STEP 2 (label, convert, train): VASP labels a selected subset, the
+    # converter folds it into the store, ALF trains -> the FIRST
+    # committee, which has SEEN the hard region from its first epoch
+    # (§11.4).
     committee = label_convert_retrain(configs, store,
                                       force_model_recipe)            # §11.4
 
-    # STEP 4 (refine by sampling): re-run the protocol under the committee;
+    # STEP 3 (refine by sampling): re-run the protocol under the committee;
     # the sampler flags where it is STILL uncertain; VASP labels those;
     # retrain; repeat until BOTH convergence tests pass (§11.6). v1 iterates
     # THIS loop; the outer re-entry stays by hand (VISION principle 5).
@@ -3219,26 +3248,34 @@ function bootstrap_potential(force_model_recipe, reference_data):
         provenance:  provenance_of(store) }
 ```
 
-### 11.2 seed_committee — enough not to explode near equilibrium
+### 11.2 build_collection1 — the calm structures, built from the recipe
+
+> **Built 2026-08-26 (silicon), `bootstrap/collection1.py`.** This
+> section once designed a `seed_committee` trained on Collection 1
+> alone, whose only job was to survive config generation. The
+> 2026-08-21 decision retired that stage — the universal foundation
+> MLIP is the generator — so Collection 1 is now plain training data,
+> built here and labelled alongside Collection 2 (§11.4).
 
 ```
-function seed_committee(force_model_recipe, reference_data):
-    # DESIGN §4.5 step 1. Train an INITIAL committee on COLLECTION 1 of
-    # the settled recipe (§4.8 part 2) -- all six families: bulk ground
-    # state, bulk strained, bulk melt-quench amorphous, clean surfaces,
-    # rattled snapshots, warm NVT/NPT runs. This is no longer a seed
-    # STAGE (the universal foundation MLIP is the generator), but the
-    # data is still required training data.
-    # The bar is LOW on purpose — "does not fly apart near equilibrium",
-    # not "accurate" — because its only job is to run step-2 generation
-    # long enough to REACH the hard configs (§11.3). The strained-substrate
-    # entries are here because the builder (§7.2) will demand exactly them.
-    #
-    # DELEGATES to ALF contract 1 (train_DEEPMD_ensemble_task, §4.2):
-    # n_models potentials from different seeds (§4.4). We supply the seed
-    # SET; ALF does the training.
-    seed_set = assemble_seed_set(force_model_recipe, reference_data)
-    return train_committee(seed_set)      # [DELEGATE -> ALF, §4.2]
+function build_collection1(force_model_recipe):
+    # DESIGN §4.8 part 2 -- COLLECTION 1 of the settled recipe, six
+    # families, ALL REQUIRED: bulk ground state, bulk strained, bulk
+    # melt-quench amorphous, clean surfaces, rattled snapshots, warm
+    # NVT/NPT runs. The static families are geometry (the bulk at the
+    # lattice the generator model derives, §2.2; strain tensors and
+    # seeded displacements applied to it; the §7 slab builder for the
+    # surfaces); the two dynamic families are short LAMMPS runs under
+    # the generator model, strided into frames. Small by construction,
+    # so every frame is labelled WHOLE (§11.4). The strained-substrate
+    # entries are here because the builder (§7.2) will demand exactly
+    # them.
+    lattices   = derive_phase_lattices(force_model_recipe)      # §2.2
+    structures = bulk_family(lattices) + strain_family(lattices)
+               + rattle_family(lattices) + surface_family(lattices)
+               + melt_quench_family(lattices)                   # dynamic
+               + warm_run_family(lattices)                      # dynamic
+    return structures        # (family, source, atoms) triples, unlabelled
 ```
 
 ### 11.3 generate_hard_configs — reuse §9/§10 in "generate" mode
@@ -3251,9 +3288,10 @@ function seed_committee(force_model_recipe, reference_data):
 > (the §7 slab builder), and the melt-quench and warm-run families as
 > short LAMMPS scripts run out-of-process under the universal model
 > with strided dumps. (2) It HARVESTS Collection 2 from an existing
-> member run's recorded trajectories — the activate dumps (family 7),
-> the press dump (families 8–10, told apart by the press chunk they
-> fall in) and the pull dumps (family 11) — cut to the §6.4 sub-cell
+> member run's recorded trajectories — the activate dumps (family 7,
+> the healed tail), the press dump (families 8–10, keyed by the
+> StageLedger of §9.3 that the bond result manifest carries) and the
+> pull dumps (family 11) — cut to the §6.4 sub-cell
 > with `bootstrap/subcell.py`. The member run is an ordinary
 > `sabsim run --dump-visuals` under the universal model; nothing forks.
 > The committee-of-one below is that model until ALF trains one.
@@ -3268,32 +3306,40 @@ reads their trajectory FRAMES as unlabeled training candidates. The
 stages themselves are unchanged — the same code, read two ways.
 
 ```
-function generate_hard_configs(committee, force_model_recipe):
-    # DESIGN §4.5 step 2. Two config families, from the two stages; in
-    # BOTH the gate verdict is INFORMATIONAL, never halting — a "failed"
-    # activation is a valuable hard config to LABEL, not a pipeline stop
-    # (the §1 halt is a PRODUCTION rule, not a generation one).
+function generate_hard_configs(force_model_recipe):
+    # DESIGN §4.5 step 2. Five config families from the two stages, all
+    # run on the universal foundation MLIP (the cascade with the §3.3
+    # ZBL cores spliced in, §4.7; the heal and the gentle stages on the
+    # model alone). In BOTH the gate verdict is INFORMATIONAL, never
+    # halting -- a "failed" activation is a valuable hard config to
+    # LABEL, not a pipeline stop (the §1 halt is a PRODUCTION rule, not
+    # a generation one).
     candidates = empty list
+    run = member_run_named_by(force_model_recipe.generation_plan)
 
-    # (a) Amorphized-surface configs. Inside activation the cascade ITSELF
-    # always runs on the classical+ZBL potential (§10.2), in production and
-    # here alike; the committee enters only via the gentle re-anneal
-    # (§10.5). So the MLIP is never asked to reproduce a cascade (§3.3).
-    (handle_A, handle_B, shared) = build_slabs(force_model_recipe,
-                                               committee,
-                                               scratch_directory)
-    activated = activate_surfaces(handle_A, handle_B, force_model_recipe,
-                                  committee)                        # §10
-    candidates.extend(harvest_frames(activated))
+    # (a) Healed activated surfaces (family 7) -- the tail of each
+    # half's activate recording, after the heal (§10.5). The committee
+    # is never asked to reproduce a cascade (§3.3): the foundation
+    # model made these, and the committee meets them only at the press.
+    candidates.extend(harvest_frames(run.activate_dumps,
+                                     after=run.heal_start_step))
 
-    # (b) Pressed-interface and bond-breaking configs. These run on the
-    # COMMITTEE (§9) — the very region the potential must get right, so its
-    # own trajectory is where the training signal is richest.
-    structure = assemble_pair(activated.slab_A, activated.slab_B,
-                              shared, force_model_recipe)           # §7.5
-    bond_debond = run_bond_debond_md(structure, committee,
-                                     force_model_recipe)            # §9
-    candidates.extend(harvest_frames(bond_debond))
+    # (b) Families 8-11, keyed on the StageLedger the bond result
+    # manifest carries (§9.3, DESIGN §5.5): 8 = the pair at press start
+    # (the frame AT ledger.press_start); 9 = the settled reference
+    # (frames in [settle_start, settle_end]); 10 = under compression
+    # (frames in [press_start, hold_end]); 11 = every pull rung's
+    # record. All cut to the §6.4 interface subcell.
+    ledger = run.bond_result.press.stage_steps
+    candidates.extend(subcell(frames_at(run.press_dump,
+                                        ledger.press_start)))
+    candidates.extend(subcell(frames_between(run.press_dump,
+                                             ledger.settle_start,
+                                             ledger.settle_end)))
+    candidates.extend(subcell(frames_between(run.press_dump,
+                                             ledger.press_start,
+                                             ledger.hold_end)))
+    candidates.extend(subcell(harvest_frames(run.pull_dumps)))
 
     return candidates
 ```
@@ -3405,8 +3451,8 @@ function test_convergence(committee, store, force_model_recipe):
 
 `[OURS, bottoms out here]` the RECIPE record and its validation (§11.1 —
 what a force model must state before anyone spends weeks making one);
-the LOOP structure (§11.1); the seed-set COMPOSITION (§11.2 — which
-structures to hand ALF); the "generate mode" frame-harvesting that
+the LOOP structure (§11.1); the Collection 1 COMPOSITION (§11.2 — which
+calm structures to build); the "generate mode" frame-harvesting that
 reuses §9/§10 (§11.3); the label-SUBSET selection and the
 interface-subcell framing (§11.4); and the TWO-test convergence with the
 gate run to ACT (§11.6). These are our orchestration decisions.
@@ -4025,10 +4071,10 @@ submits the scripts and inspects each gate before sending the next.
 
 Nothing here trains a potential or layers in a physics default. The force
 model a member uses is a LOOKUP behind the §1 `resolve_potential` seam —
-the classical stand-in today, the trained committee once the bootstrap
-(§11, a SEPARATE upstream Tier-B process) has produced one — so the same
-three jobs run either, unchanged. Deployment is "where," never "what"
-(`DESIGN.md` §1.2).
+the universal foundation MLIP today, the trained committee once the
+bootstrap (§11, a SEPARATE upstream Tier-B process) has produced one — so
+the same three jobs run either, unchanged. Deployment is "where," never
+"what" (`DESIGN.md` §1.2).
 
 ### 14.1 The deployment records (CLOSED)
 
@@ -4145,7 +4191,7 @@ function run_member_job(member, scratch, job):
     # read-from-file handoff activate_surfaces already uses (§1 re-reads the
     # pristine half), so this process needs NONE of the stages before it.
     # The potential is the LOOKUP every job does (§1 resolve_potential):
-    # classical stand-in now, trained committee later, SAME seam.
+    # foundation MLIP now, trained committee later, SAME seam.
     potential = run_to_contract(
         () -> resolve_potential(member), POTENTIAL_CONTRACT)  # §1
     seed = (job.reads is NONE)

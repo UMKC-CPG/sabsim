@@ -59,8 +59,8 @@ machinery we drive but do not write).
 2. Train a machine-learned interatomic potential (MLIP)
 3. Build wafer slab models
 4. Amorphize ("activate") the model surfaces
-   (universal MLIP + ZBL cascade; the gentle heal rides the bond
-   stage — see §2.3)
+   (universal MLIP + ZBL cascade, then the gentle heal and the §3.5
+   gate on each half, in the same session — see §2.3)
 5. Build the facing-pair (two amorphized surfaces toward each other)
    (the ORDER is fixed by the physics — each surface is activated alone
    in vacuum before the two halves ever meet; what IS a setting is
@@ -98,8 +98,8 @@ and Kaleidoscope are our own prior tools, so we *reuse* them as the
 engine (ADOPT) and build the step-8 characterization batch on top
 (BUILD) — that batch is our edge. Step 4's LAMMPS row hides a potential
 split (§2.3): the violent Ar cascade runs on a **universal foundation
-MLIP + ZBL** (a broad pre-trained model; the classical + ZBL fallback
-was deprecated 2026-08-26), while the **per-pair committee** the pipeline
+MLIP + ZBL** (a broad pre-trained model with the two hard cores of
+DESIGN §3.3 spliced in), while the **per-pair committee** the pipeline
 trains is never asked to reproduce cascades — only the foundation model
 is.
 
@@ -273,19 +273,20 @@ is.
   press / separate (steps 6, 7) molecular dynamics. The engine is
   adopted; the *protocol* (how we activate, press, and separate) is
   ours. A working Ar-bombardment *amorphize* recipe (step 4),
-  validated on SiO₂ with classical potentials, already exists in prior
-  art and is a strong starting point (`PRIOR_ART.md` §1.2); the press /
-  separate protocol there is designed but unbuilt. That prior-art
-  validation is of the *recipe* — that it reliably *disorders* the
-  surface (g(r), coordination, ~29 Å depth) — **not** of the classical
-  amorphous *structure*'s accuracy, which SABSIM checks separately (see
-  the MLIP-training and potential-quality bullets). Per STRUCTURAL 1b the
-  violent Ar cascade runs on a UNIVERSAL foundation MLIP + ZBL (a
-  classical + ZBL potential is the secondary fallback); the per-pair
-  committee takes over only for the gentle post-cascade anneal and
-  steps 6-7. Surface
-  activation is designed as a pluggable **mechanism** — energetic-particle
-  bombardment (an ion or fast-atom beam, identical in classical MD) is
+  validated on SiO₂ in prior art, already exists and is a strong
+  starting point (`PRIOR_ART.md` §1.2); the press / separate protocol
+  there is designed but unbuilt. That prior-art validation is of the
+  *recipe* — that it reliably *disorders* the surface (g(r),
+  coordination, ~29 Å depth) — **not** of the amorphous *structure*'s
+  accuracy, which SABSIM checks separately (see the MLIP-training and
+  potential-quality bullets). Per STRUCTURAL 1b the violent Ar cascade
+  runs on a UNIVERSAL foundation MLIP + ZBL, and the gentle heal of
+  each half plus its §3.5 gate follow in the SAME session (revised
+  2026-08-28 (Paul): one universal model runs cascade and heal, so the
+  heal no longer waits for the bond job); the per-pair committee takes
+  over only for steps 6-7. Surface activation is designed as a
+  pluggable **mechanism** — energetic-particle bombardment (an ion or
+  fast-atom beam) is
   v1's implementation, and the seam leaves room for other methods (e.g.
   plasma) without reworking step 4 (see DESIGN §3).
 - **Training-data physics — VASP [ADOPT].** Produces the varied
@@ -350,25 +351,23 @@ is.
   foundation MLIP" note to the primary path and retiring the separate
   hand-built-DFT seed. (1) **Generate** every hard config on the
   universal foundation MLIP: the violent Ar cascade on **foundation
-  MLIP + ZBL** (a well-validated classical silica potential — BKS or
-  Vashishta, not an arbitrary Tersoff set — with a ZBL overlay is the
-  secondary fallback), and the pressed interface and the
-  press/settle/pull on the *same* foundation MLIP — so all the hard
-  configs are manufactured with **no per-pair MLIP**, breaking the
-  circularity. The hand-built near-equilibrium DFT structures are no
-  longer a required seed STAGE, but they remain REQUIRED TRAINING DATA
-  — Collection 1 of the settled recipe (DESIGN §4.8 part 2), six
-  families: bulk ground state, bulk strained, bulk melt-quench
-  amorphous, clean surfaces, rattled snapshots, warm NVT/NPT runs.
-  Collection 2 (DESIGN §4.8 part 5) is the five the protocol visits:
-  amorphized surface, initial joint cell, relaxed joint cell, pressed
-  cell, pulled cell. Eleven families, all required (settled
-  2026-08-23); earlier text here called Collection 1 "optional", which
-  contradicted DESIGN §4.8 and was corrected. (2) **Label** a selected subset with
-  VASP, **train** the per-pair committee, and **refine** with ALF —
-  rerun the protocol, let committee / UDD uncertainty flag configs,
-  VASP-label those, retrain, until committee uncertainty across a full
-  protocol run falls below threshold. (3) **Convergence** is the
+  MLIP + ZBL**, the heal of each surface, and the press/settle/pull on
+  the *same* foundation MLIP — so all the hard configs are manufactured
+  with **no per-pair MLIP**, breaking the circularity. The hand-built
+  near-equilibrium DFT structures are no longer a required seed STAGE,
+  but they remain REQUIRED TRAINING DATA — Collection 1 of the settled
+  recipe (DESIGN §4.8 part 2), six families: bulk ground state, bulk
+  strained, bulk melt-quench amorphous, clean surfaces, rattled
+  snapshots, warm NVT/NPT runs. Collection 2 (DESIGN §4.8 part 5) is
+  the five the protocol visits: healed activated surface, assembled
+  pair at press start, settled zero-load reference, pressed cell,
+  pulled cell. Eleven families, all required (settled 2026-08-23;
+  family definitions revised 2026-08-28 (Paul) to the states the built
+  flow actually visits). (2) **Label** a selected subset with VASP,
+  **train** the per-pair committee, and **refine** with ALF — rerun the
+  protocol, let committee / UDD uncertainty flag configs, VASP-label
+  those, retrain, until committee uncertainty across a full protocol
+  run falls below threshold. (3) **Convergence** is the
   potential-quality gate plus that uncertainty threshold; it hands off
   to the interface check of STRUCTURAL 3. The **production** run — the
   one that emits the bond number — then uses the trained **committee**,
@@ -378,8 +377,7 @@ is.
   MLIPs. The **per-pair committee** — the production potential — is
   *not* asked to reproduce cascades or Ar chemistry; that role belongs
   to the **universal foundation MLIP + ZBL**, which owns the violent
-  step-4 cascade (a classical + ZBL potential is the secondary
-  fallback), so the committee's species set stays {Si, O} and the
+  step-4 cascade, so the committee's species set stays {Si, O} and the
   deferred question of where ZBL lives is settled (in the cascade).
   Because glasses are kinetically trapped, the foundation-model
   amorphous structure is trusted only as a *starting basin*: it is
@@ -391,8 +389,11 @@ is.
   committee re-anneal -> eventually MLIP melt-quench (once the committee
   has molten-regime coverage it makes the glass itself). The bootstrap
   *pattern* is pair-generic — the universal foundation model is the
-  default generator for every pair — and a classical potential or a DFT
-  melt-quench is the fallback where the foundation model is untrusted.
+  generator for every pair. There is NO fallback generator of any kind
+  (Paul, 2026-08-28): a material the named universal model cannot
+  describe is a material SABSIM does not yet cover, and the answer is a
+  better universal model (a new row in the supported-model table,
+  DESIGN §4.7), never a second code path.
 - **Bootstrap — the potential manufactory [BUILD, 2026-08-26].** The
   code that runs steps 1–2: it reads a FORCE-MODEL RECIPE (the third
   input file, `DESIGN.md` §4.8; template `dev/templates/
@@ -465,9 +466,9 @@ is.
     It also **validates the
     amorphous surface structure** — g(r), ring and coordination
     statistics against DFT and experiment, anchored by small DFT
-    melt-quench cells — so a wrong classical starting glass is caught
-    here rather than propagating into the interface and the bond number
-    (STRUCTURAL 1b). **Interface-fidelity check (STRUCTURAL 3,
+    melt-quench cells — so a wrong foundation-model starting glass is
+    caught here rather than propagating into the interface and the bond
+    number (STRUCTURAL 1b). **Interface-fidelity check (STRUCTURAL 3,
     2026-07-08).** The bulk/surface properties above do NOT probe the
     one region that matters most — the bonded interface — so a potential
     can pass them yet be wrong exactly where the bond number is read. The
@@ -935,8 +936,8 @@ back energy, positions, forces, stress, and grip reactions), with two
 implementations: the real LAMMPS adapter and a lightweight mock. This is
 §5.1's "the contract is the unit of stability" applied to the LAMMPS
 boundary — it lets the mid-run press/pull control logic be tested on a
-login node with no engine, and it is the SAME seam the classical
-stand-in and the trained MLIP swap behind.
+login node with no engine, and it is the SAME seam the universal
+foundation MLIP (today) and the trained committee (later) swap behind.
 **Parallelism comes from running the binding under
 MPI** — `mpirun -np N python driver.py`, each rank building a `lammps`
 instance over `MPI_COMM_WORLD`, so LAMMPS domain-decomposes and scales
@@ -982,15 +983,14 @@ Settings / deployment-separation module (§2.3), and is emphatically
 details into emitted scripts (`PRIOR_ART.md` §1.2 item 7). Routing is
 **per job, not per step**, because the pipeline is CPU/GPU-heterogeneous
 and step 4 in particular can straddle both — its cascade runs on a
-universal MLIP on a GPU (the classical CPU option was deprecated
-2026-08-26), with the gentle heal riding the bond job:
+universal MLIP on a GPU, and the gentle heal and the §3.5 gate ride
+that same session (revised 2026-08-28 (Paul)):
 
 | Work                                   | Resource class |
 |----------------------------------------|----------------|
 | VASP labeling (step 1 / inside ALF)    | CPU (MPI)      |
 | DeePMD training (inside ALF)           | GPU            |
-| Ar cascade — universal MLIP + ZBL      | GPU            |
-| MLIP heal + §3.5 gate (§3.4)            | rides BOND (pre-press) |
+| Ar cascade + heal + §3.5 gate          | GPU            |
 | Press / settle / pull (bond)           | GPU (`deepmd`) |
 | Imago (step 8)                         | CPU            |
 
@@ -998,23 +998,25 @@ universal MLIP on a GPU (the classical CPU option was deprecated
 follows the cascade potential.** Step 4's cascade dominates the activate
 job, and the cascade runs on the universal MLIP, so activate is GPU work.
 (Resolved 2026-08-06, superseding the earlier CPU-only-activate
-assumption; the classical CPU opt-in that briefly existed was deprecated
-2026-08-26.)
+assumption; the CPU opt-in that briefly existed was removed 2026-08-26.)
 
-**The heal + gate ride the BOND job, not activate (revised 2026-08-08).**
-The earlier design ran a per-slab MLIP re-anneal as a tail of the activate
-job and placed the §3.5 gate as a human-inspected checkpoint BETWEEN
-activate and bond. `DESIGN.md` §3.4 revised that: the heal is done once, on
-the ASSEMBLED pair at a wide gap, under the production committee — whose
-engine lives in the bond job — so the heal is the bond job's FIRST phase and
-the §3.5 gate runs there, on each healed surface, before the vacuum is
-scissored and the press begins. So the activate job is now cascade-ONLY
-(build → cascade → assemble at the wide gap → write the pair), and the
-checkpoint moves into the bond job's pre-press phase: a failed gate aborts
-the bond before its expensive press/settle/pull, so it still guards the
-scarce GPU it was meant to, just one job later. The human inspection point
-moves with it — the gate verdict is a bond-job artifact now, not an activate
-one.
+**The heal + gate ride the ACTIVATE job again (revised 2026-08-28
+(Paul)).** From 2026-08-08 to 2026-08-28 the heal was done once on the
+ASSEMBLED pair at a wide gap, as the bond job's first phase, and the
+§3.5 gate ran there — because the heal then ran under a production
+potential whose engine lived only in the bond job. With ONE universal
+model running both the cascade and the heal (`DESIGN.md` §3.4, §4.7),
+that reason is gone, and healing each half at the end of its own
+cascade session is strictly cheaper: no second engine is opened, the
+two halves heal in parallel when the halves run as separate jobs, and
+a failed gate halts BEFORE any assembly. So the activate job is
+build → cascade → heal → gate → assemble at the press-start distance →
+write the pair, and the bond job is read the pair → one-time lateral
+cell relax (§5.6) → press → settle → pull. The gate verdict is an
+activate-job artifact again, and the human inspection point sits
+between activate and bond, where it originally was. The wide assembly
+gap and the vacuum "scissors" that the bond job used to cut it are
+gone with the move.
 
 **Structure of the deployment config — two concerns, one file.** The
 config separates *what the machine has* from *how each kind of work uses
@@ -1365,23 +1367,23 @@ handed back through a file (the §4.3 file-handoff model,
 mid-run read-back: every impact is seed-derived and each cascade ends on an
 in-LAMMPS halt, so the sabsim process builds the slab before and reads the
 amorphized structure back for assembly after, from a dump rather than a live
-engine. The heal and the §3.5 gate do NOT ride this subprocess — §3.4 moved
-them to the bond job, so the activate stage is cascade-only. The bundle is
-selected by the in-repo `SABSIM_CASCADE_ENGINE_PREFIX` env (a per-machine,
-GPU-architecture-specific prefix, so a path rather than a checked-in
-module), and the subprocess is launched in a fully-reset environment so no
-sabsim-side torch or plugin path leaks in and crashes it. The classical
-cascade is unaffected — a built-in LAMMPS pair style keeps running
-in-process on CPU through `LammpsEngine` — so only the universal (GPU) path
-leaves the process. Because the activate stage no longer re-anneals, the
-subprocess needs no classical potential and the activate job carries no
-`LAMMPS_POTENTIALS`; the heal that would have needed it now runs under the
-committee in the bond job (§3.4).
+engine. The heal DOES ride this subprocess (revised 2026-08-28
+(Paul)): the script ends with the study's re-anneal schedule — hold
+hot, cool to the press temperature, minimize — under the same universal
+model, so the dump the caller reads back is the HEALED half, and the
+§3.5 gate is judged on that read-back in the sabsim process before the
+half is assembled. The bundle is selected by the in-repo
+`SABSIM_CASCADE_ENGINE_PREFIX` env (a per-machine, GPU-architecture-
+specific prefix, so a path rather than a checked-in module), and the
+subprocess is launched in a fully-reset environment so no sabsim-side
+torch or plugin path leaks in and crashes it. The activate job carries
+no parameter files of its own: everything it needs is the universal
+model's weights file named in the study file's `[potential]` block.
 
 **The §2.2 lattice derivation rides the SAME subprocess (universal path).**
-Once the §2.2 bulk relax derives the working lattice under the universal
-MLIP rather than a classical seed (`DESIGN.md` §2.2/§4.7 — so the cell and
-the cascade agree), it inherits the same out-of-process necessity: the
+Because the §2.2 bulk relax derives the working lattice under the same
+universal MLIP the cascade runs on (`DESIGN.md` §2.2/§4.7 — so the cell
+and the cascade agree), it inherits the same out-of-process necessity: the
 bundle's model will not load in-process. So the DEFAULT derivation is
 assembled as a
 standalone `fix box/relax` + `minimize` script
@@ -1432,23 +1434,24 @@ an order set by risk, not by step number.
   discipline the design chain itself uses.
 - **A walking skeleton before any depth.** Build the thinnest end-to-end
   thread first: a member spec for the **Si/Si** reference → structure
-  builder
-  → a **classical potential standing in for the MLIP** behind `pair_style`
-  → LAMMPS press/pull → analyzer emitting only the mechanical work-
-  integral (needs no Imago) → gate reports a verdict. It touches every
-  seam under real data flow with no VASP, no ALF, no Imago. Its number is
-  deliberately **not trusted** — a plumbing test, its verdict withheld
-  (`report, never restrict`, `DESIGN.md` §1) — because the point is that
-  the bytes flow and the schemas hold. Seams get stress-tested when they
-  are cheapest to move.
+  builder → a **stand-in potential behind the MLIP's `pair_style` seam**
+  (today the universal foundation MLIP as a committee of one) → LAMMPS
+  press/pull → analyzer emitting only the mechanical work-integral
+  (needs no Imago) → gate reports a verdict. It touches every seam under
+  real data flow with no VASP, no ALF, no Imago. Its number is deliberately
+  **not trusted** — a plumbing test, its verdict withheld (`report, never
+  restrict`, `DESIGN.md` §1) — because the point is that the bytes flow
+  and the schemas hold. Seams get stress-tested when they are cheapest to
+  move.
 - **Every module has a cheap stand-in behind its contract.** Generalize
-  the fidelity ladder (classical → MLIP re-anneal → melt-quench, §2.3) to
-  *every* module: a classical potential for the MLIP, the VASP subcell (or
-  a schema-valid mock) for Imago, a token cascade for activation, hand-
-  built seed data for ALF. A stand-in that satisfies the contract **is**
-  the module's contract test, not throwaway work, and it keeps the whole
-  pipeline runnable at all times — "the pipeline always runs" is the
-  strongest anti-backtracking invariant available.
+  the fidelity ladder (foundation-MLIP cascade → committee re-anneal →
+  melt-quench, §2.3) to *every* module: the universal foundation MLIP
+  for the committee, the VASP subcell (or a schema-valid mock) for
+  Imago, a token cascade for activation, hand-built seed data for ALF.
+  A stand-in that satisfies the contract **is** the module's contract
+  test, not throwaway work, and it keeps the whole pipeline runnable at
+  all times — "the pipeline always runs" is the strongest
+  anti-backtracking invariant available.
 - **Build order by risk and blast radius, not by step number.** Steps 1
   (VASP) and 8-execution (Imago) are the lowest *design* risk and the
   highest *external-dependency* risk — adopt-and-wait, not ours to
@@ -1493,11 +1496,12 @@ numeric order.
 
 Every step is present from the start; fidelity rises in waves.
 
-- **Wave 0 — the Si/Si walking skeleton.** Steps 1+2 *skipped* (classical
-  stand-in); step 3 real but minimal; step 4 stubbed; step 5 real but
-  **trivial**, because Si/Si has no lattice mismatch and the coincidence
-  matcher is effectively identity — which is exactly why Si/Si is the
-  right skeleton pair; steps 6+7 real on the classical potential; step 8
+- **Wave 0 — the Si/Si walking skeleton (historical, 2026-07).** Steps
+  1+2 *skipped* (a stand-in potential behind the `pair_style` seam);
+  step 3 real but minimal; step 4 stubbed; step 5 real but **trivial**,
+  because Si/Si has no lattice mismatch and the coincidence matcher is
+  effectively identity — which is exactly why Si/Si is the right
+  skeleton pair; steps 6+7 real on the stand-in potential; step 8
   mocked against a schema-valid fixture; the frame real throughout.
   Output: one untrusted number with full provenance.
 - **Wave 1 — deepen what is ours and needs no MLIP.** Step 4 becomes real

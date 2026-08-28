@@ -9,7 +9,7 @@
 > Sunita's `bond_debond` pipeline: the reusable kernels are catalogued in
 > `PRIOR_ART.md` §1.2, and the newer worked examples plus current status
 > are in §1.5. Lift or adapt rather than re-derive:
-> - **Surface amorphization (§3):** a classical + ZBL Ar-bombardment
+> - **Surface amorphization (§3):** an Ar-bombardment + ZBL
 >   LAMMPS recipe and the thermostat-damping / inter-impact-timing
 >   settings that make it disorder the surface — plus the §1.5 lesson
 >   that dropping the frozen substrate and `p p f` sputter boundary
@@ -185,7 +185,8 @@ on it.
   performed.
 - **Numerical** — tolerances, cutoffs, convergence criteria, the
   committee stride and persistence window of §7.3, the significance
-  levels of §7.5, slab thickness, cell size. How carefully we compute.
+  levels of §7.5, the contact-gap averaging window and contact stress
+  floor of §5.2, slab thickness, cell size. How carefully we compute.
 - **Ensemble** — the master seed and the realization count.
 - **Deployment** — resource class, node counts, walltime, modules. This
   lives in a *separate document* (`ARCHITECTURE.md` §4.1) and the member
@@ -485,8 +486,8 @@ So SABSIM derives each lattice constant from a **bulk relaxation under
 the current production potential** — the same committee that will run steps
 6 and 7: the heal, the press, and the pull (revised 2026-08-08, §3.4 — the
 heal moved out of step 4 into the bond flow). Step 4 is the exception: its
-cascade runs under the universal MLIP (or a classical form), not the
-committee (see below). Two consequences follow:
+cascade runs under the universal foundation MLIP with ZBL cores, not
+the committee (see below). Two consequences follow:
 
 - The lattice is re-derived **once per potential generation**. Each ALF
   round that changes the committee can change the equilibrium lattice,
@@ -513,15 +514,13 @@ the amorphizing potential must **agree**, because a cell equilibrated under
 one description and bombarded under another starts stressed — precisely the
 CIF-vs-model offset that detonated the oxide bring-up (a ribbon relaxed on
 one basis, then driven under a lattice the model did not want). Deriving
-the cell under the universal MLIP retires that offset at the source. A
-**classical seed** is used only on explicit request (`SABSIM_CASCADE_
-CLASSICAL`), the same opt-in that selects a classical cascade; for silicon
-the classical and MLIP lattices nearly coincide, so the choice is benign
-there and material at the oxide margins. §2.2's rule is re-applied under
-the trained committee the moment it exists, re-deriving the cell then. The
-step is identical; only the model beneath it changes. This makes "**derive
-the lattice by relaxing the bulk under the current model**" a first-class,
-named pipeline step, not a hidden preprocessing detail.
+the cell under the universal MLIP retires that offset at the source
+(the analytic-seed opt-in that once sat beside it was removed on
+2026-08-26). §2.2's rule is re-applied under the trained committee the
+moment it exists, re-deriving the cell then. The step is identical; only
+the model beneath it changes. This makes "**derive the lattice by
+relaxing the bulk under the current model**" a first-class, named
+pipeline step, not a hidden preprocessing detail.
 
 Because the universal MLIP lives in deepmd-kit's own self-contained
 bundle (its own torch and MPI) and cannot load into sabsim's in-process
@@ -529,26 +528,25 @@ engine (`ARCHITECTURE.md` §4.1/§4.4), the **universal §2.2
 derivation runs OUT-OF-PROCESS** through the same file handoff the step-4
 cascade uses (`ARCHITECTURE.md` §4.4): the primary rank drives the bundle's
 `lmp -in <script>` for a `fix box/relax` + `minimize`, writes the relaxed
-cell with `write_data`, and every rank reads the cell back. An explicit
-classical derivation keeps the small in-process path. Its first *real*
-execution is still the **smallest** use of the execution layer — a few-atom
-bulk relax — and it is exactly the moment the walking skeleton's hardcoded
-stand-in lattice is retired: not smuggled into the plumbing-only skeleton
-before a force engine exists, and not left hardcoded once one does.
+cell with `write_data`, and every rank reads the cell back. Its first
+*real* execution is still the **smallest** use of the execution layer —
+a few-atom bulk relax — and it is exactly the moment the walking
+skeleton's hardcoded stand-in lattice is retired: not smuggled into the
+plumbing-only skeleton before a force engine exists, and not left
+hardcoded once one does.
 
-**One in-plane footprint, several potentials.** A run visits three force
-models with three slightly different equilibrium lattices — the classical
-+ ZBL potential of the cascade (§3.3), the production committee of the
-re-anneal and press/pull (§3.4, §5), and (for a material with no
-classical form) a foundation model in the cascade's place (§4.7). They
-cannot each own the cell, because the two halves must share **one
-in-plane footprint** to be joined (§2.3): that footprint is a single
-choice for the whole per-material chain. It is fixed from the
-**committee-relaxed** bulk lattices — the committee, not the cascade
-potential, because the final measurement runs under the committee, so the
-joined system must sit unstressed at *its* spacing. A dissimilar pair
-carries a small, recorded in-plane residual strain from matching two
-materials (§2.4); the same-material reference carries none.
+**One in-plane footprint, two potentials.** A run visits two force
+models with slightly different equilibrium lattices — the universal
+foundation MLIP + ZBL of the cascade and heal (§3.3, §3.4, §4.7) and the
+production committee of the press/pull (§5). They cannot each own the
+cell, because the two halves must share **one in-plane footprint** to be
+joined (§2.3): that footprint is a single choice for the whole
+per-material chain. It is fixed from the **committee-relaxed** bulk
+lattices — the committee, not the cascade potential, because the final
+measurement runs under the committee, so the joined system must sit
+unstressed at *its* spacing. A dissimilar pair carries a small, recorded
+in-plane residual strain from matching two materials (§2.4); the
+same-material reference carries none.
 
 What re-relaxes at each **force-model handoff** is therefore not the
 footprint — that stays fixed — but the **internal atom positions and the
@@ -751,7 +749,7 @@ energy, which the potential-quality gate already needs anyway.
 area, of creating the face — cutting the crystal breaks bonds that were
 satisfied in the interior, and that cost per area is what we compare.
 For each candidate termination, build a slab, relax it under the current
-model (the classical/seed model at bootstrap, the trained committee
+model (the universal foundation MLIP at bootstrap, the trained committee
 after — §2.2), and take
 
 ```
@@ -849,14 +847,18 @@ first 4 Å gap in the z-profile scanning upward, a threshold that is one
 unlucky adatom away from truncating the slab.
 
 **The gap and the clash.** The initial separation is a knob, measured
-between the two dividing surfaces. It must be set WIDER than the MLIP's
-interaction cutoff (revised 2026-08-08, §3.4): the bond flow heals the two
-surfaces at this gap before pressing, and a gap beyond the cutoff is what
-lets each heal as an effectively-free surface — the two are assembled in one
-box but do not yet interact. The bond flow later scissors the gap down to
-the press start distance. After placement the minimum cross-slab atomic
-distance is checked; if it violates the floor, the gap is backed off and the
-adjustment is recorded, rather than aborting the member as prior art does.
+between the two dividing surfaces, and it is the opening the PRESS
+STARTS FROM (revised 2026-08-28 (Paul)): each half arrives at assembly
+already healed and gated in its own activation session (§3.4, §3.5), so
+the pair is stacked close — near contact, but with the two faces not
+yet loading each other — and the bond job's press begins from there
+with no vacuum to cross. (From 2026-08-08 to 2026-08-28 the pair was
+assembled WIDER than the potential cutoff so the bond job could heal
+both surfaces in one box and then cut the vacuum out; with the heal
+back in the activation stage that gap and that cut are gone.) After
+placement the minimum cross-slab atomic distance is checked; if it
+violates the floor, the gap is backed off and the adjustment is
+recorded, rather than aborting the member as prior art does.
 
 **There is no registry search.** Prior art exposes a `lateral_shift`
 knob "to explore different bonding registries." Registry is a
@@ -936,7 +938,7 @@ seam lets other methods (plasma, reactive activation) slot in later
 without touching step 4's consumers. We frame it as energetic-particle
 activation rather than "Ar-ion bombardment" deliberately: an ion beam and
 a fast-atom beam — the two things real SAB uses — are identical in
-classical MD, and both are just one setting of the projectile spec below.
+molecular dynamics, and both are one setting of the projectile spec below.
 
 ### 3.2 The bombardment spec (generic knobs)
 
@@ -969,36 +971,20 @@ classical MD, and both are just one setting of the projectile spec below.
 
 ### 3.3 The cascade engine — heat-sink and boundary design
 
-> **Deprecated 2026-08-26 (Paul):** classical analytic potentials
-> (Stillinger-Weber, Tersoff, Vashishta, Buckingham) are no longer part of
-> SABSIM. The classical cascade path was validated for silicon only, the
-> classical stand-in for the gentle stages was never going to be the
-> production model, and keeping both made the potential story hard to
-> follow. The code now has exactly two force models: the universal
-> foundation MLIP + ZBL for the lattice derivation and the cascade, and
-> the DeePMD production model (a committee once ALF trains one; a single
-> frozen file until then), both named in the study file's `[potential]`
-> block. Text below that describes a classical option, a classical
-> registry, or `SABSIM_CASCADE_CLASSICAL` / `SABSIM_DEEPMD_MODEL` /
-> `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` is historical.
-
 This is the correctness core, and the part prior art gets wrong. The
-cascade runs on a **universal foundation MLIP + ZBL** (STRUCTURAL 1b;
-selected per material by the §4.7 generator seam), with a **classical +
-ZBL** potential as the secondary fallback: a `hybrid/overlay` splice of
-the §4.7-selected generator — the universal foundation model by
-default, or, as the fallback, a config-selected classical model
-(**Stillinger-Weber for silicon**; BKS or Vashishta for silica,
-Munetoh-Tersoff a further fallback; Buckingham for ionic) — with **two
-ZBL hard cores, not one**. The first, longer-range, covers the
-projectile-substrate collisions; the second, with a very short cutoff
-below the bond length, covers every substrate-substrate pair. That second
-core is not optional: the generators — the universal MLIP and the
-classical models (Stillinger-Weber, Tersoff) alike — have only a
+cascade runs on a **universal foundation MLIP + ZBL** (STRUCTURAL 1b):
+a `hybrid/overlay` splice of the universal model the study file names
+(§4.7) with **two ZBL hard cores, not one**. The first, longer-range,
+covers the projectile-substrate collisions; the second, with a very
+short cutoff below the bond length, covers every substrate-substrate
+pair. That second core is not optional: a universal model has only a
 FINITE, soft short-range repulsion, so under an energetic cascade two
 substrate atoms can be driven into each other and fuse; the short ZBL
 supplies the missing hard wall while switching off well below the bond,
-so normal bonding is untouched (`PRIOR_ART.md` §1.9).
+so normal bonding is untouched (`PRIOR_ART.md` §1.9). There is no other
+cascade potential: the analytic forms an earlier draft carried
+(Stillinger-Weber, Tersoff, Vashishta, Buckingham) were removed on
+2026-08-26 and no fallback replaces them (Paul, 2026-08-28).
 
 The **heat-sink and boundary design** must be:
 
@@ -1062,46 +1048,52 @@ duration, and ensemble are design parameters; a kinetically trapped glass
 will not fully rearrange, so the cascade start must be a reasonable basin
 (the STRUCTURAL 1b safeguards).
 
-**The heal runs on the ASSEMBLED pair at a wide gap, not per slab (revised
-2026-08-08).** The two amorphized halves are stacked (§2.6) at an initial
-gap WIDER than the MLIP's interaction cutoff, and a single joint relaxation
-heals BOTH surfaces at once. Because the gap exceeds the cutoff, neither
-surface feels the other: each heals as an effectively-FREE surface, exactly
-as a per-slab re-anneal in vacuum would — so nothing physical is lost by
-doing it once, on the combined cell, instead of twice. This is strictly
-better than a separate per-slab re-anneal for two reasons: it removes an
-extra LAMMPS session per half, and — the deciding one — it lets the §3.5
-gate judge the surface the pipeline will actually press, *after* it has
-healed, rather than a per-slab intermediate that the assembly and this heal
-would then disturb. It also keeps activation faithful to §3.1: the wide gap
-means the two surfaces are assembled in one box but do NOT yet interact, so
-each is still healed and judged as an independent free surface, never
-co-activated. Earlier drafts ran a per-slab re-anneal inside the cascade
-session and gated there; this combined-cell heal REPLACES it (the flow
-note's "kept both" is resolved to this).
+**The heal runs PER HALF, in vacuum, at the end of the cascade session
+(revised 2026-08-28 (Paul)).** Each amorphized half is healed in the
+same LAMMPS session that bombarded it, under the same universal model,
+before it is written out and before the two halves ever meet. The
+schedule is the study's `[protocol.reanneal]` block, applied as
+**anneal, then minimize**: hold the mobile atoms at the hold
+temperature for the hold duration, cool them to the press temperature
+over the same span, then relax to the nearest local minimum. Anneal
+first because the heat is what lets loose atoms and fragments the
+cascade left standing proud of the surface find bonds; minimize last so
+the surface the gate judges is a 0 K structure. The two halves heal
+independently (they run as separate sessions, so in parallel), and
+nothing about the heal depends on the other half existing.
 
-**Where it runs, and the consequence for the gate.** The heal is under the
-production committee, whose engine lives in the bond job (`ARCHITECTURE.md`
-§4.1), so the heal is the FIRST phase of the bond job — before the vacuum
-gap is scissored out and the press begins. The §3.5 gate then runs there,
-on each healed surface (told apart by wafer tag), and only a passing gate
-proceeds to the scissor + press. This moves the gate from a between-jobs
-checkpoint to the bond job's pre-press phase; a failed gate aborts the bond
-before its expensive press/settle/pull, so the checkpoint still guards the
-scarce GPU it was meant to (`ARCHITECTURE.md` §4.1, revised to match).
+**Why it moved back here, and what that dissolved.** From 2026-08-08 to
+2026-08-28 the heal was done once on the ASSEMBLED pair, at a gap wider
+than the potential cutoff, as the bond job's first phase. That design
+had one reason: the heal then ran under the production potential, whose
+engine lived only in the bond job. With ONE universal model running both
+the cascade and the heal (§4.7), that reason is gone, and the per-half
+heal is strictly cheaper — no second engine is opened, no vacuum gap has
+to be built and later cut out, and a failed gate halts before any
+assembly is done. Physically the two are the same: a surface healed at a
+gap beyond the cutoff was already an effectively-free surface. What the
+move removed from the bond flow: the wide assembly gap, the vacuum
+"scissors", and a damped, displacement-capped pre-relax that had been
+scaffolding for a two-potential mismatch that no longer exists.
+
+**Where it runs, and the consequence for the gate.** The heal is the last
+phase of the activate stage's cascade session, so the §3.5 gate runs in
+the activate stage too, on each healed half as it is read back, and only
+a passing gate proceeds to assembly. The gate is again the checkpoint
+BETWEEN the activate job and the bond job, where a human inspects the
+healed surfaces before the bond job's press/settle/pull is submitted
+(`ARCHITECTURE.md` §4.1, §10.2).
 
 **Stripping the projectile.** The cascade embeds the beam species (argon in
 v1), which is not part of the activated surface, and the committee's
 vocabulary is only {Si, O} (§4.3) — it cannot re-equilibrate a cell that
 still DECLARES argon, even emptied of argon atoms. So the projectile is
 removed — its atoms AND its declared species — as the **cascade's own
-cleanup, at the end of the activate stage**, before the amorphized half is
-handed off. That keeps the handed-off surface substrate-only, so the
-assembly and the bond-flow heal that follows it never see the projectile
-(the amorphized half the pipeline carries is {Si, O}, as it always was).
-Formerly the per-slab re-anneal did this deletion as its FIRST act; with the
-anneal moved to the bond flow (above), the strip is what stays behind in
-activate — it is cascade housekeeping, not part of the anneal. This is
+cleanup, after the last impact and before the heal**, so the heal and the
+gate see a substrate-only surface and the handed-off half is
+substrate-only (the amorphized half the pipeline carries is {Si, O}, as
+it always was). The strip is cascade housekeeping, not part of the
+heal, and it is issued before the heal begins. This is
 distinct from the ejecta cleanup that drops disconnected *substrate*
 fragments; that is housekeeping on {Si, O}, this is what makes the {Si,
 O}-only committee runnable at all.
@@ -1122,13 +1114,14 @@ naming the first that fails so a halt is diagnosable. The registry is the
 same idiom as the §6 measures and the §8 analyzer: adding a metric, or
 swapping how one is computed, touches nothing else.
 
-**When and where it runs (revised 2026-08-08).** The gate runs AFTER the
-combined-cell heal (§3.4), on the assembled pair before it is scissored and
-pressed, judging each of the two surfaces SEPARATELY — they are told apart
-by their wafer tag, and the wide heal gap keeps them independent, so each is
-still one free surface against one reference. This is the surface the
-pipeline will actually press, healed; earlier drafts gated a per-slab
-re-anneal before assembly, which the assembly and heal then disturbed.
+**When and where it runs (revised 2026-08-28 (Paul)).** The gate runs in
+the ACTIVATE stage, on each healed half as it is read back from its own
+cascade session (§3.4), BEFORE the two halves are assembled. Each half is
+one free surface judged against one reference, and a failed gate halts
+the member before any assembly — the cheapest possible failure. (From
+2026-08-08 to 2026-08-28 the gate ran in the bond job on the assembled
+pair at a wide gap; that placement followed the heal, and the heal has
+moved back here.)
 
 Each surface is judged against **its own material's reference**, keyed by
 that wafer's **declared species set** — a SiO2 wafer keys `{O, Si}`, a
@@ -1227,8 +1220,7 @@ that feeds the potential-quality gate (§7; STRUCTURAL 1b).
 **Keep** (re-framed, not copied): the ZBL `hybrid/overlay` splice
 (channels generalized, §3.2); the density-reference g(r) normalization
 (§3.5); the thermostat/timing values as a *starting range*, understood as
-a symptom of the missing heat sink (§3.3); Munetoh-Tersoff as one
-config-selected generator option.
+a symptom of the missing heat sink (§3.3).
 
 **Replace:** argon-only species; SiO₂-hardcoded metrics; the whole-slab
 thermostat / dropped frozen layer / `p p p` regression; the per-impact
@@ -1272,13 +1264,12 @@ v1 freezes the
 dose as a direct impact **count** for the single fixed Si/Si cell, the
 per-area **fluence** being the general form used once cell sizes differ
 (§3.2); **3 amorphization seeds** for the ensemble spread (the cheaper
-rung; more seeds tighten the error bar at linear cost). The generator is a
-config-selected classical + ZBL potential — **Stillinger-Weber + ZBL for
-silicon** (decided 2026-07-17, the same model the press/pull uses), silica
-per §4 and STRUCTURAL 1b, with the two hard cores of §3.3; the MLIP
-re-anneal and the validation gate are both mandatory, not optional.
-Energy, angle, and seed count are v1 defaults, not freezes — each is a
-study-input knob.
+rung; more seeds tighten the error bar at linear cost). The generator is
+the universal foundation MLIP + ZBL of §4.7 (revised 2026-08-26; the
+Stillinger-Weber + ZBL form decided 2026-07-17 was removed), with the
+two hard cores of §3.3; the heal and the validation gate are both
+mandatory, not optional. Energy, angle, and seed count are v1 defaults,
+not freezes — each is a study-input knob.
 
 ## 4. MLIP backend and bootstrap
 
@@ -1432,15 +1423,15 @@ bootstrap pass is:
    load-bearing; §4.8 is correct and this step was corrected to match
    (2026-08-23). Retiring the seed STAGE never meant discarding the
    seed DATA.
-2. **Generate the hard configs.** Run the violent Ar cascade on the
-   **foundation MLIP + ZBL** (a classical + ZBL potential is the
-   secondary fallback) to make the amorphized surfaces; run the
-   interface and separation on the *same* **foundation MLIP** to make
-   the joint, pressed and pulled cells — no per-pair committee is
-   needed to generate any of them. These are Collection 2 of the
-   settled recipe, §4.8 part 5, and all five families are required:
-   the amorphized surface, the initial joint cell, the relaxed joint
-   cell, the pressed cell, and the pulled cell (through failure).
+2. **Generate the hard configs.** Run the violent Ar cascade and the
+   heal on the **foundation MLIP + ZBL** to make the healed activated
+   surfaces; run the press, settle and pull on the *same* **foundation
+   MLIP** to make the assembled, settled, pressed and pulled cells — no
+   per-pair committee is needed to generate any of them. These are
+   Collection 2 of the settled recipe, §4.8 part 5, and all five
+   families are required: the healed activated surface, the assembled
+   pair at press start, the settled zero-load reference, the pressed
+   cell, and the pulled cell (through failure).
 3. **Label, convert, retrain.** VASP labels a selected subset (ALF's
    `QM_task = VASP_ase_calculator_task`); the converter folds it into the
    HDF5 store; `train_DEEPMD_ensemble_task` retrains the committee.
@@ -1468,31 +1459,24 @@ stays {O, Si} and the committee is never asked to reproduce cascades or
 Ar.
 
 **What fills the committee's slot in v1 (2026-07-22; updated
-2026-08-21).** The loop above is the design; no committee is trained
-yet, so the production potential's slot is filled by a stand-in. The
-cascade already runs on the universal foundation MLIP + ZBL (§4.7), and
-the 2026-08-21 decision makes that **same foundation model the
-generator for the gentle stages too** — the re-anneal of §3.4 and the
-press, settle and pull of §5 — as it is wired in. Until that lands,
-those stages run under ONE frozen DeePMD file named by the study file's
-`[potential] production_weights` (a committee of one, no uncertainty;
-revised 2026-08-26 — the classical stand-in that previously filled this
-slot is deprecated and removed). That is a deliberate stand-in rather
-than a second design: it wears the same `ForceModel` / `pair_style` seam
-the trained committee will, which is precisely what lets the swap be
-deferred without disturbing anything upstream of it.
-Two consequences are worth stating plainly. First, a material is now
-described in exactly ONE place: the re-anneal and the press/pull each
-used to hard-code `sw Si.sw`, and one of the three copies mapped EVERY
-declared type to silicon — the truth for the Si/Si null test, and wrong
-for any other pair — so bringing up a new material is now a registry
-row instead of a code edit. Second, the two resolvers differ only by
-ZBL: the cascade splices in the hard cores of §3.3 because it drives
-atoms together at keV energies, while the quiet stages, which never
-approach that regime, take the classical form alone. The consumer-side
-work that finally replaces this stand-in with a trained committee is
-tracked as its own item in `TODO.md`; until it lands, "the MLIP is
-designed" must not be read as "the MLIP runs."
+2026-08-28).** The loop above is the design; no committee is trained
+yet, so the production potential's slot is filled by a stand-in: the
+SAME universal foundation MLIP that runs the cascade and the heal (§4.7)
+also runs the press, settle and pull of §5 — as a committee of one,
+named by the study file's `[potential] production_weights` and carrying
+no uncertainty signal. It wears the same `ForceModel` / `pair_style`
+seam the trained committee will, which is precisely what lets the swap
+be deferred without disturbing anything upstream of it. Two
+consequences are worth stating plainly. First, a material is described
+in exactly ONE place — the study file's `[potential]` block — so
+bringing up a new material is a file edit, not a code edit. Second, the
+cascade and the quiet stages differ only by ZBL: the cascade splices in
+the hard cores of §3.3 because it drives atoms together at keV energies,
+while the heal, press, settle and pull, which never approach that
+regime, take the model alone. The consumer-side work that finally
+replaces this stand-in with a trained committee is tracked as its own
+item in `TODO.md`; until it lands, "the MLIP is designed" must not be
+read as "the MLIP runs."
 
 ### 4.6 Decisions frozen for v1
 
@@ -1509,260 +1493,170 @@ designed" must not be read as "the MLIP runs."
   `E_en_bias_weight` stay tunable knobs; pinning their real values is a
   STRUCTURAL 1b/3 DESIGN follow-on, not fixed here.
 
-### 4.7 The cascade-potential generator: selection, acceptance, fallback
-
-> **Deprecated 2026-08-26 (Paul):** classical analytic potentials
-> (Stillinger-Weber, Tersoff, Vashishta, Buckingham) are no longer part of
-> SABSIM. The classical cascade path was validated for silicon only, the
-> classical stand-in for the gentle stages was never going to be the
-> production model, and keeping both made the potential story hard to
-> follow. The code now has exactly two force models: the universal
-> foundation MLIP + ZBL for the lattice derivation and the cascade, and
-> the DeePMD production model (a committee once ALF trains one; a single
-> frozen file until then), both named in the study file's `[potential]`
-> block. Text below that describes a classical option, a classical
-> registry, or `SABSIM_CASCADE_CLASSICAL` / `SABSIM_DEEPMD_MODEL` /
-> `SABSIM_ALLOW_UNVALIDATED_POTENTIAL` is historical.
+### 4.7 The cascade-potential generator: one universal model, named by the user
 
 Sections §3.3 and `PSEUDOCODE.md` §10 run the surface-activation cascade
-on a *rough* potential spliced with ZBL, deliberately not the production
-MLIP (STRUCTURAL 1b: the production MLIP must never be trained on
-cascade-level distortion or on the projectile species). The DEFAULT rough
-potential is a universal foundation model (the ladder below), which is
-chemistry-agnostic and so needs no per-material work — matching the rest
-of the cascade, which already generalizes across materials without
-change: the species-derived ZBL channels (§3.2), the fluence dose, the
-frozen-base / border / interior heat sink (§3.3), the MLIP re-anneal
-(§3.4), and the species-derived gate metrics (§3.5). A curated CLASSICAL
-form is retained as an OPTIONAL per-material optimization — cheaper to run
-where a good one exists — not a requirement anyone must satisfy to bring
-up a new material. This section designs how the rough potential is
-chosen, what "good enough" means for it, and how the two paths relate.
-Silicon plus Stillinger-Weber is one classical *instance*, not the
-pattern: Stillinger-Weber is a tetrahedral-semiconductor form, simply the
-wrong shape for silica, gallium nitride, or lithium niobate — which is
-exactly why the default cannot be classical.
+on a universal foundation MLIP spliced with the two ZBL hard cores of
+§3.3, deliberately not the production committee (STRUCTURAL 1b: the
+production committee must never be trained on cascade-level distortion
+or on the projectile species). The same universal model then runs the
+heal (§3.4), and — until a committee is trained — the press, settle and
+pull too (§4.5). "Universal" means an off-the-shelf, already-trained
+foundation model covering the periodic table with no per-material
+fitting, so it dissolves the per-material potential search entirely and
+matches the rest of the cascade, which already generalizes across
+materials without change: the species-derived ZBL channels (§3.2), the
+fluence dose, the frozen-base / border / interior heat sink (§3.3), the
+heal (§3.4), and the species-derived gate metrics (§3.5).
 
-**The generator is a seam, exactly as activation is a seam (§3.1).** A
-single resolver takes the slab's species set (substrate ∪ projectile) and
-the member specification, and returns a complete cascade potential setup:
-the classical `pair_style` and its parameter file, plus the two ZBL hard
-cores of §3.3 (the longer-range projectile-substrate core and the short
-substrate-substrate core). Whether the classical form underneath is
-Stillinger-Weber, a Tersoff / bond-order form, a Vashishta form, a
-Buckingham form with a repulsive splice, or — the fallback below — a
-foundation MLIP, the caller sees the same setup. The cascade driver
-(`PSEUDOCODE.md` §10.2) never names a potential; it asks the resolver. That same
-registry now also serves the QUIET stages, which ask it for the bare
-classical form with no ZBL cores spliced in (§4.5) — so one entry
-describes a material everywhere that material is simulated, and step 4
-is not silently silicon-only.
+**There is exactly one generator, and no fallback (Paul, 2026-08-28).**
+An earlier draft of this section designed a ladder — a universal model
+by default, a curated analytic form as a per-material option, a DFT
+melt-quench as a last resort — with a registry of per-material entries.
+That ladder is gone. The analytic forms were removed from the code on
+2026-08-26 (they had been validated for silicon only and kept two
+potential stories alive at once), and the melt-quench fallback was
+struck on 2026-08-28: a material the named universal model cannot
+describe is a material SABSIM does not yet cover, and the remedy is a
+better universal model, never a second code path. What survives from
+that draft is the part that matters for the future: the generator is a
+SEAM, and the user — not the code — says which universal model fills
+it.
 
-**A per-material potential registry, with provenance.** The resolver
-reads a registry parallel to the gate's reference-data registry (§3.5).
-Each entry records: the species set it covers, the `pair_style` and
-parameter file, the literature source for those parameters, the
-equilibrium lattice and density that form produces (needed by the
-acceptance check below and by the structure builder's lattice matching,
-§2.2), and a caveat field for per-form hazards. The registry holds both
-classical and universal entries; v1 populates exactly one — silicon,
-Stillinger-Weber — and leaves the other named materials as *documented
-but untested* entries: a recorded candidate and its source, marked
-not-yet-validated, so the shape is honest and a future contributor starts
-from a pointer rather than a blank page. The documented classical
-candidates are listed with the classical option in the ladder below.
+**The user names the model; the code holds a table of the models it
+supports.** The study file's `[potential]` block names the universal
+model by its identity (`universal_model`, e.g. "DPA-3.1-3M") and by its
+concrete weights file (`universal_weights`); the bootstrap recipe's
+`[generator]` block names the same pair for the manufacturing run
+(§4.8). The code holds a small TABLE of supported universal models —
+one row per model, each recording the model NAME, its source and
+license, the exact VERSION (a foundation model is a large network that
+shifts between releases, so "DPA" alone would let reproducibility erode
+as upstream re-trains), the LAMMPS pair style it loads through, whether
+it needs the global atom map, and its validation status. Phase-three
+validation (§1.5) checks that the study file's name is a row in that
+table and that the weights file exists. Bringing up a new universal
+model — a DPA-4, a MACE release, anything that runs inside LAMMPS — is
+a new ROW, never a resolver edit: the cascade driver (`PSEUDOCODE.md`
+§10.2) never names a model, it asks the resolver for the setup the
+study file named. Today the table has ONE row, DPA-3.1-3M; that is a
+statement of what has been validated, not a limit of the design.
 
-**A universal entry pins the model version.** A classical entry's
-provenance is a citation plus a frozen parameter file that never changes.
-A universal foundation model is a large network that shifts between
-releases (MACE-MP-0, its successors), so its registry entry must record
-the exact model NAME AND VERSION — not merely "MACE" — or reproducibility
-erodes silently as upstream re-trains. The version is part of the entry's
-provenance exactly as the parameter-file citation is for a classical
-form.
+**The mechanism.** The resolver returns a complete cascade setup:
+`pair_style hybrid/overlay deepmd <weights> zbl <long> zbl <short>` —
+the universal model composed with the two species-derived ZBL cores
+exactly as §3.3 specifies, with the projectile mapped to its real
+element (a universal model covers the projectile too, so nothing is
+left unmapped). The universal model still needs the ZBL cores because
+it is not trained deep in the repulsive regime the cascade visits and
+must be treated as out-of-distribution there. The quiet stages ask the
+same resolver for the model ALONE, no cores spliced in (§4.5). A
+message-passing model needs LAMMPS's global atom map, which the
+resolver records and the driver issues before the structure is read.
 
 **Acceptance: "good enough for a scaffold," certified by the gate.** The
 cascade potential is scaffolding, not the product. Its only job is to
-drive the surface into a *reasonable amorphous basin*; the MLIP re-anneal
-(§3.4) then corrects the structure toward MLIP/DFT quality, and the §3.5
-gate judges the result. So "acceptable" is defined cheap-to-expensive,
-and the last rung is the real arbiter:
+drive the surface into a *reasonable amorphous basin*; the heal (§3.4)
+settles the structure and the §3.5 gate judges the result. So
+"acceptable" is defined cheap-to-expensive, and the last rung is the
+real arbiter:
 
 1. it exists as a LAMMPS `pair_style`, so it can run at all;
-2. it reproduces the crystal's lattice and density within tolerance — a
-   cheap bulk relax; this also bounds the step-zero stress the cascade
-   box would otherwise carry, because the slab is built to the
-   MLIP-relaxed lattice (§2.2) while the cascade runs under this classical
-   form, and a large lattice disagreement is exactly the −30 to −40 GPa
-   artifact prior art hit (`PRIOR_ART.md` §1.6);
-3. it survives a probe single-impact cascade with the two ZBL cores in
+2. it passes the inherent-structure screen — minimize a pristine crystal
+   and a damaged configuration under the candidate, and the crystal must
+   come out LOWER in energy (a model that ranks the damaged cell below
+   the crystal gives a surface a thermodynamic incentive to destroy
+   itself, and an activation run self-heats rather than amorphizing);
+3. it reproduces the crystal's lattice and density within tolerance — a
+   cheap bulk relax, which is also the §2.2 lattice derivation, so the
+   slab is built to the lattice the cascade model wants and carries no
+   step-zero stress;
+4. it survives a probe single-impact cascade with the two ZBL cores in
    place — no fusion, no explosion;
-4. its re-annealed surface *passes the §3.5 activation gate* against the
+5. its healed surface *passes the §3.5 activation gate* against the
    DFT / experimental references.
 
-The design point is that rung 4 needs no new machinery: acceptance is
-**emergent from the pipeline we are already building**, not a separate
-a-priori judgment of the classical potential's fidelity. Rungs 1–3 are
-cheap pre-filters that avoid spending a full activation run only to fail
-the gate. This is what "acceptable, not perfect" means concretely — we
-never ask the cascade potential to be *accurate*, only to land the
-surface in a basin the re-anneal and gate accept.
+Rung 5 needs no new machinery: acceptance is **emergent from the
+pipeline we are already building**, not a separate a-priori judgment of
+the model's fidelity. Rungs 1–4 are cheap pre-filters that avoid
+spending a full activation run only to fail the gate. Every rung is per
+material AND per model: passing on silicon licenses nothing about the
+oxides.
 
-**The refusal is the default; the opt-in is per-run and visible.** An
-entry that has not cleared the last acceptance rung above — nobody has
-yet run this material through a full activation and watched the §3.5
-gate accept the result — is marked unvalidated, and both the cascade
-and quiet resolvers REFUSE it, raising rather than quietly running a
-form whose
-fidelity nobody yet has evidence for. But a material's FIRST activation
-run is precisely what produces that evidence, so the refusal cannot be
-absolute or no new material could ever be brought up. The escape hatch
-is the study file's `[potential] allow_unvalidated = true` (revised
-2026-08-26; it was an environment variable before). It lives in the study
-file deliberately: no one is tempted to flip `validated=True` in the code
-before the evidence exists, and because the study file is the provenance
-record (§1.6) the choice stays in the run's own permanent record.
-Anything produced under it is
-EXPLORATORY, and both the run and any report drawn from it must say so.
-
-**The cascade-potential ladder: universal by default, classical by
-choice.** The generator seam admits three forms; the default is the one
-that needs no per-material work:
-
-- **Default — a universal (foundation) MLIP + ZBL.** "Universal" means
-  an off-the-shelf, already-trained foundation model — the MACE-MP /
-  CHGNet family — covering the periodic table with no per-material
-  fitting, so it *dissolves* the per-material search entirely, at higher
-  runtime cost (and it makes the activate job GPU work — see
-  `ARCHITECTURE.md` §4.1). It still needs the ZBL cores, because universal
-  models are not trained deep in the repulsive regime the cascade visits,
-  and it must be treated as out-of-distribution there: the scaffold-grade
-  acceptance above, not blind trust, is what licenses it. The mechanism is a
-  universal model run inside LAMMPS composed with the ZBL cores through
-  `pair_style hybrid/overlay` — BUILT as of 2026-08-08 with a deepmd DPA
-  foundation model (`pair_style deepmd`), the two ZBL
-  cores overlaid on top (MACE's `pair_style mace` would slot in the same
-  seam). Being a different model run only for the cascade, it does not
-  violate the STRUCTURAL 1b separation that keeps the production MLIP off
-  cascade distortion.
-- **Option — a curated classical form + ZBL.** Where a material has a
-  well-tested classical form (silicon's Stillinger-Weber, a
-  cascade-validated Tersoff for gallium nitride), it is far cheaper per
-  step and runs the activate job on CPU. It is opt-in, not required;
-  silicon/SW is the v1 instance and the pipeline's regression anchor. The
-  documented classical candidates — Vashishta or a Munetoh-style Tersoff
-  for silica; a cascade-validated Tersoff / bond-order form for gallium
-  nitride (several were parameterized *with* a ZBL splice precisely for
-  radiation damage); and, for lithium niobate, a shell-model or
-  bond-valence Morse form with reduced charges, because a rigid-ion
-  Buckingham runs to −∞ under bombardment (the "Buckingham catastrophe,"
-  `PRIOR_ART.md` §1.9) — are starting points, not decisions.
-- **Last resort — a DFT melt-quench.** For a material with neither a
-  trustworthy universal model nor a classical form: expensive, rarely
-  needed.
-
-v1 builds only the classical silicon (Stillinger-Weber) instance — the
-sole working cascade today and the regression baseline — while the
-universal default and the DFT last resort are drop-in generator
-implementations behind the same resolver seam. The DESIGN default is
-universal-first; the BUILT default stays silicon/SW until the universal
-path is implemented *and* has cleared the acceptance rungs above on a
-real material.
+**The refusal is the default; the opt-in is per-run and visible.** A
+table row that has not cleared rung 5 — nobody has yet run this material
+through a full activation and watched the §3.5 gate accept the result —
+is marked unvalidated, and the resolver REFUSES it, raising rather than
+quietly running a model whose fidelity nobody yet has evidence for. But
+a material's FIRST activation run is precisely what produces that
+evidence, so the refusal cannot be absolute. The escape hatch is the
+study file's `[potential] allow_unvalidated = true` (revised 2026-08-26;
+it was an environment variable before). It lives in the study file
+deliberately: no one is tempted to flip the table's status before the
+evidence exists, and because the study file is the provenance record
+(§1.6) the choice stays in the run's own permanent record. Anything
+produced under it is EXPLORATORY, and both the run and any report drawn
+from it must say so. A gate-passing activation is what flips the row to
+validated.
 
 **Why not a bespoke amorphization model per material?** A tempting
 alternative is to train an extra machine-learned potential for each
 material, fused with ZBL, dedicated to the cascade — turning the
-project's one committee into three models. The ladder deliberately does
+project's one committee into three models. The design deliberately does
 not, for two reasons. The cascade potential is only ever asked to be
 scaffold-grade — to land the surface in a reasonable amorphous basin the
-re-anneal and §3.5 gate then judge — so spending a full committee's
-training cost to clear that low bar buys nothing a foundation model does
-not already give for free across the whole periodic table. And
-STRUCTURAL 1b forbids training the *production* committee on
-cascade-level distortion or on the projectile species, so the committee
-we do train could not be the amorphization model in any case. The
-fallback for a hard material is therefore Tier 2, not a third bespoke
-fit.
+heal and §3.5 gate then judge — so spending a full committee's training
+cost to clear that low bar buys nothing a foundation model does not
+already give for free across the whole periodic table. And STRUCTURAL
+1b forbids training the *production* committee on cascade-level
+distortion or on the projectile species, so the committee we do train
+could not be the amorphization model in any case.
 
-**Two per-form hazards the caveat field must carry.** First, the short
-substrate-substrate ZBL core changes *role* by form: for Stillinger-Weber
-and Tersoff it is *insurance* against a finite short-range repulsion
-letting two atoms fuse, but for a Buckingham form it is *load-bearing* —
-it must actually overpower the `−C/r⁶` attraction that diverges to −∞, not
-merely supplement a finite wall. Second, shell-model forms (a real
-lithium-niobate option) carry massless shells that must be relaxed every
-step, which complicates the persistent-driver and adaptive-timestep design of
-`PSEUDOCODE.md` §10.2 and costs extra per-step work. Neither is a showstopper;
-both must be recorded so a future contributor is not surprised.
+**The one row today: DPA-3.1-3M (adopted 2026-08-25).** The deepmd DPA-3
+foundation model, full periodic table via the `MP_traj_v024_alldata_mixu`
+branch frozen to a singletask `.pth`, CC-BY-4.0, loaded directly by
+`pair_style deepmd` with energy conserved over NVE.
 
-**Built state (scope decision (a), 2026-07-18; default inverted 2026-08-06;
-universal path BUILT 2026-08-08).** The generator resolver and the registry
-schema were built first with the classical silicon (Stillinger-Weber)
-instance as the sole working cascade and regression baseline. The universal
-path is now IMPLEMENTED behind the same resolver seam and is the default for
-every material: `resolve_cascade_generator` assembles
-`pair_style hybrid/overlay deepmd <model> zbl <long> zbl <short>` — the
-universal MLIP composed with the two species-derived ZBL cores exactly as
-this section specified — and a classical form is used only on the explicit
-`SABSIM_CASCADE_CLASSICAL` opt-in (the on-the-record env discipline, so a
-departure from the universal default stays in the run's record).
-
-The universal model is **DPA-3.1-3M** (deepmd DPA-3 foundation model,
-full periodic table via the `MP_traj_v024_alldata_mixu` branch frozen to a
-singletask `.pth`, CC-BY-4.0), loaded directly by `pair_style deepmd` with
-energy conserved over NVE.
-
-**Why not DPA-2.4-7M, which this section previously named.** That model
-FAILS the Tier-0 inherent-structure screen on silicon: minimize a pristine
-crystal and a damaged configuration under the candidate and the crystal
-must come out LOWER, yet DPA-2.4-7M ranks the damaged slab 0.378 eV/atom
-BELOW the perfect crystal (LEDGER T-21, job 16731025). Under such a model
-a silicon surface has a thermodynamic incentive to destroy itself, and an
-activation run self-heats rather than amorphizing — the failure is in the
-energy ordering, so no amount of force accuracy would have caught it, and
-nothing downstream of a wrong basin is worth computing. DPA-3.1-3M passes
-the same screen at +0.361 eV/atom and is adopted for that reason
-(2026-08-25). The screen is per material AND per model, so passing it on
-silicon licenses nothing about the oxides.
-
-The earlier preference for DPA-2.4-7M was an ENGINEERING one — it exported
+*Why not DPA-2.4-7M, which this section previously named.* That model
+FAILS rung 2 on silicon: it ranks a damaged silicon slab 0.378 eV/atom
+BELOW the perfect crystal (LEDGER T-21, job 16731025), so under it a
+silicon surface has a thermodynamic incentive to destroy itself — the
+failure is in the energy ordering, so no amount of force accuracy would
+have caught it, and nothing downstream of a wrong basin is worth
+computing. DPA-3.1-3M passes the same screen at +0.361 eV/atom. The
+earlier preference for DPA-2.4-7M was an ENGINEERING one — it exported
 cleanly to AOTInductor `.pt2` while DPA-3.1-3M hit an unbacked-symint
-export failure — and that reason no longer binds: LAMMPS loads the PyTorch
-`.pth` directly, so no export is needed. The `.pth` is also PORTABLE where
-a `.pt2` is architecture-locked, which unpins the cascade from any one GPU
-type; the ~2.5x per-step speed of an AOT build is the only thing given up,
-and the export patch is documented should it be worth reclaiming.
+export failure — and that reason no longer binds: LAMMPS loads the
+PyTorch `.pth` directly, so no export is needed. The `.pth` is also
+PORTABLE where a `.pt2` is architecture-locked, which unpins the cascade
+from any one GPU type; the ~2.5x per-step speed of an AOT build is the
+only thing given up, and the export patch is documented should it be
+worth reclaiming.
 
-Because that engine is a self-contained bundle with its own
-torch and MPI, the universal cascade runs OUT-OF-PROCESS — the LAMMPS
-cascade is scripted and run as the bundle's `lmp` in a subprocess, its
-structure handed back through a file (ARCHITECTURE §4.1/§4.4, §4.3). The
-activate job sets `SABSIM_CASCADE_ENGINE_PREFIX` (the bundle); the
-weights are named by the study file's `[potential] universal_weights`
-(revised 2026-08-26). Per §3.4 the activate stage is
-cascade-ONLY — the heal and the §3.5 gate ride the bond job — so the
-subprocess needs no classical potential and the activate job carries no
-`LAMMPS_POTENTIALS`. (The intermediate first node-validated on a V100 ran
-cascade + a per-slab re-anneal + gate in one subprocess, job 16014788, and
-that plumbing is proven; the §3.4 revision then moved the heal + gate to the
-bond job, leaving activate cascade-only — a code change in flight.)
+**Where it runs.** The deepmd engine is a self-contained bundle with its
+own torch and MPI, so the universal cascade runs OUT-OF-PROCESS: the
+cascade, the projectile strip and the heal are scripted as one LAMMPS
+input and run as the bundle's `lmp` in a subprocess, the healed half
+handed back through a file (`ARCHITECTURE.md` §4.1/§4.3/§4.4); the §3.5
+gate then judges that file in the sabsim process. The activate job sets
+`SABSIM_CASCADE_ENGINE_PREFIX` (the bundle); the weights are named by
+the study file's `[potential] universal_weights`. The §2.2 lattice
+derivation rides the same subprocess. The press, settle and pull run the
+same model in-process through the bundle's Python binding (the
+`sabsim-dp3` environment, LEDGER T-25), which is what lets the bond
+flow read forces and stresses back mid-run (§5).
 
-It is registered `validated=False` because it has not yet
-cleared the §3.5 gate on any material, so a DEFAULT (universal) cascade
-REFUSES unless the study sets `[potential] allow_unvalidated = true`. Its
-first gate-passing activation is what licenses flipping the flag. The
-weights are a large deploy-time artifact rather than a checked-in file, so
-the code pins the model IDENTITY (name/branch/version) and the study file
-names the concrete artifact path (`[potential] universal_weights`, which
-phase-three validation checks exists and whose name must match).
+DPA-3.1-3M is registered unvalidated because it has not yet cleared the
+§3.5 gate on any material; its first gate-passing activation flips the
+row. The weights are a large deploy-time artifact rather than a
+checked-in file, so the table pins the model IDENTITY and the study file
+names the concrete artifact path.
 
-Remaining v1 follow-ons (logged in `TODO.md`): running DPA-3.1-3M through a
-full activation to clear the §3.5 gate (then `validated=True`); pinning the
+Remaining v1 follow-ons (logged in `TODO.md`): running DPA-3.1-3M
+through a full activation to clear the §3.5 gate; pinning the
 acceptance-check tolerances (the lattice/density band, the probe-cascade
-stability criterion); selecting the deepmd GPU engine for the activate stage
-(deployment §10) and the deploy-time `.pt2` build; native DP-ZBL as a later
-close-range refinement of the `hybrid/overlay` splice; the DFT last resort;
-and validating any non-silicon classical candidate.
+stability criterion); native DP-ZBL as a later close-range refinement of
+the `hybrid/overlay` splice.
 
 ### 4.8 The force-model recipe, and the settings it fixes once
 
@@ -1806,19 +1700,18 @@ actively degrade the other.
 So a recipe is keyed by **the species union TOGETHER WITH a declared
 domain** — a named structural and chemical regime the model claims to
 cover. This is not a new hazard discovered here; it has already bitten
-the code. §4.7's registry keys on the species set alone, needed TWO
-entries for {Si, O} — a bond-order form that spans the Si/SiO₂
-interface and a Vashishta form better for amorphous silica but unable
-to describe elemental silicon at all — and disambiguated them by
-smuggling a marker string `_silica_only` into a set that is otherwise
-chemical elements. That marker was this section's missing concept,
-patched in at the point of pain. §4.7's registry key has since been
-lifted to the same (species, domain) shape and the marker retired
-(2026-07-24, `driver/cascade_potential.py`): each entry now declares its
-domain, the two {Si, O} forms sit under `silicon-and-silica` and
-`silica-only`, and a resolve that names no domain for a species set
-carrying several REFUSES rather than picking one — because those two
-forms disagree about whether elemental silicon can exist, so choosing
+the code. An earlier per-material potential registry (removed
+2026-08-26 with the analytic forms it held) keyed on the species set
+alone and needed TWO entries for {Si, O} — a bond-order form that
+spanned the Si/SiO₂ interface and a silica-only form unable to describe
+elemental silicon at all — and disambiguated them by smuggling a marker
+string `_silica_only` into a set that is otherwise chemical elements.
+That marker was this section's missing concept, patched in at the point
+of pain; the registry key was then lifted to the (species, domain) shape
+and the marker retired (2026-07-24), and a resolve that named no domain
+for a species set carrying several REFUSED rather than picking one —
+because those two forms disagreed about whether elemental silicon can
+exist, so choosing
 between them by luck would be a silent physics decision. Where exactly
 ONE domain is registered, omitting it resolves to that one: nothing is
 being guessed, because there is nothing to choose between.
@@ -1900,16 +1793,25 @@ student can read the file and know what was manufactured.
 5. **How the hard configurations are manufactured — COLLECTION 2 of
    the settled recipe.** The configurations the protocol itself visits,
    harvested from a bootstrap run. Five families, ALL REQUIRED (settled
-   2026-08-23), each a state the others do not revisit:
+   2026-08-23; definitions revised 2026-08-28 (Paul) to the states the
+   built flow actually visits), each a state the others do not revisit:
 
-   7. **Amorphized surface** — one per half, the product of the violent
-      Ar cascade. This is what the activate stage exists to make.
-   8. **Initial joint cell** — the two activated halves assembled at
-      the wide gap, BEFORE any relaxation. Two surfaces facing each
-      other and not yet interacting.
-   9. **Relaxed joint cell** — after the combined-cell relax: in
-      contact, but not yet under load.
-   10. **Pressed cell** — the interface under compression.
+   7. **Healed activated surface** — one per half: the product of the
+      violent Ar cascade AFTER the §3.4 heal, read from the tail of
+      the activate recording. This is what the activate stage exists
+      to make, and the surface the committee will be asked to press.
+   8. **Assembled pair at press start** — the two healed halves stacked
+      at the §2.6 starting opening, BEFORE any dynamics. Two surfaces
+      facing each other, within range but not yet loading each other.
+   9. **Settled zero-load reference** — the bonded pair after the press
+      drive is released and the structure has settled (§5.3): in
+      contact, at rest, under no applied load. This is the state every
+      pull starts from, so it is the unloaded contact chemistry the
+      model must get right. (It replaces the earlier "relaxed joint
+      cell, in contact but not yet loaded", a state the flow no longer
+      visits before the press.)
+   10. **Pressed cell** — the interface under compression, from the
+       first press chunk through the end of the hold.
    11. **Pulled cell** — the separation, INCLUDING the failing and
        failed states, since a pull that fails through the crystal
        rather than along the interface is an outcome §6 must tell apart
@@ -1917,19 +1819,23 @@ student can read the file and know what was manufactured.
 
    Families 8 and 9 are named explicitly because "press and pull" does
    not imply them: they are the un-loaded contact chemistries, visited
-   once on the way in and never again.
+   once each and never again. Frames are assigned to families 8–10 by
+   the press ledger the bond stage records (§5.5, §5.7): the step at
+   which the press drive started, contact was declared, the hold ended,
+   and the settle began and ended. Every recorded frame carries its
+   step, so the assignment is a lookup, never a guess.
 
    The recipe states which stages run purely to harvest frames, and on
-   WHICH force model each runs — the violent cascade on the foundation
-   MLIP + ZBL form of §4.7 (classical + ZBL the fallback), the press
-   and pull on the same universal foundation MLIP (§4.5 step 2) — how
-   many, and under what conditions. Collection 1 is labelled as whole
-   cells, being small by construction; Collection 2 is labelled as the
-   **interface subcells** of §6.4, because all-electron cost grows
-   steeply with atom count and a production cascade cell is an order of
-   magnitude beyond what DFT will take (LEDGER T-21 measured ~1960
-   atoms for a single-impact calibration cell against a routine DFT
-   budget of a few hundred).
+   WHICH force model each runs — the violent cascade and the heal on the
+   foundation MLIP + ZBL form of §4.7, the press, settle and pull on the
+   same universal foundation MLIP (§4.5 step 2) — how many, and under
+   what conditions. Collection 1 is labelled as whole cells, being small
+   by construction; Collection 2 is labelled as the **interface
+   subcells** of §6.4, because all-electron cost grows steeply with atom
+   count and a production cascade cell is an order of magnitude beyond
+   what DFT will take (LEDGER T-21 measured ~1960 atoms for a
+   single-impact calibration cell against a routine DFT budget of a few
+   hundred).
 6. **How a subset is chosen for labelling.** The accurate calculations
    are the cost bottleneck, so the recipe states the budget and the
    selection rule: favour the interface region, prefer configurations
@@ -2067,8 +1973,11 @@ This section designs steps 6 and 7 — pressing the two activated surfaces
 together, letting them bond, and pulling them apart while recording the
 force that resists. It runs on LAMMPS under the MLIP (`pair_style
 deepmd`, GPU; `ARCHITECTURE.md` §4.1) — that is the DESTINATION; until a
-committee is trained these stages run on the classical registry stand-in
-behind the identical seam, for the reasons §4.5 gives.
+committee is trained these stages run on the universal foundation MLIP
+as a committee of one, behind the identical seam, for the reasons §4.5
+gives. The bond flow is: read the assembled pair → the one-time lateral
+cell relax of §5.6 → press → settle → pull. The heal and the §3.5 gate
+sit upstream, in the activation stage (§3.4, revised 2026-08-28).
 
 **The whole press/pull runs on one persistent in-process driver.** It is
 a single stateful, multi-phase run whose transitions are decided mid-run:
@@ -2207,17 +2116,27 @@ starting separation is the one §2.6 established between the two
 density-profile dividing surfaces, not between extremal atoms. Contact
 itself is declared on a **dual criterion**, adapted from prior art's
 `find_contact_step` (`PRIOR_ART.md` §1.8) — one of the few pieces of its
-design worth taking: the primary test is that the gap has closed to a
-threshold, and the confirmatory test is that a running average of the
-normal stress has turned positive. The confirmation earns its keep,
-because a gap can close on a single asperity, whereas a positive normal
-stress means the two surfaces are genuinely loading each other. (Revised
-2026-08-27: the confirming stress may be of either sign above a floor —
-a sustained *tensile* stress across a closed gap is two surfaces that
-have already bonded and are pulling on each other, the opposite of an
-asperity; a press too weak to register as compression on a small
-footprint otherwise never declares contact, T-30.) (Prior
-art measures its gap between extremal atoms, which is exactly the
+design worth taking. The PRIMARY test is that the opening between the
+two dividing surfaces has closed to a threshold, judged on a TRAILING
+MEAN over the last `contact_gap_window` chunks rather than on a single
+reading: one chunk's density-surface reading jumps by ångströms when a
+loose atom drifts through the gap, and a single-reading test let the
+wafers touch without contact ever being declared. The CONFIRMING test
+is that the running-average normal stress across the interface is
+SUSTAINED above a floor, `contact_stress_floor`, in magnitude — of
+EITHER sign. Compression is the ordinary case: a gap can close on a
+single asperity, whereas a normal stress above the floor means the two
+surfaces are genuinely loading each other. Tension is the other: a
+sustained *tensile* stress across a closed gap is two surfaces that have
+already bonded and are pulling on each other, the opposite of an
+asperity, and a press too weak to register as compression on a small
+footprint would otherwise never declare contact (LEDGER T-30/T-31).
+Both the window and the floor are numerical knobs of the study file
+(§1.2), carried with their units — the window in chunks, the floor in
+bar — and their influence must vanish as they are refined. (Revised
+2026-08-28 (Paul); the trailing mean and the two-sided floor were first
+applied in code on 2026-08-27 and are recorded here as the design.)
+(Prior art measures its gap between extremal atoms, which is exactly the
 asperity failure the stress criterion guards against; we fix both.)
 
 The press then holds at temperature for a specified duration — the hold
@@ -2328,6 +2247,14 @@ of any atom of the other. The mechanical work integral runs from the
 §5.3 reference state to that point and stops; prior art integrates the
 entire record, noise tail included.
 
+**The press hands over a stage ledger too (revised 2026-08-28 (Paul)).**
+Alongside the curves, the bond stage records the MD step at which each
+of its phases began and ended — press drive on, contact declared, hold
+ended, settle began, settle ended — so any consumer of the recorded
+trajectory (the analyzer, a viewer, the bootstrap harvest of §4.8) can
+say which phase a frame belongs to by its step, instead of guessing
+from its position in the file.
+
 **Why bridging and not "the force has fallen to zero".** The obvious
 test — keep integrating until the pulling force dies away — was tried
 first, and it measures the wrong thing. Two rough surfaces do not let
@@ -2352,7 +2279,7 @@ reproducible, since a different thermal seed draws a different web —
 so a large part of the answer is a dice roll reported with the same
 confidence as the rest. And it is the regime our potentials describe
 WORST: a stretched, low-coordination chain is the furthest thing from
-the four-coordinated bulk silicon a classical model is fitted to, and
+the four-coordinated bulk silicon a bulk-trained model is fitted to, and
 this family of model is independently known to draw silicon out where
 the real material would snap.
 
@@ -2440,6 +2367,8 @@ Every number this stage emits names the potential generation that
 produced it, the seed set, the pull rate, the press mode and the load or
 depth reached, and the trajectory file it was reduced from
 (`VISION.md` goal 3). The analyzer **refuses a truncated trajectory**.
+The stage ledger of §5.5 rides the same result manifest as the curves,
+so the phase boundaries of a run are part of its permanent record.
 
 **The analyzer is handed its input; it does not go looking for one.**
 Prior art's strength analysis fetches "the newest `debond.dat` under the
@@ -3125,11 +3054,11 @@ therefore false-positive control, and it has six parts:
   the per-atom decomposition or only the global spread is a code-level
   question for PSEUDOCODE; the quantity exists in DeePMD.)
 - **Restart from the post-cascade checkpoint, and bound the aborts.**
-  STRUCTURAL 1b puts the violent Ar cascade on a classical potential
-  with ZBL, not on the MLIP, so **the amorphized surfaces are
-  potential-independent and survive retraining untouched**. A retrained
-  potential invalidates only the gentle re-anneal, the press and the
-  pull. Finally, aborts are counted: repeated aborts at the same
+  STRUCTURAL 1b puts the violent Ar cascade and the heal on the universal
+  foundation MLIP with ZBL, not on the committee, so **the activated
+  surfaces do not depend on the committee and survive retraining
+  untouched**. A retrained potential invalidates only the press, the
+  settle and the pull. Finally, aborts are counted: repeated aborts at the same
   physical stage within one potential generation are not a nuisance to
   be retried, they are an `interface_coverage` diagnosis, and the gate
   escalates to a human rather than looping.
@@ -3979,20 +3908,17 @@ run without a human looking. So a member is prepared as **three jobs**,
 submitted in order, each watched to completion and checked for
 correctness before the next is submitted:
 
-- **activate** (GPU by default): build both wafers, roughen both surfaces
-  with the cascade (§3 — the default universal MLIP makes this GPU, an
-  opt-in classical form CPU, §4.1), and bring them together — assembling
-  the pair at a gap wider than the MLIP cutoff (§3.4). It is CASCADE-ONLY:
-  the cheap build-and-assemble glue rides along, but the heal and the gate
-  no longer sit here (revised 2026-08-08, §3.4). It hands the assembled,
-  still-amorphous pair to the bond job.
-- **bond** (GPU): first HEAL the two surfaces with a single joint relax at
-  the wide gap (§3.4) and run the **activation gate** (§3.5) on each healed
-  surface — the human-inspected checkpoint, now here, before any expensive
-  press — then, only if it passes, scissor the vacuum and press, settle,
-  and pull (§5), with the committee of MLIP models evaluated together in
-  one process. The gate is thus a decision the human should inspect early
-  in the bond job, before its scarce GPU is spent on the press.
+- **activate** (GPU): build both wafers, roughen both surfaces with the
+  cascade (§3), HEAL each half in the same session (§3.4) and run the
+  **activation gate** (§3.5) on each healed half — the human-inspected
+  checkpoint, here, before any assembly — then, only if both pass,
+  bring them together at the press-start opening (§2.6) and hand the
+  assembled pair to the bond job. (Revised 2026-08-28 (Paul); from
+  2026-08-08 the heal and gate had ridden the bond job.)
+- **bond** (GPU): read the pair, run the one-time lateral cell relax
+  (§5.6), then press, settle, and pull (§5), with the committee of MLIP
+  models evaluated together in one process. It also writes the stage
+  ledger of §5.5.
 - **analyze** (ordinary / CPU): measure (§6). Split into its *own* job —
   not folded into bond — because the all-electron characterization (§8)
   will eventually be heavy, and drawing the boundary now avoids moving it
@@ -4067,7 +3993,7 @@ environment being installed and activated — not restated in every script.
     name it, and refuse.
 - **The outside tools to switch on are per kind of job**, not
   machine-wide. The activate script switches on only the
-  classical-dynamics engine, bond only the GPU force-model engine, and
+  molecular-dynamics engine, bond only the GPU force-model engine, and
   analyze only what its measurement needs. This **reshapes the
   deployment file**: the tool list moves out of the machine-wide
   `[hardware]` inventory and into each per-kind `[usage.*]` block, so a
@@ -4086,7 +4012,7 @@ environment being installed and activated — not restated in every script.
   it as a module. A DIRECT electronic-structure tool would join the
   analyze block only if such analysis were ever run OUTSIDE that Tier-B
   loop.
-- **Everything else gets no home in the script.** The classical potential
+- **Everything else gets no home in the script.** The gate's reference
   files are found through the shared-data root (they are reference data,
   in §3.5's registry idiom); the Python interpreter and the launcher come
   from the activated install. None of these is hand-named in a generated

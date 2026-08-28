@@ -347,17 +347,28 @@ so they are not discovered late (two touch non-negotiable goals). -->
       convergence threshold, the re-anneal protocol, and the optional
       melt-quench upgrade. (`ARCHITECTURE.md` §2.1 steps 1-2, §2.3;
       `VISION.md` goal 1 and principle 5.)
-      **STATUS (2026-07-22): design RESOLVED, prototype DONE, integration
-      NOT STARTED.** This item is resolved as a DECISION only. The
-      bootstrap strategy above is settled and the ALF/DeePMD backend is
-      prototyped and unit-tested (`prototypes/alf_deepmd/`), but NOTHING
-      is wired into the running pipeline — no committee is ever trained or
-      loaded, `resolve_potential` returns a classical stand-in, every
-      "runs on the MLIP" stage runs on the classical registry, and the
-      reported `uncertainty` is hard-coded 0.0. So "the MLIP is designed"
-      must not be read as "the MLIP runs." The consumer-side wiring that
-      closes this gap is tracked as its own first-class CODE item below
-      (the MLIP-integration checklist + status table).
+      **STATUS (2026-08-28): design RESOLVED; generate / label / harvest
+      BUILT; train / refine NOT STARTED.** The decision above stands
+      with two amendments. (2026-08-21) The config GENERATOR is the
+      universal foundation MLIP (+ ZBL for the cascade): no analytic
+      potential and no seed committee appear anywhere in the loop, and
+      the BKS / Vashishta / Stillinger-Weber language in the paragraph
+      above is history. (2026-08-28, Paul) There is NO fallback
+      generator of any kind — the DFT melt-quench "last resort" is
+      struck too; a material the named universal model cannot describe
+      is one SABSIM does not yet cover, and the answer is a new row in
+      the supported-model table (DESIGN §4.7), never a second code
+      path. Built: `sabsim bootstrap generate` (Collection 1 from the
+      recipe, Collection 2 harvested from a dumped member run), `label`
+      (direct VASP job array) and `harvest` (`labels.extxyz`) — LEDGER
+      T-26 / T-27 on silicon. NOT built: `train` (the ALF bridge; the
+      `prototypes/alf_deepmd/` converter is unit-tested but not imported
+      by `src/`), the committee `pair_style` on the consumer side, the
+      uncertainty readout, `refine`, and `test_convergence`. Until
+      `train` lands the production slot holds the universal foundation
+      MLIP as a committee of one (`[potential] production_weights`). The
+      consumer-side wiring is tracked in the MLIP-integration checklist
+      + status table below.
 - [ ] Long-range electrostatics for ionic / polar pairs — RESIDUAL from
       STRUCTURAL 1a (2026-07-08), deferred with v1's covalent Si/SiO2
       scope. A short-range MLIP (DeePMD `se_e2_a`) is defensible for
@@ -808,6 +819,45 @@ so they are not discovered late (two touch non-negotiable goals). -->
 <!-- Tasks related to algorithms and data structures, mathematical
 foundations, interaction rules. -->
 
+- [ ] **Retire the walking-skeleton residue (Paul, 2026-08-28).** The
+      walking skeleton has become a walking person, and some one-off
+      scaffolding from the skeleton period is still on the path every
+      run takes. Each item names its level; the first two are the
+      2026-08-28 decisions, the rest are open.
+      (1) [CODE] The capped / damped / reflecting-wall "contact relax"
+      that preceded the heal (`commands.contact_relax_commands`,
+      `press_pull.press_and_bond`) — a restraint written for a
+      two-potential mismatch (surfaces amorphized under one model,
+      pressed under another) that no longer exists. REMOVED
+      2026-08-28; no document ever described it.
+      (2) [DESIGN → CODE] The heal + §3.5 gate return to the activation
+      stage, and the wide assembly gap + vacuum scissors are removed
+      (DESIGN §3.4/§2.6, revised 2026-08-28) — DONE in the documents
+      2026-08-28; code to follow (see the reversed re-arch item).
+      (3) [DESIGN → CODE] `RunControl` in `driver/press_pull.py` holds
+      numbers that live only in code: `equilibrate_chunks` 20 (the
+      settle span), `stress_window` 5, `scissors_gap` 7 Å,
+      `scissors_min_gap` 2.5 Å, `relax_chunks` 5, `chunk_steps` 1000,
+      `max_chunks` 500. DESIGN §1.4 says nothing defaults silently and
+      every knob carries its unit in the study file. The two contact
+      knobs (`contact_gap_window`, `contact_stress_floor`) were lifted
+      into the study file by the §5.2 revision of 2026-08-28; the
+      scissors pair dies with the scissors; the settle span, the stress
+      window and the chunking need a DESIGN §5.3 sentence each and then
+      a study-file home.
+      (4) [DESIGN → CODE] The "surfaces already close" branch in
+      `press_and_bond` (skip heal and gate when the assembled gap is
+      under the cutoff) was the skeleton's direct-contact path and is
+      now reused, by accident, to restart a bond from a saved press
+      frame (LEDGER T-30). With the heal gone from the bond flow the
+      branch's original purpose is gone; make "resume from a saved press
+      frame" a deliberate, documented entry (DESIGN §11 / PSEUDOCODE
+      §13 already own resume) or remove the branch.
+      (5) [CODE] `pipeline/skeleton_stages.py` still narrates Wave 0 in
+      its header; its live use is the placeholder for the unbuilt step-8
+      characterization and the placeholder measure records. Reword the
+      header to say exactly that.
+
 - [ ] **Rename the study-level "member" to "material pair"** (deferred,
       opened 2026-07-31). The word is overloaded: §1.1/§2.1 and
       `spec/records.py` use "member" for a study-level MATERIAL PAIR,
@@ -1041,12 +1091,18 @@ foundations, interaction rules. -->
       STRUCTURAL 1b follow-on (descriptor/r_cut, `n_models`, loss
       schedule, `Escut`/`Fscut`, UDD weight, committee-sigma convergence
       threshold, seed-set composition), so not duplicated here.
-- [ ] STRUCTURAL 1b DESIGN follow-ons: BKS vs Vashishta as the silica
-      generator, the amorphous-structure validation metrics + thresholds
-      (g(r) / ring / coordination vs DFT + experiment), the seed-set
-      composition, the bootstrap ALF convergence threshold, the MLIP
-      re-anneal protocol, and the optional MLIP melt-quench upgrade
-      (`ARCHITECTURE.md` §2.3 MLIP + potential-gate bullets).
+      Amended 2026-08-28 (Paul): `seed_committee` (§11.2) is retired —
+      the section is now `build_collection1`, §11.1 runs generate ->
+      label -> train -> refine on the universal foundation MLIP, and the
+      Collection 2 families are keyed on the press stage ledger (§9.3
+      StageLedger, DESIGN §4.8 part 5 / §5.5).
+- [ ] STRUCTURAL 1b DESIGN follow-ons: the amorphous-structure validation
+      metrics + thresholds (g(r) / ring / coordination vs DFT +
+      experiment), the Collection 1 composition, the bootstrap ALF
+      convergence threshold, the heal protocol, and the optional MLIP
+      melt-quench upgrade (`ARCHITECTURE.md` §2.3 MLIP + potential-gate
+      bullets). The "BKS vs Vashishta silica generator" question is
+      moot: the generator is the universal foundation MLIP (2026-08-21).
 - [ ] Cascade generator DESIGN follow-ons (`DESIGN.md` §4.7, written
       2026-07-18, scope (a)). **UNIVERSAL PATH BUILT 2026-08-08**: the
       universal foundation MLIP + ZBL is now the DEFAULT for every material
@@ -1073,13 +1129,32 @@ foundations, interaction rules. -->
       tolerances — the crystal lattice/density band and the probe
       single-impact stability criterion (§4.7 rungs 2-3); (4) native DP-ZBL
       as a later close-range refinement of the `hybrid/overlay` splice
-      (deepmd `dp_zbl_model`); (5) validate a non-silicon classical
-      candidate against the §3.5 gate before trusting it; (6) the Tier-3
-      DFT melt-quench last resort for a material with neither a trustworthy
-      universal model nor a classical form (lithium niobate may be the
-      first, given the Buckingham catastrophe, `PRIOR_ART.md` §1.9).
+      (deepmd `dp_zbl_model`). Items (5) "validate a non-silicon classical
+      candidate" and (6) "the DFT melt-quench last resort" are MOOT
+      (Paul, 2026-08-28): there are no fallbacks. DESIGN §4.7 was
+      rewritten 2026-08-28 as ONE universal generator, named by the
+      study file and checked against a supported-model TABLE in code
+      (one row today, DPA-3.1-3M). NEW CODE ITEM from that rewrite: the
+      validator (`spec/references.py`) still compares the study file's
+      `universal_model` against a single pinned name — replace that with
+      the table lookup so a second universal model is a new row, not a
+      resolver edit.
 - [ ] **Re-anneal + gate re-architecture (DECIDED 2026-08-08, Paul; flow
-      note "RESOLVED 2026-08-08").** The #8 combined-cell relax REPLACES the
+      note "RESOLVED 2026-08-08"). REVERSED 2026-08-28 (Paul): the heal
+      and the §3.5 gate move BACK into the activation stage, per half,
+      at the end of each cascade session (anneal then minimize under the
+      same universal model), and the gate halts BEFORE assembly. The
+      2026-08-08 placement existed only because the heal then ran under
+      a production potential whose engine lived in the bond job; one
+      universal model for cascade and heal dissolved that reason. The
+      wide assembly gap, the vacuum scissors, and the damped/capped
+      pre-relax scaffold go with it; `initial_gap` becomes the
+      press-start opening. The one-time LATERAL cell relax (§5.6) stays
+      in the bond flow (it needs the joint cell). Docs propagated
+      2026-08-28 (ARCH §2.1/§2.3/§4.1/§4.4, DESIGN §2.6/§3.4/§3.5/§5/
+      §10.2, PSEUDOCODE §1/§7.5/§9.1/§10.1/§10.5/§10.6); CODE to
+      follow. The text below is the 2026-08-08 record.** The #8
+      combined-cell relax REPLACES the
       per-slab re-anneal, and the §3.5 gate MOVES POST-ASSEMBLY. Cross-
       cutting, DESIGN-first: (1) `cascade.build_activate_script` +
       `activate_surface` drop the re-anneal AND the gate — BOTH the universal
@@ -1972,7 +2047,11 @@ foundations, interaction rules. -->
       the classical in-process path still wants it — call it from there
       and say so, since `driver/cascade.py:379` does still issue
       `reanneal_commands` on that path. Check which before removing.
-      Found 2026-08-25.
+      Found 2026-08-25. UPDATE 2026-08-28: with the heal back in the
+      activate stage (see the reversed re-arch item under DESIGN), the
+      activate script needs a heal block again — anneal then minimize
+      under the universal model, from the study's `[protocol.reanneal]`
+      schedule — so revive or rewrite that block rather than delete it.
 
 - [ ] **PROPAGATE UP THE CHAIN: two changes landed in CODE on 2026-07-22
       that the documents above do not yet describe.** Both are real
@@ -2073,51 +2152,56 @@ foundations, interaction rules. -->
       (`train_DEEPMD_ensemble_task`, `DEEPMD_ASE_load_ensemble`) plus the
       ANI-HDF5 -> DeePMD converter, round-trip unit-tested. It is NOT
       imported by `src/` (`src/sabsim/__init__.py` states this outright).
-      WHAT DOES NOT. Nothing trains a committee, loads one, or computes an
-      uncertainty. `resolve_potential` returns a classical stand-in
-      regardless of `potential_ref` (`skeleton_stages.py`); every dynamic
-      stage resolves a CLASSICAL model from the registry
-      (`cascade_potential.classical_force_model`); `deepmd_model`
-      (`commands.py`) is defined but called from nowhere; `uncertainty` is
-      hard-coded 0.0 and only ONE realization runs; no bootstrap driver
-      exists anywhere under `src/` or `jobs/`.
-      THE SEAMS, and what fills each today (committee = the trained DeePMD
-      ensemble; stand-in = a classical registry potential wearing the same
-      `ForceModel` / `Potential` seam, which is WHY the swap is deferrable):
+      WHAT DOES NOT (revised 2026-08-28). Nothing trains a committee,
+      loads one, or computes an uncertainty. Every dynamic stage runs
+      on the universal foundation MLIP named by the study file's
+      `[potential]` block (`deepmd_model` in `commands.py`, a committee
+      of ONE); `uncertainty` is hard-coded 0.0 and only ONE realization
+      runs; the bootstrap has `generate` / `label` / `harvest`
+      (`src/sabsim/bootstrap/`, LEDGER T-26 / T-27) but no `train`.
+      THE SEAMS, and what fills each today (committee = the trained
+      DeePMD ensemble; stand-in = the universal foundation MLIP wearing
+      the same `ForceModel` seam, which is WHY the swap is deferrable):
 
       | Stage (step)              | Design -> runs on     | Today -> runs on   |
       |---------------------------|-----------------------|--------------------|
-      | bootstrap loop (producer) | trains the committee  | NOT BUILT          |
-      | 2  resolve_potential      | trained committee     | classical stand-in |
-      | 4a cascade + ZBL          | classical (by design) | classical (correct)|
-      | 4b re-anneal              | committee             | classical registry |
-      | 6-7 press / settle / pull | committee             | classical registry |
+      | bootstrap loop (producer) | trains the committee  | gen/label/harvest  |
+      | 2  [potential] lookup     | trained committee     | foundation MLIP    |
+      | 4a cascade + ZBL          | foundation MLIP + ZBL | same (correct)     |
+      | 4b heal (in activate)     | foundation MLIP       | same (correct)     |
+      | 6-7 press / settle / pull | committee             | foundation MLIP    |
       | 8a analyzer (sigma)       | committee spread      | one run, sigma=0   |
       | 8b characterization       | all-electron vs cmte  | mocked             |
 
-      Only 4a is correct as-is: the violent cascade MUST stay classical +
-      ZBL (STRUCTURAL 1b), so the production MLIP is never trained on
-      cascade distortion or on Ar. Every other "committee" row runs real
-      MD on the WRONG potential today.
+      Rows 4a and 4b are correct as-is: the violent cascade AND the heal
+      stay on the foundation MLIP by design (STRUCTURAL 1b, §3.4, §4.7 —
+      revised 2026-08-28), so the production committee is never trained
+      on cascade distortion or on Ar, and the activated surfaces do not
+      depend on the committee. Every other "committee" row runs real MD
+      on a stand-in that carries no uncertainty.
       THREE COMMITTEE ROLES, all absent, all from one source (which is why
       its absence zeroes all three at once): (i) the production potential
-      for the gentle stages (4b, 6-7); (ii) the uncertainty SIGNAL —
+      for the gentle stages (6-7); (ii) the uncertainty SIGNAL —
       `MLMD_calculator` sigma_E / sigma_F feed 8a's reported uncertainty,
       STRUCTURAL 3's interface-fidelity gate, and the §7.3 live-abort
       monitor (`DESIGN.md` §4.4, §7); (iii) the active-learning DRIVER —
       the same sigma steers uncertainty-triggered + UDD-biased sampling in
       the bootstrap (`DESIGN.md` §4.4-§4.5).
-      INTEGRATION CHECKLIST (none started; the order is a DEPENDENCY chain,
-      since the lower items block on a committee existing at all):
-      - [ ] Stand up ONE bootstrap pass end to end (seed -> generate ->
+      INTEGRATION CHECKLIST (the order is a DEPENDENCY chain, since the
+      lower items block on a committee existing at all):
+      - [~] Stand up ONE bootstrap pass end to end (generate ->
             VASP-label -> train -> refine) emitting a fingerprinted
-            committee (`DESIGN.md` §4.5, `PSEUDOCODE.md` §11). Blocks the
-            rest; needs GPU + VASP + the producer-side validation above.
-      - [ ] Make `resolve_potential` a real LOOKUP returning that member's
-            committee, not the classical stand-in (`skeleton_stages.py`).
-      - [ ] Emit the committee `pair_style deepmd` line for the re-anneal
-            and the press/pull — wire `deepmd_model`, retire the stand-in
-            on those stages, and leave 4a classical (`commands.py`).
+            committee (`DESIGN.md` §4.5, `PSEUDOCODE.md` §11). generate
+            / label / harvest BUILT (2026-08-26, T-26 / T-27); `train`
+            and `refine` block the rest — they need the ALF bridge and a
+            dumped member run that reaches the pull (Collection 2).
+      - [ ] Make the `[potential]` lookup return that member's committee
+            (N weight files) instead of the single foundation-MLIP file
+            (`spec/loader.py`, `live_stages.py`).
+      - [ ] Emit the committee `pair_style deepmd` line (several models,
+            the spread as output) for the press/settle/pull
+            (`deepmd_model`, `commands.py`); leave the cascade and the
+            heal on the foundation MLIP.
       - [ ] Compute committee sigma along the trajectory and thread it into
             the measure vector, replacing the hard-coded `uncertainty=0.0`
             and lighting up the interface-fidelity gate (`live_stages.py`).
@@ -2501,6 +2585,13 @@ foundations, interaction rules. -->
       (anchored by the starting collection), NOT the generator — left
       as-is since the anchor role is unchanged; clarify only if it
       confuses a reader.
+      UPDATE 2026-08-28: the "classical + ZBL the fallback" wording that
+      the 2026-08-21 propagation left in place is now GONE from ARCH
+      §2.1/§2.3/§5, DESIGN §2.2/§2.6/§3.3/§3.6/§4.5/§4.7/§4.8/§5/§7.4 and
+      PSEUDOCODE §1/§10.2/§11/§12 (Paul: no fallbacks of any kind), and
+      §11.2's "seed committee" is retired in favour of
+      `build_collection1`. The CODE-side cosmetics (1), (2), (4), (5)
+      remain; (1) is overtaken by the heal returning to activate.
 - [ ] **Small code/doc drifts surfaced by the review (A.5,
       2026-08-21) — reconcile each toward the correct side.** (1)
       `loader.py` enforces only `len(pull_rate_ladder) >= 1`, but
