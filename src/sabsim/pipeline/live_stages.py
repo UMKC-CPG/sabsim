@@ -28,7 +28,7 @@ engine or spawn the bundle need a compute node.
 SIZING is carried by the study's ``[numerical]`` spec block, not pinned in
 this module. Slab thickness is the §2.5 CRITERION — enough undamaged
 crystal beneath the amorphized skin — enforced as a floor over the chosen
-``slab_thickness``, the build-time ``expected_activated_depth`` estimate,
+``slab_thickness``, the study's ``required_activated_depth``,
 and the ``minimum_bulk_thickness`` cushion (:func:`_effective_slab_thickness`).
 The lateral dose footprint (``target_footprint_area``), the ``slab_vacuum``,
 and the §2.2 ``bulk_cells_per_axis`` are likewise spec inputs. The template
@@ -123,7 +123,7 @@ _BOND_CUTOFF = 2.8   # Å: Si first-g(r)-minimum stand-in (§6.3, TODO)
 # Slab SIZING now lives in the spec's [numerical] block, no longer pinned
 # here (§2.5, §3.6). Four inputs shape each half: the total
 # ``slab_thickness`` (the §3.6 convergence value), the build-time
-# ``expected_activated_depth`` estimate and the ``minimum_bulk_thickness``
+# ``required_activated_depth`` and the ``minimum_bulk_thickness``
 # cushion that together form the §2.5 thickness FLOOR
 # (:func:`_effective_slab_thickness`), the ``slab_vacuum`` above the face
 # for the beam spawn, and the §2.2 ``bulk_cells_per_axis`` relax-block
@@ -294,15 +294,17 @@ def derive_lattices_live(
     return DerivedLattices(cells=cells, provenance="; ".join(provenance))
 
 
-def _effective_slab_thickness(numerical) -> float:
+def _effective_slab_thickness(member) -> float:
     """The §2.5 thickness FLOOR: enough bulk beneath the damaged skin.
 
     A cut slab must keep enough undamaged crystal under the amorphized skin
     to behave like a real substrate, which §2.5 states as the criterion
-    ``thickness >= expected_activated_depth + minimum_bulk_thickness``. The
-    skin depth is only MEASURED after bombardment (§3.5), but the slab is
-    cut before that, so ``expected_activated_depth`` is the build-time
-    estimate (the §3.6 operating depth).
+    ``thickness >= required_activated_depth + minimum_bulk_thickness``.
+    The skin depth is only MEASURED after bombardment (§3.5), but the slab
+    is cut before that, so the depth term is the depth the study REQUIRES
+    the activation to reach (``[protocol.activation]
+    required_activated_depth``, the same number the §3.5 gate demands;
+    revised 2026-08-28).
 
     v1 does NOT derive the thickness from that sum — it FIXES the thickness
     by the §3.6 convergence study (``slab_thickness``, the measurement-
@@ -313,10 +315,10 @@ def _effective_slab_thickness(numerical) -> float:
     the chosen thickness allows automatically gets a thicker slab. The
     caller records the resulting margin (:func:`build_halves`).
     """
-    chosen = to_metal(numerical.slab_thickness, "distance")
+    chosen = to_metal(member.numerical.slab_thickness, "distance")
     required = (
-        to_metal(numerical.expected_activated_depth, "distance")
-        + to_metal(numerical.minimum_bulk_thickness, "distance"))
+        to_metal(member.protocol.required_activated_depth, "distance")
+        + to_metal(member.numerical.minimum_bulk_thickness, "distance"))
     return max(chosen, required)
 
 
@@ -377,7 +379,7 @@ def _standalone_half(
     return build_standalone_half(
         crystal, wafer.surface_face, wafer.identity,
         declared_species,
-        min_slab_thickness=_effective_slab_thickness(member.numerical),
+        min_slab_thickness=_effective_slab_thickness(member),
         min_vacuum=to_metal(member.numerical.slab_vacuum, "distance"),
         lateral_repeat=lateral_repeat,
         matched_cell=matched_cell, shared_cell=shared_cell)
@@ -488,9 +490,9 @@ def build_halves(
         comm)
     # Record the §2.5 thickness margin actually achieved: how much undamaged
     # crystal sits beneath the estimated skin, above the required cushion.
-    thickness = _effective_slab_thickness(member.numerical)
+    thickness = _effective_slab_thickness(member)
     required = (
-        to_metal(member.numerical.expected_activated_depth, "distance")
+        to_metal(member.protocol.required_activated_depth, "distance")
         + to_metal(member.numerical.minimum_bulk_thickness, "distance"))
     shared = SharedCell(
         note=(f"{half_a.identity}/{half_b.identity} coincidence match "
@@ -666,7 +668,8 @@ def activate_one_half(
     species = frozenset(handle.type_map) - _projectile_species(member)
     verdict = activation_gate(
         positions, np.asarray(cell, dtype=float),
-        load_activation_references(species))
+        load_activation_references(species),
+        to_metal(member.protocol.required_activated_depth, "distance"))
     amorphized_atoms = amorphized_half_from_arrays(
         positions, type_ids, cell, handle.type_map, handle.wafer_tag)
     amorphized_file = os.path.join(

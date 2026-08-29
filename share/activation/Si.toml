@@ -30,20 +30,3 @@ defect_fraction_max = 0.60
 # Five- and seven-membered rings appear in the amorphous network; require
 # a meaningful non-six-ring share in the skin.
 non_six_fraction_min = 0.15
-
-[depth]
-# The amorphized skin must reach at least this deep. UNLIKE every other
-# number in this file, this one is NOT a literature stand-in: it was
-# MEASURED by this pipeline. A 20-point energy x dose sweep (2026-07-21,
-# 4400-atom slab 38.4 A wide x 55 A thick, 40-75 eV x 0.010-0.030
-# ions/A^2) found the skin spans only 3.95-10.26 A and SATURATES in both
-# knobs, with zero sputtering everywhere; the old 20 A value (from the
-# ~2-3 nm target) is unreachable at any energy this cell tolerates,
-# because the energies that would reach it over-sputter the slab. 7 A
-# sits mid-window and comfortably above the ~5 A floor below which the
-# skin degrades into a rough crystalline surface — mechanical interlock,
-# a different regime from the SAB one modelled here. See DESIGN §3.6.
-# STILL AN OPERATING THRESHOLD, NOT A PHYSICS-DERIVED ONE: the work-of-
-# separation convergence study (dev/TODO.md skin-thickness item) is what
-# replaces it with the thinnest skin that still gives the converged bond.
-target_angstrom = 7.0

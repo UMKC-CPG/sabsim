@@ -38,10 +38,3 @@ defect_fraction_max = 0.60
 # (Si-O)_n rings with a spread of 4-8; require a meaningful non-six-ring
 # share in the amorphized skin.
 non_six_fraction_min = 0.15
-
-[depth]
-# The amorphized skin must reach at least this deep. A STAND-IN for silica
-# (unlike Si's 7 A, which was measured by this pipeline's own sweep): the
-# silica energy x dose sweep is a DESIGN §3.6 follow-on, so silicon's
-# measured operating point is reused as the starting guess until it runs.
-target_angstrom = 7.0

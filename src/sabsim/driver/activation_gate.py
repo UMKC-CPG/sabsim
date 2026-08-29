@@ -116,7 +116,6 @@ class ActivationReferences:
     gr: dict | None
     coordination: dict | None
     rings: dict | None
-    depth: dict | None
     source: str
 
 
@@ -162,11 +161,10 @@ def load_activation_references(species) -> ActivationReferences:
                 gr=data.get("gr"),
                 coordination=data.get("coordination"),
                 rings=data.get("rings"),
-                depth=data.get("depth"),
                 source=str(candidate))
     return ActivationReferences(
         real=False, bond_cutoff=None, gr=None, coordination=None,
-        rings=None, depth=None, source=f"MISSING ({key})")
+        rings=None, source=f"MISSING ({key})")
 
 
 # ---------------------------------------------------------------------
@@ -372,6 +370,11 @@ class GateContext:
     reference_coordination: int
     is_defect: np.ndarray
     near_surface: np.ndarray              # boolean mask of the skin atoms
+    # How deep the study REQUIRES the activated skin to reach (Å): the
+    # depth metric's threshold, from the study file's [protocol.activation]
+    # required_activated_depth — not from the material reference (DESIGN
+    # §3.5, revised 2026-08-28).
+    required_depth: float
 
 
 def _reference_coordination(
@@ -484,12 +487,11 @@ class AmorphizationDepthMetric:
     def evaluate(self, context: GateContext,
                  references: ActivationReferences,
                  control: GateControl) -> MetricVerdict:
-        if references.depth is None:
-            return _unresolved(self.name)
         depth = self._depth(context, control)
-        target = float(references.depth["target_angstrom"])
+        target = float(context.required_depth)
         return MetricVerdict(
-            name=self.name, measured=depth, reference=references.source,
+            name=self.name, measured=depth,
+            reference="study: required_activated_depth",
             threshold=target, passed=depth >= target)
 
     def _depth(self, context: GateContext, control: GateControl) -> float:
@@ -573,14 +575,20 @@ def activation_gate(
         positions: np.ndarray,
         cell: np.ndarray,
         references: ActivationReferences,
+        required_depth: float,
         control: GateControl = GateControl()) -> ActivationVerdict:
-    """Judge a re-annealed slab with every registered metric (§10.6).
+    """Judge a healed slab with every registered metric (§10.6).
 
     Builds the shared context (coordination, crystalline self-reference,
-    skin mask), runs each metric, and passes iff EVERY metric passes,
-    naming the first failure. The depth metric supplies ``activated_depth``.
-    With no reference at all (a missing file), every metric is UNRESOLVED
-    and the gate fails — a stand-in is never silently defaulted.
+    skin mask, the study's depth requirement), runs each metric, and
+    passes iff EVERY metric passes, naming the first failure. The depth
+    metric supplies ``activated_depth`` and judges it against
+    ``required_depth`` — the study file's ``[protocol.activation]
+    required_activated_depth`` in Å, the one threshold that is a study
+    choice rather than a material reference (DESIGN §3.5, revised
+    2026-08-28). With no reference at all (a missing file), every
+    material metric is UNRESOLVED and the gate fails — a stand-in is
+    never silently defaulted.
     """
     positions = np.asarray(positions, float)
     if positions.shape[0] == 0:
@@ -603,7 +611,8 @@ def activation_gate(
         reference_coordination=reference_coordination,
         is_defect=coordination != reference_coordination,
         near_surface=positions[:, 2] > surface_high
-        - control.near_surface_window)
+        - control.near_surface_window,
+        required_depth=float(required_depth))
 
     per_metric = {}
     for metric in ACTIVATION_METRICS:

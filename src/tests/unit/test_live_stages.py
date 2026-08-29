@@ -204,15 +204,16 @@ def test_footprint_repeat_sizes_the_dose_and_floors_at_one():
 
 def test_effective_slab_thickness_is_a_floor_over_the_criterion():
     """Thickness holds the chosen value but never dips below §2.5's sum."""
-    numerical = _si_si_member().numerical
+    member = _si_si_member()
     # Silicon default: 55 chosen vs 7 + 30 = 37 required, so 55 wins and the
     # §3.6-anchored cell is preserved.
-    assert _effective_slab_thickness(numerical) == pytest.approx(55.0)
-    # A material whose estimated skin is deep enough forces a thicker slab:
-    # 60 + 30 = 90 now exceeds the chosen 55, so the criterion lifts it.
-    deep = replace(
-        numerical,
-        expected_activated_depth=Quantity(value=60.0, unit="angstrom"))
+    assert _effective_slab_thickness(member) == pytest.approx(55.0)
+    # A study that REQUIRES a deeper skin forces a thicker slab: 60 + 30 =
+    # 90 now exceeds the chosen 55, so the criterion lifts it (the depth
+    # term is the study's required_activated_depth, DESIGN §2.5/§3.5).
+    deep = replace(member, protocol=replace(
+        member.protocol,
+        required_activated_depth=Quantity(value=60.0, unit="angstrom")))
     assert _effective_slab_thickness(deep) == pytest.approx(90.0)
 
 

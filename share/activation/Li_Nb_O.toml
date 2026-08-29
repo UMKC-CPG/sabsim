@@ -39,10 +39,3 @@ defect_fraction_max = 0.60
 # a meaningful non-six-ring share in the amorphized skin. A stand-in until
 # the ring statistics of the ionic network are characterised.
 non_six_fraction_min = 0.15
-
-[depth]
-# The amorphized skin must reach at least this deep. A STAND-IN: the
-# LiNbO3 energy x dose sweep is a DESIGN §3.6 follow-on (the material
-# amorphizes at lower beam energy than silicon), so silicon's measured
-# operating point is reused as the starting guess until it runs.
-target_angstrom = 7.0

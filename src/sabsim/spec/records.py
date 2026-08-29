@@ -112,6 +112,11 @@ class ProtocolKnobs:
     activation_energy: Quantity      # impact energy, e.g. 500 eV
     activation_angle: Quantity       # incidence from the surface normal
     activation_fluence: Quantity     # the dose knob (DESIGN.md §3.6)
+    # How deep the activated skin MUST reach: the §3.5 gate's depth
+    # threshold and the depth the §2.5 thickness floor builds for — a
+    # study choice tied to the dose above, not a material property
+    # (DESIGN.md §3.5, revised 2026-08-28).
+    required_activated_depth: Quantity
     cascade_duration: Quantity       # NVE cascade time per impact (§3.3)
     between_impact_relaxation: Quantity   # border-cool between impacts
     reanneal_schedule: AnnealSchedule     # the post-cascade re-anneal
@@ -155,7 +160,6 @@ class NumericalKnobs:
     target_footprint_area: Quantity  # in-plane dose-spreading area (§3.6)
     minimum_bulk_thickness: Quantity  # undamaged-crystal cushion (§2.5)
     slab_thickness: Quantity         # chosen total slab thickness (§2.5)
-    expected_activated_depth: Quantity  # build-time skin-depth est. (§2.5)
     slab_vacuum: Quantity            # vacuum above the face for the beam
     bulk_cells_per_axis: int         # §2.2 bulk-relax block, per axis
     clash_floor: Quantity            # minimum cross-slab distance (§2.6)

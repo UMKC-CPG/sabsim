@@ -1605,9 +1605,12 @@ foundations, interaction rules. -->
       skin thicknesses (thinned by LOWERING THE DOSE, more than the energy),
       run the full press/pull, and plot W_sep vs skin thickness; the
       plateau's THINNEST skin is the operating point. This lands the §3.5
-      gate depth threshold on PHYSICS — retiring the 20 Å `share/activation/
-      Si.toml` stand-in (the sweep's tiny 11 Å skin already passed 3/4
-      metrics, failing only that threshold) — and is the cheapest cell that
+      gate depth threshold on PHYSICS — replacing the study file's
+      `[protocol.activation] required_activated_depth` (7 Å in the
+      production template; moved there from the `share/activation/`
+      reference on 2026-08-28, Paul: a study's depth requirement is a
+      study choice, not a material fact — LEDGER T-33 halted a 50 eV
+      demo on the production value) — and is the cheapest cell that
       still gives the converged bond (the §3.6 three-way slab<->energy<->DFT
       accommodation). Enabled by the end-to-end press/pull; the natural
       companion to the energy sweep is a DOSE sweep measuring W_sep. Ties

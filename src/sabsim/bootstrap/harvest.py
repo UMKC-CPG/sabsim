@@ -159,7 +159,7 @@ def harvest_collection2(recipe: ForceModelRecipe) -> list:
         member.material.wafer_a.cif_source)).lattice.a)
     edge = float(np.linalg.norm(np.asarray(built.atoms.get_cell())[0]))
     lattice_constant = edge / max(1.0, round(edge / published))
-    skin_depth = to_metal(member.numerical.expected_activated_depth,
+    skin_depth = to_metal(member.protocol.required_activated_depth,
                           "distance")
     layer = atomic_layer_spacing(
         lattice_constant, member.material.wafer_a.surface_face)

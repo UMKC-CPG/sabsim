@@ -51,15 +51,19 @@ def _scramble_top(points, skin=6.0, magnitude=1.2, seed=0):
     return scrambled
 
 
-def _lenient_references(depth_target=0.0, first_peak=2.5):
-    """References whose thresholds a crafted amorphized slab clears."""
+def _lenient_references(first_peak=2.5):
+    """Material references whose bands a crafted amorphized slab clears.
+
+    The depth REQUIREMENT is not here: it is the study's own knob
+    (``required_activated_depth``), passed to the gate directly (DESIGN
+    §3.5, revised 2026-08-28).
+    """
     return ActivationReferences(
         real=False, bond_cutoff=2.9,
         gr={"first_peak": first_peak, "first_peak_tolerance": 0.5},
         coordination={"defect_fraction_min": 0.0,
                       "defect_fraction_max": 1.0},
         rings={"non_six_fraction_min": 0.0},
-        depth={"target_angstrom": depth_target},
         source="test-lenient")
 
 
@@ -73,7 +77,7 @@ def test_resolver_reads_the_silicon_standin():
     assert references.real is False                  # v1 stand-in, flagged
     assert references.bond_cutoff == pytest.approx(2.9)
     assert references.gr and references.coordination
-    assert references.rings and references.depth
+    assert references.rings
 
 
 def test_missing_reference_is_all_none():
@@ -134,7 +138,7 @@ def test_gate_fails_with_no_reference():
     """No reference file => the gate cannot judge and does not pass."""
     points, cell = _crystal_slab()
     missing = load_activation_references({"Xx"})
-    verdict = activation_gate(points, cell, missing)
+    verdict = activation_gate(points, cell, missing, required_depth=0.0)
     assert isinstance(verdict, ActivationVerdict)
     assert not verdict.passed
     assert "no activation reference" in verdict.reason
@@ -144,7 +148,8 @@ def test_gate_passes_when_every_metric_passes():
     """A crafted amorphized slab clears lenient references on all metrics."""
     points, cell = _crystal_slab()
     scrambled = _scramble_top(points)
-    verdict = activation_gate(scrambled, cell, _lenient_references())
+    verdict = activation_gate(
+        scrambled, cell, _lenient_references(), required_depth=0.0)
     assert verdict.passed
     assert verdict.activated_depth > 0.0
     assert set(verdict.per_metric) == {
@@ -156,10 +161,12 @@ def test_gate_fails_and_names_the_failing_metric():
     """An unreachable depth target fails the gate, and the reason says so."""
     points, cell = _crystal_slab()
     scrambled = _scramble_top(points)
-    references = _lenient_references(depth_target=1000.0)   # unreachable
-    verdict = activation_gate(scrambled, cell, references)
+    verdict = activation_gate(
+        scrambled, cell, _lenient_references(),
+        required_depth=1000.0)                                # unreachable
     assert not verdict.passed
     assert verdict.reason.startswith("amorphization_depth")
+    assert "required_activated_depth" in verdict.reason
 
 
 def test_unresolved_metric_never_passes():
@@ -170,9 +177,8 @@ def test_unresolved_metric_never_passes():
         real=False, bond_cutoff=2.9,
         gr={"first_peak": 2.5, "first_peak_tolerance": 0.5},
         coordination=None,                          # missing on purpose
-        rings={"non_six_fraction_min": 0.0},
-        depth={"target_angstrom": 0.0}, source="test-partial")
-    verdict = activation_gate(scrambled, cell, references)
+        rings={"non_six_fraction_min": 0.0}, source="test-partial")
+    verdict = activation_gate(scrambled, cell, references, required_depth=0.0)
     assert not verdict.passed
     assert verdict.per_metric["coordination"].reference == "UNRESOLVED"
 
@@ -196,9 +202,9 @@ def test_one_stray_atom_above_the_surface_cannot_zero_the_depth():
     """
     points, cell = _crystal_slab(n_layers=12)
     scrambled = _scramble_top(points, skin=6.0, seed=3)
-    references = _lenient_references(depth_target=0.0)
+    references = _lenient_references()
 
-    honest = activation_gate(scrambled, cell, references)
+    honest = activation_gate(scrambled, cell, references, required_depth=0.0)
     assert honest.activated_depth > 0.0, "the crafted skin must register"
 
     # One atom, placed well above the surface in a bin of its own, and
@@ -206,7 +212,7 @@ def test_one_stray_atom_above_the_surface_cannot_zero_the_depth():
     surface = scrambled[:, 2].max()
     speck = np.vstack([scrambled, [[0.0, 0.0, surface + 3.0]]])
 
-    with_speck = activation_gate(speck, cell, references)
+    with_speck = activation_gate(speck, cell, references, required_depth=0.0)
     assert with_speck.activated_depth == pytest.approx(
         honest.activated_depth, abs=1e-9), (
         "a single hovering atom changed the measured skin depth from "
@@ -223,7 +229,8 @@ def test_a_populated_bin_at_baseline_still_stops_the_walk():
     """
     points, cell = _crystal_slab(n_layers=12)
     scrambled = _scramble_top(points, skin=6.0, seed=3)
-    verdict = activation_gate(scrambled, cell, _lenient_references())
+    verdict = activation_gate(
+        scrambled, cell, _lenient_references(), required_depth=0.0)
 
     slab_thickness = float(points[:, 2].max() - points[:, 2].min())
     assert verdict.activated_depth < slab_thickness, (

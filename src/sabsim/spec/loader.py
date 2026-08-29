@@ -191,6 +191,8 @@ def _protocol_from_tables(protocol: dict, context: str) -> ProtocolKnobs:
         activation_angle=_require_quantity(activation, "angle", act_ctx),
         activation_fluence=_require_quantity(
             activation, "fluence", act_ctx),
+        required_activated_depth=_require_quantity(
+            activation, "required_activated_depth", act_ctx),
         cascade_duration=_require_quantity(
             activation, "cascade_duration", act_ctx),
         between_impact_relaxation=_require_quantity(
@@ -249,8 +251,6 @@ def _numerical_from_table(table: dict, context: str) -> NumericalKnobs:
             table, "minimum_bulk_thickness", context),
         slab_thickness=_require_quantity(
             table, "slab_thickness", context),
-        expected_activated_depth=_require_quantity(
-            table, "expected_activated_depth", context),
         slab_vacuum=_require_quantity(table, "slab_vacuum", context),
         bulk_cells_per_axis=int(_require(
             table, "bulk_cells_per_axis", context)),
