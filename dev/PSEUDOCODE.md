@@ -488,11 +488,15 @@ function load_and_validate_study(study_specification):
         reject_if_not_executable(member)
 
         # The environment library the §10.6 gate judges against is a
-        # run-time input like the weights, so its checks are phase-2
-        # too (DESIGN §3.5/§4.8, 2026-08-29): the same refusals and the
+        # run-time input like the weights, and its checks must OPEN the
+        # library file to compare model, engine, faces and temperature —
+        # so they belong to phase THREE, the "do the referenced files
+        # exist and make sense" phase that also opens the weights and
+        # crystal files (DESIGN §1.5; revised 2026-08-29 (Paul) from an
+        # earlier phase-2 placement). check_environment_library(member)
+        # runs there, on the login node, with the same refusals and the
         # temperature warn/refuse band as load_environment_library
-        # (§10.6), run here so a mismatch costs no node-hour.
-        check_environment_library(member)      # §10.6, same rules
+        # (§10.6), so a mismatch costs no node-hour.
 
     for each relation in study.relations:
         # REPORT, NEVER RESTRICT (DESIGN §1.1). A relation whose controls

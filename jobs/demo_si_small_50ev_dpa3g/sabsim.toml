@@ -215,7 +215,7 @@ angle  = { value = 0.0,   unit = "deg" }      # from the surface normal
 # costing ~20% more impacts, and each impact is ~10 s of wall clock.
 fluence = { value = 0.025, unit = "ions/angstrom^2" }
 required_activated_depth = { value = 4.0, unit = "angstrom" }  # DEMO-g (T-33)
-environment_library = "$SABSIM_SHARE/share/environment_libraries/silicon"
+environment_library = "$SABSIM_SHARE/share/environment_libraries/silicon/environment_library.toml"
 # Per-impact cascade timing lives in PROTOCOL, not numerical (§2): these
 # are physical durations of the amorphization process. PINNED at 0.5 ps
 # each from the sweep, which produced 20 clean activation points on them.

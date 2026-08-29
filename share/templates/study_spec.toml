@@ -235,7 +235,7 @@ required_activated_depth = { value = 7.0, unit = "angstrom" }
 # library built under another model or engine, or lacking a wafer's
 # face, and warns/refuses if the press temperature is above the warm
 # runs it was measured at (by more than 20 %, refuses).
-environment_library = "$SABSIM_SHARE/share/environment_libraries/silicon"
+environment_library = "$SABSIM_SHARE/share/environment_libraries/silicon/environment_library.toml"
 # Per-impact cascade timing lives in PROTOCOL, not numerical (§2): these
 # are physical durations of the amorphization process. PINNED at 0.5 ps
 # each from the sweep, which produced 20 clean activation points on them.

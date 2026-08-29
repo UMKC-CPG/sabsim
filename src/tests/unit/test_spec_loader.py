@@ -91,7 +91,7 @@ def test_environment_library_and_gate_knobs_are_parsed():
     member = study.members[0]
     assert "$" not in member.protocol.environment_library
     assert member.protocol.environment_library.endswith(
-        "environment_libraries/silicon")
+        "environment_libraries/silicon/environment_library.toml")
     assert member.numerical.depth_bin_width.value == pytest.approx(2.0)
     assert member.numerical.depth_bin_width.unit == "angstrom"
     assert member.numerical.disorder_scatter_multiple == pytest.approx(3.0)
