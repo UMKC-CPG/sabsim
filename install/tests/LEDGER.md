@@ -1348,3 +1348,64 @@ activation session, no wide gap, no scissors, no capped relax. Harness:
   an activation that PASSES the gate: either the production dose (the
   120 eV C study, ~10 h activate) or a demo whose gate reference is
   set for a demo dose (Paul's call).
+
+## T-34 — jobs 16844991 (activate, HALTED) + 16844992/3 (cancelled) — 2026-08-28
+
+*(The T-33 demo re-run with the depth requirement as a study knob,
+`[protocol.activation] required_activated_depth = 4.0`, in a fresh
+job folder. Harness: `install/tests/t34_depth_knob_demo/` = the
+`sabsim prepare` scripts of `jobs/demo_si_small_50ev_dpa3g/`,
+submitted as a dependency chain. Code = commit 6992563 (knob) on
+`universal-mlip-cascade`, deployment rc = the template.)*
+
+- **As-run:** `sbatch si-si-reference_activate.slurm` → bond
+  (`--dependency=afterok`) → analyze, on g029 (H100, 1 rank). Study =
+  `jobs/demo_si_small_50ev_dpa3g/sabsim.toml` (252 Si atoms per half,
+  50 eV, required depth 4.0 Å). Trajectory dumps on for both halves
+  (`intermediate/.../si-si-reference_activate_{a,b}.dump`).
+- **Activate 16844991 — FAILED after 45:13.** Both halves ran the
+  full cascade → strip → heal → dump session. The gate's verdicts,
+  now printed BEFORE the contract judges them (the T-33 fix):
+
+  ```
+  surface A: gate PASSED, activated depth 6.0 A
+    radial_distribution    measured=2.375 threshold=0.3 ok
+    coordination           measured=0.121 threshold=(0.05, 0.6) ok
+    ring_statistics        measured=0.458 threshold=0.15 ok
+    amorphization_depth    measured=6.0 threshold=4.0 ok
+  surface B: gate FAILED, activated depth 0.0 A
+    radial_distribution    measured=2.375 threshold=0.3 ok
+    coordination           measured=0.085 threshold=(0.05, 0.6) ok
+    ring_statistics        measured=0.644 threshold=0.15 ok
+    amorphization_depth    measured=0.0 threshold=4.0 FAIL
+  sabsim: run halted — contract 'ACTIVATED_SLABS_CONTRACT' not met:
+  surface B failed the §3.5 activation gate: amorphization_depth:
+  measured 0.0 vs 4.0 (study: required_activated_depth)
+  ```
+
+- **Half A is the FIRST gate pass of the heal-in-activation flow**
+  (all four metrics, 6 Å healed skin at 50 eV).
+- **Half B's 0.0 Å is a DEFECT OF THE DEPTH METRIC, not of the
+  surface.** Its coordination (0.085) and ring (0.644) metrics show a
+  disordered skin. The defect-fraction-versus-depth profile,
+  recomputed on the login node from `amorphized_b.extxyz` (2 Å bins,
+  defect = not four-coordinated): top two bins 4 atoms each at 0.50
+  (skipped by the fixed `min_bin_atoms = 10`), then 0.14, 0.06, 0.00
+  … crystal … and the FROZEN BOTTOM bin at 0.50. The "bulk baseline"
+  was the mean of the deep third INCLUDING that bottom face
+  (0.125) + 0.05 = 0.175, so the first judged bin (0.14) read as
+  "already crystalline" and the top-contiguous walk stopped at once.
+  Three findings: (1) the baseline is polluted by the frozen bottom
+  face; (2) the walk stops at the first crystalline-looking layer —
+  prior art's 0 Å bug under another name, against DESIGN §3.5's
+  whole-profile rule; (3) the sparse-bin cut-off and bin width are
+  fixed numbers in `GateControl`, not study knobs, and 10 atoms is
+  wrong for a 252-atom demo (9-atom crystalline bins are "sparse").
+- **Decision (Paul, 2026-08-29):** the metric's coordination-number
+  basis is itself the problem (it cannot serve LiNbO3), so it is
+  re-based on a bispectrum ENVIRONMENT LIBRARY built from the
+  bootstrap's Collection 1 — DESIGN §3.5 and §4.8 revised in the
+  commit after this entry; PSEUDOCODE and code follow.
+- **Scope NOT covered:** the bond flow with the StageLedger and the
+  statistical settle gate (16844992/3 cancelled after the halt); a
+  gate pass on BOTH halves.

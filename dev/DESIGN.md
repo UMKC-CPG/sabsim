@@ -1145,6 +1145,63 @@ this module, by the sequencer's realization ensemble (`PSEUDOCODE.md` §10.8,
 STRUCTURAL 4), exactly as the bond metric's spread is. So a metric verdict is
 one measurement against one threshold, not an averaged distribution.
 
+**What "crystalline" means here (revised 2026-08-29, Paul).** Until
+this revision every metric below rested on a hand-set neighbour count:
+an atom was "defective" if it did not have exactly the reference
+coordination (four, for silicon) inside a hand-set bond cutoff. That is
+a silicon-shaped definition. For lithium niobate there is no single
+right neighbour count — lithium sits in a cage of six oxygens, niobium
+in an octahedron of six, each oxygen has two niobium and two lithium
+neighbours at different distances — so the "ideal" number depends on
+which species pair is counted and on exactly where the cutoff is
+drawn, and a slightly-too-long cutoff quietly changes the answer.
+SABSIM therefore defines crystallinity WITHOUT a coordination number:
+
+- Every atom's neighbourhood is described by its **bispectrum
+  components** at a SHORT cutoff — the first neighbour shell — a set of
+  numbers that captures the distances AND the angles of the neighbours
+  and does not change when the neighbourhood is rotated, shifted, or
+  two atoms of the same species are swapped. (The same descriptor a
+  SNAP potential is built on; the engine that computes it is a
+  pluggable seam, §4.8 part 2, and the SAME engine with the SAME
+  settings must be used on both sides of the comparison below.)
+- The **environment library** is the set of those descriptors for every
+  atom of every species in the material's UNDAMAGED states — the cold
+  bulk crystal, the warm bulk crystal, and the clean unbombarded
+  surface — computed under the same universal model the slab was built
+  with. It is a product of the bootstrap's Collection 1 (§4.8 part 2),
+  not a hand-written reference: it exists before the first gate ever
+  runs, and a production study names the library its material was
+  bootstrapped with (`[protocol.activation] environment_library`; the
+  loader refuses a library whose recorded model is not the study's
+  `[potential] universal_model`).
+- An atom in the healed slab is **crystalline** if the library holds an
+  environment of its species within the library's own THERMAL SCATTER
+  of it — "does this neighbourhood exist anywhere in the undamaged
+  material?" — and **disordered** otherwise. The tolerance is a
+  measured quantity: the scatter of the warm-run environments about
+  their cold counterparts, multiplied by the numerical knob
+  `disorder_scatter_multiple` of the study file (§1.2's test: refine it
+  and the depth must converge, so it is numerical, not protocol).
+
+Asking "does this environment exist in the undamaged material" rather
+than "is this what THIS atom used to have" is deliberate: the cascade
+moves atoms, and an atom knocked from the top that the heal re-settles
+onto a good lattice site deeper down IS crystalline now; the frozen
+bottom face and a clean top face are in the library through the
+surface family and need no special case; and a multi-site crystal is
+judged site by site with nothing declared by hand. Angles count too, so
+a silicon atom that keeps four neighbours with badly bent bonds — real
+amorphous silicon — is caught, which a neighbour count misses.
+
+The library carries its own **self-check**, run when it is built: the
+bootstrap's melt-quench amorphous family (§4.8 family 3) is what genuine
+disorder looks like under this model, so a sound tolerance must call
+nearly every warm-run atom crystalline and nearly every melt-quench atom
+disordered. The two fractions are recorded in the library; a tolerance
+that cannot separate them is reported at bootstrap time, not discovered
+later as a misjudged slab.
+
 The registered metrics, each with what it actually discriminates:
 
 - **g(r) and partial g_AB(r).** The radial pair-correlation function,
@@ -1160,9 +1217,10 @@ The registered metrics, each with what it actually discriminates:
   the crystal, broadened and merged in the amorphous network — and the
   depth of the first minimum. Compared against a reference amorphous g(r).
 
-- **Coordination-number distribution and per-species defect fraction.**
-  The subtlety here is why the MEAN coordination is the wrong number:
-  amorphous silicon is a continuous random network that stays very nearly
+- **Coordination-number distribution and per-species defect fraction
+  (v1, to be re-based on the disorder score above).** The subtlety
+  here is why the MEAN coordination is the wrong number: amorphous
+  silicon is a continuous random network that stays very nearly
   four-fold, so the average barely moves from the crystal. The signal is
   in the **distribution** — its width, and the fraction of atoms that are
   three- or five-coordinated "defects" — measured per species and compared
@@ -1171,7 +1229,8 @@ The registered metrics, each with what it actually discriminates:
   stand-in, which leaned on the mean, and over prior art, which hardcoded
   the species.
 
-- **Ring statistics.** The network-topology check that is absent from
+- **Ring statistics (v1, silicon-shaped; a follow-on re-bases it).**
+  The network-topology check that is absent from
   prior art, and the one metric that separates a *true amorphous network*
   from a *merely defective crystal*: crystalline silicon is a network of
   six-membered rings, while the amorphous network carries five- and
@@ -1186,26 +1245,48 @@ The registered metrics, each with what it actually discriminates:
   be evaluated for narrowness before adoption (the standing rule) and drops
   in behind this backend seam without disturbing the other metrics.
 
-- **A robust amorphization-depth profile.** Disorder as a function of
-  depth — the coordination-defect fraction (or any registered metric)
-  binned by z — measured as the depth from the free surface at which the
-  disorder **returns to the bulk baseline.** Using the whole profile with
-  a return-to-baseline criterion replaces both prior art's top-down scan
-  that stops at the first crystalline-looking layer (its 0 Å bug) and the
-  Phase-1 stand-in's top-contiguous scan. This metric supplies the
-  MEASURED `activated_depth` that the structure builder's thickness
-  criterion (§2.5) only estimated a-priori, closing that loop, and that
-  labels the activated skin (`PSEUDOCODE.md` §10.7).
+- **A robust amorphization-depth profile (revised 2026-08-29, Paul).**
+  The fraction of DISORDERED atoms (the library definition above) in
+  each horizontal layer of thickness `depth_bin_width` (a numerical knob
+  of the study file), from the free surface down. The depth is the
+  distance from the free surface to the LOWER edge of the deepest layer
+  whose disordered fraction still exceeds the **baseline**, scanning the
+  WHOLE profile — not stopping at the first crystalline-looking layer,
+  which was prior art's 0 Å bug, and not the Phase-1 stand-in's
+  top-contiguous walk, which is that bug under another name (LEDGER
+  T-34's half B: 0.0 Å reported beneath a visibly disordered skin).
+  The baseline is NOT measured on the damaged slab: it is the library's
+  own false-alarm rate, the fraction of warm-run atoms the tolerance
+  calls disordered, recorded by the self-check. (The earlier design
+  took the baseline from the "deep third" of the slab being judged, and
+  the first real run showed why that fails: the deep third contained
+  the slab's frozen bottom face, whose atoms are under-coordinated by
+  construction, and the polluted baseline swallowed the real skin.)
+  Every layer is judged; there is no sparse-layer cut-off, because the
+  disorder score is per atom and a layer of four atoms is four
+  verdicts, not noise. This metric supplies the MEASURED
+  `activated_depth` that the structure builder's thickness criterion
+  (§2.5) only estimated a-priori, closing that loop, and that labels
+  the activated skin (`PSEUDOCODE.md` §10.7).
 
-**Where the references and thresholds live (revised 2026-08-28,
-Paul).** Two kinds of number are told apart. The MATERIAL references —
-what an amorphous network of this material looks like: the first g(r)
-peak, the coordination-defect band, the ring population, the bond
-cutoff — are properties of the material, not choices of the experiment,
-so they live in an **easily-locatable, version-controlled `share/`
-directory** in the repository (`share/activation/<species>.toml`, the
-discoverable-reference-data convention Imago uses), auditable and
-travelling with the code. The DEPTH REQUIREMENT is different: how deep
+**Where the references and thresholds live (revised 2026-08-28 and
+2026-08-29, Paul).** Three kinds of number are told apart. The
+ENVIRONMENT LIBRARY — what the undamaged material looks like, atom by
+atom — is MANUFACTURED by the bootstrap under the study's own universal
+model (§4.8 part 2) and named by the study; it is never written by
+hand, and it carries the model name, the descriptor settings, the
+families and frame counts it was built from, and its self-check
+fractions, so a reader can tell exactly what "crystalline" was compared
+against. The remaining MATERIAL references — what an amorphous network
+of this material looks like: the first g(r) peak, and for the v1
+survivors the coordination-defect band, the ring population and the
+bond cutoff — are properties of the material, not choices of the
+experiment, so they live in an **easily-locatable, version-controlled
+`share/` directory** in the repository (`share/activation/<species>.toml`,
+the discoverable-reference-data convention Imago uses), auditable and
+travelling with the code; as each v1 survivor is re-based on the
+disorder score, its hand-written number leaves that file. The DEPTH
+REQUIREMENT is different: how deep
 the activated skin must reach is set by the study's own dose and energy
 budget (§3.6) and changes from study to study — a demonstration at a
 light dose cannot and should not meet a production threshold — so it is
@@ -1802,6 +1883,37 @@ student can read the file and know what was manufactured.
    to mean something. NPT here is what supplies thermal expansion; NVT
    supplies the correlated motion at fixed volume. For each family the
    recipe states how many and how produced.
+
+   **Collection 1 also emits the environment library (added 2026-08-29,
+   Paul).** The §3.5 gate's definition of "crystalline" — an atom whose
+   first-shell bispectrum matches some environment of the undamaged
+   material — needs a catalogue of those environments, and this
+   collection is where they already are. So building Collection 1 also
+   writes the library: the descriptors of every atom in family 1 (the
+   cold ideal sites), family 6 (the same sites with their thermal
+   spread — this is what fixes the gate's tolerance, and what its
+   false-alarm baseline is measured on) and family 4 (the clean faces,
+   so a slab's own surfaces are not mistaken for damage). Family 2 is
+   EXCLUDED, because it is carried past the point where bonds fail and
+   a broken environment must not be catalogued as crystalline; family 3
+   is not catalogued either, but it is the library's self-check — the
+   disorder every tolerance must recognise (§3.5). Three requirements
+   follow for the recipe. The warm runs must be at or above the
+   temperature at which the gate judges a slab (the heal cools to the
+   press temperature, §3.4), or the tolerance is measured too tight.
+   The declared surfaces must include the face and termination the
+   study's slab is cut with, which is checked between recipe and study
+   at load time, not discovered as a mis-flagged face. And the
+   descriptor engine and its settings — cutoff, expansion order, per-
+   species weights — are recipe settings recorded in the library, and
+   the gate uses that record, never its own copy, so both sides of the
+   comparison are computed identically. The engine is a pluggable seam
+   (LAMMPS's own bispectrum compute, a Python descriptor library, or
+   the group's Imago; the choice is an ARCHITECTURE decision, not a
+   design one). The strain of a matched slab (§2.4, up to ~2 %) is
+   expected to sit inside the thermal tolerance; the self-check is
+   the test of that expectation, and adding the study's strained bulk
+   cell to the library is the remedy if it fails.
    The purpose is stated out loud, because it is easy to over-invest:
    this collection exists so the FIRST committee does not fly apart,
    not to make it accurate. (It anchors that first committee; it is no
@@ -1922,9 +2034,11 @@ rule binds only the references we COMPUTE, and the design must not
 overstate it. §7.2 speaks of checking "against VASP and experiment" as
 though those were one category; they are not, and §3.5's shipped
 reference file proves it — every number there is a literature-guided
-placeholder flagged `real = false`, except the amorphization depth,
-which is neither literature nor DFT but a value MEASURED by this
-pipeline's own sweep. So there are three kinds of reference: values we
+placeholder flagged `real = false` — while the required amorphization
+depth, a study knob since 2026-08-28, is neither literature nor DFT but
+a value MEASURED by this pipeline's own sweep, and the environment
+library (§3.5) is a third thing again, manufactured under the model
+being judged. So there are three kinds of reference: values we
 compute accurately, values taken from published experiment, and values
 measured by our own simulations. Only the first inherits. The other two
 carry their own provenance and are compared to as they stand.
