@@ -1539,3 +1539,37 @@ submission died in 7 s on the harness's type-map orientation.)*
 - **Scope NOT covered:** other materials (the second-shell distance
   is silicon's; the recipe states the cutoff per material); a real
   bombarded slab.
+
+## T-38 — job 16860740 (bootstrap generate, library WRITTEN) — 2026-08-29
+
+*(The T-36 rebuild with the T-37 settings — descriptor cutoff 4.2 Å
+through the second neighbour shell, warm runs at 300 K — code ca65d8c.
+Harness `install/tests/t38_environment_library_v2/`, job folder
+`jobs/bootstrap_si_lib2/`, H100 g033, 28:58.)*
+
+- **PASS.** Collection 1 rebuilt (bulk 1, strain 18, rattle 10,
+  surface 1, melt-quench 10, warm NVT 10, warm NPT 10) and the
+  environment library written and copied to
+  `$SABSIM_SHARE/share/environment_libraries/silicon/`
+  (`environment_library.npz` 350 kB + `.toml`). Sidecar:
+
+  ```
+  model_name = "DPA-3.1-3M"   engine = "lammps-sna/atom"
+  warm_run_temperature = 300.0
+  [settings] descriptor_cutoff = 4.2  expansion_order = 6  Si = 1.0
+  [thermal_scatter] Si = 5.449
+  [self_check] scatter_multiple = 3.0
+               warm_disordered = 0.0  melt_quench_disordered = 0.645
+  [[provenance.surfaces]] phase "silicon-diamond" face "100" Si
+  ```
+
+- **Reading.** The self-check separates: no warm-crystal atom flagged,
+  64.5 % of glass atoms flagged (limits ≤ 10 % / ≥ 50 %). The glass
+  fraction is below T-37's 94.5 % for the same settings because this
+  library's catalogue also holds the clean (100) SURFACE family and
+  twice the warm frames (20 vs 6): more catalogued environments, more
+  glass atoms within three scatters of one of them. The thermal
+  scatter (p90 nearest-cold distance) is 5.45 at 4.2 Å vs T-37's
+  5.16 — a different 300 K run, consistent.
+- **Scope NOT covered:** the gate on a bombarded slab (next: the dpa3h
+  demo chain); any material other than silicon.
