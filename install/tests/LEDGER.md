@@ -1409,3 +1409,54 @@ submitted as a dependency chain. Code = commit 6992563 (knob) on
 - **Scope NOT covered:** the bond flow with the StageLedger and the
   statistical settle gate (16844992/3 cancelled after the halt); a
   gate pass on BOTH halves.
+
+## T-35 — jobs 16856407 (cutoff mistake) + 16856433 (PASS) — 2026-08-29
+
+*(Which bispectrum engine can SABSIM bind for the §3.5 environment
+library? ARCHITECTURE §2.3/§4 left the choice to this check. Harness:
+`install/tests/t35_bispectrum_engine/sna_check.{slurm,in}` — the
+deepmd bundle's `lmp` in the cascade subprocess's isolation, a 216-atom
+diamond-silicon box, `compute sna/atom` at a first-shell cutoff,
+dumped per atom; plus a `dscribe` import probe in the bundle python.)*
+
+- **16856407 — FAILED on the harness's own mistake, and answered the
+  question anyway:**
+
+  ```
+  ERROR: Compute sna/atom cutoff is longer than pairwise cutoff
+  (src/ML-SNAP/compute_sna_atom.cpp:235)
+  ```
+
+  The error is raised INSIDE the ML-SNAP package, so the package is
+  compiled into the bundle's LAMMPS (29 Aug 2024). (`lmp -h` prints an
+  empty "Installed packages" list for this build, so the binary had to
+  be asked directly.) The mistake: the SNAP cutoff is
+  `rcutfac × (R_i + R_j)`, so `R_1 = 2.6` gave 5.2 Å, past the 3 Å
+  neighbour list.
+- **16856433 — PASS** (g013, 1 GPU, seconds): `R_1 = 1.3` → 2.6 Å
+  cutoff (first shell at 2.35 Å in, second at 3.84 Å out;
+  `Ave neighs/atom = 28` is the 3 Å half-list, the compute sees 4).
+
+  ```
+  == lmp exit status: 0
+  == dump written: 225 lines; first atom:
+  1 1 0 0 0 0.293801 -0.175993 -0.293449 0.798268 ... 0.698778
+  == components per atom: 30
+  max component spread across the 216 atoms: 0
+  ```
+
+  `twojmax 6` gives 30 components per atom, identical on every atom
+  of the perfect crystal to the printed precision — the invariance
+  the §3.5 definition relies on, seen directly.
+- **`dscribe`: absent** from both the sabsim venv and the bundle
+  python — the Python engine would be a NEW dependency.
+- **Imago's bispectrum: exists** (`olcao/src/olcao/loen.f90`
+  `computeBispectrumComponent`, driven by `OLCAO_LocalEnv.f90`), a
+  Fortran executable on OLCAO input — a real but heavy binding.
+- **Recommendation for the ARCHITECTURE binding (Paul's call):**
+  LAMMPS `compute sna/atom`. No new dependency; runs out-of-process
+  exactly like the cascade and the bootstrap's dynamic families; the
+  library and the gate share one compute line by construction.
+- **Scope NOT covered:** a multi-species cell (per-species `R_i`,
+  `w_i`); the thermal scatter of a warm cell; timing at production
+  size (4000+ atoms — expected seconds).

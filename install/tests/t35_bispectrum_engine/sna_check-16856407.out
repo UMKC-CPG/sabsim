@@ -1,0 +1,24 @@
+== lmp: /cluster/VAST/rulisp-lab/cpg/programs/deepmd-kit-3.2.0b0-cuda129/bin/lmp
+== node: g014.mgmt.hellbender
+== installed packages (from lmp -h):
+Installed packages:
+
+== compute sna/atom trial:
+LAMMPS (29 Aug 2024)
+OMP_NUM_THREADS environment is not set. Defaulting to 1 thread. (src/comm.cpp:98)
+  using 1 OpenMP thread(s) per MPI task
+Loaded 1 plugins from /cluster/VAST/rulisp-lab/cpg/programs/deepmd-kit-3.2.0b0-cuda129/lib/deepmd_lmp
+Lattice spacing in x,y,z = 5.43 5.43 5.43
+Created orthogonal box = (0 0 0) to (16.29 16.29 16.29)
+  1 by 1 by 1 MPI processor grid
+Created 216 atoms
+  using lattice units in orthogonal box = (0 0 0) to (16.29 16.29 16.29)
+  create_atoms CPU = 0.000 seconds
+WARNING: No fixes with time integration, atoms won't move (src/verlet.cpp:60)
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+ERROR: Compute sna/atom cutoff is longer than pairwise cutoff (src/ML-SNAP/compute_sna_atom.cpp:235)
+Last command: run             0
+== lmp exit status: 1
+== bundle python: dscribe?
+ModuleNotFoundError: No module named 'dscribe'
+T-35 DONE

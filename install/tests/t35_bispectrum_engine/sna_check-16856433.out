@@ -1,0 +1,77 @@
+== lmp: /cluster/VAST/rulisp-lab/cpg/programs/deepmd-kit-3.2.0b0-cuda129/bin/lmp
+== node: g013.mgmt.hellbender
+== installed packages (from lmp -h):
+Installed packages:
+
+== compute sna/atom trial:
+LAMMPS (29 Aug 2024)
+OMP_NUM_THREADS environment is not set. Defaulting to 1 thread. (src/comm.cpp:98)
+  using 1 OpenMP thread(s) per MPI task
+Loaded 1 plugins from /cluster/VAST/rulisp-lab/cpg/programs/deepmd-kit-3.2.0b0-cuda129/lib/deepmd_lmp
+Lattice spacing in x,y,z = 5.43 5.43 5.43
+Created orthogonal box = (0 0 0) to (16.29 16.29 16.29)
+  1 by 1 by 1 MPI processor grid
+Created 216 atoms
+  using lattice units in orthogonal box = (0 0 0) to (16.29 16.29 16.29)
+  create_atoms CPU = 0.000 seconds
+WARNING: No fixes with time integration, atoms won't move (src/verlet.cpp:60)
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 5
+  ghost atom cutoff = 5
+  binsize = 2.5, bins = 7 7 7
+  2 neighbor lists, perpetual/occasional/extra = 1 1 0
+  (1) pair zero, perpetual
+      attributes: half, newton on
+      pair build: half/bin/atomonly/newton
+      stencil: half/bin/3d
+      bin: standard
+  (2) compute sna/atom, occasional
+      attributes: full, newton on
+      pair build: full/bin/atomonly
+      stencil: full/bin/3d
+      bin: standard
+Setting up Verlet run ...
+  Unit style    : metal
+  Current step  : 0
+  Time step     : 0.001
+Per MPI rank memory allocation (min/avg/max) = 3.778 | 3.778 | 3.778 Mbytes
+   Step          Temp          E_pair         E_mol          TotEng         Press     
+         0   0              0              0              0              0            
+Loop time of 1.301e-06 on 1 procs for 0 steps with 216 atoms
+
+230.6% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0          | 0          | 0          |   0.0 |  0.00
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0          | 0          | 0          |   0.0 |  0.00
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 1.301e-06  |            |       |100.00
+
+Nlocal:            216 ave         216 max         216 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:            648 ave         648 max         648 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:           3024 ave        3024 max        3024 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+FullNghs:         6048 ave        6048 max        6048 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 6048
+Ave neighs/atom = 28
+Neighbor list builds = 0
+Dangerous builds = 0
+Total wall time: 0:00:01
+== lmp exit status: 0
+== dump written: 225 lines; first atom:
+1 1 0 0 0 0.293801 -0.175993 -0.293449 0.798268 -0.325339 0.75737 1.14201 -0.217465 -0.494913 -0.258216 -0.245793 -0.412536 -0.729121 1.08973 -0.457753 1.02406 1.23518 -0.356376 0.908186 1.07652 -0.0361638 -0.686828 -0.100672 -0.570851 -0.214069 -0.408395 1.12956 1.04141 0.885825 0.698778
+== components per atom: 30
+== bundle python: dscribe?
+ModuleNotFoundError: No module named 'dscribe'
+T-35 DONE
