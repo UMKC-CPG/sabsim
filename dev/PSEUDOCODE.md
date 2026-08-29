@@ -2730,8 +2730,7 @@ record EnvironmentLibrary:
                                     # band (DESIGN §3.5) is judged
                                     # against this
     provenance:       record{ families: list, frame_counts: map,
-                              surfaces: list of (phase, face,
-                                                 termination) }
+                              surfaces: list of (species, face) }
                                     # what was catalogued; the validator
                                     # checks the member's face is here
 
@@ -2757,7 +2756,11 @@ function load_environment_library(member_specification):
              "comparison must use one engine (ARCHITECTURE §2.3)")
     for each wafer in (member_specification.material_A,
                        member_specification.material_B):    # §7.4
-        face = (wafer.phase, wafer.face, wafer.termination)
+        # Face and species only — NOT the termination (Paul,
+        # 2026-08-29): every catalogued surface is bombarded to an
+        # amorphous skin before it matters, so which atomic plane the
+        # clean cut ended on makes no difference to the gate.
+        face = (wafer.species, wafer.face)
         if face not in library.provenance.surfaces:
             halt("environment library catalogues no clean <face> "
                  "surface; the slab's own faces would read as damage — "

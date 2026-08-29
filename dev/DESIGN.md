@@ -1930,10 +1930,14 @@ student can read the file and know what was manufactured.
    the press temperature, §3.4) against it — a warning if the study is
    hotter, a refusal if it is more than 20 % hotter (§3.5 states the
    band and why); the recipe itself declares nothing about studies it
-   has never seen. The declared surfaces must include the face and
-   termination the study's slab is cut with, which is checked between
-   library and study at load time, not discovered as a mis-flagged
-   face. And the descriptor engine and its settings are recipe settings
+   has never seen. The declared surfaces must include the FACE the
+   study's slab is cut with (matched by face and species; the
+   termination — which atomic plane the clean cut ends on — is
+   deliberately NOT matched, because every surface is bombarded to an
+   amorphous skin before the gate sees it, so the termination makes no
+   difference; Paul, 2026-08-29), checked between library and study at
+   load time, not discovered as a mis-flagged face. And the descriptor
+   engine and its settings are recipe settings
    recorded in the library, and the gate uses that record, never its
    own copy, so both sides of the comparison are computed identically.
    The cutoff is stated as a PHYSICAL length — the radius of the first
