@@ -309,8 +309,16 @@ is.
   Whichever is bound, the SAME engine and settings must produce both
   the library and the slab's descriptors, so the binding and its
   settings are recorded IN the library and the gate reads them from
-  there. The choice is made at the compute-node check that precedes
-  the code (`install/tests/LEDGER.md`), not here. (2) The **library
+  there. **Bound 2026-08-29 (Paul, after LEDGER T-35): LAMMPS
+  `compute sna/atom`.** T-35 showed the ML-SNAP package compiled into
+  the deepmd bundle's LAMMPS and 30 components per atom identical
+  across a perfect crystal; `dscribe` is installed nowhere and Imago's
+  Fortran bispectrum would need OLCAO-format input, so the LAMMPS
+  compute is the binding that adds no dependency and shares one
+  compute line between library and gate by construction. The adapter
+  states the PHYSICAL first-shell cutoff and derives LAMMPS's radii
+  from it (the SNAP cutoff is `rcutfac × (R_i + R_j)`, a trap T-35
+  fell into), never exposing LAMMPS's parameters raw. (2) The **library
   itself is a manufactured artifact** of the bootstrap (`sabsim
   bootstrap generate`, below): one file per (recipe, model), holding
   the descriptors of Collection 1's cold bulk, warm bulk and clean
@@ -724,15 +732,16 @@ dependencies, by work group, are:
   ours, with no ALF fork.
 - **Imago** + **Kaleidoscope** (which uses **Parsl** for SLURM
   dispatch) — bond characterization (step 8).
-- **Bispectrum descriptor engine** — the §3.5 gate's crystallinity
-  test and the bootstrap's environment library (DESIGN §3.5, §4.8;
-  §2.3 above). One of: LAMMPS `compute sna/atom` (the ML-SNAP package,
-  if the deepmd bundle's LAMMPS was built with it — no new dependency),
-  a Python descriptor library (`dscribe` or equivalent — a new
-  dependency of the sabsim venv), or Imago's bispectrum (a
-  cross-project dependency). Bound once per deployment; decided at the
-  compute-node check recorded in the LEDGER. Whichever is bound is used
-  on BOTH sides of the comparison.
+- **Bispectrum descriptor engine — LAMMPS `compute sna/atom`
+  [ADOPT, bound 2026-08-29].** The §3.5 gate's crystallinity test and
+  the bootstrap's environment library (DESIGN §3.5, §4.8; §2.3 above).
+  The ML-SNAP package is compiled into the deepmd bundle's LAMMPS
+  (LEDGER T-35), so this adds no dependency; it runs out-of-process
+  like every other bundle `lmp` call (§4.1). The seam stays: a Python
+  descriptor library (`dscribe`, absent today) or Imago's bispectrum
+  (`olcao/src/olcao/loen.f90`, OLCAO-format input) could be bound
+  instead, and whichever is bound is used on BOTH sides of the
+  comparison.
 - **Outer orchestrator — the thin Tier-A sequencer.** The execution
   model is now settled at three tiers (§4.1); this covers only the
   outermost. Its **dispatch substrate is Parsl** — what ALF and
