@@ -1498,3 +1498,44 @@ folder `jobs/bootstrap_si_lib/`, H100 g018, 32:42.)*
   both.
 - **Scope NOT covered:** the library file (never written); the
   activate gate on a real slab.
+
+## T-37 — jobs 16859774 (harness bug) + 16859865 (PASS) — 2026-08-29
+
+*(Why T-36's library could not tell warm crystal from glass: the
+descriptor cutoff and the warm-run temperature, measured. Harness
+`install/tests/t37_library_separation/` — T-36's Collection 1 frames
+(bulk, 12 warm 600 K, 6 melt-quench) plus a fresh 300 K NVT warm run,
+described at four cutoffs; fraction of warm atoms and of glass atoms
+flagged at each scatter multiple. H100 g033, 10:43. The first
+submission died in 7 s on the harness's type-map orientation.)*
+
+- **Result, glass flagged against the FULL catalogue (cold + warm), at
+  scatter multiple 3 (warm flagged is 0.000 in every row):**
+
+  | cutoff | warm 600 K | warm 300 K |
+  |-------:|-----------:|-----------:|
+  | 2.6 Å  | 0.000      | 0.003      |
+  | 3.4 Å  | 0.003      | 0.042      |
+  | 4.2 Å  | 0.336      | **0.945**  |
+  | 5.0 Å  | 0.294      | 0.763      |
+
+  At 4.2 Å / 300 K the separation is essentially complete at every
+  multiple (glass vs cold 0.992, vs catalogue 0.945 at multiple 3;
+  0.997 / 0.995 at multiple 2). At the first-shell 2.6 Å cutoff the
+  glass is indistinguishable from a hot crystal at any multiple.
+- **Reading.** Amorphous silicon keeps its first shell (four
+  neighbours at ~2.35 Å with a modest angular spread), so a first-
+  shell descriptor sees little; the SECOND shell (3.84 Å in the
+  crystal) is where the network's disorder lives — exactly DESIGN
+  §3.5's g(r) argument, now visible in the bispectrum. 4.2 Å takes
+  the second shell in and stops before the third (4.5 Å); 5.0 Å adds
+  third-shell noise and separates worse. The warm temperature matters
+  as much: 600 K thermal spread is ~1.6x that at 300 K and swallows
+  the glass, while 300 K is the temperature the gate actually judges
+  at (the heal's cool-to target).
+- **Recommendation for Paul (DESIGN §3.5/§4.8):** descriptor cutoff
+  4.2 Å ("through the second neighbour shell", not "first shell");
+  warm runs at the gate temperature, 300 K; scatter multiple 3 stands.
+- **Scope NOT covered:** other materials (the second-shell distance
+  is silicon's; the recipe states the cutoff per material); a real
+  bombarded slab.

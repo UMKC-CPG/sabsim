@@ -29,7 +29,7 @@ recipe_path, t36_collection, work = sys.argv[1], Path(sys.argv[2]), \
     Path(sys.argv[3])
 work.mkdir(parents=True, exist_ok=True)
 recipe = load_recipe(recipe_path)
-type_map = {1: "Si"}
+type_map = {"Si": 1}          # symbol -> LAMMPS type id
 FRAMES_PER_FAMILY = 6
 
 
