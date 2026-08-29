@@ -344,6 +344,12 @@ record ProtocolKnobs:
     activation_energy:    number  # impact energy (single value in v1)
     activation_angle:     number  # angle of incidence (normal in v1)
     activation_fluence:   number  # ions per A^2, cell-size-independent
+    required_activated_depth: number  # how deep the activated skin MUST
+                                  # reach: the §10.6 depth metric's
+                                  # threshold AND the depth the §7.2
+                                  # thickness floor builds for (DESIGN
+                                  # §3.5/§2.5, revised 2026-08-28). A
+                                  # study choice, not a material fact
     cascade_duration:     number  # NVE cascade time per impact (~ps, §3.3)
     between_impact_relaxation: number  # border-thermostat settle between
                                   # impacts, so the next starts cool (§3.3)
@@ -1074,11 +1080,13 @@ function build_slab(material, shared, applied_strain, potential,
                            applied_strain)
 
     # Thickness is a CRITERION, not a constant (DESIGN §2.5):
-    #   slab_thickness >= activated_depth + minimum_bulk_thickness
-    # activated_depth is measured by the activation gate (DESIGN §3.5);
-    # v1 fixes thickness by a short convergence study and records the
-    # margin achieved.
-    ensure_thickness(slab, activated_depth_of(material),
+    #   slab_thickness >= required_activated_depth + minimum_bulk_thickness
+    # The depth term is the study's REQUIREMENT on the activation (the
+    # same number the §10.6 gate demands), because the build runs before
+    # the gate has measured anything; v1 fixes thickness by a short
+    # convergence study, applies this as a FLOOR, and records the margin.
+    ensure_thickness(slab,
+        member_specification.protocol.required_activated_depth,
         member_specification.numerical.minimum_bulk_thickness)
 
     # Where a face admits several terminations, ENUMERATE and select by
@@ -2589,19 +2597,24 @@ function ring_statistics_metric.evaluate(activated, crystalline, refs):
 ```
 
 ```
-function amorphization_depth_metric.evaluate(activated, crystalline, refs):
+function amorphization_depth_metric.evaluate(activated, crystalline, refs,
+                                            member_specification):
     # Disorder(z): bin a per-atom disorder score (the coordination defect,
     # or any registered per-atom metric) by depth. The activated depth is
     # where the profile RETURNS to the bulk baseline — measured deep in the
     # slab — scanning from the free surface DOWN over the WHOLE profile, NOT
     # stopping at the first crystalline-looking layer (prior art's 0 A bug,
     # DESIGN §3.5) nor by the Phase-1 top-contiguous scan.
+    # The THRESHOLD is the study's requirement, not a material reference
+    # (DESIGN §3.5, revised 2026-08-28): the reference file describes the
+    # material; how deep THIS study needs the skin is the study's call.
     profile  = disorder_versus_depth(activated, crystalline)
     baseline = bulk_baseline(profile)             # deep, still crystalline
     depth    = depth_to_return_to_baseline(profile, baseline)
+    target   = member_specification.protocol.required_activated_depth
     return MetricVerdict{
-        measured: depth, reference: refs.depth_name,
-        threshold: refs.depth_target, passed: depth >= refs.depth_target }
+        measured: depth, reference: "study: required_activated_depth",
+        threshold: target, passed: depth >= target }
 ```
 
 `RING_BACKEND` is a pluggable seam (DESIGN §3.5): v1 binds it to a

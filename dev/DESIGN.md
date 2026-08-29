@@ -180,9 +180,10 @@ on it.
   read off the file — so one uniform input serves every material with no
   per-material code. What we are studying.
 - **Protocol** — the activation species, energy, angle of incidence and
-  fluence; the press mode, load, depth and duration; the hold
-  temperature; the pull rates of §5.4's ladder. How the experiment is
-  performed.
+  fluence, and the activated depth the surface is REQUIRED to reach
+  (the §3.5 gate's depth threshold, revised 2026-08-28); the press mode,
+  load, depth and duration; the hold temperature; the pull rates of
+  §5.4's ladder. How the experiment is performed.
 - **Numerical** — tolerances, cutoffs, convergence criteria, the
   committee stride and persistence window of §7.3, the significance
   levels of §7.5, the contact-gap averaging window and contact stress
@@ -731,13 +732,16 @@ idea here) and records the margin actually achieved.
 
 In code the criterion is a FLOOR, not a formula that sets thickness: the
 build takes the larger of the chosen `slab_thickness` and
-`expected_activated_depth + minimum_bulk_thickness`, where — because the
-build runs before §3.5 measures anything — `expected_activated_depth` is
-the build-time stand-in for the not-yet-measured depth (default: the §3.6
-operating depth), and it records the resulting margin on the shared-cell
-provenance. All four terms are study inputs (`[numerical]`), so a new
-material re-sizes with no code change, and the silicon defaults preserve
-the §3.6-anchored 55 Å cell (55 > 7 + 30) rather than shrinking it.
+`required_activated_depth + minimum_bulk_thickness`, where — because the
+build runs before §3.5 measures anything — the depth term is the depth
+the study REQUIRES the activation to reach (`[protocol.activation]
+required_activated_depth`, the same number the §3.5 gate then demands;
+revised 2026-08-28, retiring the separate build-time estimate
+`expected_activated_depth` — the depth you build for is the depth you
+require), and it records the resulting margin on the shared-cell
+provenance. All terms are study inputs, so a new material re-sizes with
+no code change, and the silicon defaults preserve the §3.6-anchored
+55 Å cell (55 > 7 + 30) rather than shrinking it.
 
 **Termination is chosen by surface energy.** Prior art takes
 `sym_slabs[0]` with the comment "first candidate is sufficient" — the
@@ -1191,21 +1195,32 @@ The registered metrics, each with what it actually discriminates:
   criterion (§2.5) only estimated a-priori, closing that loop, and that
   labels the activated skin (`PSEUDOCODE.md` §10.7).
 
-**Where the references and thresholds live.** They are deliberately NOT
-physics-spec knobs — a threshold is a criterion of the gate, not a choice
-of the experiment (the study template already says the depth target lives
-"with the gate's reference data, not a protocol input"). They live instead
-in an **easily-locatable, version-controlled `share/` directory** in the
-repository — the discoverable-reference-data convention Imago uses — so the
-criteria are auditable and travel with the code. For v1 the references are
-**documented STAND-INS anchored to the literature** (for amorphous
-silicon: a first g(r) peak near 2.35 Å, a nearly four-fold network with a
-few percent three- and five-coordinated defects, and a five-/six-/seven-
-ring population), each flagged as a stand-in. The depth threshold is the
-ONE exception: it is no longer a literature stand-in but a **measured**
-7 Å, re-pinned in §3.6 from this pipeline's own sweep, pending the
-work-of-separation study that will derive it from the bond instead.
-The real anchors — a DFT / experimental g(r), and the group's existing
+**Where the references and thresholds live (revised 2026-08-28,
+Paul).** Two kinds of number are told apart. The MATERIAL references —
+what an amorphous network of this material looks like: the first g(r)
+peak, the coordination-defect band, the ring population, the bond
+cutoff — are properties of the material, not choices of the experiment,
+so they live in an **easily-locatable, version-controlled `share/`
+directory** in the repository (`share/activation/<species>.toml`, the
+discoverable-reference-data convention Imago uses), auditable and
+travelling with the code. The DEPTH REQUIREMENT is different: how deep
+the activated skin must reach is set by the study's own dose and energy
+budget (§3.6) and changes from study to study — a demonstration at a
+light dose cannot and should not meet a production threshold — so it is
+a **protocol knob of the study file**, `[protocol.activation]
+required_activated_depth`, and the gate reads it from there. (Until
+2026-08-28 it sat in the reference file as `[depth] target_angstrom`;
+the first run of the heal-in-activation flow, LEDGER T-33, halted a
+50 eV demonstration on the production 7 Å and made the mismatch plain.)
+The same number is the depth the §2.5 thickness floor builds for.
+For v1 the material references are **documented STAND-INS anchored to
+the literature** (for amorphous silicon: a first g(r) peak near 2.35 Å,
+a nearly four-fold network with a few percent three- and
+five-coordinated defects, and a five-/six-/seven-ring population), each
+flagged as a stand-in; the production template's depth requirement is
+the **measured** 7 Å re-pinned in §3.6 from this pipeline's own sweep,
+pending the work-of-separation study that will derive it from the bond
+instead. The real anchors — a DFT / experimental g(r), and the group's existing
 amorphous-silicon continuous-random-network model — replace them as they
 are prepared; a large real reference need not bloat the repository, since
 the reference-data resolver can also read it from the deployment
@@ -1259,7 +1274,10 @@ not the SAB one modelled here). It remains a MEASUREMENT-ANCHORED
 OPERATING THRESHOLD, not yet a physics-derived one: the work-of-
 separation convergence study (`dev/TODO.md`, the skin-thickness item)
 is what will replace it with the thinnest skin that still gives the
-converged bond. Iterate the dose until §3.5's depth profile clears it;
+converged bond. It is written in the study file as `[protocol.activation]
+required_activated_depth` (revised 2026-08-28; a study that runs a
+lighter dose states a lighter requirement, and says so). Iterate the
+dose until §3.5's depth profile clears it;
 v1 freezes the
 dose as a direct impact **count** for the single fixed Si/Si cell, the
 per-area **fluence** being the general form used once cell sizes differ
