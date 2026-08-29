@@ -297,7 +297,7 @@ is.
   **The gate's notion of "crystalline" is a second seam (revised
   2026-08-29 (Paul), DESIGN §3.5).** The §3.5 gate no longer asks
   whether an atom has the hand-set neighbour count; it asks whether the
-  atom's first-shell **bispectrum** matches any environment in an
+  atom's second-shell **bispectrum** matches any environment in an
   **environment library** of the undamaged material. Two pieces of
   architecture follow. (1) The **descriptor engine** — the code that
   turns a set of atom positions into per-atom bispectrum components —
@@ -316,7 +316,8 @@ is.
   Fortran bispectrum would need OLCAO-format input, so the LAMMPS
   compute is the binding that adds no dependency and shares one
   compute line between library and gate by construction. The adapter
-  states the PHYSICAL first-shell cutoff and derives LAMMPS's radii
+  states the PHYSICAL descriptor cutoff (through the second neighbour
+  shell, DESIGN §3.5) and derives LAMMPS's radii
   from it (the SNAP cutoff is `rcutfac × (R_i + R_j)`, a trap T-35
   fell into), never exposing LAMMPS's parameters raw. (2) The **library
   itself is a manufactured artifact** of the bootstrap (`sabsim

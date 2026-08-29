@@ -36,13 +36,16 @@ reference_data_ref = "share/activation/Si.toml"
 # block names; the identity must match the one pinned in the code.
 # ---------------------------------------------------------------------
 # The gate's RULER (DESIGN §3.5 / §4.8 part 2, 2026-08-29). The §3.5
-# activation gate calls an atom crystalline when its first-shell
+# activation gate calls an atom crystalline when its second-shell
 # bispectrum matches some neighbourhood of the UNDAMAGED material in
 # the environment library this recipe's Collection 1 builds. These
 # settings describe that neighbourhood, and they are recorded in the
 # library so the gate reuses them — never a copy of its own. The cutoff
-# is a PHYSICAL length just past the first neighbour shell and short of
-# the second (silicon: 2.35 A in, 3.84 A out); LAMMPS's own parameters
+# is a PHYSICAL length through the SECOND neighbour shell and short of
+# the third (silicon: 2.35 and 3.84 A in, 4.5 A out => 4.2 A; LEDGER
+# T-37 showed a first-shell cutoff cannot tell glass from warm crystal,
+# and 600 K warm runs swallow it — hence 300 K below); LAMMPS's own
+# parameters
 # (rcutfac, per-species radii) are derived from it by the engine
 # adapter. `expansion_order` is LAMMPS's twojmax (6 -> 30 components per
 # atom, LEDGER T-35); `species_weights` tells unlike species apart
@@ -52,7 +55,7 @@ reference_data_ref = "share/activation/Si.toml"
 # `generate` refuses to write the library.
 # ---------------------------------------------------------------------
 [descriptor]
-first_shell_cutoff    = { value = 2.6, unit = "angstrom" }
+descriptor_cutoff    = { value = 4.2, unit = "angstrom" }
 expansion_order       = 6
 species_weights       = { Si = 1.0 }
 gate_scatter_multiple = 3.0
@@ -126,7 +129,7 @@ seed      = 20260826
 # harvested after the equilibration interval, spaced by the stride.
 phase           = "silicon-diamond"
 ensemble        = "NVT"
-temperature     = { value = 600.0, unit = "K" }
+temperature     = { value = 300.0, unit = "K" }
 duration        = { value = 4.0,   unit = "ps" }
 equilibration   = { value = 1.0,   unit = "ps" }
 sampling_stride = { value = 0.3,   unit = "ps" }
@@ -136,7 +139,7 @@ seed            = 21
 [[collection1.warm_runs]]
 phase           = "silicon-diamond"
 ensemble        = "NPT"
-temperature     = { value = 600.0, unit = "K" }
+temperature     = { value = 300.0, unit = "K" }
 duration        = { value = 4.0,   unit = "ps" }
 equilibration   = { value = 1.0,   unit = "ps" }
 sampling_stride = { value = 0.3,   unit = "ps" }

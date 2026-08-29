@@ -2029,7 +2029,7 @@ foundations, interaction rules. -->
       and /refine-checked; the code predates them. Sub-items, in order:
       (a) `driver/descriptors.py` — the descriptor adapter: an
       out-of-process bundle `lmp` run of `compute sna/atom` on a data
-      file, dump readback; the physical `first_shell_cutoff` -> per-
+      file, dump readback; the physical `descriptor_cutoff` -> per-
       species radii (`rcutfac` 1, R_i = cutoff/2) and a neighbour cutoff
       >= the SNAP cutoff (the T-35 trap). (b) `EnvironmentLibrary` record
       + the `environment_library.npz`/`.toml` writer and reader;
@@ -2095,6 +2095,15 @@ foundations, interaction rules. -->
   test harness without settling that first.
 
 <!-- Tasks related to implementation. -->
+
+- [ ] CODE — `sabsim bootstrap generate` reuse path: rebuilding the
+  library today re-runs ALL of Collection 1 (~30 min on an H100 for
+  silicon, mostly the melt-quench glass) even when only the descriptor
+  cutoff or the warm-run temperature changed (T-36 → the 2026-08-29
+  rebuild). Add a per-family "reuse the frames on disk if the family's
+  recipe entry is unchanged" step (keyed by a hash of that entry), so a
+  descriptor-only change re-describes and a warm-only change re-runs
+  the warm family alone. Paul asked 2026-08-29.
 
 - [ ] **Dead code: `_reanneal_force_model` has no callers.**
       `pipeline/live_stages.py:677` still defines the gentle re-anneal's

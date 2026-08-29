@@ -79,7 +79,7 @@ def test_template_recipe_loads_with_all_six_families():
     assert recipe.production_settings.audited is False
     # The gate's ruler (DESIGN §4.8 part 2, 2026-08-29): a physical
     # cutoff in angstrom, the expansion order, one weight per species.
-    assert recipe.descriptor_settings.first_shell_cutoff == pytest.approx(2.6)
+    assert recipe.descriptor_settings.descriptor_cutoff == pytest.approx(4.2)
     assert recipe.descriptor_settings.expansion_order == 6
     assert recipe.descriptor_settings.species_weights == {"Si": 1.0}
     assert recipe.gate_scatter_multiple == pytest.approx(3.0)
@@ -215,7 +215,7 @@ def test_warm_run_script_uses_npt_when_asked():
                if w.ensemble == "NPT")
     script = warm_run_script(
         npt, "start.data", _model(), 0.001, "frames.dump", seed=22)
-    assert any(line.startswith("fix warm all npt temp 600 600")
+    assert any(line.startswith("fix warm all npt temp 300 300")
                for line in script)
     assert "run 1000" in script                     # 1 ps equilibration
     assert "run 3000" in script                     # the remaining 3 ps

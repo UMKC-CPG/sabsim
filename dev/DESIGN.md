@@ -1162,8 +1162,10 @@ drawn, and a slightly-too-long cutoff quietly changes the answer.
 SABSIM therefore defines crystallinity WITHOUT a coordination number:
 
 - Every atom's neighbourhood is described by its **bispectrum
-  components** at a SHORT cutoff — the first neighbour shell — a set of
-  numbers that captures the distances AND the angles of the neighbours
+  components** at a cutoff that reaches THROUGH THE SECOND neighbour
+  shell and stops before the third (4.2 Å for silicon; the recipe
+  states it per material) — a set of numbers that captures the
+  distances AND the angles of the neighbours
   and does not change when the neighbourhood is rotated, shifted, or
   two atoms of the same species are swapped. (The same descriptor a
   SNAP potential is built on; the engine that computes it is a
@@ -1197,6 +1199,19 @@ surface family and need no special case; and a multi-site crystal is
 judged site by site with nothing declared by hand. Angles count too, so
 a silicon atom that keeps four neighbours with badly bent bonds — real
 amorphous silicon — is caught, which a neighbour count misses.
+
+The cutoff was first set at the FIRST shell and measured wrong (LEDGER
+T-36/T-37): amorphous silicon keeps its first shell almost intact —
+four neighbours at the crystal's bond length with only a modest angular
+spread — so a first-shell descriptor cannot tell the glass from a warm
+crystal at any tolerance (0.3 % of glass atoms flagged). The disorder
+lives in the SECOND shell, exactly as this section's g(r) argument says,
+and a cutoff through it (4.2 Å) flags 94.5 % of glass atoms while
+flagging no warm-crystal atom; a cutoff into the third shell (5.0 Å)
+adds noise and separates worse (76 %). The same measurement fixed the
+warm-run temperature: the library's thermal scatter must be measured AT
+the temperature the gate judges (300 K, the heal's cool-to target) —
+600 K runs spread 1.6x wider and swallow the glass (§4.8 part 2).
 
 The library carries its own **self-check**, run when it is built: the
 bootstrap's melt-quench amorphous family (§4.8 family 3) is what genuine
@@ -1887,7 +1902,9 @@ student can read the file and know what was manufactured.
    5. **Rattled snapshots** — moderate-temperature static displacements
       about the cold cell.
    6. **Warm runs** — short runs of each crystal in the NVT and NPT
-      ensembles at modestly elevated temperature.
+      ensembles at the temperature the protocol's quiet stages and the
+      §3.5 gate run at (300 K for the production study; revised
+      2026-08-29 from "modestly elevated", LEDGER T-37).
 
    Families 2 and 6 are the two whose necessity is easiest to doubt, so
    the argument for them is spelled out below.
@@ -1912,7 +1929,7 @@ student can read the file and know what was manufactured.
 
    **Collection 1 also emits the environment library (added 2026-08-29,
    Paul).** The §3.5 gate's definition of "crystalline" — an atom whose
-   first-shell bispectrum matches some environment of the undamaged
+   second-shell bispectrum matches some environment of the undamaged
    material — needs a catalogue of those environments, and this
    collection is where they already are. So building Collection 1 also
    writes the library: the descriptors of every atom in family 1 (the
@@ -4053,7 +4070,7 @@ id  type  x y z  group  coordination  defect  provenance
 
 where `group` is the LabeledGroup membership (frozen-base / border /
 interior / activated-skin) as an integer to color by; `defect` is the
-§3.5 per-atom verdict — 1 where the atom's first-shell environment
+§3.5 per-atom verdict — 1 where the atom's second-shell environment
 matches nothing in the environment library, 0 where it does (revised
 2026-08-29; before that it was a coordination mismatch); `coordination`
 stays as a second, human-readable column; and `provenance` is which slab

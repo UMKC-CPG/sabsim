@@ -2689,7 +2689,7 @@ function ring_statistics_metric.evaluate(context):
 ```
 record EnvironmentLibrary:
     # DESIGN §3.5 / §4.8 part 2 (2026-08-29): what the undamaged material
-    # looks like, atom by atom, as first-shell bispectrum vectors. MADE
+    # looks like, atom by atom, as second-shell bispectrum vectors. MADE
     # by the bootstrap (§11.2), never written by hand.
     model_name:       string        # the universal model the source
                                     # structures were made under; must
@@ -3086,14 +3086,15 @@ record TrainingSpec:
 
 record DescriptorSettings:
     # The GATE'S ruler (DESIGN §3.5 / §4.8 part 2, 2026-08-29): how the
-    # environment library and the §10.6 gate describe one atom's first
-    # neighbour shell. Distinct from DescriptorSpec above, which is how
+    # environment library and the §10.6 gate describe one atom's
+    # neighbourhood through its SECOND shell (LEDGER T-37: the first
+    # shell alone cannot see glass). Distinct from DescriptorSpec, how
     # the TRAINED MODEL sees an environment. Stated physically; the
     # engine's own parameters are DERIVED (ARCHITECTURE §2.3).
-    first_shell_cutoff: Quantity   # a LENGTH: just past the first
+    descriptor_cutoff: Quantity   # a LENGTH: past the SECOND
                                    # neighbour shell, short of the
-                                   # second (silicon: 2.35 A in,
-                                   # 3.84 A out => ~2.6 A)
+                                   # third (silicon: 2.35 and 3.84 A
+                                   # in, 4.5 A out => 4.2 A; T-37)
     expansion_order:    int        # how finely angles are resolved
                                    # (LAMMPS's `twojmax`; 6 gives 30
                                    # components per atom, LEDGER T-35)
@@ -3103,8 +3104,8 @@ record DescriptorSettings:
                                    # unlike species are told apart
     # DERIVED, never written by hand: for LAMMPS `compute sna/atom` the
     # cutoff is rcutfac x (R_i + R_j), so with rcutfac = 1 every species
-    # radius is first_shell_cutoff / 2; and the engine's neighbour list
-    # must be built at least first_shell_cutoff wide, or LAMMPS refuses
+    # radius is descriptor_cutoff / 2; and the engine's neighbour list
+    # must be built at least descriptor_cutoff wide, or LAMMPS refuses
     # ("cutoff is longer than pairwise cutoff" — the T-35 trap).
 
 
@@ -3300,14 +3301,16 @@ record WarmRunSpec:
                                   # FIXED volume. A model shown only
                                   # NVT never learns the volume a
                                   # crystal actually takes when hot
-    temperature:      Quantity    # modestly elevated — the protocol's
-                                  # working range, not a melt. At or
-                                  # ABOVE the temperature the §10.6
-                                  # gate judges a slab at (the heal's
-                                  # cool-to target), or the library's
-                                  # thermal scatter is measured too
-                                  # tight (DESIGN §4.8 part 2,
-                                  # 2026-08-29); validated
+    temperature:      Quantity    # THE temperature the §10.6 gate
+                                  # judges a slab at (the heal's
+                                  # cool-to target, 300 K in
+                                  # production), not "modestly
+                                  # elevated": hotter runs spread the
+                                  # library's thermal scatter until it
+                                  # swallows the glass (LEDGER T-37);
+                                  # colder measures it too tight, which
+                                  # the loader's warn/refuse band
+                                  # catches (DESIGN §3.5, 2026-08-29)
     duration:         Quantity    # short: this anchors the committee,
                                   # it does not measure a property
     equilibration:    Quantity    # leading interval DISCARDED before
@@ -3472,8 +3475,8 @@ record ForceModelRecipe:
     descriptor_settings:   DescriptorSettings  # the bispectrum the
                                      # ENVIRONMENT LIBRARY is built with
                                      # (§11.2; DESIGN §4.8 part 2,
-                                     # 2026-08-29): short cutoff (first
-                                     # shell), expansion order, per-
+                                     # 2026-08-29): cutoff through the
+                                     # SECOND shell, expansion order, per-
                                      # species weights. Distinct from
                                      # DescriptorSpec above, which is
                                      # how the TRAINED MODEL sees an

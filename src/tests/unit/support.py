@@ -58,7 +58,7 @@ def hand_built_library(
     return EnvironmentLibrary(
         model_name=model_name, engine=engine,
         settings=DescriptorSettings(
-            first_shell_cutoff=2.6, expansion_order=6,
+            descriptor_cutoff=2.6, expansion_order=6,
             species_weights={symbol: 1.0 for symbol in species}),
         environments=environments, thermal_scatter=scatter,
         warm_distances=warm,

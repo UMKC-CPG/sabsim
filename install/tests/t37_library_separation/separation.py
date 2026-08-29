@@ -70,7 +70,7 @@ def nearest(vectors, reference):
 
 for cutoff in (2.6, 3.4, 4.2, 5.0):
     settings = DescriptorSettings(
-        first_shell_cutoff=cutoff, expansion_order=6,
+        descriptor_cutoff=cutoff, expansion_order=6,
         species_weights={"Si": 1.0})
     described = {}
     for name, frames in families.items():

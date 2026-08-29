@@ -471,8 +471,8 @@ def _descriptor_from_table(table: dict, context: str) -> tuple:
         raise SpecificationError(
             f"{context} -> gate_scatter_multiple: must be positive")
     settings = DescriptorSettings(
-        first_shell_cutoff=to_metal(
-            _require_quantity(table, "first_shell_cutoff", context),
+        descriptor_cutoff=to_metal(
+            _require_quantity(table, "descriptor_cutoff", context),
             "distance"),
         expansion_order=_require_int(table, "expansion_order", context),
         species_weights={str(k): float(v) for k, v in weights.items()})

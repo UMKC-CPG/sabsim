@@ -377,7 +377,7 @@ def write_environment_library(
         "arrays_file": LIBRARY_ARRAYS_FILE,
         "warm_run_temperature": float(library.warm_run_temperature),
         "settings": {
-            "first_shell_cutoff": float(library.settings.first_shell_cutoff),
+            "descriptor_cutoff": float(library.settings.descriptor_cutoff),
             "expansion_order": int(library.settings.expansion_order),
             "species_weights": {
                 symbol: float(weight) for symbol, weight in
@@ -426,7 +426,7 @@ def read_environment_library(path) -> EnvironmentLibrary:
         model_name=str(manifest["model_name"]),
         engine=str(manifest["engine"]),
         settings=DescriptorSettings(
-            first_shell_cutoff=float(settings_table["first_shell_cutoff"]),
+            descriptor_cutoff=float(settings_table["descriptor_cutoff"]),
             expansion_order=int(settings_table["expansion_order"]),
             species_weights={
                 str(k): float(v) for k, v in

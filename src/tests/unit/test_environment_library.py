@@ -53,7 +53,7 @@ def _si_si_member():
 
 def _settings(cutoff=2.6, order=6, weights=None):
     return DescriptorSettings(
-        first_shell_cutoff=cutoff, expansion_order=order,
+        descriptor_cutoff=cutoff, expansion_order=order,
         species_weights=weights or {"Si": 1.0, "O": 0.5})
 
 
@@ -61,7 +61,7 @@ def _settings(cutoff=2.6, order=6, weights=None):
 # The adapter: physical cutoff -> LAMMPS parameters (ARCHITECTURE §2.3).
 # ---------------------------------------------------------------------
 
-def test_every_pair_cutoff_equals_the_physical_first_shell_cutoff():
+def test_every_pair_cutoff_equals_the_physical_descriptor_cutoff():
     """SNAP cuts at rcutfac x (R_i + R_j); the derivation makes that the
     physical cutoff for EVERY species pair (the T-35 trap, closed)."""
     rcutfac, _rfac0, twojmax, radii, weights = to_lammps_parameters(
@@ -252,7 +252,7 @@ class _FakeRecipe:
     def __init__(self, multiple=3.0):
         from types import SimpleNamespace
         self.descriptor_settings = DescriptorSettings(
-            first_shell_cutoff=2.6, expansion_order=6,
+            descriptor_cutoff=2.6, expansion_order=6,
             species_weights={"Si": 1.0})
         self.gate_scatter_multiple = multiple
         self.generator = SimpleNamespace(model="DPA-3.1-3M")

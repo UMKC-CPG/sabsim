@@ -25,7 +25,7 @@ a library from a different engine.
 One trap, fallen into by T-35 and documented so nobody falls in twice:
 SNAP's pair cutoff is ``rcutfac x (R_i + R_j)``, the SUM of two per-
 species radii scaled by a factor, not a radius. The settings therefore
-state the PHYSICAL first-shell cutoff as a length, and this adapter
+state the PHYSICAL descriptor cutoff as a length, and this adapter
 derives LAMMPS's parameters from it so every species pair is cut at
 exactly that length.
 """
@@ -65,9 +65,10 @@ _NEIGHBOUR_MARGIN = 0.5
 class DescriptorSettings:
     """How the bispectrum is computed — the gate's RULER (DESIGN §4.8).
 
-    ``first_shell_cutoff`` is the PHYSICAL radius, in angstrom, within
-    which neighbours count: the first neighbour shell (2.6 Å for silicon,
-    where the first shell sits at 2.35 Å and the second at 3.84 Å).
+    ``descriptor_cutoff`` is the PHYSICAL radius, in angstrom, within
+    which neighbours count: through the SECOND neighbour shell (4.2 Å
+    for silicon, whose shells sit at 2.35, 3.84 and 4.5 Å — LEDGER T-37
+    showed the first shell alone cannot tell glass from warm crystal).
     ``expansion_order`` is SNAP's ``twojmax``, which sets how many
     components describe a neighbourhood (30 at order 6). ``species_
     weights`` lets species be told apart inside one descriptor: each
@@ -80,7 +81,7 @@ class DescriptorSettings:
     from a copy of its own, so both sides of the comparison agree.
     """
 
-    first_shell_cutoff: float          # angstrom, a physical length
+    descriptor_cutoff: float          # angstrom, a physical length
     expansion_order: int               # SNAP twojmax
     species_weights: dict              # element symbol -> weight
 
@@ -92,14 +93,14 @@ def to_lammps_parameters(
     Returns ``(rcutfac, rfac0, twojmax, radii, weights)`` with ``radii``
     and ``weights`` in ``species_order`` (LAMMPS type order). SNAP cuts
     each species PAIR at ``rcutfac x (R_i + R_j)``, so giving every
-    species the radius ``first_shell_cutoff / 2`` with ``rcutfac = 1``
+    species the radius ``descriptor_cutoff / 2`` with ``rcutfac = 1``
     makes every pair cutoff exactly the physical cutoff — the first
     shell in, the second out, for every species combination alike. A
     species with no weight in the settings is a loud error, not a
     silent one: a default weight would change what "the same
     neighbourhood" means without anyone having written it down.
     """
-    radii = [settings.first_shell_cutoff / 2.0] * len(species_order)
+    radii = [settings.descriptor_cutoff / 2.0] * len(species_order)
     weights = []
     for symbol in species_order:
         if symbol not in settings.species_weights:
@@ -118,7 +119,7 @@ def neighbour_cutoff(settings: DescriptorSettings) -> float:
     At least the SNAP cutoff, plus a margin, or LAMMPS refuses to build
     the compute (the T-35 trap).
     """
-    return settings.first_shell_cutoff + _NEIGHBOUR_MARGIN
+    return settings.descriptor_cutoff + _NEIGHBOUR_MARGIN
 
 
 def sna_compute_commands(
