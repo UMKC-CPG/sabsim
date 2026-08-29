@@ -1258,8 +1258,9 @@ The registered metrics, each with what it actually discriminates:
   The baseline is NOT measured on the damaged slab: it is the library's
   own false-alarm rate — the fraction of warm-run atoms the study's
   tolerance calls disordered, computed from the warm-run scatter the
-  library records, so it follows the tolerance when a study refines it. (The earlier design
-  took the baseline from the "deep third" of the slab being judged, and
+  library records, so it follows the tolerance when a study refines
+  it. (The earlier design took the baseline from the "deep third" of
+  the slab being judged, and
   the first real run showed why that fails: the deep third contained
   the slab's frozen bottom face, whose atoms are under-coordinated by
   construction, and the polluted baseline swallowed the real skin.)
