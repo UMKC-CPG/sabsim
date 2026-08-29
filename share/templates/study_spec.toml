@@ -352,6 +352,16 @@ contact_gap_threshold = { value = 2.5, unit = "angstrom" }  # §9.3 contact
 # touch reads near zero; a real interface reads kilobars.
 contact_gap_window   = 3
 contact_stress_floor = { value = 500.0, unit = "bar" }
+contact_stress_window = 5   # chunks the stress running mean spans (§5.2)
+# The driver's chunking (§5.2/§5.3, study knobs since 2026-08-28): it
+# advances one control_interval between read-backs (the resolution of
+# the contact test, the stage ledger and the settle series); the press
+# may search for contact for press_time_budget before REPORTING "no
+# contact"; the zero-load reference equilibrates for settle_duration
+# before its gates. Refining any of these must not move the answer.
+control_interval     = { value = 1.0,   unit = "ps" }
+press_time_budget    = { value = 500.0, unit = "ps" }
+settle_duration      = { value = 20.0,  unit = "ps" }
 bonded_contact_threshold = 0.5    # contact quality => "bonded" (§9.3, §5.1)
 reference_pe_drift   = { value = 0.001, unit = "eV/atom" }
 # ^ max PE drift for the reference to count as settled (§9.4); provisional.

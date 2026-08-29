@@ -50,6 +50,19 @@ def _member():
     return load_and_validate_study(_TEMPLATE_PATH).members[0]
 
 
+def _tuned(**numerical_overrides):
+    """The template member with some ``[numerical]`` knobs replaced.
+
+    The driver's chunking is the study's (DESIGN §5.2/§5.3): a test that
+    wants a short press budget or settle span says so through the study
+    knobs, exactly as a study file would.
+    """
+    from dataclasses import replace
+    member = _member()
+    return replace(member, numerical=replace(
+        member.numerical, **numerical_overrides))
+
+
 def _fake_built():
     """A light pair with the tags, cell, and z-ranges the loops read."""
     tags = np.array([WAFER_A_TAG] * 100 + [WAFER_B_TAG] * 100)
@@ -100,10 +113,12 @@ def test_press_reports_no_contact_within_the_budget():
     """A gap that never closes is reported, not forced (§9.3)."""
     engine = MockEngine(positions=[_frame(15.0)], normal_stress=[1.0])
     result = press_and_bond(
-        engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1,
-        control=RunControl(max_chunks=3))
+        engine, _fake_built(),
+        _tuned(press_time_budget=Quantity(3.0, "ps")), _MODEL,
+        "pair.data", seed=1)
     assert not result.contact_reached
     assert result.chunks_to_contact is None
+    assert "press_time_budget" in result.note
 
 
 def _gapped_built(upper_low: float):
@@ -135,7 +150,7 @@ def test_settle_passes_a_flat_balanced_reference():
         top_reaction=[-1.0, -1.0, -1.0, -1.0],
         atom_count=64)
     result = settle_reference(
-        engine, _member(), RunControl(equilibrate_chunks=4))
+        engine, _tuned(settle_duration=Quantity(4.0, "ps")))
     assert result.settled
     assert result.report.force_ok and result.report.drift_ok
 
@@ -147,7 +162,7 @@ def test_settle_reports_a_drifting_reference_as_unsettled():
         bottom_reaction=[1.0] * 4, top_reaction=[-1.0] * 4,
         atom_count=64)
     result = settle_reference(
-        engine, _member(), RunControl(equilibrate_chunks=4))
+        engine, _tuned(settle_duration=Quantity(4.0, "ps")))
     assert not result.settled
     assert not result.report.drift_ok
 
@@ -158,7 +173,7 @@ def test_settle_releases_the_drive_and_writes_the_reference():
         energies=[-100.0] * 4, bottom_reaction=[1.0] * 4,
         top_reaction=[-1.0] * 4, atom_count=64)
     result = settle_reference(
-        engine, _member(), RunControl(equilibrate_chunks=4),
+        engine, _tuned(settle_duration=Quantity(4.0, "ps")),
         reference_data_file="settled.data")
     stream = engine.received_commands
     # The press drive is released BEFORE the minimize, or the reference
@@ -597,8 +612,9 @@ def test_press_without_contact_still_records_where_it_started():
     engine = MockEngine(
         positions=[_frame(30.0)] * 3, normal_stress=[-1.0] * 3)
     result = press_and_bond(
-        engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1,
-        control=RunControl(max_chunks=3))
+        engine, _fake_built(),
+        _tuned(press_time_budget=Quantity(3.0, "ps")), _MODEL,
+        "pair.data", seed=1)
     assert not result.contact_reached
     assert result.press_start_step == 0
     assert result.contact_step is None and result.hold_end_step is None
@@ -610,7 +626,7 @@ def test_settle_records_its_start_and_end_steps():
         energies=[-100.0] * 4, bottom_reaction=[0.0] * 4,
         top_reaction=[0.0] * 4)
     result = settle_reference(
-        engine, _member(), RunControl(equilibrate_chunks=4))
+        engine, _tuned(settle_duration=Quantity(4.0, "ps")))
     assert result.settle_start_step == 0
     assert result.settle_end_step == 4 * 1000
 
@@ -620,8 +636,9 @@ def test_bond_flow_opens_with_the_one_time_cell_relax_then_the_drive():
     engine = MockEngine(
         positions=[_frame(11.0)] * 2, normal_stress=[2000.0] * 2)
     press_and_bond(
-        engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1,
-        control=RunControl(max_chunks=1))
+        engine, _fake_built(),
+        _tuned(press_time_budget=Quantity(1.0, "ps")), _MODEL,
+        "pair.data", seed=1)
     stream = engine.received_commands
     relax = stream.index(
         "fix combined_cell_relax all box/relax x 0.0 y 0.0 vmax 0.001")
@@ -637,15 +654,38 @@ def test_contact_test_reads_its_window_and_floor_from_the_study():
     With the floor raised above the mock's stress, contact never fires
     even though the gap has closed (DESIGN §5.2, revised 2026-08-28).
     """
-    from dataclasses import replace
-    member = _member()
-    strict = replace(member, numerical=replace(
-        member.numerical,
-        contact_stress_floor=Quantity(5000.0, "bar")))
+    strict = _tuned(contact_stress_floor=Quantity(5000.0, "bar"),
+                    press_time_budget=Quantity(4.0, "ps"))
     frames = [_frame(11.0)] * 4
     engine = MockEngine(positions=frames, normal_stress=[2000.0] * 4)
     result = press_and_bond(
-        engine, _fake_built(), strict, _MODEL, "pair.data", seed=1,
-        control=RunControl(max_chunks=4))
+        engine, _fake_built(), strict, _MODEL, "pair.data", seed=1)
     assert not result.contact_reached
+
+
+def test_settle_force_gate_is_statistical_not_a_fixed_floor():
+    """A noisy but zero-mean net force settles; a biased one does not.
+
+    DESIGN §5.3 (revised 2026-08-28): the net grip force counts as zero
+    when its mean lies within two standard errors of zero, floored by
+    noise_floor. The scatter below is far above the 0.05 eV/Å floor that
+    used to be the whole test, yet it IS zero on average.
+    """
+    noisy = [0.6, -0.5, 0.4, -0.7, 0.5, -0.4, 0.3, -0.2]
+    engine = MockEngine(
+        energies=[-100.0] * 8, bottom_reaction=[0.0] * 8,
+        top_reaction=noisy, atom_count=64)
+    settled = settle_reference(
+        engine, _tuned(settle_duration=Quantity(8.0, "ps")))
+    assert settled.report.force_ok
+    assert settled.report.net_force_threshold > 0.05
+
+    biased = [value + 3.0 for value in noisy]     # a residual load
+    engine = MockEngine(
+        energies=[-100.0] * 8, bottom_reaction=[0.0] * 8,
+        top_reaction=biased, atom_count=64)
+    unsettled = settle_reference(
+        engine, _tuned(settle_duration=Quantity(8.0, "ps")))
+    assert not unsettled.report.force_ok
+    assert unsettled.report.net_force_mean == pytest.approx(3.0)
 

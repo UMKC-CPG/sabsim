@@ -263,6 +263,14 @@ def _numerical_from_table(table: dict, context: str) -> NumericalKnobs:
             table, "contact_gap_window", context)),
         contact_stress_floor=_require_quantity(
             table, "contact_stress_floor", context),
+        contact_stress_window=int(_require(
+            table, "contact_stress_window", context)),
+        control_interval=_require_quantity(
+            table, "control_interval", context),
+        press_time_budget=_require_quantity(
+            table, "press_time_budget", context),
+        settle_duration=_require_quantity(
+            table, "settle_duration", context),
         bonded_contact_threshold=float(_require(
             table, "bonded_contact_threshold", context)),
         reference_pe_drift=_require_quantity(

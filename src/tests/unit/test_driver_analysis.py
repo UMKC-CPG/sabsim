@@ -123,14 +123,29 @@ def test_potential_energy_drift_is_zero_on_a_plateau():
 
 def test_reference_is_settled_names_the_failing_gate():
     """Each gate is reported so a failed settle names itself (§5.3)."""
-    good = reference_is_settled(0.01, 0.05, 0.0005, 0.001)
+    at_rest = [0.01, -0.01, 0.01, -0.01]
+    good = reference_is_settled(at_rest, 0.05, 0.0005, 0.001)
     assert good.settled and good.force_ok and good.drift_ok
 
-    loud_force = reference_is_settled(0.1, 0.05, 0.0005, 0.001)
+    loud_force = reference_is_settled([0.1] * 4, 0.05, 0.0005, 0.001)
     assert not loud_force.settled and not loud_force.force_ok
 
-    drifting = reference_is_settled(0.01, 0.05, 0.002, 0.001)
+    drifting = reference_is_settled(at_rest, 0.05, 0.002, 0.001)
     assert not drifting.settled and not drifting.drift_ok
+
+
+def test_force_is_zero_calibrates_to_the_scatter_with_a_floor():
+    """Two standard errors of the series, floored by noise_floor (§5.3)."""
+    from sabsim.driver.analysis import force_is_zero
+    # A constant series has zero standard error: only the floor remains.
+    ok, mean, threshold = force_is_zero([0.04] * 5, noise_floor=0.05)
+    assert ok and mean == pytest.approx(0.04) and threshold == 0.05
+    # Wide zero-mean scatter is zero; the same scatter offset is not.
+    scatter = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0]
+    assert force_is_zero(scatter, 0.05)[0]
+    assert not force_is_zero([v + 5.0 for v in scatter], 0.05)[0]
+    # An empty record can never be judged settled.
+    assert not force_is_zero([], 0.05)[0]
 
 
 # ---------------------------------------------------------------------

@@ -838,16 +838,20 @@ foundations, interaction rules. -->
       activate_one_half` gates the healed half; `press_and_bond` is
       cell relax -> press -> hold; the scissors, the wide-gap branch and
       the bond-side heal are deleted).
-      (3) [DESIGN → CODE] `RunControl` in `driver/press_pull.py` holds
-      numbers that live only in code: `equilibrate_chunks` 20 (the
-      settle span), `stress_window` 5, `chunk_steps` 1000, `max_chunks`
-      500. DESIGN §1.4 says nothing defaults silently and every knob
-      carries its unit in the study file. The two contact knobs
-      (`contact_gap_window`, `contact_stress_floor`) were lifted into
-      the study file by the §5.2 revision of 2026-08-28 and the scissors
-      pair died with the scissors; the settle span, the stress window
-      and the chunking need a DESIGN §5.3 sentence each and then a
-      study-file home.
+      (3) [DESIGN → CODE] DONE 2026-08-28 (Paul): the four numbers that
+      lived only in `RunControl` are study knobs — `control_interval`
+      (was `chunk_steps` 1000), `press_time_budget` (was the press's
+      `max_chunks` 500), `contact_stress_window` (was `stress_window`
+      5) and `settle_duration` (was `equilibrate_chunks` 20) — written
+      into DESIGN §5.2/§5.3 and PSEUDOCODE §2/§9.3/§9.4 first, then
+      `records`/`loader`/template/`press_pull`. The settle's force gate
+      is the two-standard-error test the pull already used
+      (`analysis.force_is_zero`), floored by `noise_floor`. Left in
+      code, documented as engineering: the pull's chunk budget, the
+      density bin width, the checkpoint cadence, and two FOLLOW-ONS —
+      `bond_cutoff` should come from the material reference and
+      `separation_cutoff` from the model's own cutoff (a
+      supported-model table field), not from the driver.
       (4) [CODE] RESOLVED 2026-08-28 with (2): the "surfaces already
       close" branch in `press_and_bond` (the skeleton's direct-contact
       path, reused by accident to restart a bond from a saved press

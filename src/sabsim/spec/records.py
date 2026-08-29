@@ -172,6 +172,15 @@ class NumericalKnobs:
     # as the surfaces genuinely loading each other.
     contact_gap_window: int          # chunks in the opening's trailing mean
     contact_stress_floor: Quantity   # |mean normal stress| floor for contact
+    # The press/settle driver's chunking, all study knobs since 2026-08-28
+    # (DESIGN §5.2/§5.3): the stress running-mean window (chunks), the time
+    # the driver advances between read-backs, the time the press may
+    # search for contact before reporting "no contact", and the time the
+    # zero-load reference equilibrates before its gates.
+    contact_stress_window: int       # chunks in the stress running mean
+    control_interval: Quantity       # time between driver read-backs
+    press_time_budget: Quantity      # contact search limit (a time)
+    settle_duration: Quantity        # zero-load equilibration span
     bonded_contact_threshold: float  # contact quality above which "bonded"
     reference_pe_drift: Quantity     # max PE drift for a settled reference
 

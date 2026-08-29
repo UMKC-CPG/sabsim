@@ -312,8 +312,47 @@ class SettleReport:
     """
 
     settled: bool
-    force_ok: bool                 # net grip force within the noise floor
+    force_ok: bool                 # net grip force zero within its scatter
     drift_ok: bool                 # PE drift within the settle threshold
+    # What the force gate actually compared, so a report can show the
+    # number and the bar it had to clear (DESIGN §5.3, 2026-08-28).
+    net_force_mean: float = 0.0    # |mean(top + bottom)| over the settle
+    net_force_threshold: float = 0.0   # max(2 x standard error, floor)
+
+
+def net_force_series(top_reaction_fz, bottom_reaction_fz) -> np.ndarray:
+    """The per-chunk net grip force, top + bottom (§9.4).
+
+    At rest the two reactions cancel chunk by chunk (Newton's third law),
+    so this series scatters about zero with the thermal noise of the
+    system — which is exactly the scatter the settle gate calibrates
+    itself to.
+    """
+    return (np.asarray(top_reaction_fz, dtype=float)
+            + np.asarray(bottom_reaction_fz, dtype=float))
+
+
+def force_is_zero(series, noise_floor: float,
+                  standard_errors: float = 2.0) -> tuple:
+    """Is a force series zero within its own scatter? (DESIGN §5.3, §5.5)
+
+    The one criterion the program uses wherever a force must be judged
+    zero — the settle's net grip force and the pull's returned force: the
+    magnitude of the mean lies within ``standard_errors`` standard errors
+    of zero. ``noise_floor`` is the FLOOR beneath that bar, for the
+    degenerate noiseless record (a quasi-static mock, a 0 K run) whose
+    standard error collapses toward zero and would otherwise demand
+    impossible exactness. Returns ``(ok, |mean|, threshold)`` so the
+    caller can report the numbers, not only the verdict.
+    """
+    values = np.asarray(series, dtype=float)
+    if len(values) == 0:
+        return False, 0.0, float(noise_floor)
+    mean = float(abs(values.mean()))
+    standard_error = (float(values.std(ddof=1)) / np.sqrt(len(values))
+                      if len(values) > 1 else 0.0)
+    threshold = max(standard_errors * standard_error, float(noise_floor))
+    return mean <= threshold, mean, threshold
 
 
 def net_grip_force(top_reaction_fz, bottom_reaction_fz) -> float:
@@ -345,23 +384,29 @@ def potential_energy_drift(pe_series) -> float:
 
 
 def reference_is_settled(
-        net_force: float,
+        net_force_series,
         noise_floor: float,
         pe_drift: float,
         pe_drift_threshold: float) -> SettleReport:
-    """Both §9.4 gates: net grip force AND PE drift within threshold.
+    """Both §9.4 gates: net grip force zero within its scatter AND the PE
+    drift within threshold (DESIGN §5.3, revised 2026-08-28).
 
-    Takes the already-computed scalars (so unit reconciliation lives with
-    the caller that has the atom count) and reports each verdict plus the
-    conjunction. A reference that fails either gate is reported, never
-    integrated over (§5.3).
+    ``net_force_series`` is the per-chunk top + bottom reaction over the
+    settle (:func:`net_force_series`); it is judged by
+    :func:`force_is_zero`, the same statistical test the pull uses — a
+    fixed floor alone judged a visibly settled demo unsettled (LEDGER
+    T-32). The drift is the already-computed scalar (its unit
+    reconciliation lives with the caller that has the atom count). A
+    reference that fails either gate is reported, never integrated over.
     """
-    force_ok = net_force <= noise_floor
+    force_ok, mean, threshold = force_is_zero(net_force_series, noise_floor)
     drift_ok = pe_drift <= pe_drift_threshold
     return SettleReport(
         settled=(force_ok and drift_ok),
         force_ok=force_ok,
-        drift_ok=drift_ok)
+        drift_ok=drift_ok,
+        net_force_mean=mean,
+        net_force_threshold=threshold)
 
 
 # ---------------------------------------------------------------------

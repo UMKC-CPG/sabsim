@@ -333,6 +333,10 @@ contact_grid_spacing = { value = 5.0, unit = "angstrom" }   # ~cutoff/cell
 contact_gap_threshold = { value = 6.0, unit = "angstrom" }  # rough amorphous skins: density surfaces sit ~4-5 A apart when interlocked (T-31)
 contact_gap_window   = 3          # chunks in the opening's trailing mean (§5.2)
 contact_stress_floor = { value = 500.0, unit = "bar" }  # |stress| floor
+contact_stress_window = 5   # chunks in the stress running mean
+control_interval     = { value = 1.0,   unit = "ps" }   # §5.2
+press_time_budget    = { value = 500.0, unit = "ps" }   # §5.2
+settle_duration      = { value = 20.0,  unit = "ps" }   # §5.3
 bonded_contact_threshold = 0.5    # contact quality => "bonded" (§9.3, §5.1)
 reference_pe_drift   = { value = 0.001, unit = "eV/atom" }
 # ^ max PE drift for the reference to count as settled (§9.4); provisional.

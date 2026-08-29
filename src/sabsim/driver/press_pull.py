@@ -33,7 +33,7 @@ from sabsim.driver.analysis import (
     cross_interface_bridges,
     interface_opening,
     interface_plane,
-    net_grip_force,
+    net_force_series,
     potential_energy_drift,
     reexpress_versus_opening,
     reference_is_settled,
@@ -75,26 +75,22 @@ from sabsim.structure.wafer_tags import WAFER_A_TAG, WAFER_B_TAG
 
 @dataclass(frozen=True)
 class RunControl:
-    """How the phases chunk the run and where they stop (§9.3-§9.6).
+    """The engineering settings of the phases (§9.3-§9.6).
 
-    The simulation advances ``chunk_steps`` at a time, up to
-    ``max_chunks``, reading the state back between chunks; ``stress_
-    window`` is how many chunks the normal-stress running average spans;
-    ``equilibrate_chunks`` is the settle span; ``separation_cutoff`` is
-    the potential cutoff past which the interface counts as open (§4.6);
-    ``density_bin_width`` bins the profile that locates the dividing
-    surfaces (§2.6). These are engineering settings, not physics knobs.
-    The contact test's own two settings — the opening's trailing-mean
-    window and the sustained-stress floor — are STUDY knobs
-    (``numerical.contact_gap_window`` / ``contact_stress_floor``, DESIGN
-    §5.2), not fields here. (The TODO item "retire the walking-skeleton
-    residue" tracks moving the remaining constants into the study file.)
+    Everything that shapes a run is a STUDY knob since 2026-08-28 (DESIGN
+    §5.2/§5.3): the chunk length (``numerical.control_interval``), the
+    press's contact-search limit (``press_time_budget``), the settle span
+    (``settle_duration``), and the contact test's windows and floor. What
+    stays here is engineering that does not move the answer:
+    ``max_chunks`` bounds the PULL loop (its box headroom is sized from
+    it; the pull ends on separation long before); ``separation_cutoff``
+    is the potential cutoff past which the interface counts as open
+    (§4.6); ``density_bin_width`` bins the profile that locates the
+    dividing surfaces (§2.6); ``bond_cutoff`` is the joined-atom distance
+    (§5.5); ``checkpoint_cadence`` is resume bookkeeping (§13).
     """
 
-    chunk_steps: int = 1000
     max_chunks: int = 500
-    stress_window: int = 5
-    equilibrate_chunks: int = 20
     separation_cutoff: float = 6.0     # Å, the §4.6 potential cutoff
     density_bin_width: float = 1.0     # Å, dividing-surface profile bin
     # The distance within which two atoms count as still JOINED, which
@@ -245,6 +241,12 @@ def _steps(duration: Quantity, timestep: Quantity) -> int:
                         / to_metal(timestep, "time")))
 
 
+def _chunks(duration: Quantity, interval: Quantity) -> int:
+    """How many control intervals span a duration (at least one)."""
+    return max(1, int(np.ceil(to_metal(duration, "time")
+                              / to_metal(interval, "time"))))
+
+
 def _press_setup(
         built, member, force_model, data_file, seed, geometry,
         trajectory_file=None, trajectory_stride=None) -> list:
@@ -336,11 +338,16 @@ def press_and_bond(
     press_start_step = engine.step()
     gap_threshold = to_metal(numerical.contact_gap_threshold, "distance")
     stress_floor = to_metal(numerical.contact_stress_floor, "pressure")
+    # The chunking is the study's (DESIGN §5.2): one control_interval per
+    # read-back, and no more than press_time_budget of searching.
+    chunk_steps = _steps(numerical.control_interval, numerical.md_timestep)
+    chunk_budget = _chunks(numerical.press_time_budget,
+                           numerical.control_interval)
     stress_series: list = []
     opening_series: list = []
     contact_chunk = None
-    for chunk in range(control.max_chunks):
-        engine.commands([f"run {control.chunk_steps}"])
+    for chunk in range(chunk_budget):
+        engine.commands([f"run {chunk_steps}"])
         frame, aligned_tags = _positions_with_tags(engine, tags)
         z_lower, z_upper = _wafer_z(frame, aligned_tags)
         opening_series.append(interface_opening(
@@ -353,14 +360,14 @@ def press_and_bond(
         # wafers touch without contact ever being declared (T-31).
         opening = trailing_mean(opening_series, numerical.contact_gap_window)
         if contact_reached(opening, gap_threshold, stress_series,
-                           control.stress_window, stress_floor):
+                           numerical.contact_stress_window, stress_floor):
             contact_chunk = chunk
             break
 
     if contact_chunk is None:
         return PressResult(
             contact_reached=False, chunks_to_contact=None,
-            note="no contact within the chunk budget (§9.3)",
+            note="no contact within press_time_budget (§9.3, §5.2)",
             press_start_step=press_start_step,
             atoms_conserved=conserved_now())
     contact_step = engine.step()
@@ -418,23 +425,29 @@ def settle_reference(
     settle_start_step = engine.step()             # ledger (§9.4)
     engine.commands(["min_style cg", "minimize 1e-8 1e-8 1000 10000"])
 
+    # Settle for the study's settle_duration, one control_interval per
+    # read-back (DESIGN §5.3): both grip reactions and the potential
+    # energy are collected per chunk, and the force gate judges the net
+    # reaction's mean against its OWN scatter (two standard errors,
+    # floored by noise_floor) — the pull's criterion, reused.
+    chunk_steps = _steps(numerical.control_interval, numerical.md_timestep)
     energies: list = []
     bottom: list = []
     top: list = []
-    for _ in range(control.equilibrate_chunks):
-        engine.commands([f"run {control.chunk_steps}"])
+    for _ in range(_chunks(numerical.settle_duration,
+                           numerical.control_interval)):
+        engine.commands([f"run {chunk_steps}"])
         energies.append(engine.energy())
         bottom.append(engine.grip_reaction("bottom"))
         top.append(engine.grip_reaction("top"))
 
-    net_force = net_grip_force(top, bottom)
     drift = potential_energy_drift(energies)
     noise_floor = to_metal(numerical.noise_floor, "force")
     drift_threshold = (
         to_metal(numerical.reference_pe_drift, "energy_per_atom")
         * engine.atom_count())
     report = reference_is_settled(
-        net_force, noise_floor, drift, drift_threshold)
+        net_force_series(top, bottom), noise_floor, drift, drift_threshold)
 
     if reference_data_file is not None:
         engine.commands([f"write_data {reference_data_file}"])
@@ -536,7 +549,9 @@ def begin_or_resume_pull(
 
     if checkpoint is None:
         # FRESH. Read the reference and size the box for the whole travel.
-        travel_time = control.max_chunks * control.chunk_steps * timestep
+        chunk_steps = _steps(numerical.control_interval,
+                             numerical.md_timestep)
+        travel_time = control.max_chunks * chunk_steps * timestep
         engine.commands(_pull_setup(
             built, member, force_model, data_file, rate, seed, geometry,
             travel_time, trajectory_file, trajectory_stride))
@@ -627,7 +642,8 @@ def pull_at_rate(
     window = to_metal(numerical.force_average_window, "distance")
     # How far the grip travels per chunk, hence how many further chunks
     # are needed to lay down one full averaging window of record.
-    per_chunk = rate_metal * control.chunk_steps * timestep
+    chunk_steps = _steps(numerical.control_interval, numerical.md_timestep)
+    per_chunk = rate_metal * chunk_steps * timestep
     confirmation_chunks = (
         int(np.ceil(window / per_chunk)) + 1 if per_chunk else 1)
 
@@ -636,10 +652,10 @@ def pull_at_rate(
     # Bounding the loop by the engine's ABSOLUTE step means a resume
     # continues toward the SAME ceiling instead of starting a fresh budget
     # that would drive the grip out through the top of the box (§13.5).
-    step_budget = control.max_chunks * control.chunk_steps
+    step_budget = control.max_chunks * chunk_steps
     remaining_tail = None
     while engine.step() < step_budget:
-        engine.commands([f"run {control.chunk_steps}"])
+        engine.commands([f"run {chunk_steps}"])
         step = engine.step()
         # THE HINGE (§13.5, DESIGN §11.1): displacement is grip travel =
         # rate x elapsed, and elapsed is the ABSOLUTE step x timestep, not
