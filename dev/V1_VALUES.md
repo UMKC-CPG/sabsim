@@ -210,8 +210,8 @@ All five resume steps are now done:
    temperature / hold / rate ladder). §4.6 needed no change — the forks
    touch no MLIP-backend knob.
 3. ✅ Authored the §1.4 generator's fully-populated **study spec**
-   (`dev/templates/study_spec.toml`) and the deployment **rc template**
-   (`dev/templates/deployment_rc.toml`, hardware + per-kind-of-job usage).
+   (`share/templates/study_spec.toml`) and the deployment **rc template**
+   (`share/templates/deployment_rc.toml`, hardware + per-kind-of-job usage).
 4. ✅ Pointed the Tier-D "numeric follow-ons" in `TODO.md` at
    `DESIGN.md` §1.3, reclassified out of "pick a value."
 5. ✅ Serialization FORMAT decided — **TOML** (§1.8).

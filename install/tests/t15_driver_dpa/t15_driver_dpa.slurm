@@ -24,7 +24,7 @@ SHARE=/cluster/VAST/rulisp-lab/cpg
 BENCH="$SHARE/share/models/dpa_gpu_bench"
 PREFIX="$SHARE/programs/deepmd-kit-3.2.0b0-cuda129"
 
-export SABSIM_TEMPLATE="$REPO/dev/templates/study_spec.toml"
+export SABSIM_TEMPLATE="$REPO/share/templates/study_spec.toml"
 # Default to the NO-PRERELAX surfaces (override via --export to compare).
 _sio2="$BENCH/t12_val_sio2_noprerelax/sio2_activated.extxyz"
 _linbo3="$BENCH/t12_val_linbo3_25ev_noprerelax/linbo3_activated.extxyz"

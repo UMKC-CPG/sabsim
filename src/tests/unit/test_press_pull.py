@@ -38,7 +38,7 @@ from sabsim.structure.slab_builder import WAFER_A_TAG, WAFER_B_TAG
 
 _TEMPLATE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
-    "..", "..", "..", "dev", "templates", "study_spec.toml"))
+    "..", "..", "..", "share", "templates", "study_spec.toml"))
 
 _MODEL = stand_in_force_model({"Si": 1})
 _LOWER_Z = np.linspace(0.0, 10.0, 100)   # a wafer-A slab, top surface ~10

@@ -54,7 +54,7 @@ from sabsim.structure.slab_builder import (
 
 _TEMPLATE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
-    "..", "..", "..", "dev", "templates", "study_spec.toml"))
+    "..", "..", "..", "share", "templates", "study_spec.toml"))
 
 
 def _member():

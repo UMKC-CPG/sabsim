@@ -38,7 +38,7 @@ from sabsim.structure.slab_builder import (
     read_standalone_half,
 )
 
-_TEMPLATE = "dev/templates/study_spec.toml"
+_TEMPLATE = "share/templates/study_spec.toml"
 
 
 def _si_si_member():

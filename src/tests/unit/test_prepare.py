@@ -17,7 +17,7 @@ from sabsim.deploy.prepare import GUIDE_FILENAME
 from sabsim.spec import load_and_validate_study
 
 _TEMPLATES = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), "..", "..", "..", "dev", "templates"))
+    os.path.dirname(__file__), "..", "..", "..", "share", "templates"))
 _SPEC = os.path.join(_TEMPLATES, "study_spec.toml")
 _RC = os.path.join(_TEMPLATES, "deployment_rc.toml")
 

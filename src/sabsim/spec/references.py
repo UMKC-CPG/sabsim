@@ -49,7 +49,7 @@ def resolve_crystal_file(cif_source: str) -> str:
     1. the directory the run was launched from — what a user editing
        their own spec expects;
     2. the REPO ROOT — how the shipped example specs are written, and
-       what a spec copied out of ``dev/templates`` says;
+       what a spec copied out of ``share/templates`` says;
     3. the installed PACKAGE, by the file's path within it, so a
        non-source install resolves the shipped examples too.
 

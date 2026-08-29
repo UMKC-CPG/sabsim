@@ -1961,7 +1961,7 @@ load-time check that refuses a member whose structures fall outside it.
 
 **Built state (2026-08-26): the recipe is a file, and the first slice
 is silicon.** The recipe of the eight parts above is a TOML file,
-`force_model_recipe.toml` (template in `dev/templates/`), loaded by
+`force_model_recipe.toml` (template in `share/templates/`), loaded by
 `src/sabsim/bootstrap/recipe.py` with the study file's own discipline:
 every key required, units carried, three validation phases. The
 production settings block is the LEAN recipe of
@@ -3882,7 +3882,7 @@ jobs we submit directly); a machine-local deployment file carrying a
 `[hardware]` inventory and a `[usage.*]` map keyed by kind of job; and
 three roots (`SABSIM_SCRATCH` / `SABSIM_SHARE` / `SABSIM_LOCAL`) set by a
 sourced shell rc upstream of Python. The template already exists
-(`dev/templates/deployment_rc.toml`). What was missing — and what this
+(`share/templates/deployment_rc.toml`). What was missing — and what this
 section designs — is the **consumer**: the mechanism that reads that file
 and acts on it.
 

@@ -32,7 +32,7 @@ BENCH="$SHARE/share/models/dpa_gpu_bench"
 # The committee of one: the group's trained Si graph.pb (type_map [Si],
 # rcut 6). The bond flow presses under THIS model, in-process.
 export SABSIM_DEEPMD_MODEL="$SHARE/share/train_deepmd_si/graph.pb"
-export SABSIM_TEMPLATE="$REPO/dev/templates/study_spec.toml"
+export SABSIM_TEMPLATE="$REPO/share/templates/study_spec.toml"
 export VALWORK="$BENCH/t9_val"
 
 # LAMMPS needs the SLURM per-* memory exports cleared or the launch aborts

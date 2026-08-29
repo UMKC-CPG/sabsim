@@ -24,7 +24,8 @@ sabsim/
     PRIOR_ART.md      Existing overlapping work and reusable assets
   src/                Source code (orchestrator, quality gate, glue)
   src/tests/          Test suite
-  share/              Version-controlled reference data (gate criteria)
+  share/              Version-controlled run-time data: gate references,
+                      and the input-file TEMPLATES (share/templates/)
   CLAUDE.md           AI assistant guidance
 ```
 
@@ -396,7 +397,7 @@ is.
   DESIGN §4.7), never a second code path.
 - **Bootstrap — the potential manufactory [BUILD, 2026-08-26].** The
   code that runs steps 1–2: it reads a FORCE-MODEL RECIPE (the third
-  input file, `DESIGN.md` §4.8; template `dev/templates/
+  input file, `DESIGN.md` §4.8; template `share/templates/
   force_model_recipe.toml`), manufactures the training structures,
   writes and harvests the VASP labels, and — later — hands the labels to
   ALF to train the committee and refines by uncertainty. It lives in
@@ -779,7 +780,7 @@ machine — which keeps faith with "none is defaulted": the values are
 stated in a file the user owns rather than inferred by code, and the
 generator is exactly the "defaults exist only as a generator that emits
 a complete file" escape hatch (`DESIGN.md` §1.4). That generation starts
-from a *tracked* template, `dev/templates/sabsimrc`, sitting beside the
+from a *tracked* template, `share/templates/sabsimrc`, sitting beside the
 study-spec and deployment-rc templates — the distributable source of
 truth that carries the lab's own paths as a WORKED example, exactly as
 `deployment_rc.toml` does, not as code-level defaults. The v1 install

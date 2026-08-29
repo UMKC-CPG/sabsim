@@ -133,7 +133,7 @@ seed            = 22
 # for).
 # ---------------------------------------------------------------------
 [generation_plan]
-study                       = "dev/templates/study_spec.toml"
+study                       = "share/templates/study_spec.toml"
 member                      = "si-si-reference"
 job_directory               = "jobs/c_dosed_120ev"
 frames_per_stage            = { activate = 10, press = 12, pull = 10 }

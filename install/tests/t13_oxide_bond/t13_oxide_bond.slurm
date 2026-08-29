@@ -26,7 +26,7 @@ BENCH="$SHARE/share/models/dpa_gpu_bench"
 # matched amorphized surfaces, their shared-cell match, and demo mode.
 export SABSIM_DEEPMD_MODEL="$SHARE/share/training_deepmd_sio2_linbo3/model.pb"
 export SABSIM_BOND_DEMO=1
-export SABSIM_TEMPLATE="$REPO/dev/templates/study_spec.toml"
+export SABSIM_TEMPLATE="$REPO/share/templates/study_spec.toml"
 export SIO2_SURFACE="$BENCH/t12_val/sio2_activated.extxyz"
 export LINBO3_SURFACE="$BENCH/t12_val_linbo3_25ev/linbo3_activated.extxyz"
 export MATCH_PKL="$BENCH/t12_val/match.pkl"

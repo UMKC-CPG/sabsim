@@ -50,7 +50,7 @@ from sabsim.structure.slab_builder import (
 
 _RECIPE = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
-    "..", "..", "..", "dev", "templates", "force_model_recipe.toml"))
+    "..", "..", "..", "share", "templates", "force_model_recipe.toml"))
 
 
 def _recipe_text() -> str:

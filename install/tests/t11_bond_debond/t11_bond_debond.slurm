@@ -30,7 +30,7 @@ BENCH="$SHARE/share/models/dpa_gpu_bench"
 # The committee of one (the group's trained Si graph.pb), T-10's output
 # dir (holds activated.extxyz), and this run's scratch.
 export SABSIM_DEEPMD_MODEL="$SHARE/share/train_deepmd_si/graph.pb"
-export SABSIM_TEMPLATE="$REPO/dev/templates/study_spec.toml"
+export SABSIM_TEMPLATE="$REPO/share/templates/study_spec.toml"
 export T10_VALWORK="$BENCH/t10_val"
 export VALWORK="$BENCH/t11_val"
 mkdir -p "$VALWORK"

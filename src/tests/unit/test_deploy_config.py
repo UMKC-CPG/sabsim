@@ -24,7 +24,7 @@ from sabsim.deploy import (
 # the starting point every negative case mutates.
 _TEMPLATE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
-    "..", "..", "..", "dev", "templates", "deployment_rc.toml"))
+    "..", "..", "..", "share", "templates", "deployment_rc.toml"))
 
 
 def _template_text() -> str:

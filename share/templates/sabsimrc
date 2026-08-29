@@ -6,7 +6,7 @@
 # `.sabsim/sabsimrc` inside the user's clone (which is gitignored); each
 # user then edits that copy to match their own machine. It travels with
 # the repository, sitting beside the study-spec and deployment-rc
-# templates in `dev/templates/`.
+# templates in `share/templates/`.
 #
 # Like `deployment_rc.toml`, the values below are EXAMPLES for the local
 # admin to set — the Rulis-lab pixstor/cpg paths, shown as a WORKED

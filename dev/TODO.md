@@ -227,7 +227,7 @@
       SLURM's `--mem` unit; unknown unit is a loud stop), a `memory` field
       on `UsageBlock`, `_slurm_memory` in `prepare.py` emitting
       `#SBATCH --mem` (whole GB/TB kept verbatim as `16G`, else MB), the
-      three `[usage.*]` blocks in `dev/templates/deployment_rc.toml`
+      three `[usage.*]` blocks in `share/templates/deployment_rc.toml`
       (activate 16 GB / bond 32 GB / analyze 8 GB — comfortable ceilings,
       NOT tuned), and the propagation up the chain (`PSEUDOCODE.md` §14.1
       UsageBlock + §14.5 directives, `DESIGN.md` §10.6 sibling paragraph to
@@ -497,7 +497,7 @@ so they are not discovered late (two touch non-negotiable goals). -->
       (`DESIGN.md` §1.2, §1.4). Serialization FORMAT resolved to **TOML**
       (ratified 2026-07-13, `DESIGN.md` §1.8); the schema mechanism on
       top of it stays a follow-on. Templates authored:
-      `dev/templates/study_spec.toml` and `dev/templates/deployment_rc.toml`.
+      `share/templates/study_spec.toml` and `share/templates/deployment_rc.toml`.
       ROOT-ESTABLISHING mechanism DECIDED (2026-07-17): the three roots
       (`SABSIM_SCRATCH` / `SABSIM_SHARE` / `SABSIM_LOCAL`) are NOT in the
       deployment TOML — they must exist before Python starts (one names
@@ -517,7 +517,7 @@ so they are not discovered late (two touch non-negotiable goals). -->
       `ARCHITECTURE.md` §4.3 to three per-kind jobs, keeping its
       Approach-A serial-halves argument as a SEPARATE axis inside the
       activate job; (2) DONE — reshaped
-      `dev/templates/deployment_rc.toml` (tool list machine-wide ->
+      `share/templates/deployment_rc.toml` (tool list machine-wide ->
       per-kind `[usage.*]`: cascade=lammps, bond=lammps+deepmd,
       vasp=vasp, sequence=[]); (4) DONE — `/refine`: the bare `§10.x`
       refs were `PSEUDOCODE.md` §10 cross-refs missing the prefix (now
@@ -1830,7 +1830,7 @@ foundations, interaction rules. -->
       values are distilled INTO DESIGN §2.7 (faces), §3.6 (energy /
       fluence-to-depth / seeds), §5.9 (pressure / temperature / hold /
       rate ladder); §4.6 needed no change (the forks touch no MLIP-backend
-      knob). Templates authored under `dev/templates/`. Face, polymorph,
+      knob). Templates authored under `share/templates/`. Face, polymorph,
       material, energy, and seed count are v1 DEFAULTS, not freezes.
 - [ ] Tier-D numeric follow-ons are NOT "pick a value" — they are
       derived or need reference DATASETS (`DESIGN.md` §1.3): lattice
@@ -2119,7 +2119,7 @@ foundations, interaction rules. -->
       including `si-sio2`.
 
 - [ ] **`si-sio2` names a crystal file that does not exist.**
-      `dev/templates/study_spec.toml` points wafer B at
+      `share/templates/study_spec.toml` points wafer B at
       `src/sabsim/structure/data/sio2_beta_cristobalite.cif`; there is no
       such file, so the member has never been runnable. We now ship
       `sio2_alpha_quartz.cif` (used by the new `sio2-sio2-reference`

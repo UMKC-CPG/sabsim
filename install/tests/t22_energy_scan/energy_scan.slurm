@@ -42,7 +42,7 @@ source "$SHARE/virtual_envs/sabsim/bin/activate"
 export PYTHONPATH="$REPO/src"
 
 # Universal cascade, out-of-process in the deepmd bundle. The MODEL is
-# named by the study file's [potential] block (dev/templates/study_spec
+# named by the study file's [potential] block (share/templates/study_spec
 # .toml), not here. It is
 # DPA-3.1-3M as a .pth: no AOT .pt2 exists for it (the network.py `u0`
 # bug, diagnosed in dev/notes/mlip-cascade-integration.md) but lmp loads

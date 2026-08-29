@@ -31,7 +31,7 @@ BENCH="$SHARE/share/models/dpa_gpu_bench"
 export SABSIM_CASCADE_ENGINE_PREFIX="$SHARE/programs/deepmd-kit-3.2.0b0-cuda129"
 export SABSIM_CASCADE_MLIP_MODEL="$BENCH/v320fix/dpa24.pt2"
 export SABSIM_ALLOW_UNVALIDATED_POTENTIAL=1
-export SABSIM_TEMPLATE="$REPO/dev/templates/study_spec.toml"
+export SABSIM_TEMPLATE="$REPO/share/templates/study_spec.toml"
 # VALWORK (outputs) + T12_BUILD_DIR (the pre-built half) default to t12_val
 # but honour an --export override, so an energy re-run writes to its OWN dir
 # while reading the one matched build. T12_ENERGY_EV (if exported) sets the

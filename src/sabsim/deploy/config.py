@@ -1,7 +1,7 @@
 """Read and validate the deployment rc file (PSEUDOCODE.md §14.1).
 
 This module is ``load_deployment`` made real. It turns the machine-local
-deployment TOML — the ``dev/templates/deployment_rc.toml`` an admin edits
+deployment TOML — the ``share/templates/deployment_rc.toml`` an admin edits
 — into the typed records PSEUDOCODE.md §14.1 defines, and it holds the
 consumer to the SAME two disciplines the study-spec loader
 (:mod:`sabsim.spec.loader`) does, because the rc is the study spec's only

@@ -23,7 +23,7 @@ from sabsim.pipeline.run_options import (
 )
 from sabsim.spec.loader import load_and_validate_study
 
-_TEMPLATE = "dev/templates/study_spec.toml"
+_TEMPLATE = "share/templates/study_spec.toml"
 
 
 @pytest.fixture(autouse=True)

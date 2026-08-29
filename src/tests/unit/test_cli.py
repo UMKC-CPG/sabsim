@@ -16,7 +16,7 @@ from sabsim.cli import main
 
 _TEMPLATE = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
-    "..", "..", "..", "dev", "templates", "study_spec.toml"))
+    "..", "..", "..", "share", "templates", "study_spec.toml"))
 
 
 @pytest.fixture
@@ -103,7 +103,7 @@ def test_job_flags_are_mutually_exclusive(run_home):
 
 _RC_TEMPLATE = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
-    "..", "..", "..", "dev", "templates", "deployment_rc.toml"))
+    "..", "..", "..", "share", "templates", "deployment_rc.toml"))
 
 
 def test_prepare_missing_spec_returns_two(run_home):
