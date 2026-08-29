@@ -138,12 +138,17 @@ def run_member_job(member, scratch_directory, job: JobKind,
             lambda: stage_set.build(
                 member, derived_lattices, scratch_directory, comm),
             SLABS_CONTRACT)
+        # The verdicts are printed BEFORE the contract judges them, so a
+        # halted job's log still shows every metric, not only the one the
+        # halt message names (2026-08-28, job 16843986).
+        def _activate_and_report():
+            activated = stage_set.activate(
+                handle_a, handle_b, member, scratch_directory, comm)
+            if comm is None or comm.Get_rank() == 0:
+                _report_activation(member.name, activated)
+            return activated
         activated = run_to_contract(
-            lambda: stage_set.activate(
-                handle_a, handle_b, member, scratch_directory, comm),
-            ACTIVATED_SLABS_CONTRACT)
-        if comm is None or comm.Get_rank() == 0:
-            _report_activation(member.name, activated)
+            _activate_and_report, ACTIVATED_SLABS_CONTRACT)
         structure = run_to_contract(
             lambda: stage_set.assemble(
                 activated, shared, member, scratch_directory, comm),
@@ -203,8 +208,8 @@ def _report_activation(member_name: str, activated) -> None:
     The §3.5 gate verdict per healed surface, with its measured skin depth
     and every metric's number against its threshold (revised 2026-08-28:
     the gate runs in this job, so this is where a reader looks first).
-    Printed after the contract passed, so a FAILED line here can only be
-    read from a halted job's log through the contract's own message.
+    Printed BEFORE the contract judges the verdicts, so a halted job's
+    log shows every metric's number, not only the one the halt names.
     """
     print(f"\nactivation verdicts for member '{member_name}':")
     for role, verdict in (("A", activated.verdict_a),

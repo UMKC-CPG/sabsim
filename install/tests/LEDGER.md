@@ -1262,3 +1262,89 @@ real labels, and the first real cost numbers, of the lean recipe.)*
   `get_potential_energy()` / `get_forces()`, not from `info`.
 - **Scope NOT covered:** Collection 2 (needs the dumped member run);
   the audit block; any oxide.
+
+## T-28 … T-32 — jobs of 2026-08-26/27 (demo bond under DPA-3, the contact fixes) — recorded 2026-08-28
+
+*(Backlog entries. The scripts are committed under
+`install/tests/t28_bond_under_dpa3/` (t28 … t32 slurm); the job folders
+are `jobs/demo_si_small_50ev_dpa3{,b,c,d,e}/`. Each was the 50 eV, 252
+atoms-per-half silicon demo pressed under DPA-3.1-3M in-process.)*
+
+- **T-28 / T-29 / T-30 / T-31:** the sequence that produced the
+  2026-08-27 bond-flow fixes — loose surface atoms mixing at first touch
+  (→ the re-anneal settle before the press), contact never declared
+  (→ the trailing-mean opening and sustained tension accepted as
+  contact, commit 37de639), and the 6 Å gap threshold for rough
+  activated skins (commit fba92d8). Restarts from a saved press frame
+  (T-30/T-31) used the narrow-gap entry that no longer exists after
+  2026-08-28. Evidence was read in-session from the job logs and press
+  movies; it is NOT transcribed here (Scope: the numbers live in the
+  commit messages and the T-32 result below).
+- **T-32 — job 16825760 (bond) + 16826167 (analyze), stands.** The
+  demo BONDED under DPA-3 (contact on the two-sided criterion), all
+  three pull rungs (20 / 50 / 100 m/s) SEPARATED, M1 (slowest rung)
+  = 0.259 eV/Å² = 4.16 J/m²; `reference_ok = false` (the settle's
+  net grip force sat above the strict 0.05 eV/Å noise floor — a knob
+  question, not a failure). Force curves:
+  `jobs/demo_si_small_50ev_dpa3e/t32_pull_force_curves.png`.
+- **Scope NOT covered:** production dose (120 eV; the C activation
+  16822118 succeeded, its bond 16825631 TIMED OUT at 12 h in the press
+  and has no pull); any oxide.
+
+## T-33 — jobs 16843986 (activate, HALTED by design) + 16843987/8 (never ran) — 2026-08-28
+
+*(First node run of the 2026-08-28 flow: heal + §3.5 gate inside the
+activation session, no wide gap, no scissors, no capped relax. Harness:
+`install/tests/t33_heal_in_activation/` = the `sabsim prepare` scripts of
+`jobs/demo_si_small_50ev_dpa3f/`, submitted as a dependency chain.)*
+
+- **As-run:** `sbatch si-si-reference_activate.slurm` → bond
+  (`--dependency=afterok`) → analyze. Study = the 50 eV demo
+  (`jobs/demo_si_small_50ev_dpa3f/sabsim.toml`: 252 Si atoms per half,
+  `initial_gap` 7 Å, `contact_gap_window` 3, `contact_stress_floor`
+  500 bar), deployment rc = the template (H100, 1 rank). Code =
+  commit 2efcd99 on `universal-mlip-cascade`.
+- **Activate 16843986 — FAILED after 43:52, exactly as the design
+  says it must.** Per half: lattice derivation, cascade, projectile
+  strip, heal (2 ps hold at 300 K + 2 ps cool + minimize; ~2 min of
+  the ~21 min per half), handoff dump. Both heal markers written:
+  `activated_a.heal_step = 16700`, `activated_b.heal_step = 16710`.
+  Both activate movies recorded (208 frames for half A). The §3.5 gate
+  then judged the HEALED halves and the contract halted the member
+  BEFORE assembly:
+
+  ```
+  sabsim: run halted — contract 'ACTIVATED_SLABS_CONTRACT' not met:
+  surface A failed the §3.5 activation gate: amorphization_depth:
+  measured 4.0 vs 7.0 (share/activation/Si.toml)
+  ```
+
+  The full verdict, recomputed on the login node from the healed
+  halves (`amorphized_{a,b}.extxyz`) with the same gate:
+
+  ```
+  a passed=False depth=4.0  rdf 2.375 ok  coordination 0.162 ok
+                             rings 0.569 ok  amorphization_depth FAIL (7.0)
+  b passed=False depth=4.0  rdf 2.375 ok  coordination 0.202 ok
+                             rings 0.608 ok  amorphization_depth FAIL (7.0)
+  ```
+
+  Three of four metrics pass on both halves; the ONE that fails is the
+  skin depth — 4 Å after the heal, against the 7 Å reference that the
+  §3.6 study pinned for the PRODUCTION dose (120 eV, full fluence). The
+  50 eV demo is under-dosed by construction, and the earlier demo bonds
+  (T-30 … T-32) never met this gate because they entered the bond flow
+  through the restart branch that skipped it.
+- **What this validates:** the activate session's cascade → strip →
+  heal → dump order and the heal marker; the gate running in the
+  activate job; the contract halting before assembly (no bond GPU
+  spent: 16843987/8 were cancelled as DependencyNeverSatisfied).
+- **Defect found and fixed (commit after this entry):** the per-metric
+  verdict printout ran AFTER the contract, so the halted job's log held
+  only the one-line halt; `member_jobs` now prints every metric before
+  the contract judges it.
+- **Scope NOT covered:** the bond flow (cell relax → press → hold →
+  settle with the StageLedger) and the ledger in the manifest — needs
+  an activation that PASSES the gate: either the production dose (the
+  120 eV C study, ~10 h activate) or a demo whose gate reference is
+  set for a demo dose (Paul's call).
