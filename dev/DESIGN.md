@@ -1256,8 +1256,9 @@ The registered metrics, each with what it actually discriminates:
   top-contiguous walk, which is that bug under another name (LEDGER
   T-34's half B: 0.0 Å reported beneath a visibly disordered skin).
   The baseline is NOT measured on the damaged slab: it is the library's
-  own false-alarm rate, the fraction of warm-run atoms the tolerance
-  calls disordered, recorded by the self-check. (The earlier design
+  own false-alarm rate — the fraction of warm-run atoms the study's
+  tolerance calls disordered, computed from the warm-run scatter the
+  library records, so it follows the tolerance when a study refines it. (The earlier design
   took the baseline from the "deep third" of the slab being judged, and
   the first real run showed why that fails: the deep third contained
   the slab's frozen bottom face, whose atoms are under-coordinated by

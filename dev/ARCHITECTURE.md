@@ -25,7 +25,11 @@ sabsim/
   src/                Source code (orchestrator, quality gate, glue)
   src/tests/          Test suite
   share/              Version-controlled run-time data: gate references,
-                      and the input-file TEMPLATES (share/templates/)
+                      and the input-file TEMPLATES (share/templates/).
+                      The bootstrap's ENVIRONMENT LIBRARIES (DESIGN
+                      §3.5) are run-time data too, but manufactured,
+                      so they live under the deployment SABSIM_SHARE
+                      root, not in the repository (§2.3, §4.1)
   CLAUDE.md           AI assistant guidance
 ```
 
@@ -290,6 +294,33 @@ is.
   fast-atom beam) is
   v1's implementation, and the seam leaves room for other methods (e.g.
   plasma) without reworking step 4 (see DESIGN §3).
+  **The gate's notion of "crystalline" is a second seam (revised
+  2026-08-29 (Paul), DESIGN §3.5).** The §3.5 gate no longer asks
+  whether an atom has the hand-set neighbour count; it asks whether the
+  atom's first-shell **bispectrum** matches any environment in an
+  **environment library** of the undamaged material. Two pieces of
+  architecture follow. (1) The **descriptor engine** — the code that
+  turns a set of atom positions into per-atom bispectrum components —
+  is a pluggable adapter with one contract, `describe(atoms, settings)
+  -> per-atom vectors`, bound once per deployment: the candidates are
+  LAMMPS's own `compute sna/atom` (run out-of-process like every other
+  LAMMPS call, §4.1, and read back as a dump), a Python descriptor
+  library, or the group's Imago (a cross-project dependency, §4).
+  Whichever is bound, the SAME engine and settings must produce both
+  the library and the slab's descriptors, so the binding and its
+  settings are recorded IN the library and the gate reads them from
+  there. The choice is made at the compute-node check that precedes
+  the code (`install/tests/LEDGER.md`), not here. (2) The **library
+  itself is a manufactured artifact** of the bootstrap (`sabsim
+  bootstrap generate`, below): one file per (recipe, model), holding
+  the descriptors of Collection 1's cold bulk, warm bulk and clean
+  surfaces, its self-check fractions, and full provenance (model name,
+  engine, settings, families and frame counts). It is a run-time
+  input of the activate job, resolved like the model weights through
+  the `SABSIM_LOCAL` → `SABSIM_SHARE` roots (§4.1), and the study
+  names it (`[protocol.activation] environment_library`). It is NOT
+  in `share/activation/`, because that directory holds hand-written,
+  version-controlled references and the library is neither.
 - **Training-data physics — VASP [ADOPT].** Produces the varied
   atom-configuration-and-forces training set (step 1). Chosen over
   Imago deliberately — see note below.
@@ -406,7 +437,16 @@ is.
   `refine` follow), because the bootstrap runs on a third clock — once
   per material domain, before any study — and must never be confused
   with the three per-member jobs. Like `sabsim prepare` it is a WRITER:
-  `label` writes a VASP job array and submits nothing. Its runs are
+  `label` writes a VASP job array and submits nothing. Building
+  Collection 1 also EMITS the environment library the §3.5 gate
+  consumes (DESIGN §4.8 part 2, added 2026-08-29): `generate` runs the
+  descriptor engine over families 1, 4 and 6, measures the tolerance
+  and its false-alarm baseline on the warm family, runs the
+  melt-quench self-check, and writes the library beside the
+  collection. A study that never bootstraps still needs a library, so
+  a material is not usable by the gate until its recipe's Collection 1
+  has been built at least once — the same dependency order the model
+  weights already impose. Its runs are
   their own jobs, routed by a `[usage.label]` block of the deployment rc
   (CPU `vasp_gam` by default; the CUDA build is a switch of the same
   block), never by the member map (§4.1). The generation phase does no
@@ -684,6 +724,15 @@ dependencies, by work group, are:
   ours, with no ALF fork.
 - **Imago** + **Kaleidoscope** (which uses **Parsl** for SLURM
   dispatch) — bond characterization (step 8).
+- **Bispectrum descriptor engine** — the §3.5 gate's crystallinity
+  test and the bootstrap's environment library (DESIGN §3.5, §4.8;
+  §2.3 above). One of: LAMMPS `compute sna/atom` (the ML-SNAP package,
+  if the deepmd bundle's LAMMPS was built with it — no new dependency),
+  a Python descriptor library (`dscribe` or equivalent — a new
+  dependency of the sabsim venv), or Imago's bispectrum (a
+  cross-project dependency). Bound once per deployment; decided at the
+  compute-node check recorded in the LEDGER. Whichever is bound is used
+  on BOTH sides of the comparison.
 - **Outer orchestrator — the thin Tier-A sequencer.** The execution
   model is now settled at three tiers (§4.1); this covers only the
   outermost. Its **dispatch substrate is Parsl** — what ALF and

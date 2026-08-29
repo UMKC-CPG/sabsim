@@ -350,6 +350,15 @@ record ProtocolKnobs:
                                   # thickness floor builds for (DESIGN
                                   # §3.5/§2.5, revised 2026-08-28). A
                                   # study choice, not a material fact
+    environment_library:  string  # path of the bootstrap-made library
+                                  # of undamaged environments the §10.6
+                                  # gate judges "crystalline" against
+                                  # (DESIGN §3.5, 2026-08-29); roots
+                                  # expand like the model weights. The
+                                  # validator refuses a library whose
+                                  # recorded model is not [potential]
+                                  # universal_model, or whose surfaces
+                                  # lack this member's face
     cascade_duration:     number  # NVE cascade time per impact (~ps, §3.3)
     between_impact_relaxation: number  # border-thermostat settle between
                                   # impacts, so the next starts cool (§3.3)
@@ -409,6 +418,16 @@ record NumericalKnobs:
     settle_duration:        number    # TIME the zero-load reference
                                       # equilibrates before its gates
                                       # (§9.4, §5.3)
+    depth_bin_width:        number    # LENGTH of one horizontal layer
+                                      # of the §10.6 disorder-versus-
+                                      # depth profile (DESIGN §3.5,
+                                      # 2026-08-29); refine it and the
+                                      # depth must converge
+    disorder_scatter_multiple: number # how many library thermal
+                                      # scatters away an atom's
+                                      # environment may sit and still
+                                      # be "crystalline" (§10.6). Also
+                                      # numerical: the §1.2 test
     bonded_contact_threshold: number  # contact quality above which the
                                       # verdict is "bonded" (§9.3, §5.1)
     force_average_window:   number    # pull force-average window, in grip
@@ -2337,7 +2356,9 @@ function energetic_particle_bombardment(slab, member_specification,
     healed  = heal_surface(driver, member_specification)            # §10.5
     verdict = activation_gate(healed,
                               crystalline_reference(member_specification),
-                              member_specification)                 # §10.6
+                              member_specification,
+                              load_environment_library(
+                                  member_specification))            # §10.6
     # The skin label records what the cascade amorphized, at the depth the
     # gate MEASURED (§10.7).
     healed  = label_activated_skin(healed, verdict.activated_depth)  # §10.7
@@ -2520,12 +2541,15 @@ function heal_surface(driver, member_specification):
 
 ```
 function activation_gate(healed_surface, crystalline_slab,
-                         member_specification):
+                         member_specification, environment_library):
     # A GATE, not a report (DESIGN §3.5). Revised 2026-08-28 (Paul): it
     # is called from the ACTIVATE stage (§10.1), once per half, on the
     # HEALED half as it is read back from its cascade session — before
-    # assembly, where a failure is cheapest. The metrics and thresholds
-    # are unchanged; only the call site and the input moved (back).
+    # assembly, where a failure is cheapest. Revised 2026-08-29 (Paul):
+    # "crystalline" is decided per atom against the ENVIRONMENT LIBRARY
+    # (below), never against a hand-set neighbour count; the depth
+    # metric is re-based on it first, the coordination and ring metrics
+    # keep their v1 form until a follow-on re-bases them too.
     # Judgment is PER REALIZATION: each metric judges ONE healed surface;
     # the seed-ensemble spread is taken ABOVE (§10.8). Prior art only
     # PRINTED an unthresholded g(r) RMSD (PRIOR_ART §1.8). Each metric
@@ -2538,10 +2562,19 @@ function activation_gate(healed_surface, crystalline_slab,
     references = load_activation_references(
         species_of(activated_slab), member_specification)
 
+    # One disorder score per atom, computed ONCE and shared by every
+    # metric that wants it (the depth metric today; the others as they
+    # are re-based). Computed here, not inside a metric, so no two
+    # metrics can disagree about which atoms are disordered.
+    disordered = disordered_atoms(
+        activated_slab, environment_library,
+        member_specification.numerical.disorder_scatter_multiple)
+
     per_metric = empty map
     for each metric in ACTIVATION_METRICS:   # a registry, like §8 measures
         per_metric[metric.name] = metric.evaluate(
-            activated_slab, crystalline_slab, references)
+            activated_slab, crystalline_slab, references,
+            disordered, environment_library, member_specification)
 
     # The depth metric supplies the MEASURED activated_depth that build_slab
     # only ESTIMATED a-priori (§7.4) and that §10.7 uses to label the skin.
@@ -2629,25 +2662,125 @@ function ring_statistics_metric.evaluate(activated, crystalline, refs):
 ```
 
 ```
+record EnvironmentLibrary:
+    # DESIGN §3.5 / §4.8 part 2 (2026-08-29): what the undamaged material
+    # looks like, atom by atom, as first-shell bispectrum vectors. MADE
+    # by the bootstrap (§11.2), never written by hand.
+    model_name:       string        # the universal model the source
+                                    # structures were made under; must
+                                    # equal the study's universal_model
+    engine:           string        # which descriptor engine computed
+                                    # every vector here (ARCHITECTURE
+                                    # §2.3: LAMMPS sna/atom, a Python
+                                    # library, or Imago)
+    settings:         DescriptorSettings  # cutoff, expansion order, per-
+                                    # species weights — the gate REUSES
+                                    # these, never its own copy
+    environments:     map of species -> list of vector
+                                    # every catalogued environment of
+                                    # that species: families 1, 4, 6
+    thermal_scatter:  map of species -> number
+                                    # the typical descriptor-space
+                                    # distance of a warm-run atom from
+                                    # its nearest cold-bulk environment;
+                                    # the unit the tolerance is counted in
+    warm_distances:   map of species -> list of number
+                                    # every warm-run atom's nearest-cold
+                                    # distance, kept so the FALSE-ALARM
+                                    # RATE — the depth profile's
+                                    # baseline — can be recomputed at
+                                    # whatever scatter multiple a study
+                                    # names, not only the recipe's
+    self_check:       record{ scatter_multiple: number,
+                              warm_disordered: number,
+                              melt_quench_disordered: number }
+                                    # DESIGN §3.5: a sound tolerance keeps
+                                    # the first near zero and the second
+                                    # near one; both are recorded so the
+                                    # separation is auditable
+    provenance:       record{ families: list, frame_counts: map,
+                              surfaces: list of (phase, face,
+                                                 termination) }
+                                    # what was catalogued; the validator
+                                    # checks the member's face is here
+
+
+function disordered_atoms(slab, library, scatter_multiple):
+    # DESIGN §3.5: an atom is CRYSTALLINE if the library holds an
+    # environment of its species within scatter_multiple thermal
+    # scatters of it — "does this neighbourhood exist anywhere in the
+    # undamaged material?" — and DISORDERED otherwise. Asked that way,
+    # not "is it what THIS atom used to have", so a displaced atom the
+    # heal re-settled onto a good site is crystalline, and both slab
+    # faces are in the library through the surface family: no special
+    # case for the frozen base, none for a healed-clean top.
+    vectors = DESCRIPTOR_ENGINE.describe(slab, library.settings)
+    #   ^ the SAME engine and settings the library was built with
+    #     (ARCHITECTURE §2.3); a mismatch is a validator refusal, not a
+    #     silent difference in what "crystalline" means
+    flags = empty list
+    for each atom in slab:
+        nearest = min over library.environments[atom.species] of
+                  descriptor_distance(vectors[atom], environment)
+        tolerance = scatter_multiple * library.thermal_scatter[atom.species]
+        flags.append(nearest > tolerance)
+    return flags                      # true = disordered, one per atom
+
+
 function amorphization_depth_metric.evaluate(activated, crystalline, refs,
+                                            disordered, library,
                                             member_specification):
-    # Disorder(z): bin a per-atom disorder score (the coordination defect,
-    # or any registered per-atom metric) by depth. The activated depth is
-    # where the profile RETURNS to the bulk baseline — measured deep in the
-    # slab — scanning from the free surface DOWN over the WHOLE profile, NOT
-    # stopping at the first crystalline-looking layer (prior art's 0 A bug,
-    # DESIGN §3.5) nor by the Phase-1 top-contiguous scan.
+    # DESIGN §3.5 (revised 2026-08-29). Disorder(z): the FRACTION of
+    # disordered atoms in each horizontal layer of depth_bin_width, from
+    # the free surface down. Every layer is judged — a layer of four
+    # atoms is four verdicts, not noise — so there is NO sparse-layer
+    # cut-off (the Phase-1 stand-in's fixed 10-atom cut-off skipped the
+    # real skin of LEDGER T-34's half B).
+    width   = member_specification.numerical.depth_bin_width
+    surface = free_surface_height(activated)
+    profile = []                      # (layer_top, layer_bottom, fraction)
+    for each layer of thickness width from surface DOWN to the slab base:
+        atoms_in_layer = atoms of activated with layer_bottom <= z < layer_top
+        fraction = count(disordered[a] for a in atoms_in_layer)
+                   / count(atoms_in_layer)      # 0 for an empty layer
+        profile.append((layer_top, layer_bottom, fraction))
+
+    # The BASELINE is the library's own false-alarm rate — what the
+    # tolerance calls disordered in a slab that was never bombarded —
+    # never a number measured on the damaged slab being judged. (The
+    # earlier "deep third of the slab" baseline included the frozen
+    # bottom face, whose atoms are under-coordinated by construction,
+    # and the polluted baseline swallowed the real skin: T-34.)
+    multiple = member_specification.numerical.disorder_scatter_multiple
+    baseline = max over species present of
+        fraction of library.warm_distances[species]
+            > multiple * library.thermal_scatter[species]
+
+    # Scan the WHOLE profile: the depth is the free surface to the LOWER
+    # edge of the DEEPEST layer still above baseline — not the first
+    # crystalline-looking layer from the top (prior art's 0 A bug,
+    # DESIGN §3.5; the top-contiguous walk is that bug under another
+    # name). A damaged layer under a healed-clean layer still counts.
+    deepest = none
+    for each (top, bottom, fraction) in profile:
+        if fraction > baseline: deepest = bottom
+    depth = 0 if deepest is none else surface - deepest
+
     # The THRESHOLD is the study's requirement, not a material reference
-    # (DESIGN §3.5, revised 2026-08-28): the reference file describes the
-    # material; how deep THIS study needs the skin is the study's call.
-    profile  = disorder_versus_depth(activated, crystalline)
-    baseline = bulk_baseline(profile)             # deep, still crystalline
-    depth    = depth_to_return_to_baseline(profile, baseline)
-    target   = member_specification.protocol.required_activated_depth
+    # (DESIGN §3.5, revised 2026-08-28): how deep THIS study needs the
+    # skin is the study's call.
+    target = member_specification.protocol.required_activated_depth
     return MetricVerdict{
         measured: depth, reference: "study: required_activated_depth",
         threshold: target, passed: depth >= target }
 ```
+
+`DESCRIPTOR_ENGINE` is a pluggable seam (ARCHITECTURE §2.3): one binding
+per deployment, with the contract `describe(atoms, settings) -> one
+vector per atom`. The engine name and settings recorded in the library
+are the ones the gate uses; `load_environment_library` (§10.1) refuses a
+library whose engine is not the bound one, whose model is not the
+study's, or whose surfaces lack the member's face.
 
 `RING_BACKEND` is a pluggable seam (DESIGN §3.5): v1 binds it to a
 `networkx` implementation of `ring_size_histogram(graph) -> {size: count}`;
@@ -3068,7 +3201,13 @@ record WarmRunSpec:
                                   # NVT never learns the volume a
                                   # crystal actually takes when hot
     temperature:      Quantity    # modestly elevated — the protocol's
-                                  # working range, not a melt
+                                  # working range, not a melt. At or
+                                  # ABOVE the temperature the §10.6
+                                  # gate judges a slab at (the heal's
+                                  # cool-to target), or the library's
+                                  # thermal scatter is measured too
+                                  # tight (DESIGN §4.8 part 2,
+                                  # 2026-08-29); validated
     duration:         Quantity    # short: this anchors the committee,
                                   # it does not measure a property
     equilibration:    Quantity    # leading interval DISCARDED before
@@ -3230,6 +3369,21 @@ record ForceModelRecipe:
                                      # recipe should own, and one set may
                                      # serve several recipes. Recorded so
                                      # the pairing is recoverable later.
+    descriptor_settings:   DescriptorSettings  # the bispectrum the
+                                     # ENVIRONMENT LIBRARY is built with
+                                     # (§11.2; DESIGN §4.8 part 2,
+                                     # 2026-08-29): short cutoff (first
+                                     # shell), expansion order, per-
+                                     # species weights. Distinct from
+                                     # DescriptorSpec above, which is
+                                     # how the TRAINED MODEL sees an
+                                     # environment; this one is the
+                                     # gate's ruler
+    gate_scatter_multiple: number    # the scatter multiple the library
+                                     # is self-checked and baselined at
+                                     # (§11.2); a study's own
+                                     # disorder_scatter_multiple may
+                                     # refine it
     # The name is COMPUTED, not stated — see fingerprint_of below — so a
     # changed recipe cannot pass itself off as the model validated last
     # month.
@@ -3320,7 +3474,58 @@ function build_collection1(force_model_recipe):
                + rattle_family(lattices) + surface_family(lattices)
                + melt_quench_family(lattices)                   # dynamic
                + warm_run_family(lattices)                      # dynamic
-    return structures        # (family, source, atoms) triples, unlabelled
+    # DESIGN §4.8 part 2 (2026-08-29): the same six families also yield
+    # the ENVIRONMENT LIBRARY the §10.6 gate judges against, written
+    # beside the collection.
+    library = build_environment_library(structures, force_model_recipe)
+    return structures, library   # triples unlabelled; library on disk
+```
+
+```
+function build_environment_library(structures, force_model_recipe):
+    # DESIGN §3.5 / §4.8 part 2. Catalogue the UNDAMAGED environments:
+    # family 1 (cold ideal sites), family 6 (the same sites with their
+    # thermal spread) and family 4 (the clean faces, so a slab's own
+    # surfaces are not mistaken for damage). Family 2 is EXCLUDED — it
+    # is carried past bond failure, and a broken environment must not
+    # be catalogued as crystalline. Family 3 is not catalogued; it is
+    # the SELF-CHECK: the disorder every tolerance must recognise.
+    settings = force_model_recipe.descriptor_settings   # recipe part 7
+    catalogued = frames of structures with family in {bulk, surface,
+                                                      warm_run}
+    environments = map species -> []
+    for each (family, source, atoms) in catalogued:
+        vectors = DESCRIPTOR_ENGINE.describe(atoms, settings)
+        for each atom: environments[atom.species].append(vectors[atom])
+
+    # The TOLERANCE is measured, not guessed: the typical distance of a
+    # warm-run atom from its nearest COLD-BULK environment, per species.
+    cold = environments restricted to family == bulk
+    thermal_scatter = map species -> typical (say, the 90th-percentile)
+        nearest-cold distance over that species' warm-run vectors
+
+    # The recipe's warm runs must be at or above the temperature the
+    # gate judges at (the heal's cool-to target, §10.5), or this scatter
+    # is measured too tight; the recipe validator checks that.
+
+    # Self-check and baseline at the scatter multiple the recipe names
+    # (the study may refine it; the library records what it was built
+    # and checked with).
+    multiple = force_model_recipe.gate_scatter_multiple
+    warm_disordered = fraction of warm-run atoms whose nearest-cold
+                      distance > multiple * thermal_scatter[species]
+    melt_disordered = fraction of melt-quench atoms (family 3) whose
+                      nearest CATALOGUED distance > the same tolerance
+    # A sound tolerance keeps warm_disordered near 0 and melt_disordered
+    # near 1; the library REPORTS both, and generate refuses to write a
+    # library that cannot separate them (DESIGN §3.5).
+    return EnvironmentLibrary{
+        model_name: force_model_recipe.generator.model,
+        engine: DESCRIPTOR_ENGINE.name, settings: settings,
+        environments: environments, thermal_scatter: thermal_scatter,
+        warm_distances: per species, the nearest-cold distances above,
+        self_check: { multiple, warm_disordered, melt_disordered },
+        provenance: { families, frame_counts, surfaces catalogued } }
 ```
 
 ### 11.3 generate_hard_configs — reuse §9/§10 in "generate" mode
