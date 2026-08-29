@@ -1218,14 +1218,25 @@ foundations, interaction rules. -->
       the physics spec in an easily-locatable `share/` dir (real ones later
       from `SABSIM_SHARE`). Still open: (1) PIN the v1 stand-in reference
       numbers/curves — a-Si first g(r) peak ~2.35 A, ~4-fold with a few %
-      3/5-coordinated, 5/6/7-ring populations, ~2-3 nm depth target — then
-      the REAL DFT/exp g(r) + the group's a-Si CRN model as drop-in
-      replacements; (2) EVALUATE the Imago `bond_analysis.py` ring tool for
-      narrowness (standing rule) before adopting it behind the `RING_
-      BACKEND` seam — networkx King/shortest-path rings is the v1 backend;
-      (3) build the `share/` reference dir + the `load_activation_
-      references` resolver (repo share first, then SABSIM_SHARE). The Phase-1
-      stand-in `activation_disorder_check` is what this gate replaces.
+      3/5-coordinated, 5/6/7-ring populations (the depth target is a
+      STUDY knob since 2026-08-28, not a reference) — then the REAL
+      DFT/exp g(r) + the group's a-Si CRN model as drop-in replacements;
+      (2) EVALUATE the Imago `bond_analysis.py` ring tool for narrowness
+      (standing rule) before adopting it behind the `RING_BACKEND` seam —
+      networkx King/shortest-path rings is the v1 backend; (3) DONE
+      (2026-07-18): the `share/` reference dir + the `load_activation_
+      references` resolver (repo share first, then SABSIM_SHARE). The
+      Phase-1 stand-in `activation_disorder_check` is what this gate
+      replaces.
+- [ ] Re-base the gate's v1 SURVIVORS on the disorder score (`DESIGN.md`
+      §3.5, 2026-08-29). The coordination-defect and ring-statistics
+      metrics still rest on a hand-set neighbour count and a silicon
+      ring topology; DESIGN marks them "v1, to be re-based". Design the
+      replacement — a skin disorder fraction from `disordered_atoms`,
+      and whether rings survive at all for a compound like LiNbO3 — so
+      the whole gate rests on the one library definition of crystalline
+      plus the material-agnostic g(r) check. DESIGN first, then
+      PSEUDOCODE §10.6, then code.
 - [ ] /refine follow-ons (2026-07-18): (a) §10.7 `label_activated_skin` —
       record the activated-skin atom SET from the gate's measured depth —
       is not yet coded (the Phase-1 stand-in returns a verdict only); it
@@ -2011,6 +2022,41 @@ foundations, interaction rules. -->
 
 ## CODE
 
+- [ ] **Environment-library gate** (`DESIGN.md` §3.5/§4.8,
+      `PSEUDOCODE.md` §2/§10.1/§10.6/§11.1/§11.2/§11.3/§14.5,
+      `ARCHITECTURE.md` §1/§2.3/§4; designed 2026-08-29; engine bound =
+      LAMMPS `compute sna/atom`, LEDGER T-35). The docs are done top-down
+      and /refine-checked; the code predates them. Sub-items, in order:
+      (a) `driver/descriptors.py` — the descriptor adapter: an
+      out-of-process bundle `lmp` run of `compute sna/atom` on a data
+      file, dump readback; the physical `first_shell_cutoff` -> per-
+      species radii (`rcutfac` 1, R_i = cutoff/2) and a neighbour cutoff
+      >= the SNAP cutoff (the T-35 trap). (b) `EnvironmentLibrary` record
+      + the `environment_library.npz`/`.toml` writer and reader;
+      `load_environment_library` with the three refusals (model, engine,
+      member face) and the warm-run temperature warn/refuse band (20 %).
+      (c) `disordered_atoms` — nearest catalogued environment per atom,
+      per species, against `disorder_scatter_multiple` x thermal scatter.
+      (d) `activation_gate.AmorphizationDepthMetric` rewrite — whole
+      profile, layers of `depth_bin_width`, baseline = the library's
+      false-alarm rate at the study's multiple, NO sparse-layer cut-off;
+      `GateControl` loses `depth_bin_width`/`min_bin_atoms`, `GateContext`
+      gains `disordered` + `library`. (e) Study knobs `environment_
+      library` (protocol), `depth_bin_width`, `disorder_scatter_multiple`
+      (numerical) in records/loader/validator + `share/templates/
+      study_spec.toml` + every `jobs/*/sabsim.toml`; the validator's
+      `check_environment_library`. (f) Recipe `descriptor_settings` +
+      `gate_scatter_multiple` in `bootstrap/recipe.py` + `share/
+      templates/force_model_recipe.toml`. (g) `build_environment_library`
+      + self-check in `bootstrap/collection1.py`; `sabsim bootstrap
+      generate` writes the pair and refuses one that cannot separate
+      warm from melt-quench. (h) `live_stages` loads the library once per
+      activate job and passes it to both halves. (i) Tests: hand-built
+      library (perfect crystal + jittered copies); a damaged layer UNDER
+      a clean one is still counted; the frozen base is not flagged; the
+      baseline follows the multiple; the loader refusals and the band.
+      (j) Rebuild the silicon Collection 1 to get a library, rerun the
+      50 eV demo chain in a FRESH job folder with dumps, LEDGER entry.
 - [x] **Three small wins landed 2026-08-26 (Paul's direction).** (1) The
       force models are named in the study file's `[potential]` block
       (`universal_model`, `universal_weights`, `production_weights`,

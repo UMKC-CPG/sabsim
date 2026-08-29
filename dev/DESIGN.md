@@ -180,16 +180,20 @@ on it.
   read off the file — so one uniform input serves every material with no
   per-material code. What we are studying.
 - **Protocol** — the activation species, energy, angle of incidence and
-  fluence, and the activated depth the surface is REQUIRED to reach
-  (the §3.5 gate's depth threshold, revised 2026-08-28); the press mode,
+  fluence, the activated depth the surface is REQUIRED to reach (the
+  §3.5 gate's depth threshold, revised 2026-08-28), and the environment
+  library the gate judges "crystalline" against — a PATH to the
+  bootstrap-made library (§3.5, 2026-08-29), resolved through the
+  location roots exactly as the model weights are; the press mode,
   load, depth and duration; the hold temperature; the pull rates of
   §5.4's ladder. How the experiment is performed.
 - **Numerical** — tolerances, cutoffs, convergence criteria, the
   committee stride and persistence window of §7.3, the significance
   levels of §7.5, the contact-gap averaging window, stress window,
   stress floor, control interval and press time budget of §5.2, the
-  settle duration of §5.3, slab thickness, cell size. How carefully we
-  compute.
+  settle duration of §5.3, the depth-profile layer width and the
+  disorder scatter multiple of §3.5, slab thickness, cell size. How
+  carefully we compute.
 - **Ensemble** — the master seed and the realization count.
 - **Deployment** — resource class, node counts, walltime, modules. This
   lives in a *separate document* (`ARCHITECTURE.md` §4.1) and the member
@@ -1202,6 +1206,26 @@ disordered. The two fractions are recorded in the library; a tolerance
 that cannot separate them is reported at bootstrap time, not discovered
 later as a misjudged slab.
 
+**The library's temperature, and a warn/refuse band (Paul, 2026-08-29).**
+The tolerance is measured on warm runs at some temperature, and the gate
+judges a slab at the temperature the heal cools it to (the press
+temperature, §3.4). A slab hotter than the library's warm runs jiggles
+more than the library expects, so some of its crystalline atoms would
+read as disordered. The library records its warm-run temperature, and
+the study LOADER compares: a study judged at or below it is fine; one
+judged above it gets a WARNING that the tolerance was measured a little
+tight; one judged more than **20 % above** it is REFUSED. The band is a
+criterion of the loader, not a study knob — it is a validation
+tolerance in the sense of §7.5, a statement of when the comparison stops
+meaning anything. The number follows from how thermal displacement
+scales: its amplitude grows roughly with the square root of temperature,
+so a slab 20 % hotter scatters about 10 % wider — inside a single
+scatter multiple, where a warning is honest and a refusal would be
+pedantic. Beyond that the library's tolerance no longer describes the
+slab, and a refusal on the login node is cheaper than a misjudged skin
+after an hour on a GPU. The remedy is a warm run at the study's
+temperature, i.e. a rebuilt library.
+
 The registered metrics, each with what it actually discriminates:
 
 - **g(r) and partial g_AB(r).** The radial pair-correlation function,
@@ -1900,19 +1924,28 @@ student can read the file and know what was manufactured.
    a broken environment must not be catalogued as crystalline; family 3
    is not catalogued either, but it is the library's self-check — the
    disorder every tolerance must recognise (§3.5). Three requirements
-   follow for the recipe. The warm runs must be at or above the
-   temperature at which the gate judges a slab (the heal cools to the
-   press temperature, §3.4), or the tolerance is measured too tight.
-   The declared surfaces must include the face and termination the
-   study's slab is cut with, which is checked between recipe and study
-   at load time, not discovered as a mis-flagged face. And the
-   descriptor engine and its settings — cutoff, expansion order, per-
-   species weights — are recipe settings recorded in the library, and
-   the gate uses that record, never its own copy, so both sides of the
-   comparison are computed identically. The engine is a pluggable seam
-   (LAMMPS's own bispectrum compute, a Python descriptor library, or
-   the group's Imago; the choice is an ARCHITECTURE decision, not a
-   design one). The strain of a matched slab (§2.4, up to ~2 %) is
+   follow. The library RECORDS the temperature its warm runs were made
+   at (the lowest, if several), and the STUDY loader compares the
+   temperature at which the gate will judge a slab (the heal cools to
+   the press temperature, §3.4) against it — a warning if the study is
+   hotter, a refusal if it is more than 20 % hotter (§3.5 states the
+   band and why); the recipe itself declares nothing about studies it
+   has never seen. The declared surfaces must include the face and
+   termination the study's slab is cut with, which is checked between
+   library and study at load time, not discovered as a mis-flagged
+   face. And the descriptor engine and its settings are recipe settings
+   recorded in the library, and the gate uses that record, never its
+   own copy, so both sides of the comparison are computed identically.
+   The cutoff is stated as a PHYSICAL length — the radius of the first
+   neighbour shell — together with the expansion order and per-species
+   weights; the engine's own parameters are DERIVED from it and never
+   exposed raw (for LAMMPS `compute sna/atom`, whose cutoff is
+   `rcutfac × (R_i + R_j)`, the per-species radii are set so that sum
+   equals the physical cutoff, and the neighbour list is built at least
+   that wide — the trap LEDGER T-35 fell into; `ARCHITECTURE.md` §2.3).
+   The engine is a pluggable seam, bound 2026-08-29 to LAMMPS's own
+   bispectrum compute (`ARCHITECTURE.md` §2.3/§4). The strain of a
+   matched slab (§2.4, up to ~2 %) is
    expected to sit inside the thermal tolerance; the self-check is
    the test of that expectation, and adding the study's strained bulk
    cell to the library is the remedy if it fails.
@@ -3115,8 +3148,9 @@ this falls out of decisions already made elsewhere.
 
 Its **bulk and surface half** — equilibrium lattice constants, elastic
 stiffness, surface energies, and the amorphous-structure validation of
-§3.5 (partial g(r), ring statistics, coordination) against VASP and
-experiment — must run **before the structure builder**. §2.2 makes the
+§3.5 (partial g(r) against experiment, and the per-atom disorder score
+against the environment library; ring statistics and coordination are
+its v1 survivors) — must run **before the structure builder**. §2.2 makes the
 builder a consumer of the potential's own relaxed lattice constants: it
 matches the two surface lattices on them and records the residual strain
 from them. A potential with a wrong lattice therefore builds a wrong
@@ -3125,19 +3159,25 @@ gates the build, at the step 2/3 boundary.
 
 **"Against VASP and experiment" is two categories, not one, and only one
 of them inherits.** The references this half compares against arrive by
-three different routes, and §4.8's inheritance rule binds exactly one.
+four different routes, and §4.8's inheritance rule binds exactly one.
 The lattice constants, stiffnesses and surface energies are **computed by
 us**, so they inherit the recipe's production settings block unchanged —
 that is what makes each comparison a clean reading of the potential's
 learning error rather than a mix of that and a settings mismatch. The
-g(r), coordination and ring targets of §3.5 are **taken from published
-experiment or literature**, and inherit nothing: they carry their own
-provenance and the `real` flag recording whether the shipped value is yet
-the true anchor or still a stand-in. The amorphization-depth threshold is
-a third thing again — **measured by this pipeline's own sweep** (§3.6) —
-so it inherits nothing either, and its provenance is one of our own runs.
-A rule stated as "every reference inherits" would be false of two of the
-three, which is why §4.8 states it only of the computed kind.
+g(r) target of §3.5 (and the v1 survivors' coordination and ring
+numbers) are **taken from published experiment or literature**, and
+inherit nothing: they carry their own provenance and the `real` flag
+recording whether the shipped value is yet the true anchor or still a
+stand-in. The amorphization-depth threshold is a third thing again —
+**measured by this pipeline's own sweep** (§3.6) — so it inherits
+nothing either, and its provenance is one of our own runs. The
+environment library (§3.5) is a fourth: **manufactured by the bootstrap
+under the very model being judged** (§4.8 part 2), so it is neither an
+outside truth nor a computed-accurately value, and it carries the model
+name and descriptor settings it was built with instead of a `real`
+flag. A rule stated as "every reference inherits" would be false of
+three of the four, which is why §4.8 states it only of the computed
+kind.
 
 Its **interface half** cannot run there at all, because the interface
 does not yet exist. The interface-fidelity check of §7.3 needs a
@@ -4008,9 +4048,13 @@ id  type  x y z  group  coordination  defect  provenance
 ```
 
 where `group` is the LabeledGroup membership (frozen-base / border /
-interior / activated-skin) as an integer to color by; `coordination` and
-`defect` mark the amorphized region; and `provenance` is which slab an atom
-was built in (the interface's two sides). The `activated-skin` value is exactly
+interior / activated-skin) as an integer to color by; `defect` is the
+§3.5 per-atom verdict — 1 where the atom's first-shell environment
+matches nothing in the environment library, 0 where it does (revised
+2026-08-29; before that it was a coordination mismatch); `coordination`
+stays as a second, human-readable column; and `provenance` is which slab
+an atom was built in (the interface's two sides). The `activated-skin`
+value is exactly
 the per-atom set `PSEUDOCODE.md` §10.7's `label_activated_skin` records, which
 is why that step — deferred in Phase 2 — becomes load-bearing here: it is the
 field that lights up the amorphized layer. A single endpoint frame may also
@@ -4180,7 +4224,12 @@ environment being installed and activated — not restated in every script.
   files are found through the shared-data root (they are reference data,
   in §3.5's registry idiom); the Python interpreter and the launcher come
   from the activated install. None of these is hand-named in a generated
-  script.
+  script. The activate job's two run-time DATA inputs — the universal
+  model's weights and the environment library (§3.5, 2026-08-29) — are
+  named by the study file as root-relative paths, and `prepare`'s
+  fail-fast gate resolves BOTH against the frozen roots before writing,
+  so a missing library is reported on the login node exactly as a
+  missing weights file is (§1.5's third validation phase).
 
 **Filenames are semantic and carry no ordinal number** — `activate`,
 `bond`, `analyze`, named for the work. Ordinals were rejected because

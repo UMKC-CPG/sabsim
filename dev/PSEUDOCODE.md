@@ -487,6 +487,13 @@ function load_and_validate_study(study_specification):
         # whose COMPARISONS would be hard to interpret (DESIGN §1.5).
         reject_if_not_executable(member)
 
+        # The environment library the §10.6 gate judges against is a
+        # run-time input like the weights, so its checks are phase-2
+        # too (DESIGN §3.5/§4.8, 2026-08-29): the same refusals and the
+        # temperature warn/refuse band as load_environment_library
+        # (§10.6), run here so a mismatch costs no node-hour.
+        check_environment_library(member)      # §10.6, same rules
+
     for each relation in study.relations:
         # REPORT, NEVER RESTRICT (DESIGN §1.1). A relation whose controls
         # disagree, or which is confounded by more than one contrast, is
@@ -2570,11 +2577,17 @@ function activation_gate(healed_surface, crystalline_slab,
         activated_slab, environment_library,
         member_specification.numerical.disorder_scatter_multiple)
 
+    # Everything a metric may want, in ONE record, so the survivors and
+    # the re-based metrics share a signature (the code's GateContext).
+    context = GateContext{
+        activated: activated_slab, crystalline: crystalline_slab,
+        references: references, disordered: disordered,
+        library: environment_library,
+        member_specification: member_specification }
+
     per_metric = empty map
     for each metric in ACTIVATION_METRICS:   # a registry, like §8 measures
-        per_metric[metric.name] = metric.evaluate(
-            activated_slab, crystalline_slab, references,
-            disordered, environment_library, member_specification)
+        per_metric[metric.name] = metric.evaluate(context)
 
     # The depth metric supplies the MEASURED activated_depth that build_slab
     # only ESTIMATED a-priori (§7.4) and that §10.7 uses to label the skin.
@@ -2610,7 +2623,8 @@ the `MetricVerdict` of §10.1 (`measured` — a scalar or a curve — plus the
 are taken to the first minimum of the relevant partial g(r).
 
 ```
-function radial_distribution_metric.evaluate(activated, crystalline, refs):
+function radial_distribution_metric.evaluate(context):
+    activated, refs = context.activated, context.references
     # One partial per species pair DERIVED from the slab (Si-only => Si-Si).
     # DENSITY-REFERENCE normalization: the reference density is the LOCAL
     # near-surface slab's, not the whole cell's, or sputtering loss inflates
@@ -2630,7 +2644,12 @@ function radial_distribution_metric.evaluate(activated, crystalline, refs):
 ```
 
 ```
-function coordination_metric.evaluate(activated, crystalline, refs):
+function coordination_metric.evaluate(context):
+    # v1 SURVIVOR (DESIGN §3.5): still coordination-based until re-based
+    # on context.disordered; it reads the same record as every metric.
+    activated, crystalline, refs = (context.activated,
+                                    context.crystalline,
+                                    context.references)
     # The MEAN is the wrong number: amorphous silicon stays ~4-fold. Measure
     # the DISTRIBUTION and the fraction of 3- and 5-coordinated defects, PER
     # species. The reference coordination is the crystalline slab's (a
@@ -2645,7 +2664,9 @@ function coordination_metric.evaluate(activated, crystalline, refs):
 ```
 
 ```
-function ring_statistics_metric.evaluate(activated, crystalline, refs):
+function ring_statistics_metric.evaluate(context):
+    # v1 SURVIVOR (DESIGN §3.5), silicon-shaped until re-based.
+    activated, refs = context.activated, context.references
     # The network-topology discriminator: crystalline silicon is all
     # SIX-membered rings; the amorphous network carries FIVE- and
     # SEVEN-membered rings. Build the bond graph and enumerate rings through
@@ -2698,11 +2719,59 @@ record EnvironmentLibrary:
                                     # the first near zero and the second
                                     # near one; both are recorded so the
                                     # separation is auditable
+    warm_run_temperature: Quantity  # the LOWEST temperature among the
+                                    # warm runs catalogued: what the
+                                    # thermal scatter was measured at.
+                                    # The study loader's warn/refuse
+                                    # band (DESIGN §3.5) is judged
+                                    # against this
     provenance:       record{ families: list, frame_counts: map,
                               surfaces: list of (phase, face,
                                                  termination) }
                                     # what was catalogued; the validator
                                     # checks the member's face is here
+
+
+function load_environment_library(member_specification):
+    # DESIGN §3.5 / §4.8 part 2 / ARCHITECTURE §2.3. The library is a
+    # run-time input named by the study (protocol.environment_library),
+    # resolved through the location roots exactly as the weights are
+    # (SABSIM_LOCAL first, then SABSIM_SHARE, §14.5). Three refusals and
+    # one warn/refuse band, all decidable on the login node; the §2
+    # validator runs the same rules (check_environment_library) so no
+    # node-hour is spent on a mismatch.
+    path    = resolve_through_roots(
+                  member_specification.protocol.environment_library)
+    library = read_environment_library(path)     # the .toml + .npz pair
+
+    if library.model_name != member_specification.potential.universal_model:
+        halt("environment library was built under '<library model>', the "
+             "study runs '<study model>' — rebuild the library")
+    if library.engine != DESCRIPTOR_ENGINE.name:
+        halt("environment library was computed with '<engine>', this "
+             "deployment binds '<bound engine>' — both sides of the "
+             "comparison must use one engine (ARCHITECTURE §2.3)")
+    for each wafer in (member_specification.material_A,
+                       member_specification.material_B):    # §7.4
+        face = (wafer.phase, wafer.face, wafer.termination)
+        if face not in library.provenance.surfaces:
+            halt("environment library catalogues no clean <face> "
+                 "surface; the slab's own faces would read as damage — "
+                 "add the face to the recipe's surfaces and rebuild")
+
+    # The warn/refuse band (DESIGN §3.5, Paul 2026-08-29): the gate
+    # judges at the heal's cool-to target, the press temperature.
+    judged_at = member_specification.protocol.press_temperature
+    if judged_at > library.warm_run_temperature:
+        if judged_at > 1.20 * library.warm_run_temperature:
+            halt("study judges the gate at <judged_at>, more than 20 % "
+                 "above the library's warm runs at <warm>; the tolerance "
+                 "no longer describes the slab — rebuild the library "
+                 "with a warm run at the study's temperature")
+        warn("study judges the gate at <judged_at>, above the library's "
+             "warm runs at <warm>: the tolerance was measured a little "
+             "tight, some crystalline atoms may read as disordered")
+    return library
 
 
 function disordered_atoms(slab, library, scatter_multiple):
@@ -3006,6 +3075,30 @@ record TrainingSpec:
     learning_schedule: string  # how the step size is annealed
     validation_split:  number  # the held-out fraction, so "trained" is
                                # a measured claim and not a hope
+
+
+record DescriptorSettings:
+    # The GATE'S ruler (DESIGN §3.5 / §4.8 part 2, 2026-08-29): how the
+    # environment library and the §10.6 gate describe one atom's first
+    # neighbour shell. Distinct from DescriptorSpec above, which is how
+    # the TRAINED MODEL sees an environment. Stated physically; the
+    # engine's own parameters are DERIVED (ARCHITECTURE §2.3).
+    first_shell_cutoff: Quantity   # a LENGTH: just past the first
+                                   # neighbour shell, short of the
+                                   # second (silicon: 2.35 A in,
+                                   # 3.84 A out => ~2.6 A)
+    expansion_order:    int        # how finely angles are resolved
+                                   # (LAMMPS's `twojmax`; 6 gives 30
+                                   # components per atom, LEDGER T-35)
+    species_weights:    map of species -> number
+                                   # how strongly each species counts
+                                   # in a neighbour's contribution, so
+                                   # unlike species are told apart
+    # DERIVED, never written by hand: for LAMMPS `compute sna/atom` the
+    # cutoff is rcutfac x (R_i + R_j), so with rcutfac = 1 every species
+    # radius is first_shell_cutoff / 2; and the engine's neighbour list
+    # must be built at least first_shell_cutoff wide, or LAMMPS refuses
+    # ("cutoff is longer than pairwise cutoff" — the T-35 trap).
 
 
 record PhaseSpec:
@@ -3524,6 +3617,8 @@ function build_environment_library(structures, force_model_recipe):
         engine: DESCRIPTOR_ENGINE.name, settings: settings,
         environments: environments, thermal_scatter: thermal_scatter,
         warm_distances: per species, the nearest-cold distances above,
+        warm_run_temperature: min over catalogued warm runs of
+                              spec.temperature,
         self_check: { multiple, warm_disordered, melt_disordered },
         provenance: { families, frame_counts, surfaces catalogued } }
 ```
@@ -3531,7 +3626,7 @@ function build_environment_library(structures, force_model_recipe):
 ### 11.3 generate_hard_configs — reuse §9/§10 in "generate" mode
 
 > **Built 2026-08-26, first slice (silicon).** `sabsim bootstrap
-> generate` does two things. (1) It BUILDS Collection 1 itself, on disk,
+> generate` does three things. (1) It BUILDS Collection 1 itself, on disk,
 > from the recipe: the bulk ground state at the model-derived lattice
 > (§2.2), the strain sweep (static tensors applied to that cell), the
 > rattled snapshots (seeded static displacements), the clean surfaces
@@ -3545,6 +3640,14 @@ function build_environment_library(structures, force_model_recipe):
 > with `bootstrap/subcell.py`. The member run is an ordinary
 > `sabsim run --dump-visuals` under the universal model; nothing forks.
 > The committee-of-one below is that model until ALF trains one.
+> (3) It WRITES the environment library (§11.2, DESIGN §3.5; designed
+> 2026-08-29, not yet built) beside Collection 1 in the bootstrap work
+> directory as a PAIR of files: `environment_library.npz` — the arrays,
+> per-species environment vectors and warm-run nearest-cold distances —
+> and its sidecar `environment_library.toml` — model, engine, settings,
+> thermal scatter, self-check fractions, warm-run temperature and
+> provenance, readable by a person. A study points at the pair's
+> location once it is copied under `SABSIM_SHARE` (§14.5).
 
 
 The one genuinely OURS step, and the one worth stating carefully: the
@@ -4523,6 +4626,10 @@ function render_job_script(study, member, job, usage, partition,
         DEEPMD_LMP_PLUGIN).
       - the three location roots BAKED IN as resolved values -- a frozen
         snapshot, not a re-read of the rc at run time (§10.5, §1.4).
+        The study's two root-relative DATA paths -- the universal weights
+        and the environment library (§10.6, 2026-08-29) -- are resolved
+        against those roots by prepare's fail-fast gate before anything
+        is written, so a missing library stops on the login node.
       - the launcher + `python -m sabsim run <study> --<job.name>
         --only <member.name>` (§14.3) -- e.g. `mpirun -np <N>` INSIDE the
         allocation, never on the login node (§4.1). N = usage.nodes x
