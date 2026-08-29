@@ -161,6 +161,13 @@ class NumericalKnobs:
     clash_floor: Quantity            # minimum cross-slab distance (§2.6)
     contact_grid_spacing: Quantity   # cell size for contact fraction
     contact_gap_threshold: Quantity  # gap that, with stress, marks contact
+    # The two contact-test settings the press reads (DESIGN §5.2, revised
+    # 2026-08-28): how many press chunks the surface-to-surface opening is
+    # averaged over before it is compared with the threshold, and the
+    # smallest sustained normal-stress magnitude (either sign) that counts
+    # as the surfaces genuinely loading each other.
+    contact_gap_window: int          # chunks in the opening's trailing mean
+    contact_stress_floor: Quantity   # |mean normal stress| floor for contact
     bonded_contact_threshold: float  # contact quality above which "bonded"
     reference_pe_drift: Quantity     # max PE drift for a settled reference
 
@@ -197,11 +204,12 @@ class PotentialSpec:
     * ``universal_model`` / ``universal_weights`` — the pre-trained
       foundation model that derives the working lattice (§2.2) and runs
       the ion-beam cascade spliced with ZBL cores (§4.7). The name must
-      match the identity the code pins (``UNIVERSAL_CASCADE_MODEL``), so
-      a study cannot silently run under a different release than the one
-      the code was validated against; the weights path says where that
-      model's file is on this machine (``$SABSIM_SHARE`` and the other
-      roots are expanded by the loader).
+      be a row of the code's table of supported universal models
+      (``SUPPORTED_UNIVERSAL_MODELS``, DESIGN §4.7), so a study cannot
+      silently run under a model the code has no record of, while the
+      study — not the code — chooses which supported model runs; the
+      weights path says where that model's file is on this machine
+      (``$SABSIM_SHARE`` and the other roots are expanded by the loader).
     * ``production_weights`` — the model the gentle stages (heal, press,
       settle, pull) run under. The design target is the ALF-trained
       DeePMD committee named by each member's ``potential_ref``; until

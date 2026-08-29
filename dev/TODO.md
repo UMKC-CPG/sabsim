@@ -833,26 +833,27 @@ foundations, interaction rules. -->
       (2) [DESIGN → CODE] The heal + §3.5 gate return to the activation
       stage, and the wide assembly gap + vacuum scissors are removed
       (DESIGN §3.4/§2.6, revised 2026-08-28) — DONE in the documents
-      2026-08-28; code to follow (see the reversed re-arch item).
+      and in the code 2026-08-28 (`driver/cascade.build_activate_script`
+      appends `commands.heal_surface_commands`; `live_stages.
+      activate_one_half` gates the healed half; `press_and_bond` is
+      cell relax -> press -> hold; the scissors, the wide-gap branch and
+      the bond-side heal are deleted).
       (3) [DESIGN → CODE] `RunControl` in `driver/press_pull.py` holds
       numbers that live only in code: `equilibrate_chunks` 20 (the
-      settle span), `stress_window` 5, `scissors_gap` 7 Å,
-      `scissors_min_gap` 2.5 Å, `relax_chunks` 5, `chunk_steps` 1000,
-      `max_chunks` 500. DESIGN §1.4 says nothing defaults silently and
-      every knob carries its unit in the study file. The two contact
-      knobs (`contact_gap_window`, `contact_stress_floor`) were lifted
-      into the study file by the §5.2 revision of 2026-08-28; the
-      scissors pair dies with the scissors; the settle span, the stress
-      window and the chunking need a DESIGN §5.3 sentence each and then
-      a study-file home.
-      (4) [DESIGN → CODE] The "surfaces already close" branch in
-      `press_and_bond` (skip heal and gate when the assembled gap is
-      under the cutoff) was the skeleton's direct-contact path and is
-      now reused, by accident, to restart a bond from a saved press
-      frame (LEDGER T-30). With the heal gone from the bond flow the
-      branch's original purpose is gone; make "resume from a saved press
-      frame" a deliberate, documented entry (DESIGN §11 / PSEUDOCODE
-      §13 already own resume) or remove the branch.
+      settle span), `stress_window` 5, `chunk_steps` 1000, `max_chunks`
+      500. DESIGN §1.4 says nothing defaults silently and every knob
+      carries its unit in the study file. The two contact knobs
+      (`contact_gap_window`, `contact_stress_floor`) were lifted into
+      the study file by the §5.2 revision of 2026-08-28 and the scissors
+      pair died with the scissors; the settle span, the stress window
+      and the chunking need a DESIGN §5.3 sentence each and then a
+      study-file home.
+      (4) [CODE] RESOLVED 2026-08-28 with (2): the "surfaces already
+      close" branch in `press_and_bond` (the skeleton's direct-contact
+      path, reused by accident to restart a bond from a saved press
+      frame, LEDGER T-30) no longer exists — there is ONE path, cell
+      relax -> press, and a pair restored from a saved press frame
+      simply enters it at whatever opening it was saved at.
       (5) [CODE] `pipeline/skeleton_stages.py` still narrates Wave 0 in
       its header; its live use is the placeholder for the unbuilt step-8
       characterization and the placeholder measure records. Reword the
@@ -1134,11 +1135,12 @@ foundations, interaction rules. -->
       (Paul, 2026-08-28): there are no fallbacks. DESIGN §4.7 was
       rewritten 2026-08-28 as ONE universal generator, named by the
       study file and checked against a supported-model TABLE in code
-      (one row today, DPA-3.1-3M). NEW CODE ITEM from that rewrite: the
-      validator (`spec/references.py`) still compares the study file's
-      `universal_model` against a single pinned name — replace that with
-      the table lookup so a second universal model is a new row, not a
-      resolver edit.
+      (one row today, DPA-3.1-3M). CODE DONE 2026-08-28: `cascade_
+      potential.SUPPORTED_UNIVERSAL_MODELS` + `supported_universal_
+      model(name)`; the validator (`spec/references.py`) and both
+      resolvers look the study file's / recipe's model name up in that
+      table, so a second universal model is a new row, not a resolver
+      edit.
 - [ ] **Re-anneal + gate re-architecture (DECIDED 2026-08-08, Paul; flow
       note "RESOLVED 2026-08-08"). REVERSED 2026-08-28 (Paul): the heal
       and the §3.5 gate move BACK into the activation stage, per half,
@@ -1152,8 +1154,14 @@ foundations, interaction rules. -->
       press-start opening. The one-time LATERAL cell relax (§5.6) stays
       in the bond flow (it needs the joint cell). Docs propagated
       2026-08-28 (ARCH §2.1/§2.3/§4.1/§4.4, DESIGN §2.6/§3.4/§3.5/§5/
-      §10.2, PSEUDOCODE §1/§7.5/§9.1/§10.1/§10.5/§10.6); CODE to
-      follow. The text below is the 2026-08-08 record.** The #8
+      §10.2, PSEUDOCODE §1/§7.5/§9.1/§10.1/§10.5/§10.6); CODE DONE
+      2026-08-28 (`commands.heal_surface_commands` + heal-start marker,
+      `cascade.build_activate_script`, `live_stages.activate_one_half`
+      gating the healed half, `ActivatedSlabs`/`Structure` carrying the
+      verdicts, `press_and_bond` = cell relax -> press -> hold with the
+      `StageLedger`, `handoff` manifests, `bootstrap/harvest` keyed on
+      the ledger; node validation = the dpa3f demo, LEDGER entry to
+      follow). The text below is the 2026-08-08 record.** The #8
       combined-cell relax REPLACES the
       per-slab re-anneal, and the §3.5 gate MOVES POST-ASSEMBLY. Cross-
       cutting, DESIGN-first: (1) `cascade.build_activate_script` +

@@ -44,8 +44,6 @@ from sabsim.driver.analysis import (
 from sabsim.driver.commands import (
     ForceModel,
     RegionGeometry,
-    contact_relax_commands,
-    heal_anneal_commands,
     force_model_commands,
     grip_hold_and_readback_commands,
     integrator_commands,
@@ -58,15 +56,9 @@ from sabsim.driver.commands import (
     recording_commands,
     region_group_commands,
     restart_preamble_commands,
-    scissors_commands,
     timestep_command,
     to_metal,
     trajectory_dump_commands,
-)
-from sabsim.driver.activation_gate import (
-    ActivationVerdict,
-    activation_gate,
-    load_activation_references,
 )
 from sabsim.driver.engine import Engine
 from sabsim.driver.resume import (
@@ -92,42 +84,17 @@ class RunControl:
     the potential cutoff past which the interface counts as open (§4.6);
     ``density_bin_width`` bins the profile that locates the dividing
     surfaces (§2.6). These are engineering settings, not physics knobs.
+    The contact test's own two settings — the opening's trailing-mean
+    window and the sustained-stress floor — are STUDY knobs
+    (``numerical.contact_gap_window`` / ``contact_stress_floor``, DESIGN
+    §5.2), not fields here. (The TODO item "retire the walking-skeleton
+    residue" tracks moving the remaining constants into the study file.)
     """
 
     chunk_steps: int = 1000
     max_chunks: int = 500
     stress_window: int = 5
-    gap_window: int = 3                # chunks the opening is averaged over
-    # Minimum |running-average normal stress| (bar) for a closed gap to
-    # count as contact, of either sign (compression, or the adhesive
-    # tension of surfaces that have already bonded, 2026-08-27). An
-    # asperity touch reads near zero; a real interface reads kbar.
-    contact_stress_floor: float = 500.0
     equilibrate_chunks: int = 20
-    # How many chunks the pre-press contact RELAX holds at temperature
-    # after its minimize (§5, relax-press-settle-pull). Kept short: the
-    # relax only heals the assembly clashes and drops the pair into the
-    # force model's basin, it does not re-anneal. Only runs when the
-    # surfaces are assembled beyond ``separation_cutoff`` (so each is a
-    # genuinely free surface); at a close gap it auto-skips.
-    relax_chunks: int = 5
-    # Target surface-to-surface OPENING (Å, the §2.6 dividing-surface
-    # metric — same as the press's contact test) the SCISSORS leaves after
-    # the relax: the vacuum is cut in one geometric move down to this
-    # separation, so the load-press begins near contact and never
-    # accelerates across empty space. ~7 A opening ≈ 3 A closest-atom given
-    # surface roughness — a safe near-contact start where the two faces
-    # already interact (< the cutoff). Only runs when the relax did.
-    scissors_gap: float = 7.0
-    # Hard SAFETY floor (Å) on the closest-ATOM separation the scissors may
-    # leave. The dividing-surface opening can be corrupted when a violent
-    # out-of-distribution relax depletes the interface density (it read
-    # ~45 A on an ~11 A gap, bond job 15876342, and the cut drove one wafer
-    # into the other). This clamps the cut against the actual facing atoms
-    # so the nearest pair never closes within this floor, whatever the
-    # opening says. Below the scissors_gap's ~3 A closest-atom target, so
-    # it binds only when the opening overshoots.
-    scissors_min_gap: float = 2.5
     separation_cutoff: float = 6.0     # Å, the §4.6 potential cutoff
     density_bin_width: float = 1.0     # Å, dividing-surface profile bin
     # The distance within which two atoms count as still JOINED, which
@@ -147,21 +114,25 @@ class RunControl:
 class PressResult:
     """Whether the press reached contact, and when (§9.3).
 
-    ``activation_a`` / ``activation_b`` carry the §3.5 gate verdict for each
-    HEALED surface, judged in the bond flow after the joint heal and before
-    the press (§3.4, revised 2026-08-08). They are ``None`` on the retired
-    narrow-gap path, which never heals or gates; on the wide-gap path a
-    FAILED gate returns early (no press) with them set, so the caller halts.
+    Besides the verdict, the press RECORDS where its phases fall in the
+    engine's step count (PSEUDOCODE §9.3 ``StageLedger``, DESIGN §5.5):
+    ``press_start_step`` (drive installed, first chunk begins),
+    ``contact_step`` (the dual criterion fired) and ``hold_end_step``
+    (the hold at temperature ended). Every frame of the press recording
+    carries its step, so a consumer keys a frame to its phase by these
+    numbers rather than guessing from its position in the file. The
+    settle adds its own two markers (:class:`ReferenceResult`).
     """
 
     contact_reached: bool
     chunks_to_contact: int | None
     note: str
-    activation_a: ActivationVerdict | None = None
-    activation_b: ActivationVerdict | None = None
+    press_start_step: int | None = None
+    contact_step: int | None = None
+    hold_end_step: int | None = None
     # Whether the pair still holds every atom it was assembled with, read
-    # at the END of the press phase (heal, gate, scissor, press, hold). A
-    # press that ejected atoms is VOID (DESIGN §5.6), whatever
+    # at the END of the press phase (cell relax, press, hold). A press
+    # that ejected atoms is VOID (DESIGN §5.6), whatever
     # ``contact_reached`` says — a flying fragment can fire the stress
     # criterion on a pair that has disintegrated (LEDGER T-18).
     atoms_conserved: bool = True
@@ -184,6 +155,12 @@ class ReferenceResult:
     # Conservation against the ASSEMBLED count (§5.6), checked here too so
     # an atom lost during the settle is caught before any pull starts.
     atoms_conserved: bool = True
+    # The settle's two ledger markers (PSEUDOCODE §9.4): the step the drive
+    # was released and the minimize began, and the step the gated
+    # reference was written. Frames between them are the zero-load
+    # reference the bootstrap's family 9 is harvested from (§11.3).
+    settle_start_step: int | None = None
+    settle_end_step: int | None = None
 
 
 @dataclass(frozen=True)
@@ -262,50 +239,6 @@ def _positions_with_tags(engine: Engine, tags: np.ndarray) -> tuple:
     return frame, aligned_tags
 
 
-def gate_healed_surfaces(engine: Engine, built) -> tuple:
-    """Gate each HEALED surface of the assembled pair (§3.5, in the bond flow).
-
-    Revised 2026-08-08 (§3.4): the §3.5 activation gate moved here, run AFTER
-    the bond flow's joint heal, on the assembled+healed pair — one verdict per
-    wafer. The atoms are split by wafer tag, and each wafer is judged as its
-    own free surface against the share/ references (keyed by the pair's
-    species; the projectile was already stripped as cascade cleanup, so the
-    pair is substrate-only).
-
-    Wafer B was flipped face-DOWN at assembly (:func:`~sabsim.structure.
-    amorphized_assembly.flip_in_z`), so its free (gap-facing) surface sits at
-    its BOTTOM. Every gate metric assumes the free surface is at the TOP — the
-    depth metric reads the highest populated bin as the surface — so wafer B's
-    z is mirrored here before gating, presenting it exactly as a standalone
-    activated slab. Returns ``(verdict_a, verdict_b)``; the caller halts the
-    bond before the press if either failed.
-    """
-    positions, tags = _positions_with_tags(
-        engine, np.asarray(built.atoms.get_tags()))
-    cell = np.asarray(built.atoms.get_cell(), dtype=float)
-    # Each wafer is judged against ITS OWN material's reference: a SiO2
-    # wafer keys {O, Si}, a LiNbO3 wafer keys {Li, Nb, O}, so the gate can
-    # tell them apart (DESIGN.md §3.5). The per-wafer species is recorded on
-    # the pair; when absent (the crystalline/identity path, or a pair built
-    # before that field existed) it falls back to the pair's global type
-    # map, which for a same-material pair IS each wafer's set.
-    global_species = frozenset(built.type_map)
-    references_a = load_activation_references(
-        getattr(built, "wafer_a_species", None) or global_species)
-    references_b = load_activation_references(
-        getattr(built, "wafer_b_species", None) or global_species)
-
-    # Wafer A is bottom, its activated surface already facing up (+z).
-    verdict_a = activation_gate(
-        positions[tags == WAFER_A_TAG], cell, references_a)
-    # Wafer B faces down — mirror its z so the free surface is at the top.
-    positions_b = positions[tags == WAFER_B_TAG].copy()
-    z_b = positions_b[:, 2]
-    positions_b[:, 2] = (z_b.max() + z_b.min()) - z_b
-    verdict_b = activation_gate(positions_b, cell, references_b)
-    return verdict_a, verdict_b
-
-
 def _steps(duration: Quantity, timestep: Quantity) -> int:
     """MD steps spanning a duration, given the timestep."""
     return max(1, round(to_metal(duration, "time")
@@ -320,9 +253,8 @@ def _press_setup(
     Reads the structure, loads the force model, carves the driver zones,
     installs the integrator, and installs the shared grip force gauges —
     everything the press needs EXCEPT the drive itself. The drive is issued
-    separately by :func:`press_and_bond` so an optional contact relax
-    (:func:`~sabsim.driver.commands.contact_relax_commands`) can run first,
-    while the top grip is still free of a drive fix.
+    separately by :func:`press_and_bond`, after the one-time lateral cell
+    relax of §5.6 has run with the top grip still free of a drive fix.
 
     The grip gauges live here, on the instance the press and settle share,
     so the settle can read them without redefining a compute
@@ -346,51 +278,6 @@ def _press_setup(
     return commands
 
 
-def _assembled_gap(built) -> float:
-    """The closest-atom vertical gap between the two assembled halves (Å).
-
-    Measured as the lowest atom of the TOP wafer minus the highest atom of
-    the BOTTOM wafer, from the builder's per-wafer z-ranges. This is the
-    physical quantity that decides whether the surfaces are free: only when
-    it clears the potential cutoff do the two faces stop interacting, so
-    each can relax as a genuine free surface during the contact relax.
-    """
-    _, lower_high = built.wafer_a_z_range
-    upper_low, _ = built.wafer_b_z_range
-    return float(upper_low - lower_high)
-
-
-def _scissors_delta(
-        engine, tags: np.ndarray, target_gap: float,
-        bin_width: float, min_atom_gap: float) -> float:
-    """How far to slide the top wafer down to reach ``target_gap`` (Å).
-
-    Reads the CURRENT positions — after the relax, so surface
-    reconstruction is already accounted for — and asks the SAME density
-    dividing-surface metric the press uses for contact
-    (:func:`interface_opening`), NOT the single closest atom, how much
-    vacuum to cut so the opening becomes ``target_gap``. Using the density
-    metric keeps a lone atom that wanders into the gap from fooling the cut
-    into thinking the surfaces already touch (it did, bond job 15876243).
-
-    That density opening is then CLAMPED by a hard safety ceiling from the
-    actual facing atoms: the cut may never bring the nearest atom of one
-    wafer within ``min_atom_gap`` of the other. A violent out-of-
-    distribution relax can deplete the interface density and inflate the
-    opening (it read ~45 A on an ~11 A gap, bond job 15876342), and without
-    this clamp the cut drove one wafer straight into the other. Never
-    negative: if the surfaces already sit within the target, nothing is
-    cut.
-    """
-    frame, aligned_tags = _positions_with_tags(engine, tags)
-    z_lower, z_upper = _wafer_z(frame, aligned_tags)
-    wanted = interface_opening(z_lower, z_upper, bin_width) - target_gap
-    # The real nearest-atom separation is the ceiling the cut cannot cross.
-    closest_atom_gap = float(z_upper.min() - z_lower.max())
-    ceiling = closest_atom_gap - min_atom_gap
-    return max(0.0, min(wanted, ceiling))
-
-
 def press_and_bond(
         engine: Engine,
         built,
@@ -402,15 +289,23 @@ def press_and_bond(
         control: RunControl = RunControl(),
         trajectory_file: str | None = None,
         trajectory_stride: int | None = None) -> PressResult:
-    """Press until the DUAL contact criterion fires, then hold (§9.3).
+    """Relax the shared cell once, press until contact, then hold (§9.3).
 
-    Sets up the press, then advances in chunks: after each, it measures
-    the surface-to-surface opening (§2.6) and appends the normal stress,
-    and stops when the gap has closed AND the running-average stress has
-    turned positive (:func:`contact_reached`). It then holds at
-    temperature for ``press_duration`` where bonding happens. The bonded
-    verdict and contact-quality grading reuse §8 geometric machinery not
-    yet built, so this reports contact, not a graded bond.
+    The pair arrives HEALED and GATED (§3.4, revised 2026-08-28: each half
+    was annealed, minimized and judged in its own cascade session) and
+    assembled at the press-start opening, so the bond flow's first act is
+    the ONE-TIME lateral cell relax of DESIGN §5.6 — the shared in-plane
+    cell to zero in-plane stress, then frozen for everything after. The
+    drive is then installed and the press advances in chunks: after each,
+    it measures the surface-to-surface opening (§2.6) and appends the
+    normal stress, and stops when the opening's trailing mean has closed
+    to the study's gap threshold AND the running-average stress shows a
+    sustained load of either sign above the study's floor
+    (:func:`contact_reached`, DESIGN §5.2). It then holds at temperature
+    for ``press_duration`` where bonding happens, recording the step each
+    phase began at (the ledger, :class:`PressResult`). The bonded verdict
+    and contact-quality grading reuse §8 geometric machinery not yet
+    built, so this reports contact, not a graded bond.
     """
     numerical = member.numerical
     engine.commands(
@@ -419,65 +314,28 @@ def press_and_bond(
     # The §5.6 conservation baseline is the ASSEMBLED pair — the count the
     # structure was built with — not whatever the engine holds later. Every
     # exit below reports conservation against it, so an atom ejected in the
-    # heal, the scissor, or the press is never invisible to the analyzer.
+    # cell relax or the press is never invisible to the analyzer.
     assembled_atom_count = len(built.atoms.get_tags())
 
     def conserved_now() -> bool:
         return atom_count_conserved(
             assembled_atom_count, engine.atom_count())
 
-    # HEAL the gapped pair, then GATE each healed surface (§3.4): both moved
-    # into the bond flow. The heal runs ONLY when the two surfaces are
-    # assembled beyond the potential cutoff — a wide gap is what lets each
-    # heal as an effectively-free surface (§2.6); production always assembles
-    # wide (initial_gap > separation_cutoff), and the narrow-gap `else` is the
-    # retired classical direct-contact path, which never heals or gates. The
-    # drive is installed AFTER, so the top grip is free while the relax runs.
+    # One-time combined-cell relax (§5.6, §2.6): resize the shared lateral
+    # cell to zero in-plane stress, then FREEZE it for the press. The
+    # recorded relaxation that replaces the forbidden live barostat; it
+    # relieves the dominant frame-0 stress (the cell off the model's
+    # preferred lattice) so a strained pair does not detonate at contact
+    # (T-17, job 16453628). It needs the joint cell, which is why it is
+    # the one relaxation that did not move to the activation stage.
     tags = np.asarray(built.atoms.get_tags())
-    activation_a = None
-    activation_b = None
-    if _assembled_gap(built) > control.separation_cutoff:
-        # NOTE: contact_relax_commands is a TEMPORARY out-of-distribution
-        # scaffold (see its docstring) — remove once the classical->trained
-        # seam is proven and surfaces are activated under the committee.
-        engine.commands(contact_relax_commands(
-            member, seed, control.relax_chunks * control.chunk_steps))
-        # The study's re-anneal schedule then SETTLES both surfaces at the
-        # wide gap before anything is cut or pressed (§3.4): loose atoms
-        # and fragments the cascade left standing proud of each surface
-        # find bonds under the production model instead of mixing at the
-        # first touch (the 50 eV demo press, 2026-08-26).
-        engine.commands(heal_anneal_commands(member, seed))
-        # One-time combined-cell relax (§5.6, §2.6): resize the shared
-        # lateral cell to zero in-plane stress, then FREEZE it for the
-        # press. The recorded relaxation that replaces the forbidden live
-        # barostat; it relieves the dominant frame-0 stress (the cell off
-        # the model's preferred lattice) so the strained pair does not
-        # detonate at contact (T-17, job 16453628).
-        engine.commands(combined_cell_relax_commands())
-        # The §3.5 activation gate, now HERE (§3.4): judge each healed
-        # surface. A FAILED gate halts the bond BEFORE the press, so its
-        # scarce GPU is never spent on an un-activated surface (§9.1). The
-        # gate is READ-ONLY — it issues no commands.
-        activation_a, activation_b = gate_healed_surfaces(engine, built)
-        if not (activation_a.passed and activation_b.passed):
-            failing = (activation_a if not activation_a.passed
-                       else activation_b)
-            return PressResult(
-                contact_reached=False, chunks_to_contact=None,
-                note=f"activation gate failed (§3.5): {failing.reason}",
-                activation_a=activation_a, activation_b=activation_b,
-                atoms_conserved=conserved_now())
-        # Cut the vacuum the relax needed so the load-press starts near
-        # contact at rest, never accelerating the grip across empty space
-        # (mode = load, §9.3). Δz is measured from the RELAXED positions.
-        delta_z = _scissors_delta(
-            engine, tags, control.scissors_gap, control.density_bin_width,
-            control.scissors_min_gap)
-        if delta_z > 0.0:
-            engine.commands(scissors_commands(built.interface_z, delta_z))
+    engine.commands(combined_cell_relax_commands())
+
+    # The drive goes on and the press begins; the ledger notes the step.
     engine.commands(press_drive_commands(built, member))
+    press_start_step = engine.step()
     gap_threshold = to_metal(numerical.contact_gap_threshold, "distance")
+    stress_floor = to_metal(numerical.contact_stress_floor, "pressure")
     stress_series: list = []
     opening_series: list = []
     contact_chunk = None
@@ -489,14 +347,13 @@ def press_and_bond(
             z_lower, z_upper, control.density_bin_width))
         stress_series.append(engine.normal_stress())
         # The gap is judged on a TRAILING MEAN of the opening, as the
-        # stress already is: one chunk's density-surface reading jumps by
-        # ångströms when loose atoms drift through the gap (the 50 eV demo
-        # press, 2026-08-26), and demanding both conditions in the SAME
-        # chunk let the wafers touch without contact ever being declared.
-        opening = trailing_mean(opening_series, control.gap_window)
+        # stress already is (DESIGN §5.2): one chunk's density-surface
+        # reading jumps by ångströms when loose atoms drift through the
+        # gap, and demanding both conditions in the SAME chunk let the
+        # wafers touch without contact ever being declared (T-31).
+        opening = trailing_mean(opening_series, numerical.contact_gap_window)
         if contact_reached(opening, gap_threshold, stress_series,
-                           control.stress_window,
-                           control.contact_stress_floor):
+                           control.stress_window, stress_floor):
             contact_chunk = chunk
             break
 
@@ -504,18 +361,21 @@ def press_and_bond(
         return PressResult(
             contact_reached=False, chunks_to_contact=None,
             note="no contact within the chunk budget (§9.3)",
-            activation_a=activation_a, activation_b=activation_b,
+            press_start_step=press_start_step,
             atoms_conserved=conserved_now())
+    contact_step = engine.step()
 
     hold_steps = _steps(member.protocol.press_duration, numerical.md_timestep)
     engine.commands([f"run {hold_steps}"])
+    hold_end_step = engine.step()
     conserved = conserved_now()
     return PressResult(
         contact_reached=True, chunks_to_contact=contact_chunk,
         note=("contact on the dual criterion, held at temperature (§9.3)"
               if conserved else
               "LOST ATOMS during the press — result VOID (§5.6)"),
-        activation_a=activation_a, activation_b=activation_b,
+        press_start_step=press_start_step, contact_step=contact_step,
+        hold_end_step=hold_end_step,
         atoms_conserved=conserved)
 
 
@@ -555,6 +415,7 @@ def settle_reference(
     """
     numerical = member.numerical
     engine.commands(press_release_commands(member))
+    settle_start_step = engine.step()             # ledger (§9.4)
     engine.commands(["min_style cg", "minimize 1e-8 1e-8 1000 10000"])
 
     energies: list = []
@@ -577,6 +438,7 @@ def settle_reference(
 
     if reference_data_file is not None:
         engine.commands([f"write_data {reference_data_file}"])
+    settle_end_step = engine.step()               # ledger (§9.4)
     conserved = (
         atom_count_conserved(expected_atom_count, engine.atom_count())
         if expected_atom_count is not None else True)
@@ -584,7 +446,9 @@ def settle_reference(
         settled=report.settled, report=report,
         potential_energy=energies[-1] if energies else engine.energy(),
         reference_data_file=reference_data_file,
-        atoms_conserved=conserved)
+        atoms_conserved=conserved,
+        settle_start_step=settle_start_step,
+        settle_end_step=settle_end_step)
 
 
 def _pull_fixture_commands(

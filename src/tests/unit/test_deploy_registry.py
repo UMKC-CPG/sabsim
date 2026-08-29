@@ -32,9 +32,8 @@ def test_resource_classes_match_the_design():
     """activate and bond are GPU, analyze is CPU (DESIGN.md §10.2).
 
     The universal-MLIP cascade runs on the GPU, so activate is GPU by
-    default (revised 2026-08-08); a classical CPU cascade is the
-    deployment-expressed opt-in. analyze (the M1 mechanical measure) is
-    pure Python, so it stays CPU.
+    default (revised 2026-08-08; the CPU opt-in was removed 2026-08-26).
+    analyze (the M1 mechanical measure) is pure Python, so it stays CPU.
     """
     by_name = {job.name: job for job in JOB_REGISTRY}
     assert by_name["activate"].resource_class == "gpu"

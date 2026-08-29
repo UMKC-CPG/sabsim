@@ -15,11 +15,9 @@ This module is a pure assembler: it returns a
 :class:`~sabsim.driver.commands.ForceModel` and never talks to LAMMPS,
 so it is unit-tested by asserting the emitted strings.
 
-Classical analytic potentials (Stillinger-Weber, Tersoff, ...) were once
-registered here as an opt-in alternative. That path was validated for
-silicon only, was never going to be the production model, and was removed
-on 2026-08-26 so that exactly one description of the cascade potential
-exists.
+There is exactly ONE kind of cascade potential — a universal foundation
+MLIP from the supported-models table below, spliced with ZBL cores — and
+no fall-back of any kind (DESIGN §4.7, revised 2026-08-28).
 """
 
 from __future__ import annotations
@@ -79,8 +77,8 @@ class UniversalCascadeModel:
     model IDENTITY. A foundation network shifts between upstream releases,
     so reproducibility depends on recording the model ``name``, the
     multitask ``model_branch`` frozen out of it, and a ``version`` tag — the
-    universal analogue of a classical form's frozen parameter-file citation
-    (DESIGN §4.7, "a universal entry pins the model version").
+    universal analogue of a frozen parameter-file citation (DESIGN §4.7,
+    "a universal entry pins the model version").
 
     ``validated`` follows the gate-not-warn discipline: it stays ``False``
     until a full activation under this model has
@@ -140,6 +138,36 @@ UNIVERSAL_CASCADE_MODEL = UniversalCascadeModel(
     validated=False)
 
 
+# The TABLE of universal models SABSIM knows how to run (DESIGN §4.7,
+# revised 2026-08-28). The user names one of these in the study file's
+# ``[potential] universal_model`` (and the bootstrap recipe's
+# ``[generator] model``); nothing in the code assumes a particular row.
+# Bringing up a newer foundation model (a DPA-4, or another family that
+# LAMMPS can load through ``pair_style deepmd``) means adding a row here —
+# its identity, provenance, caveat and validation status — never editing
+# a resolver. One row today, because one model has been screened.
+SUPPORTED_UNIVERSAL_MODELS: tuple = (UNIVERSAL_CASCADE_MODEL,)
+
+
+def supported_universal_model(name: str) -> UniversalCascadeModel:
+    """Look a universal model up by the name the study file gives.
+
+    The lookup is the ONLY place a model name is turned into a model
+    record, so the study file (not the code) decides which foundation
+    model a run uses, while an unknown name is a loud stop on the login
+    node that lists what IS supported — never a silent fall-through to a
+    default (DESIGN §4.7: no fall-backs).
+    """
+    for model in SUPPORTED_UNIVERSAL_MODELS:
+        if model.name == name:
+            return model
+    known = ", ".join(model.name for model in SUPPORTED_UNIVERSAL_MODELS)
+    raise ValueError(
+        f"universal model '{name}' is not in SABSIM's table of supported "
+        f"universal models ({known}); add a row to "
+        f"SUPPORTED_UNIVERSAL_MODELS (DESIGN §4.7) to bring it up")
+
+
 def resolve_universal_model_path(
         weights_path: str,
         model: UniversalCascadeModel = UNIVERSAL_CASCADE_MODEL) -> str:
@@ -168,7 +196,8 @@ def resolve_cascade_generator(
                             _LONG_CORE_OUTER_STANDIN),
         short_core: tuple = (_SHORT_CORE_INNER_STANDIN,
                             _SHORT_CORE_OUTER_STANDIN),
-        allow_unvalidated: bool = False) -> ForceModel:
+        allow_unvalidated: bool = False,
+        model_name: str = UNIVERSAL_CASCADE_MODEL.name) -> ForceModel:
     """Assemble the cascade potential: the universal MLIP + ZBL (§4.7).
 
     ``type_map`` maps every element symbol present in the cascade cell —
@@ -177,16 +206,14 @@ def resolve_cascade_generator(
     substrate species are inferred as ``type_map`` minus
     ``projectile_species``.
 
-    The cascade runs on the chemistry-agnostic universal foundation MLIP
-    (:data:`UNIVERSAL_CASCADE_MODEL`) spliced with the two ZBL cores — it
-    needs no per-material work and covers every species. (Classical
-    analytic potentials were once an opt-in alternative here; that path was
-    never validated beyond silicon and was removed on 2026-08-26 so that
-    one description of the cascade potential exists.)
-
-    ``weights_path`` is the universal model's weights file, taken from the
-    study's ``[potential] universal_weights`` (the study file is the
-    provenance record, DESIGN §1.6).
+    The cascade runs on a chemistry-agnostic universal foundation MLIP
+    spliced with the two ZBL cores — it needs no per-material work and
+    covers every species. WHICH universal model is the study file's
+    choice: ``model_name`` is its ``[potential] universal_model``, looked
+    up in :data:`SUPPORTED_UNIVERSAL_MODELS` (an unknown name stops
+    loudly, DESIGN §4.7), and ``weights_path`` is its ``[potential]
+    universal_weights`` (the study file is the provenance record, DESIGN
+    §1.6). There is no other cascade potential and no fall-back.
 
     ``allow_unvalidated`` is the deliberate escape hatch for EXPLORATORY
     work — the first run of a new material (or, for the universal model, its
@@ -203,7 +230,7 @@ def resolve_cascade_generator(
     every substrate-substrate pair (DESIGN §3.3).
     """
     projectile = frozenset(projectile_species)
-    model = UNIVERSAL_CASCADE_MODEL
+    model = supported_universal_model(model_name)
     if not model.validated and not allow_unvalidated:
         raise NotImplementedError(
             f"the universal cascade model '{model.name}' is the cascade "
@@ -220,7 +247,7 @@ def universal_force_model(
         type_map: dict,
         weights_path: str,
         allow_unvalidated: bool = False,
-        model: UniversalCascadeModel = UNIVERSAL_CASCADE_MODEL) -> ForceModel:
+        model_name: str = UNIVERSAL_CASCADE_MODEL.name) -> ForceModel:
     """The universal MLIP ALONE — no ZBL — for the QUIET stages (§4.7).
 
     The same no-ZBL form the gentle stages want, built on the
@@ -231,9 +258,12 @@ def universal_force_model(
     under the SAME model the cascade then bombards under is the point (DESIGN
     §2.2, §4.7): a cell equilibrated under one description and bombarded
     under another starts stressed — exactly the offset that detonated the
-    oxide bring-up. For silicon the classical and MLIP lattices nearly
+    oxide bring-up. For silicon the published and MLIP lattices nearly
     coincide, so this only matters at the margins, but the discipline is
-    uniform: match first, tile second, under one potential.
+    uniform: match first, tile second, under one potential. ``model_name``
+    is the study file's ``[potential] universal_model`` (or the bootstrap
+    recipe's ``[generator] model``), looked up in
+    :data:`SUPPORTED_UNIVERSAL_MODELS`.
 
     Every LAMMPS type maps to its REAL element — the universal model covers
     the whole periodic table and deepmd's element map has no ``NULL`` slot —
@@ -246,6 +276,7 @@ def universal_force_model(
     unless ``allow_unvalidated`` opts into the same on-the-record bring-up.
     ``weights_path`` is the study's ``[potential] universal_weights``.
     """
+    model = supported_universal_model(model_name)
     if not model.validated and not allow_unvalidated:
         raise NotImplementedError(
             f"the universal model '{model.name}' is the §2.2 lattice-"
@@ -323,13 +354,13 @@ def _assemble_universal_overlay(
     The base sub-style is ``deepmd <model>``, and EVERY LAMMPS type is
     mapped to its real element — the universal model covers the whole
     periodic table, projectile included, and deepmd's element map has no
-    ``NULL`` slot the way a classical form does. The near-equilibrium MLIP is
-    still wrong deep in the collision, but the LONG ZBL core (#1) overlaid on
-    every projectile pair dominates there, so the projectile is handled by
-    ZBL exactly as in the classical path — the model merely also sees it at
-    long range, which is scaffold-grade acceptable (DESIGN §4.7).
+    ``NULL`` slot to leave a species unmapped. The near-equilibrium MLIP is
+    still wrong deep in the collision, but the LONG ZBL core (#1) overlaid
+    on every projectile pair dominates there, so the projectile is handled
+    by ZBL — the model merely also sees it at long range, which is
+    scaffold-grade acceptable (DESIGN §4.7).
 
-    Two things distinguish this ForceModel from the classical one. It needs
+    Two things distinguish this ForceModel from a built-in one. It needs
     the global atom map (``needs_atom_map``) because the graph network
     gathers per-atom features across the neighbor graph; and it carries no
     ``preload``, because the deepmd LAMMPS engine used for the cascade ships

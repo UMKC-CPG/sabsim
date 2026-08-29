@@ -262,3 +262,17 @@ def test_unset_location_root_in_a_weights_path_is_rejected(
     with pytest.raises(SpecificationError) as caught:
         load_and_validate_study(spec)
     assert "sabsimrc" in str(caught.value)
+
+
+def test_contact_test_settings_are_study_knobs_with_units():
+    """The press's two contact-test settings come from the study file.
+
+    DESIGN §5.2 (revised 2026-08-28): the trailing-mean window over the
+    surface-to-surface opening and the sustained-stress floor were once
+    constants inside the driver; a value the run uses must be visible in
+    the study file (DESIGN §1.4), so both are knobs here.
+    """
+    numerical = load_and_validate_study(_TEMPLATE_PATH).members[0].numerical
+    assert numerical.contact_gap_window == 3
+    assert numerical.contact_stress_floor.value == 500.0
+    assert numerical.contact_stress_floor.unit == "bar"

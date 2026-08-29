@@ -137,6 +137,12 @@ class Slab:
     # wafer's activation reference by ITS own set, not the pair's global
     # type map (DESIGN.md §3.5). Empty on the W0 placeholder.
     species: frozenset = frozenset()
+    # The MD step at which this half's heal began in its cascade session
+    # (PSEUDOCODE §10.1, 2026-08-28), read from the marker the session
+    # wrote beside its recording; a consumer of the activate movie tells
+    # the cascade-hot frames from the healed ones by it (§11.3). None
+    # when no recording was made (the W0 placeholder).
+    heal_start_step: int | None = None
 
 
 @dataclass(frozen=True)
@@ -170,18 +176,21 @@ class Verdict:
 
 @dataclass(frozen=True)
 class ActivatedSlabs:
-    """Both amorphized slabs (§10.1, revised 2026-08-08).
+    """Both HEALED slabs and the §3.5 verdict for each (§10.1).
 
-    Revised: activation is cascade-only, so this seam carries just the two
-    amorphized slabs. The §3.5 gate no longer rides here — it moved to the
-    bond flow (DESIGN.md §3.4), which heals the assembled pair and gates
-    each healed surface before pressing. The ACTIVATED_SLABS_CONTRACT here
-    checks only that both slabs are present and amorphized; the pass/fail
-    verdict is a bond-flow artifact now.
+    Revised 2026-08-28 (Paul): each half is cascaded, healed and GATED in
+    its own activation session (DESIGN.md §3.4/§3.5), so the verdicts
+    ride this seam again — the ACTIVATED_SLABS_CONTRACT checks that both
+    slabs are present AND both verdicts passed, and a failure halts the
+    member here, before the pair is ever assembled. (From 2026-08-08 to
+    2026-08-28 the gate ran in the bond flow and its verdicts rode the
+    BondDebondResult instead.)
     """
 
     slab_a: Slab
     slab_b: Slab
+    verdict_a: ActivationVerdict | None = None
+    verdict_b: ActivationVerdict | None = None
 
 
 @dataclass(frozen=True)
@@ -203,6 +212,34 @@ class Structure:
     # W0 placeholder; a # C-EXPANSION point (Approach C would re-read it from
     # the file in the press job, ARCHITECTURE.md §4.3).
     built: object = None
+    # The §3.5 verdict each half arrived with, and the step its heal began
+    # at (§10.1) — carried on the pair so the bond and analyze jobs, which
+    # read only this artifact, can still report the activation that
+    # produced the surfaces they run on (ARCHITECTURE.md §4.3).
+    activation_a: ActivationVerdict | None = None
+    activation_b: ActivationVerdict | None = None
+    heal_start_step_a: int | None = None
+    heal_start_step_b: int | None = None
+
+
+@dataclass(frozen=True)
+class StageLedger:
+    """Where the press and settle phases fall in the MD step count (§9.3).
+
+    The press and settle RECORD the step each phase began or ended at,
+    so a consumer of the recorded trajectory — the analyzer, a viewer,
+    the bootstrap harvest (PSEUDOCODE §11.3) — keys a frame to its phase
+    by the step every dump frame carries, never by guessing from its
+    position in the file (DESIGN §5.5, §5.7, 2026-08-28). A marker is
+    None when its phase never ran (a press that never reached contact
+    has no hold and no settle).
+    """
+
+    press_start: int | None = None    # drive installed, first chunk begins
+    contact: int | None = None        # the dual criterion fired (§9.3)
+    hold_end: int | None = None       # end of the hold at temperature
+    settle_start: int | None = None   # drive released, settle begins
+    settle_end: int | None = None     # the gated reference written (§9.4)
 
 
 @dataclass(frozen=True)
@@ -211,6 +248,9 @@ class PressOutcome:
 
     bonded: bool
     note: str
+    # The phase-boundary steps of the press and settle (§9.3); None on
+    # the W0 placeholder, which runs no engine.
+    stage_steps: StageLedger | None = None
 
 
 @dataclass(frozen=True)
@@ -261,12 +301,6 @@ class BondDebondResult:
     press: PressOutcome
     reference_ok: bool             # the §5.3 gated zero-load reference
     pulls: tuple[PullOutcome, ...]
-    # The §3.5 activation gate moved into the bond flow (§3.4, revised
-    # 2026-08-08): each HEALED surface is judged after the joint heal, before
-    # the press. A failed verdict makes this artifact contract-invalid, so
-    # the pipeline halts before the press's scarce GPU is spent (§9.1).
-    activation_a: ActivationVerdict | None = None
-    activation_b: ActivationVerdict | None = None
 
 
 @dataclass(frozen=True)

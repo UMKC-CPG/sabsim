@@ -120,7 +120,7 @@ def test_search_locations_are_not_repeated(tmp_path, monkeypatch):
 
 
 def test_wrong_universal_model_name_is_rejected():
-    """The study's universal model must be the identity the code pins."""
+    """The study's universal model must be a row of the supported table."""
     from dataclasses import replace
     study = load_and_validate_study(_TEMPLATE_PATH)
     wrong = replace(study.members[0].potential, universal_model="MACE-MP-0")

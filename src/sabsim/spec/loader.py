@@ -259,6 +259,10 @@ def _numerical_from_table(table: dict, context: str) -> NumericalKnobs:
             table, "contact_grid_spacing", context),
         contact_gap_threshold=_require_quantity(
             table, "contact_gap_threshold", context),
+        contact_gap_window=int(_require(
+            table, "contact_gap_window", context)),
+        contact_stress_floor=_require_quantity(
+            table, "contact_stress_floor", context),
         bonded_contact_threshold=float(_require(
             table, "bonded_contact_threshold", context)),
         reference_pe_drift=_require_quantity(

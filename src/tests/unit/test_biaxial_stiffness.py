@@ -46,7 +46,7 @@ def test_measure_walks_the_sweep_and_fits_the_modulus():
     strains = STRAIN_SWEEP
     scripted = _stress_for(234.0, strains)
     engine = MockEngine(in_plane_stress=scripted)
-    model = ForceModel(pair_style="sw", pair_coeff=("* * Si.sw Si",))
+    model = ForceModel(pair_style="zero 6.0", pair_coeff=("* *",))
     result = measure_biaxial_modulus(engine, "slab.data", model, strains)
 
     assert abs(result.biaxial_modulus_gpa - 234.0) < 1.0e-6

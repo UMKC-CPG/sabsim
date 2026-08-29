@@ -119,17 +119,25 @@ def _validate_slabs(artifact: object) -> str | None:
 
 
 def _validate_activated(artifact: object) -> str | None:
-    """Both slabs amorphized (ACTIVATED, §10.1, revised 2026-08-08).
+    """Both slabs healed AND both gates passed (ACTIVATED, §10.1).
 
-    The §3.5 gate no longer rides this seam — it moved to the bond flow
-    (DESIGN §3.4), which gates each healed surface before pressing. So this
-    checks only that the artifact carries both amorphized slabs; the
-    pass/fail halt is now in the bond flow.
+    Revised 2026-08-28: the §3.5 gate judges each healed half in its own
+    activation session (DESIGN §3.4/§3.5), so its verdict rides this seam
+    and a failure HALTS the member here — before the pair is assembled
+    and long before the bond job's GPU is spent. Checked FIRST so the halt
+    reason is the gate's own, not a downstream symptom.
     """
     if not isinstance(artifact, ActivatedSlabs):
         return "expected an ActivatedSlabs artifact"
     if artifact.slab_a is None or artifact.slab_b is None:
         return "an activated slab is missing"
+    for surface, verdict in (("A", artifact.verdict_a),
+                             ("B", artifact.verdict_b)):
+        if verdict is None:
+            return f"surface {surface} was never gated (§3.5)"
+        if not verdict.passed:
+            return (f"surface {surface} failed the §3.5 activation gate: "
+                    f"{verdict.reason}")
     return None
 
 
@@ -143,19 +151,9 @@ def _validate_structure(artifact: object) -> str | None:
 
 
 def _validate_bond_debond(artifact: object) -> str | None:
-    """A gated press plus at least one pull (BOND_DEBOND, §9.1, §3.4)."""
+    """A press outcome plus at least one pull (BOND_DEBOND, §9.1)."""
     if not isinstance(artifact, BondDebondResult):
         return "expected a BondDebondResult artifact"
-    # The §3.5 activation gate moved into the bond flow (§3.4, revised
-    # 2026-08-08): a failed healed-surface verdict halts HERE, before the
-    # press is trusted. Checked FIRST so the halt reason is the gate's own,
-    # not a downstream symptom. When absent (the retired narrow-gap path or a
-    # skeleton stub that never gated) it is simply not enforced.
-    for surface, verdict in (("A", artifact.activation_a),
-                             ("B", artifact.activation_b)):
-        if verdict is not None and not verdict.passed:
-            return (f"surface {surface} failed the §3.5 activation gate: "
-                    f"{verdict.reason}")
     if artifact.press is None:
         return "no press outcome recorded"
     if not artifact.pulls:

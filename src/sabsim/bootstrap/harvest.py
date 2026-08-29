@@ -2,22 +2,28 @@
 
 The bootstrap runs NO cascade and NO press of its own (PSEUDOCODE §11.3):
 it reads the trajectories an ordinary member job recorded when run with
-``sabsim run --dump-visuals`` under the universal model, and takes from
-them the five families the protocol visits — the amorphized surface
-(family 7, from the activate dumps), the initial, relaxed and pressed
-joint cells (8–10, from the press dump), and the pulled cell through
-failure (11, from the pull dumps). Interface frames are cut to the
-labelling sub-cell of :mod:`sabsim.bootstrap.subcell`.
+trajectories on under the universal model, and takes from them the five
+families the protocol visits (DESIGN §4.8 part 5, revised 2026-08-28):
 
-Two lean choices are made here and named. The press record is split
-into thirds by frame index to stand for "initial / relaxed / pressed"
-— the press dump opens after the heal and the scissor, so its early
-frames are the freshly closed contact and its late frames the loaded
-one; a chunk-keyed split can replace this once the press ledger is
-written to the handoff. And any argon still present in an activate
-frame is dropped, because the labelling model's species union does not
-contain the projectile (§3.4): the frames after the cascade cleanup are
-argon-free anyway, and earlier ones become substrate-only snapshots.
+* family 7, the HEALED activated surface — the tail of each half's
+  activate movie, from the step its heal began (the ``heal_start_step``
+  marker the session wrote, carried on the assembled-pair manifest);
+* family 8, the pair at press start — the press-movie frame AT the
+  ledger's ``press_start``;
+* family 9, the settled zero-load reference — the frames between the
+  ledger's ``settle_start`` and ``settle_end`` (§5.3);
+* family 10, the pair under compression — the frames between
+  ``press_start`` and ``hold_end``;
+* family 11, the pulled cell through failure — every pull rung's movie.
+
+Every frame is keyed to its phase by the MD step it carries and the
+StageLedger the bond job wrote into its manifest (PSEUDOCODE §9.3) —
+never by its position in the file. Interface frames (8–11) are cut to
+the labelling sub-cell of :mod:`sabsim.bootstrap.subcell`.
+
+Any projectile atom still present in an activate frame is dropped,
+because the labelling model's species union does not contain the beam
+(§3.4); the healed frames are projectile-free anyway.
 """
 
 from __future__ import annotations
@@ -37,7 +43,7 @@ from sabsim.bootstrap.subcell import (
 )
 from sabsim.deploy.scratch import member_scratch
 from sabsim.driver.commands import stage_dump_file, to_metal
-from sabsim.pipeline.handoff import read_assembled_pair
+from sabsim.pipeline.handoff import read_assembled_pair, read_pull_results
 from sabsim.spec.loader import load_and_validate_study
 
 
@@ -49,8 +55,27 @@ def _evenly(frames: list, count: int) -> list:
     return [frames[int(round(pick))] for pick in picks]
 
 
+def _dump_steps(path: str) -> list:
+    """The MD step of every frame in a LAMMPS dump, in file order.
+
+    Read straight from the ``ITEM: TIMESTEP`` headers, because that step
+    is the key the StageLedger speaks in; ASE's reader does not keep it.
+    """
+    steps = []
+    with open(path, encoding="utf-8") as dump:
+        take_next = False
+        for line in dump:
+            if take_next:
+                steps.append(int(line.split()[0]))
+                take_next = False
+            elif line.startswith("ITEM: TIMESTEP"):
+                take_next = True
+    return steps
+
+
 def _read_dump(path: str, type_map: dict) -> list:
-    """A custom dump's frames as Atoms with real element symbols."""
+    """A custom dump's frames as Atoms with real element symbols, each
+    carrying its MD step in ``atoms.info["step"]``."""
     if not os.path.isfile(path):
         return []
     frames = ase_read(path, format="lammps-dump-text", index=":",
@@ -58,11 +83,42 @@ def _read_dump(path: str, type_map: dict) -> list:
     if isinstance(frames, Atoms):
         frames = [frames]
     by_id = {type_id: symbol for symbol, type_id in type_map.items()}
-    for frame in frames:
+    steps = _dump_steps(path)
+    for frame, step in zip(frames, steps):
         type_ids = (frame.arrays["type"] if "type" in frame.arrays
                     else frame.get_atomic_numbers())
         frame.set_chemical_symbols([by_id[int(t)] for t in type_ids])
+        frame.info["step"] = step
     return frames
+
+
+def frames_between(frames: list, first: int | None,
+                   last: int | None) -> list:
+    """The frames whose step lies in ``[first, last]`` (inclusive).
+
+    A None bound is open on that side. Frames without a recorded step are
+    never selected: an unkeyed frame cannot be assigned to a phase.
+    """
+    chosen = []
+    for frame in frames:
+        step = frame.info.get("step")
+        if step is None:
+            continue
+        if first is not None and step < first:
+            continue
+        if last is not None and step > last:
+            continue
+        chosen.append(frame)
+    return chosen
+
+
+def frame_at(frames: list, step: int | None) -> list:
+    """The first frame recorded AT or after ``step`` (a one-element list),
+    or nothing when there is no such frame or no step to look for."""
+    if step is None:
+        return []
+    later = frames_between(frames, step, None)
+    return later[:1]
 
 
 def _without_species(atoms: Atoms, species: set) -> Atoms:
@@ -115,33 +171,49 @@ def harvest_collection2(recipe: ForceModelRecipe) -> list:
             plan.subcell_crystalline_layers, vacuum)
 
     structures = []
-    # Family 7 — the activated surfaces, one dump per half. The half's
-    # own type map includes the projectile; the assembled map does too.
+    # Family 7 — the HEALED activated surfaces: each half's movie from
+    # the step its heal began (the session's marker, on the manifest).
+    heal_steps = {"a": structure.heal_start_step_a,
+                  "b": structure.heal_start_step_b}
     for role in ("a", "b"):
         dump = stage_dump_file(str(scratch), member.name, f"activate_{role}")
         frames = _read_dump(dump, type_map)
         if not frames:
             raise FileNotFoundError(
                 f"no activate dump for half {role} at {dump}: run the "
-                f"member with --dump-visuals first")
+                f"member with trajectories on first")
+        if heal_steps[role] is None:
+            raise KeyError(
+                f"the assembled-pair manifest under {scratch} records no "
+                f"heal_start_step for half {role}: the activate stage "
+                f"that wrote it predates the heal marker (2026-08-28)")
+        healed = frames_between(frames, heal_steps[role], None)
         for index, frame in enumerate(
-                _evenly(frames, plan.frames_per_stage["activate"])):
+                _evenly(healed, plan.frames_per_stage["activate"])):
             structures.append((
                 "activated_surface", f"{member.name}:activate_{role}:{index}",
                 _without_species(frame, projectile)))
-    # Families 8–10 — the press record in thirds (see the module note).
+    # Families 8–10 — the press movie, keyed on the bond job's ledger.
     press_frames = _read_dump(
         stage_dump_file(str(scratch), member.name, "press"), type_map)
     if not press_frames:
         raise FileNotFoundError(
             f"no press dump under {scratch}: run the bond job with "
-            f"--dump-visuals first")
-    thirds = np.array_split(
-        np.arange(len(press_frames)), 3)
-    for family, indices in zip(
-            ("joint_initial", "joint_relaxed", "joint_pressed"), thirds):
-        chosen = _evenly([press_frames[i] for i in indices],
-                         max(1, plan.frames_per_stage["press"] // 3))
+            f"trajectories on first")
+    ledger = read_pull_results(scratch).press.stage_steps
+    if ledger is None or ledger.press_start is None:
+        raise KeyError(
+            f"the bond result under {scratch} carries no stage ledger: "
+            f"the bond job that wrote it predates the ledger (2026-08-28)")
+    press_budget = max(1, plan.frames_per_stage["press"])
+    for family, chosen in (
+            ("joint_initial", frame_at(press_frames, ledger.press_start)),
+            ("joint_settled", _evenly(
+                frames_between(press_frames, ledger.settle_start,
+                               ledger.settle_end), press_budget)),
+            ("joint_pressed", _evenly(
+                frames_between(press_frames, ledger.press_start,
+                               ledger.hold_end), press_budget))):
         for index, frame in enumerate(chosen):
             structures.append((
                 family, f"{member.name}:press:{family}:{index}",

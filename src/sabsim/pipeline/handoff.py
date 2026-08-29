@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
+from dataclasses import asdict
 from pathlib import Path
 
 from ase.io import read as ase_read
@@ -58,6 +59,7 @@ from sabsim.pipeline.exec_artifacts import (
     PressOutcome,
     PullOutcome,
     Structure,
+    StageLedger,
 )
 from sabsim.structure.slab_builder import (
     BuiltPair,
@@ -144,6 +146,25 @@ def write_assembled_pair(scratch_directory, structure: Structure) -> None:
             },
         },
     }
+    # The §3.5 verdict each half arrived with, and the step its heal began
+    # at (§10.1, 2026-08-28), ride the manifest so the bond and analyze
+    # jobs — which read only this artifact — can report the activation
+    # that produced the surfaces, and the bootstrap harvest can tell the
+    # healed frames of the activate movie from the cascade-hot ones.
+    activation = {
+        role: _activation_to_dict(verdict)
+        for role, verdict in (("a", structure.activation_a),
+                              ("b", structure.activation_b))
+        if verdict is not None}
+    if activation:
+        manifest["activation"] = activation
+    heal_steps = {
+        role: int(step)
+        for role, step in (("a", structure.heal_start_step_a),
+                           ("b", structure.heal_start_step_b))
+        if step is not None}
+    if heal_steps:
+        manifest["heal_start_step"] = heal_steps
     _write_toml(scratch / _ASSEMBLED_PAIR_MANIFEST, manifest)
 
 
@@ -188,11 +209,19 @@ def read_assembled_pair(scratch_directory) -> Structure:
         initial_gap_adjustment=float(
             built_fields["initial_gap_adjustment"]),
     )
+    activation = manifest.get("activation", {})
+    heal_steps = manifest.get("heal_start_step", {})
     return Structure(
         note=manifest["note"],
         labeled_groups=tuple(manifest["labeled_groups"]),
         data_file=str(data_path),
-        built=built)
+        built=built,
+        activation_a=_activation_from_dict(activation.get("a")),
+        activation_b=_activation_from_dict(activation.get("b")),
+        heal_start_step_a=(int(heal_steps["a"]) if "a" in heal_steps
+                           else None),
+        heal_start_step_b=(int(heal_steps["b"]) if "b" in heal_steps
+                           else None))
 
 
 # ---------------------------------------------------------------------
@@ -214,24 +243,26 @@ def write_pull_results(
     v1 they are tens of kilobytes, so they stay inline.
     """
     scratch = Path(scratch_directory)
+    press_table = {
+        "bonded": bool(bond_debond.press.bonded),
+        "note": bond_debond.press.note,
+    }
+    # The stage ledger (§9.3, DESIGN §5.5/§5.7): the step each press and
+    # settle phase began or ended at, so a reader of the press movie keys
+    # every frame to its phase. Markers of phases that never ran are
+    # simply absent (TOML has no null).
+    ledger = bond_debond.press.stage_steps
+    if ledger is not None:
+        stage_steps = {
+            name: int(step)
+            for name, step in asdict(ledger).items() if step is not None}
+        if stage_steps:
+            press_table["stage_steps"] = stage_steps
     manifest = {
-        "press": {
-            "bonded": bool(bond_debond.press.bonded),
-            "note": bond_debond.press.note,
-        },
+        "press": press_table,
         "reference_ok": bool(bond_debond.reference_ok),
         "pulls": [_pull_to_dict(pull) for pull in bond_debond.pulls],
     }
-    # The §3.5 gate verdicts, one per healed surface, ride the manifest
-    # so the verdict a run reached is on disk beside the press it gated —
-    # not only in the halt message. Absent when the flow did not gate.
-    activation = {
-        role: _activation_to_dict(verdict)
-        for role, verdict in (("a", bond_debond.activation_a),
-                              ("b", bond_debond.activation_b))
-        if verdict is not None}
-    if activation:
-        manifest["activation"] = activation
     _write_toml(scratch / _PULL_RESULTS_MANIFEST, manifest)
 
 
@@ -247,14 +278,16 @@ def read_pull_results(scratch_directory) -> BondDebondResult:
     manifest = _read_manifest(scratch / _PULL_RESULTS_MANIFEST,
                               PULL_RESULTS, scratch)
     press = manifest["press"]
-    activation = manifest.get("activation", {})
+    stage_steps = press.get("stage_steps")
+    ledger = (StageLedger(**{name: int(step)
+                            for name, step in stage_steps.items()})
+              if stage_steps else None)
     return BondDebondResult(
         press=PressOutcome(
-            bonded=bool(press["bonded"]), note=press["note"]),
+            bonded=bool(press["bonded"]), note=press["note"],
+            stage_steps=ledger),
         reference_ok=bool(manifest["reference_ok"]),
         pulls=tuple(_pull_from_dict(pull) for pull in manifest["pulls"]),
-        activation_a=_activation_from_dict(activation.get("a")),
-        activation_b=_activation_from_dict(activation.get("b")),
     )
 
 

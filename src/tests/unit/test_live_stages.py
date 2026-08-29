@@ -374,10 +374,12 @@ def _passing_gate(depth):
 def test_analyzer_surfaces_the_per_surface_activation_gate():
     """The §3.5 gate verdict rides the report as a per-surface depth measure.
 
-    The gate moved to the bond flow (§3.4), so its verdict arrives on the
-    BondDebondResult; the analyzer surfaces each surface's MEASURED skin
-    depth (closing the §2.5 estimate) with the gate's summary as the method.
+    The gate runs in the activation stage and its verdicts ride the
+    assembled pair (§10.1, revised 2026-08-28); the analyzer surfaces each
+    surface's MEASURED skin depth (closing the §2.5 estimate) with the
+    gate's summary as the method.
     """
+    from dataclasses import replace
     member = _si_si_member()
     pull = PullOutcome(
         rate_value=1.0, rate_unit="m/s", note="", complete=True,
@@ -385,10 +387,12 @@ def test_analyzer_surfaces_the_per_surface_activation_gate():
         force_vs_grip=(0.0, 1.0, 0.0))
     bond = BondDebondResult(
         press=PressOutcome(bonded=True, note=""), reference_ok=True,
-        pulls=(pull,),
+        pulls=(pull,))
+    structure = replace(
+        _structure_with_area(),
         activation_a=_passing_gate(8.5), activation_b=_passing_gate(7.2))
 
-    measures = run_analyzer_live(_structure_with_area(), bond, member)
+    measures = run_analyzer_live(structure, bond, member)
 
     depth_a = measures.by_name("activated_depth_a")
     assert depth_a.value == pytest.approx(8.5)
@@ -399,14 +403,14 @@ def test_analyzer_surfaces_the_per_surface_activation_gate():
     assert measures.by_name("activated_depth_b").value == pytest.approx(7.2)
 
 
-def test_analyzer_omits_activation_when_the_bond_never_gated():
-    """No activation verdict (skeleton / narrow-gap path) -> no such measure."""
+def test_analyzer_omits_activation_when_the_pair_carries_no_verdict():
+    """No activation verdict on the pair (a skeleton) -> no such measure."""
     member = _si_si_member()
     incomplete = PullOutcome(
         rate_value=1.0, rate_unit="m/s", note="", complete=False)
     bond = BondDebondResult(
         press=PressOutcome(bonded=False, note=""), reference_ok=False,
-        pulls=(incomplete,))                     # activation_a/b default None
+        pulls=(incomplete,))          # the Structure's verdicts default None
 
     measures = run_analyzer_live(_structure_with_area(), bond, member)
     names = {measure.name for measure in measures.measures}
@@ -598,9 +602,8 @@ def test_dissimilar_halves_emerge_commensurate(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# The §2.2 lattice-derivation dispatch (DESIGN §4.7): universal by
-# default (out-of-process under the foundation MLIP), classical only on
-# explicit request (in-process). Login-node tests: the universal
+# The §2.2 lattice-derivation dispatch (DESIGN §4.7): out-of-process
+# under the universal foundation MLIP. Login-node tests: the universal
 # subprocess and the in-process engine are both stubbed.
 # ---------------------------------------------------------------------
 

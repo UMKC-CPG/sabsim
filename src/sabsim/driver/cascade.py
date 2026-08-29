@@ -13,8 +13,10 @@ assembled here as ONE self-contained script (:func:`build_activate_script`)
 and executed out-of-process, its amorphized structure handed back through
 a file. Nothing is read back mid-run: every impact's position and
 velocity is derived from a seed, and the physical-time halt (§10.4) ends
-each ballistic phase from inside LAMMPS. The gentle heal and the §3.5 gate
-are NOT here — they run in the bond flow (§3.4, revised 2026-08-08).
+each ballistic phase from inside LAMMPS. The gentle heal runs at the end
+of the same session (§3.4, revised 2026-08-28: per half, in vacuum, under
+the same model) and the §3.5 gate judges the healed half the script hands
+back.
 
 This module runs ONE amorphization realization; the ensemble that averages
 the bond metric over realizations (STRUCTURAL 4) is the sequencer's job,
@@ -39,6 +41,7 @@ from sabsim.driver.commands import (
     cascade_halt_release_commands,
     cascade_prerelax_commands,
     cascade_setup_commands,
+    heal_surface_commands,
     insert_projectile_commands,
     to_metal,
     trajectory_dump_commands,
@@ -241,16 +244,14 @@ def sample_impact_velocity(spec: BombardmentSpec, seed: int) -> tuple:
 def cascade_cleanup_commands(projectile_types) -> list:
     """The cascade's own end-of-stage cleanup (§3.4), as one command list.
 
-    This is what stays in the CASCADE-ONLY activate stage after the anneal
-    moved to the bond flow (§3.4, revised 2026-08-08): drop the cascade's
-    ballistic integrator and border thermostat, STRIP every projectile atom
-    (by type, so embedded ones from earlier impacts go too), and RENUMBER
-    the survivors so a ``gather_atoms`` or a sorted dump read pairs
-    row-for-row with the type map. The frozen base is kept (it anchors the
-    bulk). It leaves the surface SUBSTRATE-ONLY and consecutively numbered,
-    ready to hand off — the re-equilibration (heal) is NOT here; it runs on
-    the assembled pair in the bond flow (§9.1). No MLIP is loaded and no MD
-    is run: this only tears down and relabels.
+    Drop the cascade's ballistic integrator and border thermostat, STRIP
+    every projectile atom (by type, so embedded ones from earlier impacts
+    go too), and RENUMBER the survivors so a ``gather_atoms`` or a sorted
+    dump read pairs row-for-row with the type map. The frozen base is kept
+    (it anchors the bulk). It leaves the surface SUBSTRATE-ONLY and
+    consecutively numbered for the heal that follows
+    (:func:`~sabsim.driver.commands.heal_surface_commands`, §3.4). No
+    MD is run here: this only tears down and relabels.
     """
     return [
         # Drop the cascade's ballistic integrator and border thermostat;
@@ -280,12 +281,13 @@ def build_activate_script(
         seed: int,
         projectile_types,
         output_structure_file: str,
+        heal_marker_file: str,
         geometry: CascadeGeometry = CascadeGeometry(),
         control: CascadeControl = CascadeControl(),
         trajectory_file: str | None = None,
         trajectory_stride: int = 200,
         skip_prerelax: bool = False) -> list:
-    """Assemble the CASCADE-ONLY activate run as one self-contained script.
+    """Assemble the activate run — cascade, then heal — as ONE script.
 
     The cascade runs on the universal-MLIP engine — a separate deepmd
     bundle that cannot share this process's LAMMPS (ARCHITECTURE §4.1/§4.4)
@@ -293,9 +295,10 @@ def build_activate_script(
     that engine's ``lmp`` in ONE subprocess, and its AMORPHIZED structure
     handed back through a FILE (ARCHITECTURE §4.3). The sabsim process builds
     the slab
-    before and reads the amorphized structure back after; nothing is read
-    back mid-run. The heal and the §3.5 gate are NOT here — the §3.4 revision
-    moved them to the bond flow (§9.1), so this stage is cascade-only.
+    before and reads the healed structure back after; nothing is read
+    back mid-run. The heal (§3.4) is the script's last dynamic block, on
+    the same engine and model; the §3.5 gate then judges the healed half
+    the script hands back, in the sabsim process.
 
     That the cascade needs NO mid-run read-back is what makes this possible:
     every impact's position and velocity is derived from a seed
@@ -303,12 +306,14 @@ def build_activate_script(
     from the live damaged state, so all impacts are precomputed here and the
     per-impact halt ends each cascade from inside LAMMPS. The command blocks
     are: setup, the §2.4 prerelax, the per-impact insert -> adaptive cascade
-    -> fixed-step relax loop, then :func:`cascade_cleanup_commands`.
+    -> fixed-step relax loop, :func:`cascade_cleanup_commands`, then the
+    heal (:func:`heal_surface_commands`, which also writes the step it
+    begins at to ``heal_marker_file``).
 
-    The script ends by writing the AMORPHIZED (substrate-only, re-numbered)
+    The script ends by writing the HEALED (substrate-only, re-numbered)
     structure to ``output_structure_file`` as a sorted custom dump
-    (``id type x y z``), the handoff the §3.5 gate (now in the bond flow) and
-    the amorphized-half snapshot read back.
+    (``id type x y z``), the handoff the §3.5 gate and the amorphized-half
+    snapshot read back.
 
     An optional ``trajectory_file`` records the WHOLE bombardment as one
     strided movie — a frame every ``trajectory_stride`` steps, opened after
@@ -366,14 +371,18 @@ def build_activate_script(
         script += cascade_fixed_timestep_commands(member)
         script += [f"run {relax_steps}"]
 
-    # Cascade cleanup (§3.4): strip the projectile + renumber, the SAME block
-    # the live path issues. NO heal here — it moved to the bond flow.
+    # Cascade cleanup (§3.4): strip the projectile + renumber, so the heal
+    # and the gate see a substrate-only, consecutively numbered slab.
     script += cascade_cleanup_commands(projectile_types)
 
-    # The handoff: write the AMORPHIZED structure for the sabsim process to
+    # The heal (§3.4, PSEUDOCODE §10.5): anneal on the study's schedule,
+    # then minimize — per half, here, under the same model.
+    script += heal_surface_commands(member, seed, heal_marker_file)
+
+    # The handoff: write the HEALED structure for the sabsim process to
     # read back. A sorted custom dump carries id, type, and the coordinates
-    # the amorphized-half snapshot (and, later, the bond-flow gate) need, and
-    # its header carries the box; `sort id` gives the consecutive-id order the
+    # the §3.5 gate and the amorphized-half snapshot need, and its header
+    # carries the box; `sort id` gives the consecutive-id order the
     # read-back pairs row-for-row with the type map (ARCHITECTURE §4.3).
     script += [
         f"write_dump all custom {output_structure_file} "
@@ -385,18 +394,13 @@ def build_activate_script(
 # ---------------------------------------------------------------------
 # The activation gate lives in `activation_gate` (PSEUDOCODE §10.6) — the
 # pluggable metric registry (g(r), coordination, ring statistics, depth).
-# Revised 2026-08-08 (§3.4): the gate no longer runs in the activate stage;
-# it moved to the bond flow (`press_pull.gate_healed_surfaces`), which judges
-# each HEALED surface and produces the `ActivationVerdict` directly. The
-# activate stage itself is cascade-only and returns a `CascadeOutcome`.
-# ---------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------
-# Tying it together (PSEUDOCODE.md §10.1): each surface is activated
-# INDEPENDENTLY — cascade to the dose, re-anneal, then GATE the re-annealed
-# structure. Two calls, never one co-activation; the pair does not co-exist
-# here (activation runs before the two ever face each other, §3.1).
+# It judges the HEALED half this script hands back, in the sabsim process
+# (`live_stages.activate_one_half`), and a failed verdict halts the member
+# before assembly (revised 2026-08-28, §3.4/§3.5).
+#
+# Each surface is activated INDEPENDENTLY — cascade to the dose, heal, then
+# gate. Two calls, never one co-activation; the pair does not co-exist here
+# (activation runs before the two ever face each other, §3.1).
 # ---------------------------------------------------------------------
 
 def _projectile_species(member: MemberSpecification) -> set:

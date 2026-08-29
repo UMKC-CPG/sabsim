@@ -161,10 +161,11 @@ def _small_spec():
 # ---------------------------------------------------------------------
 
 def test_build_activate_script_emits_setup_impacts_cleanup_and_handoff():
-    """The script is setup -> prerelax -> impacts -> cleanup -> a dump.
+    """The script is setup -> prerelax -> impacts -> cleanup -> heal -> dump.
 
-    Cascade-only (§3.4): the heal and gate are NOT in the script — it ends
-    with the cascade cleanup (strip + renumber) and the structure handoff.
+    Revised 2026-08-28 (§3.4): the heal runs at the end of the same
+    session, after the strip, and writes its start-step marker; the gate
+    then judges the healed half the final dump hands back.
     """
     built = _cascade_built()
     member = _template_member()
@@ -176,7 +177,8 @@ def test_build_activate_script_emits_setup_impacts_cleanup_and_handoff():
     script = build_activate_script(
         built, member, cascade, data_file="slab.data", spec=spec,
         seed=99, projectile_types=[2],
-        output_structure_file="activated.dump")
+        output_structure_file="activated.dump",
+        heal_marker_file="activated.heal_step")
 
     # It is one flat list of command strings, no engine involved.
     assert all(isinstance(line, str) for line in script)
@@ -187,11 +189,20 @@ def test_build_activate_script_emits_setup_impacts_cleanup_and_handoff():
     # One projectile is created per impact (the small spec delivers two).
     assert sum(1 for line in script
                if line.startswith("create_atoms 2 single")) == spec.impact_count
-    # The cleanup renumbers survivors; NO heal (the anneal's nvt fix) is
-    # present — only the §2.4 prerelax minimize, which is not the heal.
-    assert "reset_atoms id" in script
-    assert not any("fix reanneal" in line for line in script)
-    # ...and the LAST line is the amorphized-structure handoff.
+    # The cleanup renumbers survivors, THEN the heal: its marker, the
+    # anneal on the study's schedule, and the closing minimize — in that
+    # order (anneal, then minimize, PSEUDOCODE §9.7).
+    strip = script.index("reset_atoms id")
+    marker = script.index(
+        'print "$(step)" file activated.heal_step screen no')
+    hold = next(i for i, line in enumerate(script)
+                if line.startswith("fix heal_hold heal_mobile nvt"))
+    quench = next(i for i, line in enumerate(script)
+                  if line.startswith("fix heal_quench heal_mobile nvt"))
+    minimize = len(script) - 1 - script[::-1].index(
+        "minimize 1e-6 1e-6 200 2000")
+    assert strip < marker < hold < quench < minimize
+    # ...and the LAST line is the healed-structure handoff.
     assert script[-1] == (
         "write_dump all custom activated.dump id type x y z modify sort id")
 
@@ -214,13 +225,15 @@ def test_activate_script_records_a_trajectory_when_asked():
     quiet = build_activate_script(
         built, member, cascade, data_file="slab.data", spec=spec,
         seed=99, projectile_types=[2],
-        output_structure_file="activated.dump")
+        output_structure_file="activated.dump",
+        heal_marker_file="activated.heal_step")
     assert not any(line.startswith("dump traj") for line in quiet)
 
     movie = build_activate_script(
         built, member, cascade, data_file="slab.data", spec=spec,
         seed=99, projectile_types=[2],
         output_structure_file="activated.dump",
+        heal_marker_file="activated.heal_step",
         trajectory_file="cascade.dump", trajectory_stride=250)
     dump_lines = [index for index, line in enumerate(movie)
                   if line.startswith("dump traj")]

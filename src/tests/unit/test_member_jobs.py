@@ -96,6 +96,14 @@ def _bond_debond() -> BondDebondResult:
             atoms_conserved=True, bridges_at_separation=0),))
 
 
+from sabsim.driver.activation_gate import ActivationVerdict
+
+# A passing placeholder verdict: the ACTIVATED_SLABS_CONTRACT halts on a
+# missing or failed §3.5 verdict (2026-08-28), so the stub must carry one.
+_PASSED = ActivationVerdict(
+    passed=True, activated_depth=0.0, per_metric={}, reason="stub")
+
+
 def _fake_stage_set() -> StageSet:
     """A stage set whose every body returns a contract-valid record.
 
@@ -113,7 +121,8 @@ def _fake_stage_set() -> StageSet:
             HalfHandle("b.data", {"Si": 1}, "Si", WAFER_B_TAG),
             SharedCell(note="identity")),
         activate=lambda *a, **k: ActivatedSlabs(
-            slab_a=Slab("Si", "a"), slab_b=Slab("Si", "b")),
+            slab_a=Slab("Si", "a"), slab_b=Slab("Si", "b"),
+            verdict_a=_PASSED, verdict_b=_PASSED),
         assemble=lambda *a, **k: Structure(
             note="pair", labeled_groups=("interface_z",),
             data_file=None, built=_built_pair()),
@@ -123,7 +132,7 @@ def _fake_stage_set() -> StageSet:
                 name="mechanical_work_of_separation", value=1.5,
                 uncertainty=0.0, realization_count=1,
                 unit_native="eV/angstrom^2", unit_si="J/m^2",
-                fidelity="classical-stand-in", method="stub",
+                fidelity="stand-in", method="stub",
                 status=MeasureStatus.OK),),
             verdicts=Verdicts(bonded=True, contact_quality=None)),
         characterize=lambda *a, **k: MeasureVector(

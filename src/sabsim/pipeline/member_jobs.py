@@ -142,6 +142,8 @@ def run_member_job(member, scratch_directory, job: JobKind,
             lambda: stage_set.activate(
                 handle_a, handle_b, member, scratch_directory, comm),
             ACTIVATED_SLABS_CONTRACT)
+        if comm is None or comm.Get_rank() == 0:
+            _report_activation(member.name, activated)
         structure = run_to_contract(
             lambda: stage_set.assemble(
                 activated, shared, member, scratch_directory, comm),
@@ -195,16 +197,18 @@ def run_member_job(member, scratch_directory, job: JobKind,
         f"registry defines {[j for j in ('activate', 'bond', 'analyze')]}")
 
 
-def _report_bond(member_name: str, bond_debond) -> None:
-    """Print the bond job's verdicts so the job log states them plainly.
+def _report_activation(member_name: str, activated) -> None:
+    """Print the activate job's gate verdicts so the job log states them.
 
-    The §3.5 gate verdict per surface (with its measured skin depth), the
-    press outcome, and each pull rung's note — the facts a reader wants
-    from the job output without opening the manifest.
+    The §3.5 gate verdict per healed surface, with its measured skin depth
+    and every metric's number against its threshold (revised 2026-08-28:
+    the gate runs in this job, so this is where a reader looks first).
+    Printed after the contract passed, so a FAILED line here can only be
+    read from a halted job's log through the contract's own message.
     """
-    print(f"\nbond verdicts for member '{member_name}':")
-    for role, verdict in (("A", bond_debond.activation_a),
-                          ("B", bond_debond.activation_b)):
+    print(f"\nactivation verdicts for member '{member_name}':")
+    for role, verdict in (("A", activated.verdict_a),
+                          ("B", activated.verdict_b)):
         if verdict is None:
             print(f"  surface {role}: not gated")
             continue
@@ -216,8 +220,24 @@ def _report_bond(member_name: str, bond_debond) -> None:
             print(f"    {name:22s} measured={metric.measured} "
                   f"threshold={metric.threshold} "
                   f"{'ok' if metric.passed else 'FAIL'}")
+
+
+def _report_bond(member_name: str, bond_debond) -> None:
+    """Print the bond job's outcome so the job log states it plainly.
+
+    The press outcome, its stage ledger (the step each phase began at,
+    §9.3), and each pull rung's note — the facts a reader wants from the
+    job output without opening the manifest.
+    """
+    print(f"\nbond verdicts for member '{member_name}':")
     print(f"  press: bonded={bond_debond.press.bonded} — "
           f"{bond_debond.press.note}")
+    ledger = bond_debond.press.stage_steps
+    if ledger is not None:
+        print(f"  stage ledger (MD steps): press_start="
+              f"{ledger.press_start} contact={ledger.contact} "
+              f"hold_end={ledger.hold_end} settle_start="
+              f"{ledger.settle_start} settle_end={ledger.settle_end}")
     for pull in bond_debond.pulls:
         print(f"  pull {pull.rate_value:g} {pull.rate_unit}: {pull.note}")
 

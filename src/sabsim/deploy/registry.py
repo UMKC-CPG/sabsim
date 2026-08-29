@@ -96,8 +96,8 @@ JOB_REGISTRY: tuple[JobKind, ...] = (
         name="activate",
         # GPU by default: the universal-MLIP cascade runs on the GPU
         # (DESIGN.md §10.2/§4.7, revised 2026-08-08). The build/assemble
-        # geometry rides along on the GPU node's CPU — cheap. A classical
-        # CPU cascade is the deployment-expressed opt-in.
+        # geometry rides along on the GPU node's CPU — cheap. (The CPU
+        # opt-in that once sat here was removed with the analytic forms.)
         resource_class="gpu",
         stages=("build", "activate", "assemble"),
         reads=FROM_SPEC,                 # starts from the study spec

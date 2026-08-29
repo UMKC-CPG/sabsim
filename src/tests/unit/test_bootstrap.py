@@ -293,3 +293,43 @@ def test_selection_is_even_per_family_within_budget():
     assert families.count("pulled") == 5
     picked = [source for family, source, _ in chosen if family == "pulled"]
     assert picked[0] == "p0" and picked[-1] == "p24"   # spans the record
+
+
+# ---------------------------------------------------------------------
+# The ledger-keyed harvest (PSEUDOCODE §11.3, 2026-08-28): frames are
+# keyed to a phase by the MD step every dump frame carries.
+# ---------------------------------------------------------------------
+
+def _write_dump(path, steps):
+    """A minimal two-atom custom dump with one frame per step."""
+    lines = []
+    for step in steps:
+        lines += [
+            "ITEM: TIMESTEP", str(step), "ITEM: NUMBER OF ATOMS", "2",
+            "ITEM: BOX BOUNDS pp pp ff", "0 5", "0 5", "0 20",
+            "ITEM: ATOMS id type x y z",
+            f"1 1 0.0 0.0 {1.0 + 0.001 * step}", "2 1 2.5 2.5 3.0"]
+    path.write_text("\n".join(lines) + "\n")
+
+
+def test_dump_frames_carry_their_step_and_key_by_the_ledger(tmp_path):
+    from sabsim.bootstrap.harvest import (
+        _read_dump,
+        frame_at,
+        frames_between,
+    )
+    dump = tmp_path / "press.dump"
+    _write_dump(dump, [0, 1000, 2000, 3000, 4000])
+    frames = _read_dump(str(dump), {"Si": 1})
+    assert [f.info["step"] for f in frames] == [0, 1000, 2000, 3000, 4000]
+    assert all(f.get_chemical_symbols() == ["Si", "Si"] for f in frames)
+    # Inclusive bounds, open on a None side.
+    assert [f.info["step"] for f in frames_between(frames, 1000, 3000)] == [
+        1000, 2000, 3000]
+    assert [f.info["step"] for f in frames_between(frames, 3000, None)] == [
+        3000, 4000]
+    # The frame AT a step, or the first after it; nothing for no step.
+    assert frame_at(frames, 2000)[0].info["step"] == 2000
+    assert frame_at(frames, 2500)[0].info["step"] == 3000
+    assert frame_at(frames, None) == []
+    assert frame_at(frames, 9000) == []

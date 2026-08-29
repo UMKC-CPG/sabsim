@@ -182,41 +182,54 @@ def test_reading_a_missing_artifact_is_a_loud_stop(tmp_path):
         read_artifact(tmp_path, PULL_RESULTS)
 
 
-def test_pull_results_carry_the_activation_verdicts(tmp_path):
-    """The §3.5 verdicts ride the manifest and round-trip (2026-08-26)."""
+def test_assembled_pair_carries_the_verdicts_and_heal_steps(tmp_path):
+    """The §3.5 verdicts and heal markers ride the pair manifest (§10.1).
+
+    Revised 2026-08-28: the gate runs in the activation stage, so the bond
+    and analyze jobs learn the verdict from the assembled pair they read.
+    """
+    from dataclasses import replace
     from sabsim.driver.activation_gate import (
         ActivationVerdict,
         MetricVerdict,
     )
-    from sabsim.pipeline.exec_artifacts import (
-        BondDebondResult,
-        PressOutcome,
-        PullOutcome,
-    )
-    from sabsim.pipeline.handoff import read_pull_results, write_pull_results
     verdict = ActivationVerdict(
-        passed=False, activated_depth=5.5,
+        passed=True, activated_depth=5.5,
         per_metric={
             "coordination": MetricVerdict(
                 name="coordination", measured=0.91,
                 reference="share/activation/Si.toml", threshold=(0.05, 0.6),
-                passed=False),
+                passed=True),
             "amorphization_depth": MetricVerdict(
                 name="amorphization_depth", measured=5.5,
-                reference="share/activation/Si.toml", threshold=7.0,
-                passed=False)},
-        reason="coordination: measured 0.91 vs (0.05, 0.6)")
-    result = BondDebondResult(
-        press=PressOutcome(bonded=False, note="gate failed"),
-        reference_ok=False,
-        pulls=(PullOutcome(rate_value=1.0, rate_unit="m/s", note="void"),),
-        activation_a=verdict, activation_b=None)
-    write_pull_results(tmp_path, result)
-    back = read_pull_results(tmp_path)
+                reference="share/activation/Si.toml", threshold=5.0,
+                passed=True)},
+        reason="")
+    structure = replace(
+        _structure(_built_pair()),
+        activation_a=verdict, activation_b=None,
+        heal_start_step_a=42000, heal_start_step_b=None)
+    write_assembled_pair(tmp_path, structure)
+    back = read_assembled_pair(tmp_path)
     assert back.activation_b is None
-    assert back.activation_a.passed is False
+    assert back.activation_a.passed is True
     assert back.activation_a.activated_depth == 5.5
     assert back.activation_a.per_metric["coordination"].threshold == (
         0.05, 0.6)
-    assert back.activation_a.per_metric["amorphization_depth"].measured == 5.5
-    assert "coordination" in back.activation_a.reason
+    assert back.heal_start_step_a == 42000
+    assert back.heal_start_step_b is None
+
+
+def test_pull_results_carry_the_stage_ledger(tmp_path):
+    """The press/settle stage ledger round-trips; absent markers stay None."""
+    from dataclasses import replace
+    from sabsim.pipeline.exec_artifacts import StageLedger
+    ledger = StageLedger(press_start=0, contact=3000, hold_end=153000,
+                         settle_start=153000, settle_end=None)
+    original = _bond_debond()
+    with_ledger = replace(
+        original, press=replace(original.press, stage_steps=ledger))
+    write_pull_results(tmp_path, with_ledger)
+    back = read_pull_results(tmp_path)
+    assert back.press.stage_steps == ledger
+    assert back == with_ledger

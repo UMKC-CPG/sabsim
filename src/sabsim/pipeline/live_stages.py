@@ -61,6 +61,10 @@ from sabsim.driver.bulk_relax import (
     cubic_lattice_constant,
     read_data_box,
 )
+from sabsim.driver.activation_gate import (
+    activation_gate,
+    load_activation_references,
+)
 from sabsim.driver.cascade_potential import (
     resolve_cascade_generator,
     universal_force_model,
@@ -264,7 +268,8 @@ def derive_lattices_live(
         # (§4.7), then read the relaxed cell back.
         model = universal_force_model(
             type_map, member.potential.universal_weights,
-            allow_unvalidated=allow_unvalidated)
+            allow_unvalidated=allow_unvalidated,
+            model_name=member.potential.universal_model)
         relaxed_file = os.path.join(
             str(scratch_directory), f"relaxed_bulk_{wafer.identity}.data")
         script = bulk_relax_subprocess_script(
@@ -588,18 +593,19 @@ def activate_one_half(
         seed: int,
         output_directory: str,
         comm=None) -> tuple:
-    """Amorphize ONE half OUT-OF-PROCESS, under the universal cascade engine.
+    """Cascade, heal and GATE one half, out-of-process (§10.1, §3.4).
 
-    The default cascade runs on the universal foundation MLIP, which lives
-    in deepmd's own self-contained bundle and cannot load into this process
-    (ARCHITECTURE §4.1/§4.4). So the cascade half of the activate stage —
-    assembled by :func:`~sabsim.driver.cascade.build_activate_script` — is
-    run as the bundle's ``lmp -in <script>`` in ONE subprocess, and its
-    AMORPHIZED structure is read back from a dump file (the §4.3 file
-    handoff). Cascade-only (§3.4): the heal and the §3.5 gate moved to the
-    bond flow, so nothing gates here — the slab build runs before and the
-    amorphized-half snapshot reads the FILE after. Returns the same
-    ``(CascadeOutcome, amorphized_file)`` pair as the in-process path.
+    The cascade runs on the universal foundation MLIP, which lives in
+    deepmd's own self-contained bundle and cannot load into this process
+    (ARCHITECTURE §4.1/§4.4). So the whole activate session — the
+    cascade and, since 2026-08-28, the heal that follows it on the same
+    engine — is assembled by
+    :func:`~sabsim.driver.cascade.build_activate_script` and run as the
+    bundle's ``lmp -in <script>`` in ONE subprocess; the HEALED structure
+    is read back from a dump file (the §4.3 file handoff), and the §3.5
+    gate judges it here, in this process. Returns ``(CascadeOutcome,
+    amorphized_file, verdict, heal_start_step)``: the healed half on
+    disk, its gate verdict, and the step its heal began at.
     """
     built = read_standalone_half(
         handle.data_file, handle.type_map, handle.identity)
@@ -608,7 +614,8 @@ def activate_one_half(
     cascade_force_model = resolve_cascade_generator(
         built.type_map, _projectile_species(member),
         weights_path=member.potential.universal_weights,
-        allow_unvalidated=member.potential.allow_unvalidated)
+        allow_unvalidated=member.potential.allow_unvalidated,
+        model_name=member.potential.universal_model)
 
     spec = derive_bombardment_spec(built, member)
     projectile_types = [
@@ -618,6 +625,8 @@ def activate_one_half(
 
     role = "a" if handle.wafer_tag == WAFER_A_TAG else "b"
     dump_path = os.path.join(output_directory, f"activated_{role}.dump")
+    marker_path = os.path.join(
+        output_directory, f"activated_{role}.heal_step")
     # Honour the invocation's trajectory switch (run_options): with frames
     # on, the out-of-process cascade records the WHOLE bombardment as a
     # movie, the same as the in-process press and pull stages.
@@ -625,8 +634,8 @@ def activate_one_half(
         output_directory, member, f"activate_{role}")
     script = build_activate_script(
         built, member, cascade_force_model, handle.data_file, spec,
-        seed, projectile_types, dump_path, _GEOMETRY, _CONTROL,
-        trajectory_file=trajectory_file,
+        seed, projectile_types, dump_path, marker_path, _GEOMETRY,
+        _CONTROL, trajectory_file=trajectory_file,
         trajectory_stride=trajectory_stride)
 
     # Only the primary rank drives the one-GPU subprocess and writes the
@@ -643,13 +652,21 @@ def activate_one_half(
 
     positions, type_ids = read_dump_structure(dump_path)
     cell = built.atoms.get_cell()
+    heal_start_step = _read_heal_marker(marker_path)
     cascade_outcome = CascadeOutcome(
         impacts_run=spec.impact_count,
         note=f"delivered {spec.impact_count} impacts of "
              f"{spec.projectile_symbol} at "
-             f"{spec.impact_energy:.0f} eV out-of-process (§10.4, §4.3)")
-    # Cascade-only (§3.4): NO gate here — it moved to the bond flow. The
-    # dump is the amorphized, substrate-only surface; reconstitute the half.
+             f"{spec.impact_energy:.0f} eV, then healed, out-of-process "
+             f"(§10.4, §10.5, §4.3)")
+    # The §3.5 gate, on the HEALED half (§3.4, revised 2026-08-28). The
+    # dump is substrate-only (the projectile was stripped before the
+    # heal) with its free surface on top, exactly as the gate's metrics
+    # assume; the reference is keyed by THIS wafer's declared species.
+    species = frozenset(handle.type_map) - _projectile_species(member)
+    verdict = activation_gate(
+        positions, np.asarray(cell, dtype=float),
+        load_activation_references(species))
     amorphized_atoms = amorphized_half_from_arrays(
         positions, type_ids, cell, handle.type_map, handle.wafer_tag)
     amorphized_file = os.path.join(
@@ -659,7 +676,17 @@ def activate_one_half(
                   format="extxyz", parallel=False)
     if comm is not None:
         comm.Barrier()
-    return cascade_outcome, amorphized_file
+    return cascade_outcome, amorphized_file, verdict, heal_start_step
+
+
+def _read_heal_marker(marker_path: str) -> int | None:
+    """The step the heal began at, from the one-line marker the session
+    wrote (``heal_surface_commands``); None if the file is absent."""
+    try:
+        with open(marker_path, encoding="utf-8") as marker:
+            return int(float(marker.read().split()[0]))
+    except (OSError, IndexError, ValueError):
+        return None
 
 
 def activate_surfaces_live(
@@ -670,18 +697,18 @@ def activate_surfaces_live(
         comm=None):
     """Amorphize BOTH halves independently (step 4, §10.1).
 
-    Each half is activated on its OWN engine, SERIALLY (ARCHITECTURE.md
+    Each half is activated in its OWN session, SERIALLY (ARCHITECTURE.md
     §4.3 — serial slabs), from a reproducible per-half seed derived from
-    the member's one master seed. Cascade-only (§3.4): each half yields an
-    amorphized slab (no verdict — the §3.5 gate moved to the bond flow); the
-    amorphized-half file paths ride on the returned slabs' ``data_file`` for
-    the assembly to read. The returned ``ActivatedSlabs`` is contract-valid
-    when both slabs are present; the pass/fail halt is now in the bond flow.
+    the member's one master seed. Each yields a HEALED slab and its §3.5
+    verdict (revised 2026-08-28); the healed-half file paths ride on the
+    returned slabs' ``data_file`` for the assembly to read, and the
+    verdicts ride the ``ActivatedSlabs`` so the contract halts a failed
+    activation before anything is assembled.
     """
     half_seeds = derive_seeds(member.ensemble.master_seed, 2)
-    _outcome_a, amorphized_a = activate_one_half(
+    _outcome_a, amorphized_a, verdict_a, heal_a = activate_one_half(
         handle_a, member, half_seeds[0], scratch_directory, comm)
-    _outcome_b, amorphized_b = activate_one_half(
+    _outcome_b, amorphized_b, verdict_b, heal_b = activate_one_half(
         handle_b, member, half_seeds[1], scratch_directory, comm)
 
     # Each wafer's DECLARED material species: the half's pre-cascade type
@@ -692,12 +719,12 @@ def activate_surfaces_live(
     species_a = frozenset(handle_a.type_map) - projectile
     species_b = frozenset(handle_b.type_map) - projectile
     slab_a = Slab(
-        identity=handle_a.identity, note="amorphized half A (bottom)",
-        data_file=amorphized_a, species=species_a)
+        identity=handle_a.identity, note="healed activated half A (bottom)",
+        data_file=amorphized_a, species=species_a, heal_start_step=heal_a)
     slab_b = Slab(
-        identity=handle_b.identity, note="amorphized half B (top)",
-        data_file=amorphized_b, species=species_b)
-    return activated_slabs_from_results(slab_a, slab_b)
+        identity=handle_b.identity, note="healed activated half B (top)",
+        data_file=amorphized_b, species=species_b, heal_start_step=heal_b)
+    return activated_slabs_from_results(slab_a, slab_b, verdict_a, verdict_b)
 
 
 # ---------------------------------------------------------------------
@@ -716,7 +743,8 @@ def assemble_pair_live(
     The BARRIER stage: it reads BOTH amorphized halves back from the files
     the activation stage wrote (the wafer tag rides along in the XYZ), flips
     the top half so its activated face meets the interface, removes ejecta,
-    places the halves surface-to-surface at the protocol gap, and relieves
+    places the halves surface-to-surface at the protocol's press-start
+    opening (``initial_gap``, §2.6 revised 2026-08-28), and relieves
     any clash — all in :func:`sabsim.structure.amorphized_assembly.
     assemble_amorphized_pair`. The assembled pair is written to a LAMMPS
     data file the press will load, and the per-wafer z-ranges + interface
@@ -786,7 +814,11 @@ def _assemble_on_one_rank(
             "wafer_a_z_range", "wafer_b_z_range", "interface_z",
             "activated_skin"),
         data_file=pair_file,
-        built=built)
+        built=built,
+        activation_a=activated.verdict_a,
+        activation_b=activated.verdict_b,
+        heal_start_step_a=activated.slab_a.heal_start_step,
+        heal_start_step_b=activated.slab_b.heal_start_step)
 
 
 # ---------------------------------------------------------------------
@@ -837,6 +869,7 @@ def run_bond_debond_md_live(
         BondDebondResult,
         PressOutcome,
         PullOutcome,
+        StageLedger,
     )
 
     built = structure.built
@@ -870,6 +903,17 @@ def run_bond_debond_md_live(
             expected_atom_count=assembled_atom_count)
     press_engine.close()
 
+    # The stage ledger (§9.3, DESIGN §5.5): where each phase fell in the
+    # step count, written into the manifest beside the outcome.
+    stage_steps = StageLedger(
+        press_start=press.press_start_step,
+        contact=press.contact_step,
+        hold_end=press.hold_end_step,
+        settle_start=(reference.settle_start_step
+                      if reference is not None else None),
+        settle_end=(reference.settle_end_step
+                    if reference is not None else None))
+
     ladder = member.numerical.pull_rate_ladder
     void = (not press.atoms_conserved
             or (reference is not None and not reference.atoms_conserved))
@@ -884,10 +928,9 @@ def run_bond_debond_md_live(
                 rate_value=rate.value, rate_unit=rate.unit, note=why)
             for rate in ladder)
         return BondDebondResult(
-            press=PressOutcome(bonded=False, note=note),
-            reference_ok=False, pulls=pulls,
-            activation_a=press.activation_a,
-            activation_b=press.activation_b)
+            press=PressOutcome(bonded=False, note=note,
+                               stage_steps=stage_steps),
+            reference_ok=False, pulls=pulls)
 
     # One fresh engine per pull rung, each in its OWN directory so it can
     # be resumed from its own checkpoints without touching another rung
@@ -922,11 +965,10 @@ def run_bond_debond_md_live(
 
     return BondDebondResult(
         press=PressOutcome(
-            bonded=True, note="contact reached and held (§9.3)"),
+            bonded=True, note="contact reached and held (§9.3)",
+            stage_steps=stage_steps),
         reference_ok=reference.settled,
-        pulls=tuple(pulls),
-        activation_a=press.activation_a,
-        activation_b=press.activation_b)
+        pulls=tuple(pulls))
 
 
 # ---------------------------------------------------------------------
@@ -1000,15 +1042,16 @@ def run_analyzer_live(
         fidelity="mlip", method="not computed in v1 (wave 2)",
         status=MeasureStatus.UNRESOLVED)
 
-    # Surface the §3.5 activation gate result for each HEALED surface (§3.4:
-    # the gate moved to the bond flow, so its verdict rides bond_debond).
-    # Only a PASS reaches here — a failed gate halted the bond before this —
-    # so this reports the MEASURED skin depth (closing the §2.5 estimate)
-    # with the gate's own summary as the method. Absent on the retired
-    # narrow-gap path or a skeleton stub, in which case nothing is emitted.
+    # Surface the §3.5 activation gate result for each HEALED surface. The
+    # verdicts ride the assembled pair (§10.1, revised 2026-08-28: the gate
+    # runs in the activation stage and the pair carries what it was built
+    # from). Only a PASS reaches here — a failed gate halted the member
+    # before assembly — so this reports the MEASURED skin depth (closing
+    # the §2.5 estimate) with the gate's own summary as the method. Absent
+    # on a skeleton stub, in which case nothing is emitted.
     activation_measures = []
-    for surface, verdict in (("a", bond_debond.activation_a),
-                             ("b", bond_debond.activation_b)):
+    for surface, verdict in (("a", structure.activation_a),
+                             ("b", structure.activation_b)):
         if verdict is None:
             continue
         report = verdict_from_activation(verdict)

@@ -2,7 +2,7 @@
 
 Slice 2 is a PURE {value, unit} -> LAMMPS-command mapping, so these tests
 assert the generated STRINGS with no LAMMPS present: the metal-unit
-conversions, the parameterized force-model line (classical AND MLIP), the
+conversions, the parameterized force-model line (any pair style), the
 by-position region carving, both press control modes, the pull drive, and
 the two assembled scripts. The knobs come from the REAL study-spec
 template so the field names are checked against the true records; the
@@ -94,20 +94,20 @@ def test_normal_force_from_pressure():
 
 
 # ---------------------------------------------------------------------
-# The force model is one parameterized line, serving classical AND MLIP.
+# The force model is one parameterized line, serving ANY pair style.
 # ---------------------------------------------------------------------
 
-def test_classical_stand_in_force_model():
-    """The classical stand-in is Stillinger-Weber over the type map."""
+def test_stand_in_force_model_is_a_force_free_built_in_style():
+    """The test stand-in is LAMMPS's built-in ``zero`` pair style."""
     model = stand_in_force_model({"Si": 1})
-    assert model.pair_style == "sw"
-    assert model.pair_coeff == ("* * Si.sw Si",)
+    assert model.pair_style == "zero 6.0"
+    assert model.pair_coeff == ("* *",)
 
 
 def test_deepmd_force_model():
     """The trained potential is the SAME shape, a different value.
 
-    Plus a ``preload`` the classical model lacks: DeePMD ships as a runtime
+    Plus a ``preload`` a built-in style lacks: DeePMD ships as a runtime
     plugin, so the model carries the ``plugin load`` that registers its
     pair style (the path read from the environment, ARCHITECTURE §4.4).
     """
@@ -119,14 +119,14 @@ def test_deepmd_force_model():
 
 
 def test_force_model_commands_emit_both_lines():
-    """One generator emits pair_style + pair_coeff for a classical model.
+    """One generator emits pair_style + pair_coeff for a built-in style.
 
-    A classical potential has an empty preload, so nothing precedes the
+    A built-in pair style has an empty preload, so nothing precedes the
     two lines — the pre-plugin behaviour is unchanged.
     """
-    model = ForceModel(pair_style="sw", pair_coeff=("* * Si.sw Si",))
+    model = ForceModel(pair_style="zero 6.0", pair_coeff=("* *",))
     commands = force_model_commands(model)
-    assert commands == ["pair_style sw", "pair_coeff * * Si.sw Si"]
+    assert commands == ["pair_style zero 6.0", "pair_coeff * *"]
 
 
 def test_force_model_commands_emit_plugin_load_before_pair_style():
@@ -165,8 +165,8 @@ def test_preamble_adds_atom_map_only_for_a_message_passing_model():
     A message-passing MLIP gathers per-atom features across the neighbor
     graph and cannot run without a global atom map, which LAMMPS must be
     told to keep BEFORE the atoms are created — so the preamble injects it
-    right after ``atom_style`` and ahead of ``read_data``. A classical
-    force model (or none) leaves the preamble untouched.
+    right after ``atom_style`` and ahead of ``read_data``. A model
+    without the flag (or none) leaves the preamble untouched.
     """
     gnn = ForceModel(
         pair_style="deepmd model.pt2", pair_coeff=("* * Si",),
@@ -178,9 +178,9 @@ def test_preamble_adds_atom_map_only_for_a_message_passing_model():
             < with_map.index("atom_modify map yes")
             < with_map.index("read_data pair.data"))
 
-    # A classical model never asks for it, so the block is unchanged.
-    classical = stand_in_force_model({"Si": 1})
-    without_map = preamble_commands("pair.data", Quantity(1.0, "fs"), classical)
+    # A built-in style never asks for it, so the block is unchanged.
+    built_in = stand_in_force_model({"Si": 1})
+    without_map = preamble_commands("pair.data", Quantity(1.0, "fs"), built_in)
     assert "atom_modify map yes" not in without_map
 
 
@@ -311,13 +311,13 @@ def test_press_script_is_ordered_and_runs_the_hold():
         _fake_pair(), member, model, "pair.data", seed=7)
 
     assert commands[0] == "units metal"
-    assert "pair_style sw" in commands
+    assert "pair_style zero 6.0" in commands
     assert "fix drive_top top_grip aveforce 0.0 0.0 v_press_fz" in commands
-    # Two runs: approach (gap 10 Å at 0.01 Å/ps = 1000 ps / 0.001 ps =
-    # 1000000 steps — the template initial_gap is now WIDE, §2.6/§3.4) then
-    # the 150 ps hold (150000 steps).
+    # Two runs: approach (the template's 7 Å press-start opening at
+    # 0.01 Å/ps = 700 ps / 0.001 ps = 700000 steps, §2.6 revised
+    # 2026-08-28) then the 150 ps hold (150000 steps).
     runs = [c for c in commands if c.startswith("run ")]
-    assert runs == ["run 1000000", "run 150000"]
+    assert runs == ["run 700000", "run 150000"]
 
 
 def test_pull_script_records_and_runs_the_distance(tmp_path):

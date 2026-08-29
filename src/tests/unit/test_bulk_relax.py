@@ -24,7 +24,7 @@ def test_bulk_relax_commands_are_periodic_and_relax_the_box():
     model = stand_in_force_model({"Si": 1})
     commands = bulk_relax_commands("bulk.data", model)
     assert "boundary p p p" in commands
-    assert "pair_style sw" in commands
+    assert "pair_style zero 6.0" in commands
     assert "fix relax_box all box/relax iso 0.0 vmax 0.001" in commands
     assert "min_style cg" in commands
     assert any(c.startswith("minimize ") for c in commands)
@@ -70,8 +70,8 @@ def test_bulk_relax_commands_map_the_atoms_for_a_deepmd_model():
     """A message-passing MLIP gets atom_modify map yes BEFORE read_data.
 
     The GNN neighbor gather needs the global atom map to exist when the
-    atoms are created, so the line must precede the read. The in-process
-    classical path never needed it, so it was absent until the universal
+    atoms are created, so the line must precede the read. The earlier
+    in-process path never needed it, so it was absent until the universal
     §2.2 derivation arrived (DESIGN §4.7).
     """
     commands = bulk_relax_commands("bulk.data", _deepmd_bulk_model())

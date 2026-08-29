@@ -37,7 +37,7 @@
 # A study is a set of members sharing ONE potential and ONE protocol,
 # compared through a declared relation (§1.1, §7.4). v1 contrasts the
 # dissimilar bond against a same-material reference.
-name        = "c-dosed-120ev"
+name        = "demo-si-small-50ev-dpa3f"
 description = "Cold SAB of beta-cristobalite(100) SiO2 to Si(100)"
 
 # ---------------------------------------------------------------------
@@ -170,7 +170,7 @@ universal_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
 # member's potential_ref will name (§4.5); until that bootstrap exists
 # this names ONE frozen DeePMD file, a committee of one, and results
 # under it carry no committee uncertainty.
-production_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"   # DPA-3 for the bond too (T-25/T-28)
+production_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"   # DPA-3 for the bond too (T-25 env)
 # The universal model has passed the Tier-0 crystal-below-damaged screen
 # on silicon but has NOT cleared the §3.5 activation gate on any
 # material, so it is still marked unvalidated in the code. Running it
@@ -197,7 +197,7 @@ cospecies_fraction = 0.0
 # fail the gate outright. Within that clean band ENERGY is what sets the
 # REACHABLE skin depth (it is the ion range), so 75 eV is chosen as the
 # top of it: the setting with the most margin over the 7 A threshold.
-energy = { value = 120.0, unit = "eV" }   # C: T-22 bracket 100-140 eV under DPA-3.1
+energy = { value = 50.0, unit = "eV" }    # DEMO-50: the sputter-free band of the 2026-07-21 sweep
 angle  = { value = 0.0,   unit = "deg" }      # from the surface normal
 # Dose is the KNOB (§3.6). The amorphized skin DEPTH is NOT set here; it
 # is measured by the §3.5 gate — iterate this dose until the gate's depth
@@ -234,25 +234,23 @@ between_impact_relaxation = { value = 0.5, unit = "ps" }   # border cool
 # only has to relieve the cascade's leftover strain in a ~10 A skin, not
 # re-equilibrate a thick damaged layer, and a longer gentle hold risks
 # un-trapping the very disorder the quench froze in.
-hold_temperature = { value = 300.0, unit = "K" }   # settle cool (Paul, 2026-08-26)
+hold_temperature = { value = 300.0, unit = "K" }   # DEMO re-press: settle cool (Paul)
 hold_duration    = { value = 2.0,   unit = "ps" }  # sweep-pinned
 ensemble         = "nvt"                            # constant-volume hold
 
 [protocol.assembly]
-# Slab separation at assembly (§2.6). Revised 2026-08-08 (§3.4): this MUST
-# exceed the MLIP interaction cutoff (the bond flow's separation_cutoff,
-# ~6 Å), because the bond flow HEALS the two surfaces at this gap BEFORE
-# pressing — a gap beyond the cutoff is what lets each heal as an
-# effectively-free surface, never co-activated. The bond flow then scissors
-# the vacuum down to the press start distance. A knob (§2), distinct from
-# the derived cell geometry (§1.3).
-initial_gap = { value = 10.0, unit = "angstrom" }
+# The surface-to-surface opening the pair is assembled at (§2.6, revised
+# 2026-08-28): each half arrives HEALED and GATED from its own activation
+# session, so the pair is stacked directly at the distance the press
+# starts from — within the model's ~6 Å cutoff yet not touching. DEMO-f
+# (2026-08-28): first run of the heal-in-activation flow.
+initial_gap = { value = 7.0, unit = "angstrom" }
 
 [protocol.press]
 mode        = "load"           # load- vs displacement-controlled press
 pressure    = { value = 1.0,   unit = "MPa" }   # ~1 MPa (ratified)
 temperature = { value = 300.0, unit = "K" }     # room temperature (SAB)
-duration    = { value = 10.0, unit = "ps" }     # DEMO-SCALE for the first C bond (production: 150 ps)
+duration    = { value = 10.0, unit = "ps" }     # DEMO: short hold (production: 150 ps)
 # Displacement-mode target: unused while mode = "load", but written so
 # the Si/Si reference's displacement cross-check (§5.9) has its value.
 depth        = { value = 5.0, unit = "angstrom" }
@@ -282,7 +280,7 @@ langevin_damping = { value = 0.5, unit = "ps" }
 # lives in NUMERICAL (§2) because it is a convergence instrument — M3
 # reports the remaining distance to the quasi-static limit, and the
 # answer should stop moving as the rate falls.
-pull_rate_ladder = [   # DEMO-SCALE: fast rungs (production: 1 / 3.2 / 10 m/s)
+pull_rate_ladder = [   # DEMO: fast rungs so each separates in tens of ps
   { value = 20.0,  unit = "m/s" },
   { value = 50.0,  unit = "m/s" },
   { value = 100.0, unit = "m/s" },
@@ -301,7 +299,7 @@ noise_floor          = { value = 0.05, unit = "eV/angstrom" }
 misfit_tolerance     = 0.02       # max strain component in the match (§2.3)
 max_coincidence_area = { value = 400.0, unit = "angstrom^2" }
 # ^ atom-area budget bounding atoms per layer (§7.6); provisional.
-target_footprint_area = { value = 745.0, unit = "angstrom^2" }   # C: 7x7 cell (T-22), ~19 impacts
+target_footprint_area = { value = 140.0, unit = "angstrom^2" }   # DEMO: 3x3 cell, ~4 impacts
 # ^ dose-spreading footprint (§3.6): the matched cell is tiled up to
 #   ~this in-plane area so no single impact dominates the areal dose.
 #   1475 Å² ~ the pinned 38.4 Å Si cell (the old 10x10). A convergence
@@ -316,7 +314,7 @@ target_footprint_area = { value = 745.0, unit = "angstrom^2" }   # C: 7x7 cell (
 # the build-time estimate (the §3.6 operating depth).
 minimum_bulk_thickness = { value = 30.0, unit = "angstrom" }
 # ^ undamaged-crystal cushion beneath the skin (§2.5).
-slab_thickness         = { value = 55.0, unit = "angstrom" }
+slab_thickness         = { value = 37.0, unit = "angstrom" }   # DEMO: at the §2.5 floor
 # ^ chosen total slab thickness (the §3.6-pinned 55 Å cell). The floor
 #   max(slab_thickness, expected_activated_depth + minimum_bulk_thickness)
 #   guarantees the §2.5 criterion for any material; here 55 > 7 + 30 = 37.

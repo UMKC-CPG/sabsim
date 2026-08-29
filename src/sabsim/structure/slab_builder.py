@@ -218,7 +218,7 @@ def load_crystal(cif_path) -> Structure:
 
     Charge is not information we lose. SABSIM's data files are written
     ``atom_style atomic`` and are charge-free at this fidelity (§2.6),
-    and the classical form chosen for silica in v1 is deliberately
+    and the universal foundation MLIP that runs every stage is
     charge-free too (§4.7). A form that DOES carry charges assigns them
     from its own parameterization, never from a structure file's labels.
     """
@@ -792,7 +792,7 @@ def _write_atoms_as_lammps_data(
 
     The shared writer behind :func:`write_lammps_data` (a facing pair) and
     :func:`write_standalone_half` (one wafer). ``atom_style atomic`` (no
-    charges — the classical Si potential and the {Si,O} MLIP are both
+    charges — the foundation MLIP and the {Si,O} committee are both
     charge-free at this fidelity), and the species order is pinned to
     ``type_map`` so LAMMPS type ids match the potential's expectation.
     Every type in the map is written, including one the map DECLARES but

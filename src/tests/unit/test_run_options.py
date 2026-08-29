@@ -180,9 +180,15 @@ class _RecordingEngine:
         return 0.0
 
     def normal_stress(self):
-        # Positive == compressive contact, so the press reaches its
-        # criterion promptly and the test stays fast.
-        return 1.0
+        # Compressive and well above the study's 500 bar contact floor,
+        # so the press reaches its criterion promptly and the test stays
+        # fast (DESIGN §5.2, revised 2026-08-28).
+        return 2000.0
+
+    def step(self):
+        # The stage ledger reads the engine's step; a fixed clock is
+        # enough here, since these tests look only at the command stream.
+        return 0
 
     def grip_reaction(self, *_args):
         return 0.0
@@ -208,7 +214,7 @@ def _press_commands(member, trajectory_file, stride=None):
         atoms=atoms, wafer_a_z_range=(0.0, 10.0),
         wafer_b_z_range=(15.0, 25.0), type_map={"Si": 1})
     force_model = ForceModel(
-        pair_style="sw", pair_coeff=("* * Si.sw Si",))
+        pair_style="zero 6.0", pair_coeff=("* *",))
     return _press_setup(
         built, member, force_model, "ref.data", 1, RegionGeometry(),
         trajectory_file, stride)
@@ -248,7 +254,7 @@ def _press_and_bond_commands(member, trajectory_file, stride=None):
     engine = Engine()
     press_and_bond(
         engine, built, member,
-        ForceModel(pair_style="sw", pair_coeff=("* * Si.sw Si",)),
+        ForceModel(pair_style="zero 6.0", pair_coeff=("* *",)),
         "pair.data", 1, control=RunControl(max_chunks=1),
         trajectory_file=trajectory_file, trajectory_stride=stride)
     return engine.issued

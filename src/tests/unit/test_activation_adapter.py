@@ -83,20 +83,19 @@ def test_no_atoms_maps_to_a_failure():
     assert "no atoms to judge" in verdict.reason
 
 
-def test_activated_slabs_gathers_both_surfaces():
-    """Two amorphized slabs become one ACTIVATED_SLABS (no verdict, §3.4).
+def test_activated_slabs_gathers_both_surfaces_and_their_verdicts():
+    """Two healed slabs and two §3.5 verdicts become one ACTIVATED_SLABS.
 
-    Revised 2026-08-08: activation is cascade-only, so the artifact carries
-    just the two amorphized slabs — the §3.5 gate moved to the bond flow,
-    which gates each healed surface there. ``verdict_from_activation`` (above)
-    is the distillation the bond flow reuses.
+    Revised 2026-08-28: the gate runs in the activation stage again, so
+    the verdicts ride the artifact the contract checks before assembly.
     """
     slab_a = Slab(identity="Si", note="bottom")
     slab_b = Slab(identity="Si", note="top")
-    activated = activated_slabs_from_results(slab_a, slab_b)
+    passed = ActivationVerdict(
+        passed=True, activated_depth=7.0, per_metric={}, reason="")
+    activated = activated_slabs_from_results(slab_a, slab_b, passed, passed)
 
     assert isinstance(activated, ActivatedSlabs)
     assert activated.slab_a is slab_a
     assert activated.slab_b is slab_b
-    # No verdicts ride this seam anymore.
-    assert not hasattr(activated, "verdict_a")
+    assert activated.verdict_a is passed and activated.verdict_b is passed

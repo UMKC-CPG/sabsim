@@ -34,13 +34,13 @@ from sabsim.pipeline.exec_artifacts import ActivatedSlabs, Slab, Verdict
 def verdict_from_activation(gate: ActivationVerdict) -> Verdict:
     """Distil one surface's §3.5 gate verdict to a report Verdict (§6, §3.5).
 
-    Revised 2026-08-08 (§3.4): the gate moved to the bond flow, which
-    produces an :class:`ActivationVerdict` per HEALED surface (all metrics,
-    the measured skin depth, a named failure). This maps it to the simple
-    :class:`Verdict` the report reads, preserving the measured skin depth
-    and — on a failure — the failing metric the gate already named. (The
-    bond flow halts on a failure, so the report only ever sees a PASS; the
-    failure branch is kept so the distiller is total and diagnosable.)
+    The activation stage produces an :class:`ActivationVerdict` per HEALED
+    half (all metrics, the measured skin depth, a named failure; §3.4,
+    revised 2026-08-28). This maps it to the simple :class:`Verdict` the
+    report reads, preserving the measured skin depth and — on a failure —
+    the failing metric the gate already named. (The contract halts on a
+    failure, so the report only ever sees a PASS; the failure branch is
+    kept so the distiller is total and diagnosable.)
 
     On a PASS the reason records the depth and that every metric passed, so a
     reader sees at a glance how thick a skin this activation authored. On a
@@ -63,15 +63,16 @@ def verdict_from_activation(gate: ActivationVerdict) -> Verdict:
 
 def activated_slabs_from_results(
         slab_a: Slab,
-        slab_b: Slab) -> ActivatedSlabs:
+        slab_b: Slab,
+        verdict_a: ActivationVerdict | None = None,
+        verdict_b: ActivationVerdict | None = None) -> ActivatedSlabs:
     """Assemble the ACTIVATED_SLABS artifact from both surfaces (§10.1).
 
-    Revised 2026-08-08 (§3.4): activation is cascade-only, so this just
-    gathers the two amorphized slabs into the single :class:`ActivatedSlabs`
-    the contract checks — no verdict. The §3.5 gate moved to the bond flow,
-    which gates each healed surface before pressing;
-    :func:`verdict_from_activation` is the distillation the bond flow reuses
-    there. Each surface was activated INDEPENDENTLY in its own engine, before
+    Gathers the two healed slabs and their §3.5 verdicts into the single
+    :class:`ActivatedSlabs` the contract checks (revised 2026-08-28: the
+    gate runs in the activation stage again, so the verdicts ride here).
+    Each surface was activated INDEPENDENTLY in its own session, before
     the two ever face each other (DESIGN.md §3.1).
     """
-    return ActivatedSlabs(slab_a=slab_a, slab_b=slab_b)
+    return ActivatedSlabs(slab_a=slab_a, slab_b=slab_b,
+                          verdict_a=verdict_a, verdict_b=verdict_b)

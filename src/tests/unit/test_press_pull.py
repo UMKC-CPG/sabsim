@@ -17,13 +17,10 @@ import pytest
 from sabsim.driver.commands import RegionGeometry
 from tests.unit.support import stand_in_force_model
 from sabsim.driver.engine import MockEngine
-from sabsim.driver.activation_gate import ActivationVerdict
 from sabsim.driver.press_pull import (
     RunControl,
     _positions_with_tags,
-    _scissors_delta,
     begin_or_resume_pull,
-    gate_healed_surfaces,
     press_and_bond,
     pull_at_rate,
     settle_reference,
@@ -39,30 +36,13 @@ from sabsim.spec.records import Quantity
 from sabsim.structure.slab_builder import WAFER_A_TAG, WAFER_B_TAG
 
 
-@pytest.fixture
-def passing_gate(monkeypatch):
-    """Stub the bond-flow activation gate (§3.4) to PASS both surfaces.
-
-    The wide-gap press tests below exercise the relax + scissors mechanics
-    that run AFTER the gate; the gate itself — including the wafer-B mirror —
-    is covered by ``test_gate_healed_surfaces_gates_each_wafer_by_tag``. So
-    here the gate is stubbed to pass, letting the press proceed on the toy
-    structures these tests use (which are not real amorphous surfaces).
-    """
-    import sabsim.driver.press_pull as press_pull_module
-
-    passed = ActivationVerdict(
-        passed=True, activated_depth=10.0, per_metric={}, reason="stubbed")
-    monkeypatch.setattr(
-        press_pull_module, "gate_healed_surfaces",
-        lambda engine, built: (passed, passed))
-
 _TEMPLATE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
     "..", "..", "..", "dev", "templates", "study_spec.toml"))
 
 _MODEL = stand_in_force_model({"Si": 1})
 _LOWER_Z = np.linspace(0.0, 10.0, 100)   # a wafer-A slab, top surface ~10
+
 
 
 def _member():
@@ -102,7 +82,8 @@ def test_press_stops_on_the_dual_contact_criterion():
     frames = [_frame(15.0), _frame(13.0), _frame(11.0), _frame(11.0),
               _frame(11.0)]
     engine = MockEngine(
-        positions=frames, normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0])
+        positions=frames,
+        normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0])
 
     result = press_and_bond(
         engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
@@ -145,97 +126,6 @@ def _first_drive_index(stream):
             return index
     raise AssertionError("no press drive was installed")
 
-
-def test_contact_relax_runs_when_the_gap_clears_the_cutoff(passing_gate):
-    """A wide vacuum gap triggers the capped settle BEFORE the drive.
-
-    (The relax is a temporary OOD scaffold: displacement-capped damped
-    dynamics, NOT a minimize — see contact_relax_commands.)
-    """
-    built = _gapped_built(20.0)        # closest-atom gap 10 Å > 6 Å cutoff
-    engine = MockEngine(positions=[_frame(20.0)], normal_stress=[-1.0])
-    press_and_bond(
-        engine, built, _member(), _MODEL, "pair.data", seed=1,
-        control=RunControl(max_chunks=1))
-    stream = engine.received_commands
-    assert "fix relax_hold_top top_grip setforce 0.0 0.0 0.0" in stream
-    # The displacement cap is what keeps OOD forces from ejecting atoms.
-    assert any(line.startswith("fix relax_cap_i interior nve/limit")
-               for line in stream)
-    assert "fix relax_wall all wall/reflect zlo EDGE zhi EDGE" in stream
-    assert "unfix relax_hold_top" in stream
-    # The top grip is released BEFORE the press drive claims it.
-    assert stream.index("unfix relax_hold_top") < _first_drive_index(stream)
-
-
-def test_no_contact_relax_when_the_surfaces_are_in_range():
-    """A close gap (< cutoff) presses cold — no relax, the unchanged path."""
-    built = _gapped_built(13.0)        # closest-atom gap 3 Å < 6 Å cutoff
-    engine = MockEngine(positions=[_frame(13.0)], normal_stress=[-1.0])
-    press_and_bond(
-        engine, built, _member(), _MODEL, "pair.data", seed=1,
-        control=RunControl(max_chunks=1))
-    stream = engine.received_commands
-    assert "fix relax_hold_top top_grip setforce 0.0 0.0 0.0" not in stream
-    assert not any("nve/limit" in line for line in stream)
-    # No relax => no scissors either; the close-gap path is untouched.
-    assert not any(line.startswith("displace_atoms") for line in stream)
-
-
-def test_scissors_cuts_the_vacuum_after_the_relax(passing_gate):
-    """After the relax, the top wafer is slid DOWN toward the scissors gap.
-
-    The opening is measured with the dividing-surface metric (robust to a
-    stray atom), so the cut fires whenever the relaxed opening exceeds the
-    target; the exact distance is not asserted here.
-    """
-    built = _gapped_built(20.0)         # wide opening -> a cut is needed
-    engine = MockEngine(positions=[_frame(20.0)], normal_stress=[-1.0])
-    press_and_bond(
-        engine, built, _member(), _MODEL, "pair.data", seed=1,
-        control=RunControl(max_chunks=1))
-    stream = engine.received_commands
-    assert "group scissors_upper region scissors_upper" in stream
-    displace = [line for line in stream
-                if line.startswith("displace_atoms scissors_upper move")]
-    assert displace, "scissors should cut the vacuum after the relax"
-    assert " -" in displace[0], "the top wafer slides DOWN (negative z)"
-    # Order: relax released, THEN scissors, THEN the press drive.
-    cut = stream.index(displace[0])
-    assert stream.index("unfix relax_hold_top") < cut < _first_drive_index(
-        stream)
-
-
-def test_scissors_delta_is_clamped_against_wafer_overlap():
-    """A corrupted opening can't drive the top wafer into the bottom.
-
-    The bulk surfaces read ~20 Å apart by the density metric, but a few
-    atoms poke into the gap so the nearest facing atoms are 6 Å apart. The
-    cut must be clamped to the atom-level ceiling (6 - min_atom_gap), NOT
-    the density opening, or one wafer is driven into the other (the failure
-    of bond job 15876342).
-    """
-    # Wafer A: a bulk slab 0..10 plus two atoms poking up to 12.
-    z_a = np.concatenate([np.linspace(0.0, 10.0, 100), [11.0, 12.0]])
-    # Wafer B: a bulk slab 30..40 plus two atoms reaching down to 18.
-    z_b = np.concatenate([np.linspace(30.0, 40.0, 100), [19.0, 18.0]])
-    positions = np.zeros((z_a.size + z_b.size, 3))
-    positions[:z_a.size, 2] = z_a
-    positions[z_a.size:, 2] = z_b
-    tags = np.array([WAFER_A_TAG] * z_a.size + [WAFER_B_TAG] * z_b.size)
-    engine = MockEngine(positions=[positions])
-
-    delta = _scissors_delta(
-        engine, tags, target_gap=7.0, bin_width=1.0, min_atom_gap=2.5)
-
-    # Density opening ~20 would want a ~13 Å cut; the closest atoms (18-12)
-    # cap it at 6 - 2.5 = 3.5.
-    assert delta == pytest.approx(3.5, abs=1e-6)
-
-
-# ---------------------------------------------------------------------
-# settle_reference — the two zero-load gates (§9.4).
-# ---------------------------------------------------------------------
 
 def test_settle_passes_a_flat_balanced_reference():
     """A flat PE and canceling grip reactions settle the reference."""
@@ -551,140 +441,6 @@ def test_input_hash_tracks_the_reference_content(tmp_path):
     assert before != after
 
 
-# ---------------------------------------------------------------------
-# The per-wafer activation gate, now in the bond flow (§3.4, §3.5).
-# ---------------------------------------------------------------------
-
-def _si_diamond_block(n_lateral, n_depth, lattice=5.43):
-    """A silicon diamond block and its cell, for gating (§3.5)."""
-    basis = [(0, 0, 0), (0, .5, .5), (.5, 0, .5), (.5, .5, 0),
-             (.25, .25, .25), (.25, .75, .75), (.75, .25, .75),
-             (.75, .75, .25)]
-    points = np.array([
-        ((i + x) * lattice, (j + y) * lattice, (k + z) * lattice)
-        for i in range(n_lateral) for j in range(n_lateral)
-        for k in range(n_depth) for (x, y, z) in basis])
-    cell = np.diag([n_lateral * lattice, n_lateral * lattice,
-                    n_depth * lattice])
-    return points, cell
-
-
-def test_gate_healed_surfaces_gates_each_wafer_by_tag():
-    """Each wafer of the assembled pair is gated separately (§3.4, §3.5).
-
-    The atoms split by wafer tag, wafer B is mirrored to present its free
-    surface up, and each surface yields an ActivationVerdict over all four
-    §3.5 metrics — the plumbing the bond flow reads to halt before pressing.
-    """
-    points, cell = _si_diamond_block(n_lateral=3, n_depth=8)
-    median_z = float(np.median(points[:, 2]))
-    tags = np.where(points[:, 2] < median_z, WAFER_A_TAG, WAFER_B_TAG)
-    engine = MockEngine(positions=[points])
-    built = SimpleNamespace(
-        atoms=SimpleNamespace(get_tags=lambda: tags,
-                              get_cell=lambda: cell),
-        type_map={"Si": 1})
-
-    verdict_a, verdict_b = gate_healed_surfaces(engine, built)
-
-    assert isinstance(verdict_a, ActivationVerdict)
-    assert isinstance(verdict_b, ActivationVerdict)
-    # Both surfaces are judged over the full §3.5 metric set.
-    metrics = {"radial_distribution", "coordination", "ring_statistics",
-               "amorphization_depth"}
-    assert set(verdict_a.per_metric) == metrics
-    assert set(verdict_b.per_metric) == metrics
-
-
-def test_gate_keys_each_wafer_by_its_own_material_species(monkeypatch):
-    """A dissimilar pair gates each wafer against ITS material's reference.
-
-    The bug this guards: the gate used to key BOTH wafers by the pair's
-    GLOBAL type map, so it could not tell a SiO2 wafer from a LiNbO3 one
-    and loaded one (wrong, missing) reference for both. Now each wafer's
-    declared species set selects its own reference (DESIGN.md §3.5).
-    """
-    import sabsim.driver.press_pull as press_pull_module
-
-    requested = []
-
-    def _spy(species):
-        requested.append(frozenset(species))
-        # A permissive reference so the gate runs to completion.
-        from sabsim.driver.activation_gate import ActivationReferences
-        return ActivationReferences(
-            real=False, bond_cutoff=2.5,
-            gr={"first_peak": 2.0, "first_peak_tolerance": 1.0},
-            coordination={"defect_fraction_min": 0.0,
-                          "defect_fraction_max": 1.0},
-            rings={"non_six_fraction_min": 0.0},
-            depth={"target_angstrom": 0.0}, source="spy")
-
-    monkeypatch.setattr(
-        press_pull_module, "load_activation_references", _spy)
-
-    points, cell = _si_diamond_block(n_lateral=3, n_depth=8)
-    median_z = float(np.median(points[:, 2]))
-    tags = np.where(points[:, 2] < median_z, WAFER_A_TAG, WAFER_B_TAG)
-    engine = MockEngine(positions=[points])
-    built = SimpleNamespace(
-        atoms=SimpleNamespace(get_tags=lambda: tags,
-                              get_cell=lambda: cell),
-        type_map={"Si": 1, "O": 2, "Li": 3, "Nb": 4},
-        wafer_a_species=frozenset({"O", "Si"}),
-        wafer_b_species=frozenset({"Li", "Nb", "O"}))
-
-    gate_healed_surfaces(engine, built)
-
-    # Each wafer asked for ITS OWN species set, not the pair's global map.
-    assert requested == [
-        frozenset({"O", "Si"}), frozenset({"Li", "Nb", "O"})]
-    assert frozenset({"Si", "O", "Li", "Nb"}) not in requested
-
-
-def test_gate_falls_back_to_the_global_type_map_when_species_absent(
-        monkeypatch):
-    """A same-material pair with no per-wafer species keys the global map.
-
-    The identity/crystalline path (and any pair built before the per-wafer
-    field existed) sets no wafer species; the gate then keys the pair's
-    global type map, which for a same-material pair IS each wafer's set —
-    preserving the original Si/Si behaviour.
-    """
-    import sabsim.driver.press_pull as press_pull_module
-
-    requested = []
-    monkeypatch.setattr(
-        press_pull_module, "load_activation_references",
-        lambda species: (requested.append(frozenset(species))
-                         or _null_reference()))
-
-    points, cell = _si_diamond_block(n_lateral=3, n_depth=8)
-    median_z = float(np.median(points[:, 2]))
-    tags = np.where(points[:, 2] < median_z, WAFER_A_TAG, WAFER_B_TAG)
-    engine = MockEngine(positions=[points])
-    built = SimpleNamespace(
-        atoms=SimpleNamespace(get_tags=lambda: tags,
-                              get_cell=lambda: cell),
-        type_map={"Si": 1})           # no wafer_a/b_species set
-
-    gate_healed_surfaces(engine, built)
-
-    assert requested == [frozenset({"Si"}), frozenset({"Si"})]
-
-
-def _null_reference():
-    """A permissive activation reference for the fallback test."""
-    from sabsim.driver.activation_gate import ActivationReferences
-    return ActivationReferences(
-        real=False, bond_cutoff=2.5,
-        gr={"first_peak": 2.0, "first_peak_tolerance": 1.0},
-        coordination={"defect_fraction_min": 0.0,
-                      "defect_fraction_max": 1.0},
-        rings={"non_six_fraction_min": 0.0},
-        depth={"target_angstrom": 0.0}, source="null")
-
-
 class _LossyEngine:
     """A minimal stand-in that reports SURVIVORS after atom loss.
 
@@ -759,7 +515,8 @@ def test_press_that_loses_atoms_is_void_even_when_contact_fires():
     # The assembled pair has 200 atoms (100 per wafer); the engine reports
     # only 150 survivors by the end of the press.
     engine = MockEngine(
-        positions=frames, normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0],
+        positions=frames,
+        normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0],
         atom_count=150)
     result = press_and_bond(
         engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
@@ -773,7 +530,8 @@ def test_press_that_keeps_every_atom_is_conserved():
     frames = [_frame(15.0), _frame(13.0), _frame(11.0), _frame(11.0),
               _frame(11.0)]
     engine = MockEngine(
-        positions=frames, normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0],
+        positions=frames,
+        normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0],
         atom_count=200)
     result = press_and_bond(
         engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
@@ -809,18 +567,85 @@ def test_pull_uses_the_assembled_count_as_its_baseline(tmp_path):
     assert result.atoms_conserved is False
 
 
-def test_heal_anneal_runs_the_studys_schedule_with_grips_pinned():
-    """The settle holds, quenches, minimises, and restores the integrators."""
-    from sabsim.driver.commands import heal_anneal_commands
-    commands = heal_anneal_commands(_member(), seed=7)
-    # Hold at the schedule's temperature (template: 500 K for 2 ps = 2000
-    # steps at 1 fs), then quench to the press temperature (300 K).
-    assert "fix heal_hold interior nvt temp 500 500 0.5" in commands
-    assert commands.count("run 2000") == 2
-    assert "fix heal_quench interior nvt temp 500 300 0.5" in commands
-    assert "fix heal_hold_top top_grip setforce 0.0 0.0 0.0" in commands
-    assert commands.index("unfix heal_hold_top") > commands.index(
-        "minimize 1e-6 1e-6 200 2000")
-    assert commands[-3:] == ["fix nve_interior interior nve",
-                             "fix nve_border border nve",
-                             "unfix heal_hold_top"]
+# ---------------------------------------------------------------------
+# The stage ledger (§9.3, §9.4, DESIGN §5.5): the press and settle record
+# the MD step each phase began at, so a movie frame keys to its phase.
+# ---------------------------------------------------------------------
+
+def test_press_records_its_stage_ledger_in_engine_steps():
+    """press_start, contact and hold_end are read off the engine's clock.
+
+    The mock advances its step by every ``run N``: the cell relax runs no
+    steps, so press_start is 0; contact fires after three 1000-step
+    chunks; the template's 150 ps hold at 1 fs is 150000 more steps.
+    """
+    frames = [_frame(15.0), _frame(13.0), _frame(11.0), _frame(11.0),
+              _frame(11.0)]
+    engine = MockEngine(
+        positions=frames,
+        normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0])
+    result = press_and_bond(
+        engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1)
+    assert result.contact_reached
+    assert result.press_start_step == 0
+    assert result.contact_step == 1000 * (result.chunks_to_contact + 1)
+    assert result.hold_end_step == result.contact_step + 150000
+
+
+def test_press_without_contact_still_records_where_it_started():
+    """No contact -> no contact/hold markers, but press_start is kept."""
+    engine = MockEngine(
+        positions=[_frame(30.0)] * 3, normal_stress=[-1.0] * 3)
+    result = press_and_bond(
+        engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1,
+        control=RunControl(max_chunks=3))
+    assert not result.contact_reached
+    assert result.press_start_step == 0
+    assert result.contact_step is None and result.hold_end_step is None
+
+
+def test_settle_records_its_start_and_end_steps():
+    """settle_start is the step the drive came off; settle_end the last."""
+    engine = MockEngine(
+        energies=[-100.0] * 4, bottom_reaction=[0.0] * 4,
+        top_reaction=[0.0] * 4)
+    result = settle_reference(
+        engine, _member(), RunControl(equilibrate_chunks=4))
+    assert result.settle_start_step == 0
+    assert result.settle_end_step == 4 * 1000
+
+
+def test_bond_flow_opens_with_the_one_time_cell_relax_then_the_drive():
+    """No heal, no gate, no scissors: cell relax, then the drive (§9.1)."""
+    engine = MockEngine(
+        positions=[_frame(11.0)] * 2, normal_stress=[2000.0] * 2)
+    press_and_bond(
+        engine, _fake_built(), _member(), _MODEL, "pair.data", seed=1,
+        control=RunControl(max_chunks=1))
+    stream = engine.received_commands
+    relax = stream.index(
+        "fix combined_cell_relax all box/relax x 0.0 y 0.0 vmax 0.001")
+    drive = _first_drive_index(stream)
+    assert relax < drive
+    assert not any("heal" in line or "scissors" in line
+                   or "relax_cap" in line for line in stream)
+
+
+def test_contact_test_reads_its_window_and_floor_from_the_study():
+    """The trailing-mean window and the stress floor are study knobs.
+
+    With the floor raised above the mock's stress, contact never fires
+    even though the gap has closed (DESIGN §5.2, revised 2026-08-28).
+    """
+    from dataclasses import replace
+    member = _member()
+    strict = replace(member, numerical=replace(
+        member.numerical,
+        contact_stress_floor=Quantity(5000.0, "bar")))
+    frames = [_frame(11.0)] * 4
+    engine = MockEngine(positions=frames, normal_stress=[2000.0] * 4)
+    result = press_and_bond(
+        engine, _fake_built(), strict, _MODEL, "pair.data", seed=1,
+        control=RunControl(max_chunks=4))
+    assert not result.contact_reached
+

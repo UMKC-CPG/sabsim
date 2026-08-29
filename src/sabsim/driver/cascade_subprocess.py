@@ -18,8 +18,8 @@ gates the written structure after; nothing is read back mid-run, which is
 sound because every impact is seed-derived and the per-impact halt ends each
 cascade from inside LAMMPS.
 
-Every cascade comes here: the universal MLIP is the only cascade
-potential (classical forms were deprecated 2026-08-26).
+Every cascade comes here: a universal foundation MLIP is the only kind
+of cascade potential (DESIGN §4.7), so every activate run is a subprocess.
 """
 
 from __future__ import annotations

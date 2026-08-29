@@ -13,7 +13,7 @@ Three design commitments show up directly here:
 
 * **The force model is a PARAMETER, not a fork.** The line that tells
   LAMMPS which model supplies the forces is one :class:`ForceModel`
-  value, so the classical stand-in (now) and the trained MLIP (later)
+  value, so the foundation MLIP (now) and the trained committee (later)
   are served by the SAME generator (DESIGN.md §5, PSEUDOCODE.md §9.8).
 * **Both control modes are generated.** Load control and displacement
   control differ by a single drive command; both are produced so the
@@ -125,21 +125,21 @@ class ForceModel:
 
     ``pair_style`` is the LAMMPS ``pair_style`` argument string and
     ``pair_coeff`` the one or more ``pair_coeff`` argument strings. The
-    classical stand-in and the trained MLIP are two VALUES of this one
-    type, so the command generator never branches on which potential is
-    in use — it just emits these lines (DESIGN.md §5, §9.8).
+    foundation-MLIP stand-in and the trained committee are two VALUES
+    of this one type, so the command generator never branches on which
+    potential is in use — it just emits these lines (DESIGN.md §5, §9.8).
 
     ``preload`` is any command that must run BEFORE ``pair_style`` — for a
     DeePMD model, the ``plugin load`` that registers the ``deepmd`` pair
-    style (ARCHITECTURE.md §4.4); it is empty for a classical potential
-    whose style is built in. Keeping it on the value, not in the
-    generator, preserves the "force model is a parameter, not a fork"
-    commitment: the generator still emits lines without branching.
+    style (ARCHITECTURE.md §4.4); it is empty for a pair style built into
+    LAMMPS itself. Keeping it on the value, not in the generator,
+    preserves the "force model is a parameter, not a fork" commitment:
+    the generator still emits lines without branching.
 
     ``needs_atom_map`` records whether the model requires LAMMPS to keep a
     global atom map (``atom_modify map yes``). A message-passing MLIP (the
     DPA graph-network cascade potential) gathers per-atom features across
-    the neighbor graph and cannot run without it, whereas a classical
+    the neighbor graph and cannot run without it, whereas a built-in
     pair form never needs it. Because ``atom_modify`` must be issued BEFORE
     the structure is read, this flag is consulted by the preamble
     generator (not :func:`force_model_commands`), which is why it rides on
@@ -237,8 +237,8 @@ def restart_preamble_commands(force_model: ForceModel | None = None) -> list:
     When ``force_model`` is a message-passing MLIP (``needs_atom_map``),
     ``atom_modify map yes`` is inserted right after ``atom_style`` — it
     MUST precede the read that creates the atoms, which is why it lives in
-    the preamble rather than beside the ``pair_style`` lines. A classical
-    force model (or no force model) leaves those lines untouched.
+    the preamble rather than beside the ``pair_style`` lines. A model
+    without the flag (or no force model) leaves those lines untouched.
 
     ``thermo_modify lost warn`` closes the block: the ``p p f`` boundary
     silently deletes any atom that leaves the open-z box (a free surface
@@ -293,11 +293,11 @@ def preamble_commands(
 
 
 def force_model_commands(force_model: ForceModel) -> list:
-    """Emit the parameterized force-model lines (classical OR MLIP).
+    """Emit the parameterized force-model lines for ANY force model.
 
     Any ``preload`` (a DeePMD ``plugin load``) comes FIRST — the pair style
     it registers cannot be named before it is loaded — then the
-    ``pair_style`` and its ``pair_coeff`` lines. A classical potential has
+    ``pair_style`` and its ``pair_coeff`` lines. A built-in pair style has
     an empty preload, so its two lines are unchanged.
     """
     return [*force_model.preload,
@@ -385,8 +385,10 @@ def integrator_commands(member: MemberSpecification, seed: int) -> list:
 def combined_cell_relax_commands() -> list:
     """Relax the assembled pair's IN-PLANE cell to zero stress, ONCE.
 
-    A one-time ``fix box/relax x 0 y 0`` + ``minimize`` run at the joint
-    heal (DESIGN.md §5.6, §2.6): the shared lateral cell resizes to its
+    A one-time ``fix box/relax x 0 y 0`` + ``minimize`` run as the bond
+    flow's FIRST act, on the assembled pair (DESIGN.md §5.6, §2.6; it
+    needs the joint cell, which is why it cannot ride the activation
+    stage): the shared lateral cell resizes to its
     zero-in-plane-stress size while z is left to the free surface and the
     grips, then the fix is REMOVED so the cell is frozen for the press,
     settle, and pull. This is the recorded, one-time relaxation §5.6
@@ -501,99 +503,31 @@ def grip_hold_and_readback_commands() -> list:
     ]
 
 
-# TEMPORARY SCAFFOLD (see contact_relax_commands): max distance (Å) any
-# atom may move per step during the capped settle. Exists only to keep an
-# out-of-distribution model from ejecting loose surface atoms; goes away
-# with the rest of the workaround once the seam is proven.
-_RELAX_DISPLACE_CAP = 0.05
+def heal_surface_commands(
+        member: MemberSpecification, seed: int, marker_file: str) -> list:
+    """Heal ONE activated half at the end of its cascade session (§3.4).
 
+    The cascade leaves the surface hot and littered with loosely bound
+    atoms and small fragments standing proud of it; those are what mix
+    across the interface at the first touch of a press (the 50 eV demo
+    press, 2026-08-26). So, after the projectile strip, the half is
+    RE-EQUILIBRATED under the same universal model that bombarded it —
+    per half, in vacuum, on the same engine (revised 2026-08-28, Paul):
+    the study's ``[protocol.reanneal]`` schedule holds every mobile atom
+    at ``hold_temperature`` for ``hold_duration``, cools it to the press
+    temperature over the same span, and THEN a short minimisation drops
+    the slab into a nearby 0 K minimum (PSEUDOCODE §9.7,
+    ``anneal_then_minimize``). The frozen base keeps its ``setforce``
+    hold from the cascade setup, so it neither moves nor heats.
 
-def contact_relax_commands(
-        member: MemberSpecification, seed: int, settle_steps: int) -> list:
-    """Relax the gapped, assembled pair BEFORE the press drives (§5).
+    The cascade's own integrators are already torn down by the cleanup,
+    so this installs its own thermostat on the mobile atoms only. It
+    runs at the ordinary MD step the between-impact cool-down restored.
 
-    ================================================================
-    TEMPORARY SCAFFOLD — REMOVE once the classical->trained seam is
-    proven end to end (task #8). The damped/capped/wall dance below
-    exists ONLY to keep a NOT-yet-in-distribution model (a first bulk
-    Si potential run on classically-amorphized surfaces) from ejecting
-    atoms, so the PLUMBING can be exercised on real DeePMD. It is NOT
-    the intended physics. The real design activates each surface under
-    the trained COMMITTEE (DESIGN §3.4, the deferred per-slab re-anneal
-    under DeePMD), which removes the out-of-distribution mismatch and
-    with it the need for any capping, damping, or wall here — a normal
-    relax then suffices. Do NOT build on this or treat it as the way
-    the relax should work; delete it when the seam test is green.
-    ================================================================
-
-    The 'relax' of relax-press-settle-pull. The two amorphized surfaces are
-    assembled a VACUUM GAP apart — wider than the potential cutoff — so each
-    reconstructs as an effectively FREE surface while the joined pair drops
-    into the force model's basin, letting the press begin from an in-
-    distribution contact instead of a cold, clashing one.
-
-    The surfaces were shaped by the CLASSICAL cascade, so the trained model
-    sees them OUT OF DISTRIBUTION: a few loosely-bound surface atoms carry
-    large forces, and an unconstrained minimize hurls them clean out of the
-    box (install/tests/LEDGER.md: "Lost atoms" in the relax). So — AS A
-    STOPGAP — the relax is DAMPED, displacement-CAPPED dynamics rather than
-    a minimize: no atom moves more than ``_RELAX_DISPLACE_CAP`` Å per step,
-    a Langevin bath bleeds the excess energy, and a reflecting wall backs
-    the box faces, which walks each free surface into the model's basin at
-    the press temperature without losing atoms. The later settle (after
-    contact) is what minimizes; the relax only has to make the pair
-    press-ready.
-
-    Runs on the engine the press setup already prepared: the plain interior
-    and border integrators are swapped for capped ones for the settle and
-    restored afterwards. Both grips are pinned (the bottom is already
-    setforce-held) so the vacuum gap is held; the top grip is released at
-    the end for the press drive.
-    """
-    temperature = to_metal(member.protocol.press_temperature, "temperature")
-    damping = to_metal(member.numerical.langevin_damping, "time")
-    cap = _lammps_number(_RELAX_DISPLACE_CAP)
-    return [
-        # Pin the top grip and back the box faces with a reflecting wall so
-        # nothing can leave while the OOD forces bleed off.
-        "fix relax_hold_top top_grip setforce 0.0 0.0 0.0",
-        "fix relax_wall all wall/reflect zlo EDGE zhi EDGE",
-        # Swap the plain nve integrators for displacement-CAPPED ones and
-        # damp the interior, so the force spikes dissipate without ejection.
-        "unfix nve_interior",
-        "unfix nve_border",
-        f"fix relax_cap_i interior nve/limit {cap}",
-        f"fix relax_cap_b border nve/limit {cap}",
-        f"fix relax_damp_i interior langevin {_lammps_number(temperature)} "
-        f"{_lammps_number(temperature)} {_lammps_number(damping)} {seed}",
-        f"run {max(1, settle_steps)}",
-        # Tear the capped settle down and restore the press integrators.
-        "unfix relax_cap_i",
-        "unfix relax_cap_b",
-        "unfix relax_damp_i",
-        "unfix relax_wall",
-        "fix nve_interior interior nve",
-        "fix nve_border border nve",
-        # Release the top grip so the press drive can move it downward.
-        "unfix relax_hold_top",
-    ]
-
-
-def heal_anneal_commands(member: MemberSpecification, seed: int) -> list:
-    """Settle the two activated surfaces with the study's re-anneal (§3.4).
-
-    The capped relax above only takes the edge off the cascade's leftover
-    strain; it leaves loosely bound atoms and small fragments standing
-    proud of each surface, and those are what mix first when the wafers
-    meet (Paul, 2026-08-26, the 50 eV demo press). This runs the
-    ``[protocol.reanneal]`` schedule the study file already carries —
-    hold the mobile atoms at ``hold_temperature`` for ``hold_duration``,
-    then cool to the press temperature over the same span, then a short
-    minimisation — on the ASSEMBLED pair at its wide gap, so each surface
-    heals as a free surface under the production model and its loose
-    atoms find bonds before any load is applied. Both grips stay pinned
-    (the bottom is already held) so the gap is preserved. The plain
-    integrators are restored afterwards.
+    ``marker_file`` receives the MD step at which the heal begins — a
+    one-line file written beside the recording — so a reader of the
+    activate movie can tell the cascade-hot frames from the healed ones
+    (the bootstrap harvest, PSEUDOCODE §11.3).
     """
     schedule = member.protocol.reanneal_schedule
     hold_kelvin = to_metal(schedule.hold_temperature, "temperature")
@@ -603,53 +537,24 @@ def heal_anneal_commands(member: MemberSpecification, seed: int) -> list:
         to_metal(schedule.hold_duration, "time") / timestep))
     damping = to_metal(member.numerical.langevin_damping, "time")
     return [
-        "fix heal_hold_top top_grip setforce 0.0 0.0 0.0",
-        "unfix nve_interior",
-        "unfix nve_border",
-        f"velocity interior create {_lammps_number(hold_kelvin)} {seed} "
+        # Everything the cascade could move, minus the anchored base.
+        "group heal_mobile subtract all frozen_base",
+        # The ledger marker: the step this heal begins at (§11.3).
+        f'print "$(step)" file {marker_file} screen no',
+        f"velocity heal_mobile create {_lammps_number(hold_kelvin)} {seed} "
         f"dist gaussian",
-        f"fix heal_hold interior nvt temp {_lammps_number(hold_kelvin)} "
+        f"fix heal_hold heal_mobile nvt temp {_lammps_number(hold_kelvin)} "
         f"{_lammps_number(hold_kelvin)} {_lammps_number(damping)}",
-        "fix heal_border border nve",
         f"run {hold_steps}",
         "unfix heal_hold",
-        f"fix heal_quench interior nvt temp {_lammps_number(hold_kelvin)} "
+        f"fix heal_quench heal_mobile nvt temp {_lammps_number(hold_kelvin)} "
         f"{_lammps_number(press_kelvin)} {_lammps_number(damping)}",
         f"run {hold_steps}",
         "unfix heal_quench",
-        "unfix heal_border",
         "min_style cg",
         "minimize 1e-6 1e-6 200 2000",
-        "fix nve_interior interior nve",
-        "fix nve_border border nve",
-        "unfix heal_hold_top",
     ]
 
-
-def scissors_commands(interface_z: float, delta_z: float) -> list:
-    """Cut vacuum: slide the TOP wafer down by ``delta_z`` Å, no MD (§5).
-
-    After the contact relax heals each free surface across the wide
-    assembly gap, most of that gap is empty space. A LOAD-controlled press
-    driven across it would ACCELERATE the grip into a collision (§9.3), so
-    the vacuum is removed here in one position update with NO dynamics:
-    every atom above the assembly interface plane (``interface_z``, the
-    density dividing midpoint the builder recorded) is translated down by
-    ``delta_z``, leaving the two surfaces the small ``scissors_gap`` apart
-    — the 6a starting separation — ready for the quasi-static press.
-
-    ``displace_atoms`` moves positions only; velocities are untouched, so
-    the top wafer arrives THERMALIZED from the relax, not drifting as a
-    rigid block. The relax kept the two surfaces well apart, so no atom has
-    crossed ``interface_z`` — the region cleanly selects the top wafer.
-    """
-    return [
-        f"region scissors_upper block INF INF INF INF "
-        f"{_lammps_number(interface_z)} INF units box",
-        "group scissors_upper region scissors_upper",
-        f"displace_atoms scissors_upper move 0.0 0.0 "
-        f"{_lammps_number(-delta_z)} units box",
-    ]
 
 
 def pull_drive_commands(rate: Quantity) -> list:

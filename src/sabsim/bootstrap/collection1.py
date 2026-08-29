@@ -83,7 +83,8 @@ def _generator_model(recipe: ForceModelRecipe, type_map: dict) -> ForceModel:
     """The universal model alone (no ZBL) for the calm dynamics."""
     return universal_force_model(
         type_map, recipe.generator.weights,
-        allow_unvalidated=recipe.generator.allow_unvalidated)
+        allow_unvalidated=recipe.generator.allow_unvalidated,
+        model_name=recipe.generator.model)
 
 
 # ---------------------------------------------------------------------

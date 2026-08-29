@@ -3,8 +3,8 @@
 These are the eight pipeline steps' stand-ins. Each returns a
 schema-valid placeholder artifact so a well-formed number can travel
 every seam (PSEUDOCODE.md §1); NONE of them is physics yet. Later waves
-replace each body behind its already-frozen contract: the classical
-LAMMPS press/pull for steps 6-7 first, then the real activator, the
+replace each body behind its already-frozen contract: the LAMMPS
+press/pull for steps 6-7 first, then the real activator, the
 bootstrap-trained MLIP, and the Si/SiO2 coincidence matcher
 (ARCHITECTURE.md §5.1). The signatures and the artifacts they exchange
 are the permanent part.
@@ -133,21 +133,25 @@ def activate_surfaces(
     :func:`sabsim.pipeline.live_stages.activate_surfaces_live` uses; W0
     writes nothing and opens no engine, so it ignores them.)
 
-    W0 stubs the amorphization, returning two placeholder slabs so the
-    ACTIVATED_SLABS_CONTRACT (which now checks only that both slabs are
-    present, §10.1 revised) is satisfied and the pipeline flows. The REAL
-    body is :func:`sabsim.pipeline.live_stages.activate_surfaces_live`: it
-    opens a ``LammpsEngine`` per half, re-reads the pristine half from its
-    handle's data file, runs the driver (:mod:`sabsim.driver.cascade` — the
-    CASCADE ONLY now; the heal and the §3.5 gate moved to the bond flow,
-    §3.4), and writes the amorphized half back. It is not called here because
-    it needs a compute-node engine the W0 login-node skeleton has no access
-    to. The seam does not change: the sequencer carries the
-    :class:`ActivatedSlabs` forward (§10.1).
+    W0 stubs the amorphization, returning two placeholder slabs with
+    PASSING placeholder verdicts, so the ACTIVATED_SLABS_CONTRACT (both
+    slabs present, both gates passed, §10.1) is satisfied and the
+    pipeline flows. The REAL body is
+    :func:`sabsim.pipeline.live_stages.activate_surfaces_live`: it runs
+    each half's cascade + heal as one out-of-process session
+    (:mod:`sabsim.driver.cascade`), gates the healed half (§3.5), and
+    writes it back. It is not called here because it needs a compute
+    node the W0 login-node skeleton has no access to. The seam does not
+    change: the sequencer carries the :class:`ActivatedSlabs` forward.
     """
+    from sabsim.driver.activation_gate import ActivationVerdict
     slab_a = Slab(identity=handle_a.identity, note="placeholder (wave 0)")
     slab_b = Slab(identity=handle_b.identity, note="placeholder (wave 0)")
-    return ActivatedSlabs(slab_a=slab_a, slab_b=slab_b)
+    placeholder = ActivationVerdict(
+        passed=True, activated_depth=0.0, per_metric={},
+        reason="placeholder verdict (wave 0): nothing was gated")
+    return ActivatedSlabs(slab_a=slab_a, slab_b=slab_b,
+                          verdict_a=placeholder, verdict_b=placeholder)
 
 
 def assemble_pair(

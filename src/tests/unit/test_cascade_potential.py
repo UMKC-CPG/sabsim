@@ -11,8 +11,10 @@ for the global atom map the graph network needs.
 import pytest
 
 from sabsim.driver.cascade_potential import (
+    SUPPORTED_UNIVERSAL_MODELS,
     UNIVERSAL_CASCADE_MODEL,
     resolve_cascade_generator,
+    supported_universal_model,
     universal_force_model,
 )
 
@@ -44,7 +46,7 @@ def test_universal_force_model_is_deepmd_alone_no_zbl():
 
     ZBL is a keV close-approach hard core; the §2.2 bulk relax equilibrates
     at ordinary bond lengths, so the working lattice is the pure MLIP
-    equilibrium. It is the universal sibling of ``classical_force_model``.
+    equilibrium. It is the one model the whole pipeline now runs on.
     """
     force_model = universal_force_model(
         {"O": 1, "Si": 2}, FAKE_MODEL_PATH, allow_unvalidated=True)
@@ -72,7 +74,7 @@ def test_universal_overlay_assembles_deepmd_plus_two_zbl():
         weights_path=FAKE_MODEL_PATH, allow_unvalidated=True)
 
     # deepmd is the base sub-style, then the long core (2.0 outer) and the
-    # short core (1.2) — the same two cores the classical path carries.
+    # short core (1.2) — the two hard cores of DESIGN §3.3.
     assert force_model.pair_style == (
         f"hybrid/overlay deepmd {FAKE_MODEL_PATH} zbl 0.5 2 zbl 0.5 1.2")
 
@@ -130,6 +132,49 @@ def test_universal_model_is_not_the_tier0_failing_model():
     it without a test saying why it must not.
     """
     assert UNIVERSAL_CASCADE_MODEL.name != "DPA-2.4-7M"
+
+
+# ---------------------------------------------------------------------
+# The table of supported universal models (DESIGN §4.7, 2026-08-28): the
+# study file chooses WHICH model, the code only knows which ones it can
+# run. One row today; a new model is a new row, not a resolver edit.
+# ---------------------------------------------------------------------
+
+def test_supported_models_table_holds_the_pinned_model():
+    """The pinned DPA-3 row is in the table, and is found by its name."""
+    assert UNIVERSAL_CASCADE_MODEL in SUPPORTED_UNIVERSAL_MODELS
+    found = supported_universal_model(UNIVERSAL_CASCADE_MODEL.name)
+    assert found is UNIVERSAL_CASCADE_MODEL
+
+
+def test_unknown_universal_model_name_is_a_loud_stop():
+    """A name outside the table stops and lists what IS supported.
+
+    There is no fall-back (Paul, 2026-08-28): an unknown model must never
+    silently become the default one.
+    """
+    with pytest.raises(ValueError) as caught:
+        supported_universal_model("DPA-4-hypothetical")
+    assert "DPA-4-hypothetical" in str(caught.value)
+    assert UNIVERSAL_CASCADE_MODEL.name in str(caught.value)
+
+
+def test_resolvers_take_the_model_name_from_the_study_file():
+    """Both resolvers look the study's model name up in the table."""
+    cascade = resolve_cascade_generator(
+        SILICON_ARGON_TYPE_MAP, projectile_species={"Ar"},
+        weights_path=FAKE_MODEL_PATH, allow_unvalidated=True,
+        model_name=UNIVERSAL_CASCADE_MODEL.name)
+    assert cascade.pair_style.startswith("hybrid/overlay deepmd")
+    with pytest.raises(ValueError):
+        resolve_cascade_generator(
+            SILICON_ARGON_TYPE_MAP, projectile_species={"Ar"},
+            weights_path=FAKE_MODEL_PATH, allow_unvalidated=True,
+            model_name="not-a-supported-model")
+    with pytest.raises(ValueError):
+        universal_force_model(
+            {"Si": 1}, FAKE_MODEL_PATH, allow_unvalidated=True,
+            model_name="not-a-supported-model")
 
 
 def test_universal_zbl_cores_cover_every_pair_once():
