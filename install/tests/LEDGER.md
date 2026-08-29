@@ -1460,3 +1460,41 @@ dumped per atom; plus a `dscribe` import probe in the bundle python.)*
 - **Scope NOT covered:** a multi-species cell (per-species `R_i`,
   `w_i`); the thermal scatter of a warm cell; timing at production
   size (4000+ atoms — expected seconds).
+
+## T-36 — job 16858023 (bootstrap generate, library SELF-CHECK REFUSED) — 2026-08-29
+
+*(First build of the §3.5 environment library: `sabsim bootstrap
+generate --skip-collection2` on the silicon recipe plus its new
+`[descriptor]` block (2.6 Å first shell, order 6, scatter multiple 3),
+code 4e2441e. Harness `install/tests/t36_environment_library/`, job
+folder `jobs/bootstrap_si_lib/`, H100 g018, 32:42.)*
+
+- **Collection 1 rebuilt** (lattice derivation, static families,
+  melt-quench and 600 K NVT/NPT warm runs) and every catalogued frame
+  described through the bundle's `compute sna/atom` — 3 bulk, 3
+  surface, 30 warm NVT, 30 warm NPT, 30 melt-quench descriptor runs,
+  all clean (perfect crystal: identical 30-vectors on all 64 atoms).
+- **Halted by the self-check, exactly as designed:**
+
+  ```
+  sabsim: bootstrap halted — the environment library cannot separate
+  warm crystal from melt-quench glass at scatter multiple 3: 0.000 of
+  warm-run atoms and 0.000 of melt-quench atoms read as disordered
+  (limits 0.1 and 0.5; DESIGN §3.5)
+  ```
+
+- **Diagnosis (login-node re-analysis of the dumps).** Nearest-cold
+  descriptor distance, 600 K warm crystal: median 0.71, p90 1.39
+  (= the thermal scatter). Melt-quench glass: median 1.57, p90 2.66,
+  max 4.44. So at multiple 3 (tolerance 4.17) no glass atom is
+  flagged; and against the FULL catalogue (cold + 600 K warm +
+  surface) the glass is almost never farther than the tolerance at
+  ANY multiple (0.5 % at multiple 1) — the 600 K crystal's first-shell
+  environments overlap the glass's. Against the cold bulk alone the
+  separation is only modest (multiple 1: 10 % warm vs 57 % glass).
+  Two suspects: the warm temperature (600 K, twice the 300 K the gate
+  judges at) and the first-shell cutoff (the DESIGN §3.5 g(r) argument
+  says crystal and glass differ in the SECOND shell). T-37 measures
+  both.
+- **Scope NOT covered:** the library file (never written); the
+  activate gate on a real slab.
