@@ -397,6 +397,18 @@ record NumericalKnobs:
                                       # confirms contact, of EITHER sign
                                       # (compression, or the tension of
                                       # an already-bonded interface)
+    contact_stress_window:  integer   # chunks that running mean spans
+                                      # (§9.3, §5.2; 2026-08-28)
+    control_interval:       number    # TIME the driver advances between
+                                      # read-backs: the resolution of the
+                                      # contact test, the stage ledger and
+                                      # the settle series (§5.2)
+    press_time_budget:      number    # TIME the press may search for
+                                      # contact before reporting "no
+                                      # contact" (§9.3, §5.2)
+    settle_duration:        number    # TIME the zero-load reference
+                                      # equilibrates before its gates
+                                      # (§9.4, §5.3)
     bonded_contact_threshold: number  # contact quality above which the
                                       # verdict is "bonded" (§9.3, §5.1)
     force_average_window:   number    # pull force-average window, in grip
@@ -1917,13 +1929,22 @@ function press_and_bond(driver, member_specification):
     # closed gap means they have already bonded and pull on each other —
     # the opposite of an asperity. Gap measured surface-to-surface, NOT
     # between extremal atoms (prior art's asperity failure).
+    # The driver advances one control_interval at a time and reads back
+    # between chunks; the stress mean spans contact_stress_window chunks;
+    # the search stops at press_time_budget and REPORTS no contact (§5.2,
+    # 2026-08-28 — all three are study knobs, no longer driver constants).
     stage_steps.press_start = current_step(driver)
-    run_until(driver,
-        trailing_mean(opening_between_dividing_surfaces(driver),
-                      numerical.contact_gap_window)
-            <= numerical.contact_gap_threshold
-        and abs(running_mean_normal_stress(driver))
-            >= numerical.contact_stress_floor)
+    run_until(driver, step = numerical.control_interval,
+        budget = numerical.press_time_budget,
+        condition =
+            trailing_mean(opening_between_dividing_surfaces(driver),
+                          numerical.contact_gap_window)
+                <= numerical.contact_gap_threshold
+            and abs(trailing_mean(normal_stress(driver),
+                                  numerical.contact_stress_window))
+                >= numerical.contact_stress_floor)
+    if budget exhausted:
+        return PressOutcome{ bonded: false, ... }     # reported, §5.1
     stage_steps.contact = current_step(driver)
 
     # The HOLD at temperature is where bonding actually happens (§5.2).
@@ -1965,12 +1986,23 @@ function settle_reference(driver, press, member_specification):
     release_press_drive(driver, member_specification)
     press.stage_steps.settle_start = current_step(driver)   # ledger, §9.3
     minimize(driver)                          # to a local minimum
-    equilibrate_under_thermostat(driver)      # settle at temperature
+    # Settle at temperature for settle_duration, one control_interval at
+    # a time, reading BOTH grip reactions and the potential energy back
+    # after each chunk (§5.3, 2026-08-28: both are study knobs).
+    series = equilibrate_under_thermostat(driver, numerical.settle_duration,
+                                          numerical.control_interval)
     press.stage_steps.settle_end = current_step(driver)
     # ASSERT the press actually settled; if not, REPORT, do not integrate
-    # over it (§5.3). Force floor reuses the pull's noise floor.
-    assert net_grip_force(driver) <= numerical.noise_floor
-    assert potential_energy_drift(driver) <= numerical.reference_pe_drift
+    # over it (§5.3). The force test is the SAME statistical criterion
+    # §9.6 uses for the pull's returned force: the net grip force (top +
+    # bottom, per chunk) counts as zero when its mean lies within two
+    # standard errors of zero, floored by noise_floor for a noiseless
+    # record — never a fixed constant (revised 2026-08-28, Paul).
+    net = series.top_reaction + series.bottom_reaction     # per chunk
+    assert abs(mean(net)) <= max(2 * standard_error(net),
+                                 numerical.noise_floor)
+    assert potential_energy_drift(series.potential_energy)
+           <= numerical.reference_pe_drift
     # The location is a WRITTEN data file, because the pull restores from a
     # file on a fresh instance (§9.6); handing it the original pair data
     # would silently discard the whole press.

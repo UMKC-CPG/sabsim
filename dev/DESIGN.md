@@ -186,8 +186,10 @@ on it.
   §5.4's ladder. How the experiment is performed.
 - **Numerical** — tolerances, cutoffs, convergence criteria, the
   committee stride and persistence window of §7.3, the significance
-  levels of §7.5, the contact-gap averaging window and contact stress
-  floor of §5.2, slab thickness, cell size. How carefully we compute.
+  levels of §7.5, the contact-gap averaging window, stress window,
+  stress floor, control interval and press time budget of §5.2, the
+  settle duration of §5.3, slab thickness, cell size. How carefully we
+  compute.
 - **Ensemble** — the master seed and the realization count.
 - **Deployment** — resource class, node counts, walltime, modules. This
   lives in a *separate document* (`ARCHITECTURE.md` §4.1) and the member
@@ -2157,6 +2159,21 @@ applied in code on 2026-08-27 and are recorded here as the design.)
 (Prior art measures its gap between extremal atoms, which is exactly the
 asperity failure the stress criterion guards against; we fix both.)
 
+**The press is driven in chunks, and the chunking is a study setting
+too (revised 2026-08-28, Paul).** The driver advances the simulation a
+`control_interval` at a time (a time, ~1 ps), reads the opening and the
+stress back between chunks, and decides; that interval is the
+resolution of the contact test, of the stage ledger (§5.5), and of the
+settle's force series (§5.3), and refining it can only sharpen WHEN
+contact is declared, never move the answer. The stress confirmation
+averages over the last `contact_stress_window` chunks, the sibling of
+the opening's window. And the press may search for contact for at most
+`press_time_budget` (a time): a press that has not closed the gap and
+loaded the interface within it is REPORTED as "no contact", a
+first-class outcome (§5.1), never driven harder. Until 2026-08-28 these
+three were constants inside the driver (1000 steps, 5 chunks, 500
+chunks); §1.4 says nothing that shapes a run may hide there.
+
 The press then holds at temperature for a specified duration — the hold
 is where bonding actually happens — and the structure is relaxed to
 define the reference state of §5.3.
@@ -2174,11 +2191,24 @@ subtracts no baseline.
 SABSIM makes the reference state a gated artifact: **release the press
 load first** — remove the drive, and in load-controlled mode re-freeze
 the driven grip that was given mass in §5.2, so nothing is still pressing
-the interface — then minimize, then equilibrate under the thermostat,
-then **assert** that the net force on each grip has fallen within the
-thermal noise floor and that the potential energy has stopped drifting.
-If it has not, the press did not settle, and that is reported rather than
-integrated over. Releasing the load is not a detail: equilibrating while
+the interface — then minimize, then equilibrate under the thermostat for
+`settle_duration` (a numerical knob of the study file, revised
+2026-08-28; until then a constant of twenty chunks inside the driver),
+reading the two grip reactions and the potential energy back every
+`control_interval`, then **assert** two things. First, that the net
+force on the grips — the sum of the two reactions, which Newton's third
+law says cancels at rest — is ZERO in the statistical sense §5.5 already
+uses for the pull's returned force: its mean over the settle lies within
+two standard errors of zero, with the configured `noise_floor` as the
+floor beneath that test for a noiseless record. (Revised 2026-08-28,
+Paul: the earlier fixed test, mean force below `noise_floor`, judged a
+visibly settled 252-atom demo unsettled at 0.05 eV/Å against a thermal
+scatter several times that — LEDGER T-32; a criterion that calibrates
+itself to the noise the system actually has replaces it, and the same
+criterion now serves both places a force must be zero.) Second, that
+the potential energy has stopped drifting (`reference_pe_drift`). If
+either fails, the press did not settle, and that is reported rather
+than integrated over. Releasing the load is not a detail: equilibrating while
 the press drive is still live would settle a *loaded* state and the
 zero-load gate would pass a state that is not at zero load. The settled
 state is written to a file, because the pull restores from it on a fresh
