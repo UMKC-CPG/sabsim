@@ -77,6 +77,21 @@ def test_template_recipe_loads_with_all_six_families():
     assert "$" not in recipe.generator.weights
     assert "$" not in recipe.production_settings.paw_library
     assert recipe.production_settings.audited is False
+    # The gate's ruler (DESIGN §4.8 part 2, 2026-08-29): a physical
+    # cutoff in angstrom, the expansion order, one weight per species.
+    assert recipe.descriptor_settings.first_shell_cutoff == pytest.approx(2.6)
+    assert recipe.descriptor_settings.expansion_order == 6
+    assert recipe.descriptor_settings.species_weights == {"Si": 1.0}
+    assert recipe.gate_scatter_multiple == pytest.approx(3.0)
+
+
+def test_recipe_descriptor_must_weight_every_species(tmp_path):
+    text = _recipe_text().replace("species_weights       = { Si = 1.0 }",
+                                  "species_weights       = { O = 1.0 }")
+    path = tmp_path / "recipe.toml"
+    path.write_text(text)
+    with pytest.raises(SpecificationError, match="species_weights"):
+        load_recipe(path)
 
 
 def test_recipe_missing_key_is_rejected(tmp_path):

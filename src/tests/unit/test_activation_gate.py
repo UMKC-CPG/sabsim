@@ -5,8 +5,15 @@ references: the reference resolver (share/ lookup, missing -> all-None),
 the structural kernels (coordination, g(r), the pluggable ring backend),
 and the gate's AND-with-a-named-failure logic. A missing or unresolved
 reference must never pass, which is the no-defaults discipline made
-testable. The full activate_surface -> gate integration is covered in
-test_cascade_driver.py.
+testable.
+
+"Crystalline" is judged against an ENVIRONMENT LIBRARY (revised
+2026-08-29): the tests hand the gate descriptor vectors built by hand —
+an undamaged atom carries the library's cold neighbourhood, a damaged
+one a neighbourhood far from it — so no LAMMPS runs here, and the depth
+metric's whole-profile rule can be checked layer by layer. The real
+descriptor run is LEDGER T-35; the full activate_surface -> gate
+integration is covered in test_cascade_driver.py.
 """
 
 import numpy as np
@@ -24,6 +31,7 @@ from sabsim.driver.activation_gate import (
     non_six_ring_fraction,
     pair_correlation,
 )
+from tests.unit.support import COLD_VECTOR, THERMAL_SCATTER, hand_built_library
 
 
 def _crystal_slab(spacing=2.5, n_lateral=4, n_layers=8):
@@ -42,13 +50,27 @@ def _crystal_slab(spacing=2.5, n_lateral=4, n_layers=8):
 
 
 def _scramble_top(points, skin=6.0, magnitude=1.2, seed=0):
-    """Displace the top ``skin`` Å of atoms — a crafted amorphized skin."""
+    """Displace the top ``skin`` Å of atoms — a crafted amorphized skin.
+
+    Returns the displaced points AND the mask of the atoms displaced, so
+    a test can hand the gate the matching descriptor vectors.
+    """
     scrambled = points.copy()
     top = scrambled[:, 2] > points[:, 2].max() - skin
     generator = np.random.default_rng(seed)
     scrambled[top] += generator.uniform(
         -magnitude, magnitude, size=(int(top.sum()), 3))
-    return scrambled
+    return scrambled, top
+
+
+def _vectors(damaged_mask, seed=1):
+    """Hand-built descriptors: cold-plus-jitter, or far away if damaged."""
+    generator = np.random.default_rng(seed)
+    count = len(damaged_mask)
+    vectors = np.tile(COLD_VECTOR, (count, 1))
+    vectors[:, 1] += generator.uniform(0.0, 0.5 * THERMAL_SCATTER, count)
+    vectors[damaged_mask, 2] += 20.0 * THERMAL_SCATTER
+    return vectors
 
 
 def _lenient_references(first_peak=2.5):
@@ -65,6 +87,15 @@ def _lenient_references(first_peak=2.5):
                       "defect_fraction_max": 1.0},
         rings={"non_six_fraction_min": 0.0},
         source="test-lenient")
+
+
+def _gate(points, cell, references, damaged_mask, required_depth=0.0,
+          multiple=3.0, bin_width=2.0):
+    """Run the gate with hand-built vectors and the hand-built library."""
+    return activation_gate(
+        points, cell, ["Si"] * len(points), references, required_depth,
+        hand_built_library(), multiple, bin_width,
+        descriptor_vectors=_vectors(damaged_mask))
 
 
 # ---------------------------------------------------------------------
@@ -138,18 +169,26 @@ def test_gate_fails_with_no_reference():
     """No reference file => the gate cannot judge and does not pass."""
     points, cell = _crystal_slab()
     missing = load_activation_references({"Xx"})
-    verdict = activation_gate(points, cell, missing, required_depth=0.0)
+    verdict = _gate(points, cell, missing, np.zeros(len(points), bool))
     assert isinstance(verdict, ActivationVerdict)
     assert not verdict.passed
     assert "no activation reference" in verdict.reason
 
 
+def test_gate_needs_a_work_directory_or_vectors():
+    """Without vectors the engine must run somewhere; that must be said."""
+    points, cell = _crystal_slab()
+    with pytest.raises(ValueError, match="work_directory"):
+        activation_gate(
+            points, cell, ["Si"] * len(points), _lenient_references(),
+            0.0, hand_built_library(), 3.0, 2.0)
+
+
 def test_gate_passes_when_every_metric_passes():
     """A crafted amorphized slab clears lenient references on all metrics."""
     points, cell = _crystal_slab()
-    scrambled = _scramble_top(points)
-    verdict = activation_gate(
-        scrambled, cell, _lenient_references(), required_depth=0.0)
+    scrambled, damaged = _scramble_top(points)
+    verdict = _gate(scrambled, cell, _lenient_references(), damaged)
     assert verdict.passed
     assert verdict.activated_depth > 0.0
     assert set(verdict.per_metric) == {
@@ -160,10 +199,9 @@ def test_gate_passes_when_every_metric_passes():
 def test_gate_fails_and_names_the_failing_metric():
     """An unreachable depth target fails the gate, and the reason says so."""
     points, cell = _crystal_slab()
-    scrambled = _scramble_top(points)
-    verdict = activation_gate(
-        scrambled, cell, _lenient_references(),
-        required_depth=1000.0)                                # unreachable
+    scrambled, damaged = _scramble_top(points)
+    verdict = _gate(scrambled, cell, _lenient_references(), damaged,
+                    required_depth=1000.0)                # unreachable
     assert not verdict.passed
     assert verdict.reason.startswith("amorphization_depth")
     assert "required_activated_depth" in verdict.reason
@@ -172,66 +210,92 @@ def test_gate_fails_and_names_the_failing_metric():
 def test_unresolved_metric_never_passes():
     """A missing per-metric section leaves that metric UNRESOLVED and fails."""
     points, cell = _crystal_slab()
-    scrambled = _scramble_top(points)
+    scrambled, damaged = _scramble_top(points)
     references = ActivationReferences(
         real=False, bond_cutoff=2.9,
         gr={"first_peak": 2.5, "first_peak_tolerance": 0.5},
         coordination=None,                          # missing on purpose
         rings={"non_six_fraction_min": 0.0}, source="test-partial")
-    verdict = activation_gate(scrambled, cell, references, required_depth=0.0)
+    verdict = _gate(scrambled, cell, references, damaged)
     assert not verdict.passed
     assert verdict.per_metric["coordination"].reference == "UNRESOLVED"
 
 
 # ---------------------------------------------------------------------
-# Depth-profile robustness (the regression that halted the first
-# end-to-end run, 2026-07-21).
+# The depth profile against the library (DESIGN §3.5, 2026-08-29).
 # ---------------------------------------------------------------------
 
-def test_one_stray_atom_above_the_surface_cannot_zero_the_depth():
-    """A speck in the topmost bin must not erase a real skin.
+def _depth(points, cell, damaged, **kwargs):
+    return _gate(points, cell, _lenient_references(), damaged,
+                 **kwargs).activated_depth
 
-    The depth walk starts at the surface and stops at the first bin that
-    has returned to the bulk baseline. A cascade routinely ejects an atom
-    that lands hovering alone above the surface, and a bin holding ONE
-    atom has a defect fraction that is pure noise — it can only be 0.0 or
-    1.0. When it came up 0.0 the walk stopped before it started and the
-    gate reported a 0.0 Å skin for a slab carrying a good one, which is
-    exactly how the first full run halted with one half passing and its
-    identical twin failing.
+
+def test_depth_is_the_thickness_of_the_disordered_skin():
+    """Three top layers disordered (2.5 Å apart) => depth reaches the
+    lower edge of the 2 Å layer holding the third one."""
+    points, cell = _crystal_slab(n_layers=12)
+    damaged = points[:, 2] > points[:, 2].max() - 5.5     # top 3 layers
+    depth = _depth(points, cell, damaged)
+    # Layers of 2 Å from the surface: the third crystal layer (5 Å down)
+    # sits in the 4-6 Å layer, whose lower edge is 6 Å from the surface.
+    assert depth == pytest.approx(6.0)
+
+
+def test_a_damaged_layer_under_a_clean_one_still_counts():
+    """The WHOLE profile is scanned: a healed-clean top over a damaged
+    layer reports the deeper damage, not 0 Å (prior art's bug, T-34)."""
+    points, cell = _crystal_slab(n_layers=12)
+    surface = points[:, 2].max()
+    top_layer = points[:, 2] > surface - 1.0               # clean
+    buried = (points[:, 2] < surface - 4.0) & (
+        points[:, 2] > surface - 6.0)                      # 5 Å down
+    depth = _depth(points, cell, buried & ~top_layer)
+    assert depth == pytest.approx(6.0)
+
+
+def test_the_frozen_base_is_not_mistaken_for_damage():
+    """A pristine slab — bottom face included — has zero depth, because
+    the base's neighbourhoods are in the library, not special-cased."""
+    points, cell = _crystal_slab(n_layers=12)
+    assert _depth(points, cell, np.zeros(len(points), bool)) == 0.0
+
+
+def test_one_stray_atom_above_the_surface_cannot_zero_the_depth():
+    """A speck hovering above a real skin does not erase the skin.
+
+    There is no sparse-layer cut-off any more: the speck's own layer is
+    judged on its one atom (crystalline here), and the damaged layers
+    beneath are still found by the whole-profile scan.
     """
     points, cell = _crystal_slab(n_layers=12)
-    scrambled = _scramble_top(points, skin=6.0, seed=3)
-    references = _lenient_references()
+    scrambled, damaged = _scramble_top(points, skin=6.0, seed=3)
+    honest = _depth(scrambled, cell, damaged)
+    assert honest > 0.0, "the crafted skin must register"
 
-    honest = activation_gate(scrambled, cell, references, required_depth=0.0)
-    assert honest.activated_depth > 0.0, "the crafted skin must register"
-
-    # One atom, placed well above the surface in a bin of its own, and
-    # deliberately given NO neighbours-worth of company.
     surface = scrambled[:, 2].max()
     speck = np.vstack([scrambled, [[0.0, 0.0, surface + 3.0]]])
+    with_speck = _depth(speck, cell, np.append(damaged, False))
+    # Measured from the speck, the skin is 3 Å further down, so the
+    # depth grows by the speck's height — never collapses to zero.
+    assert with_speck == pytest.approx(honest + 3.0, abs=2.0)
+    assert with_speck > honest
 
-    with_speck = activation_gate(speck, cell, references, required_depth=0.0)
-    assert with_speck.activated_depth == pytest.approx(
-        honest.activated_depth, abs=1e-9), (
-        "a single hovering atom changed the measured skin depth from "
-        f"{honest.activated_depth} to {with_speck.activated_depth}")
 
-
-def test_a_populated_bin_at_baseline_still_stops_the_walk():
-    """Skipping sparse bins must not make the scan run away downward.
-
-    The counterpart to the test above: the fix must ignore only bins too
-    sparse to judge, never a well-populated one that has genuinely
-    returned to the crystalline baseline — otherwise the measurement
-    would happily report the whole slab as amorphized.
-    """
+def test_baseline_follows_the_scatter_multiple():
+    """A tight multiple flags jittered-but-crystalline atoms as
+    disordered everywhere; the baseline rises with them, so a pristine
+    slab still reads as 0 Å rather than as fully amorphized."""
     points, cell = _crystal_slab(n_layers=12)
-    scrambled = _scramble_top(points, skin=6.0, seed=3)
-    verdict = activation_gate(
-        scrambled, cell, _lenient_references(), required_depth=0.0)
+    tight = _depth(points, cell, np.zeros(len(points), bool),
+                   multiple=0.2)
+    assert tight == 0.0
 
-    slab_thickness = float(points[:, 2].max() - points[:, 2].min())
-    assert verdict.activated_depth < slab_thickness, (
-        "the skin must stop at the crystalline bulk, not swallow the slab")
+
+def test_depth_layer_width_is_the_study_knob():
+    """A thinner layer resolves the same skin more finely."""
+    points, cell = _crystal_slab(n_layers=12)
+    damaged = points[:, 2] > points[:, 2].max() - 5.5
+    coarse = _depth(points, cell, damaged, bin_width=4.0)
+    fine = _depth(points, cell, damaged, bin_width=1.0)
+    assert coarse == pytest.approx(8.0)
+    assert fine == pytest.approx(6.0)

@@ -2,11 +2,24 @@
 
 This is Phase 2 of surface activation: the formal pass/fail gate that
 replaces Phase 1's stand-in `activation_disorder_check`. It judges the
-re-annealed surface with a registry of structural metrics (DESIGN §3.5),
+healed surface with a registry of structural metrics (DESIGN §3.5),
 each measuring one property and comparing it against a reference with a
 threshold; the gate is the AND over all of them. The four metrics are the
 radial pair-correlation g(r), the coordination-number distribution, the
 ring statistics, and a robust amorphization-depth profile.
+
+**What "crystalline" means (revised 2026-08-29).** The depth metric no
+longer rests on a hand-set neighbour count. Every atom of the healed
+slab is described by its first-shell bispectrum
+(:mod:`sabsim.driver.descriptors`) and compared with the ENVIRONMENT
+LIBRARY of the undamaged material that the bootstrap manufactured
+(:mod:`sabsim.driver.environment_library`): an atom whose neighbourhood
+exists nowhere in that library, within the library's own thermal
+scatter times the study's ``disorder_scatter_multiple``, is DISORDERED.
+That per-atom verdict is computed ONCE here and shared by every metric
+through the :class:`GateContext`, so no two metrics can disagree about
+which atoms are disordered. The coordination and ring metrics are v1
+survivors still on the neighbour count; a follow-on re-bases them.
 
 Three design commitments from DESIGN §3.5 show up directly here:
 
@@ -39,6 +52,13 @@ from pathlib import Path
 
 import networkx as nx
 import numpy as np
+
+from sabsim.driver.descriptors import describe_structure
+from sabsim.driver.environment_library import (
+    EnvironmentLibrary,
+    disordered_atoms,
+    false_alarm_rate,
+)
 
 
 # ---------------------------------------------------------------------
@@ -333,21 +353,18 @@ class GateControl:
 
     ``near_surface_window`` is the skin-region thickness the coordination
     and ring metrics work in (so the crystalline bulk does not dilute the
-    signal and the ring search stays small); ``depth_bin_width`` bins the
-    depth profile; the ``gr_*`` settings size the g(r) histogram; and
-    ``max_ring_size`` caps the ring search.
+    signal and the ring search stays small); the ``gr_*`` settings size
+    the g(r) histogram; and ``max_ring_size`` caps the ring search.
 
-    ``min_bin_atoms`` is the smallest population a depth bin may have and
-    still be JUDGED. A bin holding one or two atoms has a defect fraction
-    that is pure coin-flip noise — it can only be 0.0 or 1.0 — and the
-    cascade routinely leaves a stray atom or two hovering above the
-    surface in a bin of their own. Ten is comfortably below a normal
-    bin's population here (~150 atoms) while excluding those specks.
+    The depth profile's layer thickness and its "too sparse to judge"
+    cut-off used to live here too. Both shaped the measurement, so
+    neither could hide in an engineering record (DESIGN §1.4): the layer
+    thickness is now the study's ``depth_bin_width`` and the cut-off is
+    GONE — the disorder verdict is per atom, so a layer of four atoms is
+    four verdicts, not noise (DESIGN §3.5, revised 2026-08-29).
     """
 
     near_surface_window: float = 15.0     # Å, the skin region
-    depth_bin_width: float = 2.0          # Å, depth-profile bin
-    min_bin_atoms: int = 10               # ignore statistically empty bins
     gr_r_max: float = 6.0                 # Å, g(r) range
     gr_bin_width: float = 0.05            # Å, g(r) bin
     max_ring_size: int = 9                # cap on the ring search
@@ -355,21 +372,34 @@ class GateControl:
 
 @dataclass(frozen=True)
 class GateContext:
-    """Precomputed quantities shared by the metrics (efficiency).
+    """Everything a metric may want, in ONE record (PSEUDOCODE §10.6).
 
-    The coordination count and the crystalline reference are computed ONCE
-    here and reused by the coordination and depth metrics, rather than each
-    metric recomputing the O(N^2) neighbour list. The ring metric builds
-    its own (near-surface) graph.
+    Built once by :func:`activation_gate` and handed to every metric's
+    ``evaluate(context)``, so the v1 survivors and the library-based
+    metrics share a signature. The coordination count is computed ONCE
+    here and reused by the coordination metric rather than recomputing
+    the O(N^2) neighbour list; the per-atom DISORDER verdict against the
+    environment library is likewise computed once (``disordered``) so no
+    two metrics can disagree about which atoms are disordered. The ring
+    metric builds its own (near-surface) graph.
     """
 
     positions: np.ndarray
     cell: np.ndarray
+    symbols: tuple                        # element symbol per atom
+    references: ActivationReferences      # the material's share/ file
+    control: GateControl                  # engineering settings
     bond_cutoff: float
     coordination: np.ndarray
     reference_coordination: int
-    is_defect: np.ndarray
+    is_defect: np.ndarray                 # v1 survivors' neighbour test
     near_surface: np.ndarray              # boolean mask of the skin atoms
+    # The library verdict: True = DISORDERED, one per atom (DESIGN §3.5,
+    # revised 2026-08-29), and what it was judged against.
+    disordered: np.ndarray
+    library: EnvironmentLibrary
+    disorder_scatter_multiple: float      # study knob: the tolerance
+    depth_bin_width: float                # study knob: the profile layer (Å)
     # How deep the study REQUIRES the activated skin to reach (Å): the
     # depth metric's threshold, from the study file's [protocol.activation]
     # required_activated_depth — not from the material reference (DESIGN
@@ -409,9 +439,8 @@ class RadialDistributionMetric:
 
     name = "radial_distribution"
 
-    def evaluate(self, context: GateContext,
-                 references: ActivationReferences,
-                 control: GateControl) -> MetricVerdict:
+    def evaluate(self, context: GateContext) -> MetricVerdict:
+        references, control = context.references, context.control
         if references.gr is None:
             return _unresolved(self.name)
         curve = pair_correlation(
@@ -431,13 +460,16 @@ class RadialDistributionMetric:
 
 
 class CoordinationMetric:
-    """Defect fraction in the skin, within an amorphous band (§3.5)."""
+    """Defect fraction in the skin, within an amorphous band (§3.5).
+
+    A v1 SURVIVOR on the hand-set neighbour count (DESIGN §3.5, revised
+    2026-08-29): a follow-on re-bases it on ``context.disordered``.
+    """
 
     name = "coordination"
 
-    def evaluate(self, context: GateContext,
-                 references: ActivationReferences,
-                 control: GateControl) -> MetricVerdict:
+    def evaluate(self, context: GateContext) -> MetricVerdict:
+        references = context.references
         if references.coordination is None:
             return _unresolved(self.name)
         skin = context.near_surface
@@ -454,13 +486,16 @@ class CoordinationMetric:
 
 
 class RingStatisticsMetric:
-    """Non-six-ring fraction in the skin, via the pluggable backend (§3.5)."""
+    """Non-six-ring fraction in the skin, via the pluggable backend (§3.5).
+
+    A v1 SURVIVOR, silicon-shaped (six-membered rings are the crystal's
+    signature); a follow-on re-bases it on the disorder score.
+    """
 
     name = "ring_statistics"
 
-    def evaluate(self, context: GateContext,
-                 references: ActivationReferences,
-                 control: GateControl) -> MetricVerdict:
+    def evaluate(self, context: GateContext) -> MetricVerdict:
+        references, control = context.references, context.control
         if references.rings is None:
             return _unresolved(self.name)
         skin_indices = np.where(context.near_surface)[0]
@@ -480,83 +515,75 @@ class RingStatisticsMetric:
 
 
 class AmorphizationDepthMetric:
-    """Return-to-baseline amorphization depth (§3.5); supplies the depth."""
+    """Whole-profile amorphization depth against the library (§3.5).
+
+    Supplies the MEASURED ``activated_depth`` that the slab builder only
+    estimated a-priori (§2.5) and that labels the activated skin.
+    """
 
     name = "amorphization_depth"
 
-    def evaluate(self, context: GateContext,
-                 references: ActivationReferences,
-                 control: GateControl) -> MetricVerdict:
-        depth = self._depth(context, control)
+    def evaluate(self, context: GateContext) -> MetricVerdict:
+        depth = self._depth(context)
         target = float(context.required_depth)
         return MetricVerdict(
             name=self.name, measured=depth,
             reference="study: required_activated_depth",
             threshold=target, passed=depth >= target)
 
-    def _depth(self, context: GateContext, control: GateControl) -> float:
-        """The skin depth: contiguous-from-surface above the bulk baseline.
+    def _depth(self, context: GateContext) -> float:
+        """The skin depth: the deepest layer still above the baseline.
 
-        Bin the coordination-defect fraction by depth, take the bulk
-        baseline from the deep third, and measure from the free surface
-        down the contiguous region whose defect fraction stays above the
-        baseline — using the whole profile and ignoring the frozen BOTTOM
-        surface (also under-coordinated), the robust replacement for prior
-        art's stop-at-first-crystalline scan (DESIGN §3.5).
+        Slice the slab into horizontal layers of ``depth_bin_width`` from
+        the free surface (the highest atom) down to the lowest atom, and
+        take each layer's fraction of DISORDERED atoms — the library
+        verdict, one per atom. The depth is the distance from the free
+        surface to the LOWER edge of the DEEPEST layer whose fraction
+        exceeds the baseline, scanning the WHOLE profile: a damaged layer
+        under a healed-clean one still counts. That is DESIGN §3.5's
+        return-to-baseline rule, and it replaces two earlier scans that
+        both stopped at the first crystalline-looking layer — prior art's
+        (its 0 Å bug) and the Phase-1 top-contiguous walk (LEDGER T-34's
+        half B: 0.0 Å reported beneath a visibly disordered skin).
 
-        SPARSE BINS ARE SKIPPED, NOT OBEYED. A cascade routinely leaves a
-        stray atom or two hovering above the surface, alone in the topmost
-        bin. Such a bin's defect fraction is noise, but the walk below
-        starts at the top, so treating it as a real reading let ONE atom
-        end the scan before it began and report a 0.0 Å skin for a slab
-        carrying a perfectly good 10 Å one. (That is not hypothetical: it
-        halted the first end-to-end run, 2026-07-21.) A bin too sparse to
-        judge therefore neither confirms the skin nor terminates it — the
-        walk passes straight through it — and only a POPULATED bin that
-        has returned to baseline stops the scan.
-
-        The surface is likewise taken as the top of the highest populated
-        bin rather than the highest atom, so a floating speck cannot
-        inflate the depth it is not part of.
+        The BASELINE is not measured on the damaged slab: it is the
+        library's own false-alarm rate — what the tolerance flags in a
+        slab that was never bombarded — at the study's scatter multiple,
+        the largest over the species present. (The earlier "deep third of
+        the slab" baseline included the frozen bottom face, whose atoms
+        are under-coordinated by construction, and the polluted baseline
+        swallowed the real skin.) Every layer is judged; there is no
+        sparse-layer cut-off, because the disorder score is per atom and
+        a layer of four atoms is four verdicts, not noise. An empty layer
+        has fraction zero and simply does not count as damaged.
         """
         z = context.positions[:, 2]
-        low, high = float(z.min()), float(z.max())
-        width = control.depth_bin_width
-        edges = np.arange(low, high + width, width)
+        surface = float(z.max())
+        bottom = float(z.min())
+        width = float(context.depth_bin_width)
+        if width <= 0.0:
+            raise ValueError("depth_bin_width must be positive")
 
-        # (lower edge, population, defect fraction) per bin.
-        profile = []
-        for lower, upper in zip(edges[:-1], edges[1:]):
-            in_bin = (z >= lower) & (z < upper)
-            count = int(in_bin.sum())
-            fraction = float(context.is_defect[in_bin].mean()) if count else 0.0
-            profile.append((lower, count, fraction))
+        baseline = max(
+            false_alarm_rate(context.library, species,
+                             context.disorder_scatter_multiple)
+            for species in set(context.symbols))
 
-        populated = [entry for entry in profile
-                     if entry[1] >= control.min_bin_atoms]
-        if not populated:
-            return 0.0
-
-        # The free surface: the top of the highest bin holding real
-        # material, not the z of the highest stray atom.
-        surface = min(populated[-1][0] + width, high)
-
-        deep_cut = low + (high - low) / 3.0
-        deep = [fraction for lower, _count, fraction in populated
-                if lower < deep_cut]
-        baseline = (float(np.mean(deep)) if deep else 0.0) + 0.05
-
-        depth = 0.0
-        for lower, count, fraction in reversed(profile):   # surface downward
-            if lower >= surface:
-                continue                      # above the material
-            if count < control.min_bin_atoms:
-                continue                      # too sparse to mean anything
+        deepest_damaged_edge = None
+        layer_top = surface
+        while layer_top > bottom:
+            layer_bottom = layer_top - width
+            in_layer = (z > layer_bottom) & (z <= layer_top)
+            count = int(in_layer.sum())
+            fraction = (float(context.disordered[in_layer].mean())
+                        if count else 0.0)
             if fraction > baseline:
-                depth = surface - lower
-            else:
-                break
-        return depth
+                deepest_damaged_edge = layer_bottom
+            layer_top = layer_bottom
+        if deepest_damaged_edge is None:
+            return 0.0
+        # The lower edge cannot lie below the slab itself.
+        return surface - max(deepest_damaged_edge, bottom)
 
 
 ACTIVATION_METRICS = [
@@ -574,49 +601,83 @@ ACTIVATION_METRICS = [
 def activation_gate(
         positions: np.ndarray,
         cell: np.ndarray,
+        symbols,
         references: ActivationReferences,
         required_depth: float,
-        control: GateControl = GateControl()) -> ActivationVerdict:
+        library: EnvironmentLibrary,
+        disorder_scatter_multiple: float,
+        depth_bin_width: float,
+        work_directory: str | None = None,
+        control: GateControl = GateControl(),
+        descriptor_vectors: np.ndarray | None = None) -> ActivationVerdict:
     """Judge a healed slab with every registered metric (§10.6).
 
-    Builds the shared context (coordination, crystalline self-reference,
-    skin mask, the study's depth requirement), runs each metric, and
-    passes iff EVERY metric passes, naming the first failure. The depth
-    metric supplies ``activated_depth`` and judges it against
-    ``required_depth`` — the study file's ``[protocol.activation]
-    required_activated_depth`` in Å, the one threshold that is a study
-    choice rather than a material reference (DESIGN §3.5, revised
-    2026-08-28). With no reference at all (a missing file), every
-    material metric is UNRESOLVED and the gate fails — a stand-in is
-    never silently defaulted.
+    Describes every atom of the slab with the SAME descriptor engine and
+    settings the library was built with, decides per atom whether its
+    neighbourhood exists in the undamaged material (``disordered``), and
+    builds the one :class:`GateContext` every metric reads. Passes iff
+    EVERY metric passes, naming the first failure. The depth metric
+    supplies ``activated_depth`` and judges it against ``required_depth``
+    — the study file's ``[protocol.activation] required_activated_depth``
+    in Å; ``disorder_scatter_multiple`` and ``depth_bin_width`` are the
+    study's two numerical knobs for this gate (DESIGN §3.5). With no
+    material reference at all (a missing file), every reference-based
+    metric is UNRESOLVED and the gate fails — a stand-in is never
+    silently defaulted.
+
+    ``work_directory`` is where the descriptor engine runs its
+    out-of-process LAMMPS call; ``descriptor_vectors`` lets a caller that
+    already has the slab's descriptors (or a test with no LAMMPS) hand
+    them in instead.
     """
     positions = np.asarray(positions, float)
+    symbols = tuple(str(symbol) for symbol in symbols)
     if positions.shape[0] == 0:
         return ActivationVerdict(
             passed=False, activated_depth=0.0, per_metric={},
             reason="no atoms to judge")
+    if len(symbols) != positions.shape[0]:
+        raise ValueError(
+            f"{positions.shape[0]} positions but {len(symbols)} symbols")
     if references.bond_cutoff is None:
         return ActivationVerdict(
             passed=False, activated_depth=0.0, per_metric={},
             reason=f"no activation reference found ({references.source})")
 
     cell = np.asarray(cell, float)
+    if descriptor_vectors is None:
+        if work_directory is None:
+            raise ValueError(
+                "activation_gate needs a work_directory for the descriptor "
+                "engine when no descriptor_vectors are supplied")
+        descriptor_vectors = describe_structure(
+            positions, cell, list(symbols), library.settings,
+            work_directory, "gate")
+    disordered = disordered_atoms(
+        descriptor_vectors, symbols, library, disorder_scatter_multiple)
+
     coordination = coordination_numbers(
         positions, cell, references.bond_cutoff)
     reference_coordination = _reference_coordination(positions, coordination)
     surface_high = float(positions[:, 2].max())
     context = GateContext(
-        positions=positions, cell=cell, bond_cutoff=references.bond_cutoff,
+        positions=positions, cell=cell, symbols=symbols,
+        references=references, control=control,
+        bond_cutoff=references.bond_cutoff,
         coordination=coordination,
         reference_coordination=reference_coordination,
         is_defect=coordination != reference_coordination,
         near_surface=positions[:, 2] > surface_high
         - control.near_surface_window,
+        disordered=np.asarray(disordered, dtype=bool),
+        library=library,
+        disorder_scatter_multiple=float(disorder_scatter_multiple),
+        depth_bin_width=float(depth_bin_width),
         required_depth=float(required_depth))
 
     per_metric = {}
     for metric in ACTIVATION_METRICS:
-        per_metric[metric.name] = metric.evaluate(context, references, control)
+        per_metric[metric.name] = metric.evaluate(context)
 
     depth_verdict = per_metric["amorphization_depth"]
     activated_depth = float(depth_verdict.measured or 0.0)

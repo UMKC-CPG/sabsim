@@ -117,6 +117,12 @@ class ProtocolKnobs:
     # study choice tied to the dose above, not a material property
     # (DESIGN.md §3.5, revised 2026-08-28).
     required_activated_depth: Quantity
+    # The environment library the §3.5 gate judges "crystalline" against
+    # (DESIGN §3.5, 2026-08-29): the path of the bootstrap-made pair
+    # (``environment_library.toml`` + ``.npz``), roots expanded by the
+    # loader like the weights. A run-time input of the activate job, never
+    # written by hand (ARCHITECTURE §2.3).
+    environment_library: str
     cascade_duration: Quantity       # NVE cascade time per impact (§3.3)
     between_impact_relaxation: Quantity   # border-cool between impacts
     reanneal_schedule: AnnealSchedule     # the post-cascade re-anneal
@@ -181,6 +187,13 @@ class NumericalKnobs:
     control_interval: Quantity       # time between driver read-backs
     press_time_budget: Quantity      # contact search limit (a time)
     settle_duration: Quantity        # zero-load equilibration span
+    # The §3.5 gate's two measurement knobs (DESIGN §3.5, 2026-08-29):
+    # the thickness of one horizontal layer of the disorder-versus-depth
+    # profile, and how many library thermal scatters away an atom's
+    # neighbourhood may sit and still count as crystalline. Both are
+    # numerical by §1.2's test: refine them and the depth must converge.
+    depth_bin_width: Quantity        # depth-profile layer thickness
+    disorder_scatter_multiple: float # tolerance, in thermal scatters
     bonded_contact_threshold: float  # contact quality above which "bonded"
     reference_pe_drift: Quantity     # max PE drift for a settled reference
 

@@ -73,6 +73,7 @@ from sabsim.driver.cascade_subprocess import (
     read_dump_structure,
     run_activate_subprocess,
 )
+from sabsim.driver.environment_library import load_environment_library
 from sabsim.driver.commands import (
     CascadeGeometry,
     ForceModel,
@@ -594,8 +595,14 @@ def activate_one_half(
         member: MemberSpecification,
         seed: int,
         output_directory: str,
-        comm=None) -> tuple:
+        comm=None,
+        library=None) -> tuple:
     """Cascade, heal and GATE one half, out-of-process (§10.1, §3.4).
+
+    ``library`` is the study's environment library (loaded ONCE per
+    activate job by :func:`activate_surfaces_live`); when a caller
+    passes none it is loaded here, so a single-half invocation still
+    works.
 
     The cascade runs on the universal foundation MLIP, which lives in
     deepmd's own self-contained bundle and cannot load into this process
@@ -611,6 +618,8 @@ def activate_one_half(
     """
     built = read_standalone_half(
         handle.data_file, handle.type_map, handle.identity)
+    if library is None:
+        library, _warnings = load_environment_library(member)
     # The universal cascade force model (deepmd + ZBL); it refuses unless the
     # run opted into the not-yet-gate-cleared model (§4.7).
     cascade_force_model = resolve_cascade_generator(
@@ -664,12 +673,28 @@ def activate_one_half(
     # The §3.5 gate, on the HEALED half (§3.4, revised 2026-08-28). The
     # dump is substrate-only (the projectile was stripped before the
     # heal) with its free surface on top, exactly as the gate's metrics
-    # assume; the reference is keyed by THIS wafer's declared species.
+    # assume; the reference is keyed by THIS wafer's declared species,
+    # and "crystalline" is judged against the study's environment
+    # library (revised 2026-08-29): the descriptor engine runs its own
+    # out-of-process bundle call on rank 0 and every rank reads back.
     species = frozenset(handle.type_map) - _projectile_species(member)
+    symbol_of_type = {type_id: symbol
+                      for symbol, type_id in handle.type_map.items()}
+    symbols = [symbol_of_type[int(type_id)] for type_id in type_ids]
+    gate_directory = os.path.join(output_directory, f"gate_{role}")
+    if rank == 0:
+        os.makedirs(gate_directory, exist_ok=True)
+    if comm is not None:
+        comm.Barrier()
     verdict = activation_gate(
-        positions, np.asarray(cell, dtype=float),
+        positions, np.asarray(cell, dtype=float), symbols,
         load_activation_references(species),
-        to_metal(member.protocol.required_activated_depth, "distance"))
+        to_metal(member.protocol.required_activated_depth, "distance"),
+        library, member.numerical.disorder_scatter_multiple,
+        to_metal(member.numerical.depth_bin_width, "distance"),
+        work_directory=gate_directory,
+        descriptor_vectors=_describe_on_one_rank(
+            positions, cell, symbols, library, gate_directory, comm))
     amorphized_atoms = amorphized_half_from_arrays(
         positions, type_ids, cell, handle.type_map, handle.wafer_tag)
     amorphized_file = os.path.join(
@@ -680,6 +705,26 @@ def activate_one_half(
     if comm is not None:
         comm.Barrier()
     return cascade_outcome, amorphized_file, verdict, heal_start_step
+
+
+def _describe_on_one_rank(
+        positions, cell, symbols, library, gate_directory, comm):
+    """Run the descriptor engine on rank 0 and share its vectors.
+
+    The engine is one out-of-process bundle ``lmp`` call, like the
+    cascade: one rank drives it and the others receive the result by
+    broadcast, so every rank judges the identical verdict (§4.1).
+    """
+    from sabsim.driver.descriptors import describe_structure
+    rank = comm.Get_rank() if comm is not None else 0
+    vectors = None
+    if rank == 0:
+        vectors = describe_structure(
+            positions, np.asarray(cell, dtype=float), symbols,
+            library.settings, gate_directory, "gate")
+    if comm is not None:
+        vectors = comm.bcast(vectors, root=0)
+    return vectors
 
 
 def _read_heal_marker(marker_path: str) -> int | None:
@@ -709,10 +754,18 @@ def activate_surfaces_live(
     activation before anything is assembled.
     """
     half_seeds = derive_seeds(member.ensemble.master_seed, 2)
+    # The environment library the §3.5 gate judges against, loaded and
+    # checked ONCE for both halves (DESIGN §3.5, 2026-08-29); its
+    # temperature warning, if any, is said out loud before any cascade.
+    library, warnings = load_environment_library(member)
+    rank = comm.Get_rank() if comm is not None else 0
+    if rank == 0:
+        for warning in warnings:
+            print(f"sabsim: WARNING — {warning}", flush=True)
     _outcome_a, amorphized_a, verdict_a, heal_a = activate_one_half(
-        handle_a, member, half_seeds[0], scratch_directory, comm)
+        handle_a, member, half_seeds[0], scratch_directory, comm, library)
     _outcome_b, amorphized_b, verdict_b, heal_b = activate_one_half(
-        handle_b, member, half_seeds[1], scratch_directory, comm)
+        handle_b, member, half_seeds[1], scratch_directory, comm, library)
 
     # Each wafer's DECLARED material species: the half's pre-cascade type
     # map minus the projectile beam. This is what the §3.5 gate keys the

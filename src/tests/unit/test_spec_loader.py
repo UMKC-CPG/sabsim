@@ -83,6 +83,29 @@ def test_template_values_map_to_the_schema_fields():
     assert len(member.numerical.pull_rate_ladder) == 3
 
 
+def test_environment_library_and_gate_knobs_are_parsed():
+    """The §3.5 gate's inputs are study settings, not hidden constants
+    (revised 2026-08-29): the library path (roots expanded), the depth
+    profile's layer thickness, and the scatter multiple."""
+    study = load_and_validate_study(_TEMPLATE_PATH)
+    member = study.members[0]
+    assert "$" not in member.protocol.environment_library
+    assert member.protocol.environment_library.endswith(
+        "environment_libraries/silicon")
+    assert member.numerical.depth_bin_width.value == pytest.approx(2.0)
+    assert member.numerical.depth_bin_width.unit == "angstrom"
+    assert member.numerical.disorder_scatter_multiple == pytest.approx(3.0)
+
+
+def test_missing_gate_knob_is_rejected(tmp_path):
+    """No hidden default for the scatter multiple (DESIGN §1.4)."""
+    broken = _drop_lines_containing(
+        _template_text(), "disorder_scatter_multiple = 3.0")
+    spec_path = _write_spec(tmp_path, broken)
+    with pytest.raises(SpecificationError, match="disorder_scatter_multiple"):
+        load_and_validate_study(spec_path)
+
+
 def test_relation_is_computed_not_deleted():
     """The single ratio relation loads and is flagged not-confounded."""
     study = load_and_validate_study(_TEMPLATE_PATH)

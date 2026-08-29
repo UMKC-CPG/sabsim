@@ -10,9 +10,11 @@ under ``bootstrap/<recipe name>/`` (the same mirror discipline as a
 study run, :mod:`sabsim.deploy.scratch`).
 
 * ``generate``  builds Collection 1 (runs the generator model's short
-  dynamics out-of-process — a compute-node step) and harvests
-  Collection 2 from the member run the recipe names; writes every
-  structure to ``structures.extxyz``.
+  dynamics out-of-process — a compute-node step), writes the
+  ENVIRONMENT LIBRARY the §3.5 gate judges against beside it
+  (``collection1/environment_library.{npz,toml}``, PSEUDOCODE §11.3),
+  and harvests Collection 2 from the member run the recipe names;
+  writes every structure to ``structures.extxyz``.
 * ``label``     selects the labelling subset, writes one VASP directory
   per structure and one SLURM job array; submits nothing.
 * ``harvest``   reads the finished calculations, drops what did not
@@ -74,12 +76,15 @@ def generate(recipe_path: str, job_directory: str,
     check_recipe_references(recipe)
     out_dir = bootstrap_directory(job_directory, recipe)
     structures: list = []
+    summary: dict = {}
     if collection1:
-        structures += build_collection1(recipe, out_dir / "collection1")
+        calm, library_manifest = build_collection1(
+            recipe, out_dir / "collection1")
+        structures += calm
+        summary["environment_library"] = str(library_manifest)
     if collection2:
         structures += harvest_collection2(recipe)
     _write_structures(structures, out_dir / STRUCTURES_FILE)
-    summary: dict = {}
     for family, _, _ in structures:
         summary[family] = summary.get(family, 0) + 1
     return summary

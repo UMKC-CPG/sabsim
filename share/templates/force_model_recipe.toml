@@ -34,6 +34,29 @@ reference_data_ref = "share/activation/Si.toml"
 # (melt-quench, warm runs) and derives the working lattice (§2.2). The
 # same model, under the same name, that the study file's [potential]
 # block names; the identity must match the one pinned in the code.
+# ---------------------------------------------------------------------
+# The gate's RULER (DESIGN §3.5 / §4.8 part 2, 2026-08-29). The §3.5
+# activation gate calls an atom crystalline when its first-shell
+# bispectrum matches some neighbourhood of the UNDAMAGED material in
+# the environment library this recipe's Collection 1 builds. These
+# settings describe that neighbourhood, and they are recorded in the
+# library so the gate reuses them — never a copy of its own. The cutoff
+# is a PHYSICAL length just past the first neighbour shell and short of
+# the second (silicon: 2.35 A in, 3.84 A out); LAMMPS's own parameters
+# (rcutfac, per-species radii) are derived from it by the engine
+# adapter. `expansion_order` is LAMMPS's twojmax (6 -> 30 components per
+# atom, LEDGER T-35); `species_weights` tells unlike species apart
+# inside one descriptor. `gate_scatter_multiple` is the tolerance the
+# library is self-checked at: nearly every warm-run atom must read as
+# crystalline and nearly every melt-quench atom as disordered, or
+# `generate` refuses to write the library.
+# ---------------------------------------------------------------------
+[descriptor]
+first_shell_cutoff    = { value = 2.6, unit = "angstrom" }
+expansion_order       = 6
+species_weights       = { Si = 1.0 }
+gate_scatter_multiple = 3.0
+
 [generator]
 model             = "DPA-3.1-3M"
 weights           = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"

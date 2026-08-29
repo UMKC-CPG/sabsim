@@ -193,6 +193,9 @@ def _protocol_from_tables(protocol: dict, context: str) -> ProtocolKnobs:
             activation, "fluence", act_ctx),
         required_activated_depth=_require_quantity(
             activation, "required_activated_depth", act_ctx),
+        environment_library=_expand_roots(
+            str(_require(activation, "environment_library", act_ctx)),
+            f"{act_ctx} -> environment_library"),
         cascade_duration=_require_quantity(
             activation, "cascade_duration", act_ctx),
         between_impact_relaxation=_require_quantity(
@@ -271,6 +274,10 @@ def _numerical_from_table(table: dict, context: str) -> NumericalKnobs:
             table, "press_time_budget", context),
         settle_duration=_require_quantity(
             table, "settle_duration", context),
+        depth_bin_width=_require_quantity(
+            table, "depth_bin_width", context),
+        disorder_scatter_multiple=float(_require(
+            table, "disorder_scatter_multiple", context)),
         bonded_contact_threshold=float(_require(
             table, "bonded_contact_threshold", context)),
         reference_pe_drift=_require_quantity(

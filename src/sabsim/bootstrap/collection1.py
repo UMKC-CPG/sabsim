@@ -41,6 +41,10 @@ from sabsim.driver.bulk_relax import (
 )
 from sabsim.driver.cascade_potential import universal_force_model
 from sabsim.driver.cascade_subprocess import run_activate_subprocess
+from sabsim.driver.environment_library import (
+    build_environment_library,
+    write_environment_library,
+)
 from sabsim.driver.commands import ForceModel, force_model_commands, to_metal
 from sabsim.spec.references import resolve_crystal_file
 from sabsim.structure.slab_builder import (
@@ -343,8 +347,18 @@ def warm_run_family(
     return structures
 
 
-def build_collection1(recipe: ForceModelRecipe, work_dir: Path) -> list:
-    """All six families, in order; returns ``(family, source, Atoms)``."""
+def build_collection1(recipe: ForceModelRecipe, work_dir: Path) -> tuple:
+    """All six families, in order, AND the environment library.
+
+    Returns ``(structures, library_manifest_path)``: the ``(family,
+    source, Atoms)`` triples, and the path of the library's TOML
+    sidecar. The same six families also yield the ENVIRONMENT LIBRARY
+    the §3.5 gate judges against (DESIGN §4.8 part 2, 2026-08-29): the
+    cold bulk, the clean surfaces and the warm runs are catalogued, the
+    melt-quench family is the self-check, and the pair of files
+    (``environment_library.npz`` + ``.toml``) is written beside the
+    collection under ``work_dir`` (PSEUDOCODE §11.2/§11.3).
+    """
     lattices = derive_phase_lattices(recipe, work_dir)
     structures = []
     structures += bulk_family(recipe, lattices)
@@ -353,4 +367,7 @@ def build_collection1(recipe: ForceModelRecipe, work_dir: Path) -> list:
     structures += surface_family(recipe, lattices)
     structures += rattle_family(recipe, lattices)
     structures += warm_run_family(recipe, lattices, work_dir)
-    return structures
+    library = build_environment_library(
+        structures, recipe, Path(work_dir) / "descriptors")
+    manifest_path = write_environment_library(library, work_dir)
+    return structures, manifest_path

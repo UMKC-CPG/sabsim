@@ -27,6 +27,7 @@ from sabsim.spec.loader import (
     _require,
     _require_quantity,
 )
+from sabsim.driver.descriptors import DescriptorSettings
 from sabsim.spec.records import Quantity
 
 # The unit strings the recipe accepts for the two quantities LAMMPS's
@@ -188,6 +189,13 @@ class ForceModelRecipe:
     labelling: LabellingBudget
     production_settings: ReferenceSettings
     audit_settings: ReferenceSettings
+    # The gate's RULER (DESIGN §4.8 part 2, 2026-08-29): how the
+    # environment library — and therefore the §3.5 gate — describes one
+    # atom's first neighbour shell, and the scatter multiple the library
+    # is self-checked at. Distinct from the trained model's descriptor
+    # (part 7): this one only asks "is this neighbourhood undamaged?".
+    descriptor_settings: DescriptorSettings
+    gate_scatter_multiple: float
 
     def phase_named(self, name: str) -> PhaseSpec:
         """The phase entry a family refers to by name (a loud miss)."""
@@ -398,6 +406,13 @@ def _reject_if_inconsistent(recipe: ForceModelRecipe) -> None:
                 f"every element of species_union needs one")
     if not recipe.domain:
         raise SpecificationError("[recipe] -> domain: must not be empty")
+    unweighted = recipe.species_union - set(
+        recipe.descriptor_settings.species_weights)
+    if unweighted:
+        raise SpecificationError(
+            f"[descriptor] -> species_weights: no weight for "
+            f"{sorted(unweighted)}; every element of species_union needs "
+            f"one, or the library cannot describe it")
 
 
 def check_recipe_references(recipe: ForceModelRecipe) -> None:
@@ -438,6 +453,32 @@ def check_recipe_references(recipe: ForceModelRecipe) -> None:
             f"could not be resolved:\n  - {listed}")
 
 
+def _descriptor_from_table(table: dict, context: str) -> tuple:
+    """The ``[descriptor]`` table -> (DescriptorSettings, scatter multiple).
+
+    The cutoff is stated as a PHYSICAL length (converted to angstrom
+    here); LAMMPS's own parameters are derived from it by the engine
+    adapter, never written in the recipe (ARCHITECTURE §2.3).
+    """
+    from sabsim.driver.commands import to_metal
+    weights = _require(table, "species_weights", context)
+    if not isinstance(weights, dict) or not weights:
+        raise SpecificationError(
+            f"{context} -> species_weights: a non-empty element -> weight "
+            f"table")
+    multiple = float(_require(table, "gate_scatter_multiple", context))
+    if multiple <= 0.0:
+        raise SpecificationError(
+            f"{context} -> gate_scatter_multiple: must be positive")
+    settings = DescriptorSettings(
+        first_shell_cutoff=to_metal(
+            _require_quantity(table, "first_shell_cutoff", context),
+            "distance"),
+        expansion_order=_require_int(table, "expansion_order", context),
+        species_weights={str(k): float(v) for k, v in weights.items()})
+    return settings, multiple
+
+
 def load_recipe(recipe_path: str | Path) -> ForceModelRecipe:
     """Load and validate a recipe file (phases one and two).
 
@@ -453,6 +494,8 @@ def load_recipe(recipe_path: str | Path) -> ForceModelRecipe:
         str(symbol) for symbol in _require(head, "species_union", "[recipe]"))
     if not species:
         raise SpecificationError("[recipe] -> species_union: must not be empty")
+    descriptor_settings, gate_scatter_multiple = _descriptor_from_table(
+        _require(raw, "descriptor", "top level"), "[descriptor]")
     recipe = ForceModelRecipe(
         name=str(_require(head, "name", "[recipe]")),
         species_union=species,
@@ -477,6 +520,8 @@ def load_recipe(recipe_path: str | Path) -> ForceModelRecipe:
         audit_settings=_settings_from_table(
             _require(raw, "audit_settings", "top level"),
             "[audit_settings]"),
+        descriptor_settings=descriptor_settings,
+        gate_scatter_multiple=gate_scatter_multiple,
     )
     _reject_if_inconsistent(recipe)
     return recipe

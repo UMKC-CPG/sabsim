@@ -40,8 +40,51 @@ def test_the_shipped_template_resolves_completely():
 
     This is the regression that matters most: a shipped template naming
     a file nobody created teaches every new user to write a broken spec.
+
+    ONE named exception, until the bootstrap has run: the environment
+    library (DESIGN §3.5, 2026-08-29) is MANUFACTURED by `sabsim
+    bootstrap generate`, so on a machine where the silicon library has
+    not yet been built the only problems the check may report are the
+    ones naming it. Anything else is a broken template.
     """
-    check_study_references(_template_study())
+    try:
+        check_study_references(_template_study())
+    except SpecificationError as reported:
+        problems = [line for line in str(reported).splitlines()
+                    if line.lstrip().startswith("- ")]
+        assert problems, "a refusal with no listed problem"
+        assert all("environment_library" in line for line in problems), (
+            f"the template points at something missing besides the "
+            f"not-yet-built library:\n{reported}")
+
+
+def test_missing_environment_library_is_reported_on_the_login_node():
+    """A study naming a library nobody built fails phase three by name."""
+    study = _template_study()
+    members = tuple(
+        replace(member, protocol=replace(
+            member.protocol, environment_library="/no/such/library"))
+        for member in study.members)
+    with pytest.raises(SpecificationError) as caught:
+        check_study_references(_with_members(study, members))
+    assert "/no/such/library" in str(caught.value)
+    assert "bootstrap generate" in str(caught.value)
+
+
+def test_a_mismatched_library_is_refused_before_any_node_hour(tmp_path):
+    """The activate job's library checks run here too (PSEUDOCODE §2)."""
+    from sabsim.driver.environment_library import write_environment_library
+    from tests.unit.support import hand_built_library
+    manifest = write_environment_library(
+        hand_built_library(model_name="DPA-2.4-7M"), tmp_path)
+    study = _template_study()
+    members = tuple(
+        replace(member, protocol=replace(
+            member.protocol, environment_library=str(manifest)))
+        for member in study.members)
+    with pytest.raises(SpecificationError) as caught:
+        check_study_references(_with_members(study, members))
+    assert "DPA-2.4-7M" in str(caught.value)
 
 
 def test_missing_crystal_file_is_reported_with_every_path_tried():

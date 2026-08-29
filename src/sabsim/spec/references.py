@@ -162,12 +162,54 @@ def _potential_problems(study: Study) -> list:
     return problems
 
 
-def check_study_references(study: Study) -> None:
+def _library_problems(member: MemberSpecification) -> list:
+    """Report an environment library the activate job could not use.
+
+    The §3.5 gate judges "crystalline" against the bootstrap-made library
+    the study names (DESIGN §3.5, 2026-08-29). PSEUDOCODE §2 places its
+    checks in phase two; they live HERE because every one of them needs
+    to READ the library file — exactly the environment-dependence that
+    defines phase three. The file must exist, and if it does the same
+    rules the activate job applies (:func:`~sabsim.driver.
+    environment_library.check_library_against_study`: model, engine, the
+    wafers' faces, the temperature warn/refuse band) run now, so a
+    mismatch costs no node-hour. Warnings are returned as problems
+    prefixed ``WARNING`` only in the sense of being listed; they do not
+    fail the check — see :func:`check_study_references`.
+    """
+    from sabsim.driver.environment_library import (
+        check_library_against_study,
+        read_environment_library,
+    )
+    path = member.protocol.environment_library
+    context = f"member '{member.name}' -> environment_library"
+    if not (os.path.isfile(path) or os.path.isdir(path)):
+        return [f"{context} names a library that does not exist: {path} "
+                f"(manufactured by `sabsim bootstrap generate`, DESIGN "
+                f"§4.8 part 2)"]
+    try:
+        library = read_environment_library(path)
+        check_library_against_study(library, member)
+    except SpecificationError as refused:
+        return [str(refused)]
+    except Exception as unreadable:      # a corrupt or half-written pair
+        return [f"{context} could not be read: {unreadable}"]
+    return []
+
+
+def check_study_references(
+        study: Study, activation_gate_will_run: bool = True) -> None:
     """Phase three: every artifact a study POINTS AT must be there.
 
     Raises :class:`~sabsim.spec.loader.SpecificationError` listing EVERY
     problem found across every member, so one pass over the spec fixes
     all of them. Returns quietly when the study is fully resolvable.
+
+    ``activation_gate_will_run`` says whether this run opens the §3.5
+    gate at all. The walking skeleton (a ``--dry-run``) never does — its
+    activation stage is a stand-in — so it has no use for the
+    environment library and is not refused for lacking one; a live run
+    always checks it, because its activate job WILL open the gate.
 
     What is deliberately NOT checked, and why it is named rather than
     skipped: ``potential_ref`` points at a manufactured force model, and
@@ -178,6 +220,8 @@ def check_study_references(study: Study) -> None:
     problems = []
     for member in study.members:
         problems.extend(_crystal_problems(member))
+        if activation_gate_will_run:
+            problems.extend(_library_problems(member))
     problems.extend(_potential_problems(study))
 
     if problems:

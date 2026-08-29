@@ -82,8 +82,11 @@ def exec_full_study(
     # principle — but does everything it POINTS AT actually exist? This
     # needs the filesystem and the registry rather than the file's text,
     # which is why it is separate from the loader, and it runs HERE
-    # because here is the last moment before node-hours are spent.
-    check_study_references(study)
+    # because here is the last moment before node-hours are spent. The
+    # skeleton never opens the §3.5 gate, so only a live stage set is
+    # held to the environment library (DESIGN §3.5, 2026-08-29).
+    check_study_references(
+        study, activation_gate_will_run=stage_set is not W0_STAGES)
 
     members = study.members
     if only is not None:
