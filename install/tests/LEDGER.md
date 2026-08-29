@@ -1573,3 +1573,33 @@ Harness `install/tests/t38_environment_library_v2/`, job folder
   5.16 — a different 300 K run, consistent.
 - **Scope NOT covered:** the gate on a bombarded slab (next: the dpa3h
   demo chain); any material other than silicon.
+
+## T-39 — jobs 16860880 (activate, HALTED at validation) + 16860881/2 (cancelled) — 2026-08-29
+
+*(First activate under the environment-library gate: the T-33 demo
+study in a fresh folder `jobs/demo_si_small_50ev_dpa3h/`, prepared by
+`sabsim prepare` against the T-38 silicon library; harness
+`install/tests/t39_library_gate_demo/`, code d672c1c.)*
+
+- **Halted after 13 s in validation phase three, before any physics:**
+
+  ```
+  sabsim: run halted — the study references 2 artifact(s) that could
+  not be resolved (DESIGN §1.5, phase three):
+  - member 'si-sio2' environment library catalogues no clean (001)
+    surface of wafer_b 'SiO2'; ...
+  - member 'sio2-sio2-reference' environment library catalogues no
+    clean (001) surface of wafer_a 'SiO2'; ...
+  ```
+
+- **Reading — a DESIGN gap, not a bug.** The study file names ONE
+  `environment_library` under `[protocol.activation]`, shared by all
+  three members, but a library is built per RECIPE, i.e. per material:
+  the silicon library cannot catalogue a silica face, and no single
+  file ever could for a dissimilar pair. The validator did what it
+  should — refused before a node-hour — but it refused the silicon
+  member's job for the silica members' sake. The library must be
+  resolved PER WAFER by the wafer's species key, the way
+  `share/activation/<species>.toml` already is (DESIGN §3.5). Brought
+  to Paul; DESIGN §3.5/§1.2 → PSEUDOCODE → code, then rerun.
+- **Scope NOT covered:** everything past validation.
