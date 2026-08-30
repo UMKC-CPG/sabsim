@@ -1,0 +1,197 @@
+# =====================================================================
+# SABSIM force-model RECIPE — v0, silicon, LEAN (DESIGN.md §4.8)
+# ---------------------------------------------------------------------
+# The third input file, on its own clock: a potential is manufactured
+# ONCE from this recipe, costing days of machine time, then consumed
+# unchanged by many studies. It states, plainly enough for a student to
+# read, what the model must cover (part 1), which calm structures are
+# computed first (part 2, Collection 1), the accurate-calculation
+# settings every label and every reference inherits (parts 3-4), how
+# the hard configurations are harvested (part 5, Collection 2), and how
+# many get the expensive labels (part 6). Parts 7-8 (the learning loop
+# and the stopping rule) are added when `sabsim bootstrap train` lands.
+#
+# No hidden defaults (§1.4): the loader rejects a missing key. Units
+# travel with values ({ value, unit }). Paths may use the location
+# roots ($SABSIM_SHARE ...), expanded by the loader (ARCHITECTURE §4.1).
+#
+# CHEAP FIRST (Paul, 2026-08-26): every count and tolerance here is the
+# smallest that exercises the whole process end to end. The cost is
+# learned by spending; accuracy is dialled up afterwards.
+# =====================================================================
+
+[recipe]
+name          = "si-lean-v0"
+# Part 1 — the key. The elements the ONE shared model must handle (this
+# fixes the global type-map order, §4.3) and the structural/chemical
+# regime it claims. A member's material_domain must lie inside this.
+species_union = ["Si"]
+domain        = "diamond-cubic"
+# Points at (never contains) the §3.5 reference set the gate uses.
+reference_data_ref = "/cluster/pixstor/home/rulisp/CPG/cpg-repo/sabsim/share/activation/Si.toml"
+
+# The universal foundation model that RUNS the dynamics of Collection 1
+# (melt-quench, warm runs) and derives the working lattice (§2.2). The
+# same model, under the same name, that the study file's [potential]
+# block names; the identity must match the one pinned in the code.
+[descriptor]
+descriptor_cutoff    = { value = 4.2, unit = "angstrom" }
+expansion_order       = 6
+species_weights       = { Si = 1.0 }
+gate_scatter_multiple = 3.0
+
+[generator]
+model             = "DPA-3.1-3M"
+weights           = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
+allow_unvalidated = true
+# Time step for the Collection-1 dynamics (silicon at <= 3000 K).
+md_timestep       = { value = 1.0, unit = "fs" }
+
+# ---------------------------------------------------------------------
+# Part 2 — Collection 1, the calm structures. Six families, all required
+# (§4.8 part 2). Each phase entry IS the domain's truth: a phase absent
+# here was not taught, whatever the domain label says.
+# ---------------------------------------------------------------------
+[[phases]]
+name = "silicon-diamond"
+cif  = "src/sabsim/structure/data/si_diamond.cif"
+
+[collection1.bulk]
+# Family 1 — the perfect crystal at the lattice the GENERATOR model
+# relaxes it to (§2.2), replicated so the cell is wider than twice the
+# descriptor cutoff (6 A): 2 x 2 x 2 conventional cells = 64 atoms.
+cells_per_axis = 2
+
+[collection1.strain]
+# Family 2 — the relaxed bulk cell deformed by each magnitude in each
+# mode, carried past the reversible range (+-10 %): §7.2 gates the
+# stiffness, and the pull is tension. "volumetric" scales all axes,
+# "uniaxial_z" one axis, "shear_xy" tilts x along y. Static: no MD.
+magnitudes = [-0.10, -0.05, -0.02, 0.02, 0.05, 0.10]
+modes      = ["volumetric", "uniaxial_z", "shear_xy"]
+
+[[collection1.melt_quench]]
+# Family 3 — the bulk amorphous network: melt the cell far above
+# melting, hold until it has forgotten the lattice, quench at a stated
+# RATE, keep frames from the quench. One replica, ten frames: lean.
+phase             = "silicon-diamond"
+cells_per_axis    = 2
+melt_temperature  = { value = 3000.0, unit = "K" }
+melt_duration     = { value = 5.0,    unit = "ps" }
+quench_rate       = { value = 200.0,  unit = "K/ps" }
+final_temperature = { value = 300.0,  unit = "K" }
+replicas          = 1
+frames            = 10
+seed              = 11
+
+[[collection1.surfaces]]
+# Family 4 — the clean, unbombarded free surface: same face the studies
+# bond, no damage. Cut by the §7 slab builder at the derived lattice.
+phase             = "silicon-diamond"
+face              = [1, 0, 0]
+termination_index = 0
+slab_thickness    = { value = 10.0, unit = "angstrom" }
+vacuum            = { value = 12.0, unit = "angstrom" }
+# In-plane tiling: the primitive Si(100) slab cell is 3.9 A wide, so a
+# 1x1 column has every atom seeing its own image inside the 6 A
+# descriptor cutoff (T-26 produced an 8-atom column). 3x3 = 11.6 A.
+lateral_repeat    = 3
+
+[collection1.rattle]
+# Family 5 — seeded static displacements about the cold bulk cell.
+amplitude = { value = 0.15, unit = "angstrom" }
+count     = 10
+seed      = 20260826
+
+[[collection1.warm_runs]]
+# Family 6 — short warm runs, NVT AND NPT (both required: NPT supplies
+# thermal expansion, NVT correlated motion at fixed volume). Frames are
+# harvested after the equilibration interval, spaced by the stride.
+phase           = "silicon-diamond"
+ensemble        = "NVT"
+temperature     = { value = 300.0, unit = "K" }
+duration        = { value = 4.0,   unit = "ps" }
+equilibration   = { value = 1.0,   unit = "ps" }
+sampling_stride = { value = 0.3,   unit = "ps" }
+replicas        = 1
+seed            = 21
+
+[[collection1.warm_runs]]
+phase           = "silicon-diamond"
+ensemble        = "NPT"
+temperature     = { value = 300.0, unit = "K" }
+duration        = { value = 4.0,   unit = "ps" }
+equilibration   = { value = 1.0,   unit = "ps" }
+sampling_stride = { value = 0.3,   unit = "ps" }
+replicas        = 1
+seed            = 22
+
+# ---------------------------------------------------------------------
+# Part 5 — Collection 2, the hard configurations (§4.8 part 5). NOT new
+# MD: harvested from an ordinary member run recorded with
+# `sabsim run --dump-visuals` under the universal model. `job_directory`
+# is that run's home (its scratch mirror holds the dumps); `member`
+# names which member. Families 7-11 come from the activate dumps (7),
+# the press dump (8-10: initial / relaxed / pressed thirds of the press
+# record) and the pull dumps (11). Interface frames are cut to the
+# §6.4 sub-cell: the activated skins plus this many crystalline layers
+# under each (Paul, 2026-08-26: the surface atoms are what training is
+# for).
+# ---------------------------------------------------------------------
+[generation_plan]
+project                     = "/cluster/pixstor/home/rulisp/CPG/cpg-repo/sabsim/jobs/si_sio2/sabsim.toml"
+frames_per_stage            = { activate = 10, press = 12, pull = 10 }
+subcell_crystalline_layers  = 2
+subcell_vacuum              = { value = 10.0, unit = "angstrom" }
+
+# ---------------------------------------------------------------------
+# Part 6 — what gets labelled. In this first slice the selection is the
+# budget alone: the first `budget_per_family` structures of each
+# family, evenly strided. The interface-preference and uncertainty
+# terms of §11.1's SelectionRule engage once a committee exists.
+# ---------------------------------------------------------------------
+[labelling]
+budget_per_family = 10
+
+# ---------------------------------------------------------------------
+# Part 3 — the PRODUCTION settings block: the labels AND every reference
+# that is differenced against the model inherit it unchanged (§4.8).
+# The lean recipe of dev/notes/vasp-labelling-recipe-lean.md.
+# ---------------------------------------------------------------------
+[production_settings]
+paw_library           = "$SABSIM_SHARE/vasp_pot/potpaw_PBE.54"
+# Element -> PAW directory name in that library (see the recipe note
+# for why Li not Li_sv, Nb_pv not Nb_sv, O not O_s).
+paw                   = { Si = "Si" }
+functional            = "PBE"
+plane_wave_cutoff     = { value = 350.0, unit = "eV" }
+# A SPACING, never a mesh (§4.8): used only for the two bulk families
+# when gamma_only_off_bulk is true; everything else is Gamma only.
+reciprocal_spacing    = { value = 0.5, unit = "1/angstrom" }
+gamma_only_off_bulk   = true
+smearing_scheme       = "gaussian"
+smearing_width        = { value = 0.10, unit = "eV" }
+electronic_tolerance  = { value = 1.0e-4, unit = "eV" }
+max_electronic_steps  = 60
+spin_polarized        = false
+real_space_projection = "Auto"
+# Has the part-4 audit been run against these values? Not yet: every
+# label from this recipe is EXPLORATORY until it has.
+audited               = false
+
+# Part 4 — the AUDIT block: tightened, run once on a few small cells so
+# the method error is measured and reported beside the learning error.
+[audit_settings]
+paw_library           = "$SABSIM_SHARE/vasp_pot/potpaw_PBE.54"
+paw                   = { Si = "Si" }
+functional            = "PBE"
+plane_wave_cutoff     = { value = 450.0, unit = "eV" }
+reciprocal_spacing    = { value = 0.3, unit = "1/angstrom" }
+gamma_only_off_bulk   = false
+smearing_scheme       = "gaussian"
+smearing_width        = { value = 0.05, unit = "eV" }
+electronic_tolerance  = { value = 1.0e-6, unit = "eV" }
+max_electronic_steps  = 120
+spin_polarized        = false
+real_space_projection = "False"
+audited               = false
