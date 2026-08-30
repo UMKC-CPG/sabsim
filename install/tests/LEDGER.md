@@ -1603,3 +1603,68 @@ study in a fresh folder `jobs/demo_si_small_50ev_dpa3h/`, prepared by
   `share/activation/<species>.toml` already is (DESIGN §3.5). Brought
   to Paul; DESIGN §3.5/§1.2 → PSEUDOCODE → code, then rerun.
 - **Scope NOT covered:** everything past validation.
+
+## T-40 — job 16870691 (activate, PASS) + 16870692 (bond) + 16870693 (analyze) — 2026-08-29
+
+*(First activate under the PER-WAFER environment library: Paul's
+decision after T-39 — the library lives at
+`<study>/<material label>/environment_library.toml`, no path in the
+study file, no shared repository. Study `jobs/demo_si_small_50ev_dpa3i/`
+with `Si/` = the T-38 library + the `bootstrap_si_lib2` recipe; the
+T-33 demo dose (50 eV, 4 Å demanded); harness
+`install/tests/t40_per_wafer_library/`; code 4b0bc39.)*
+
+- **Login-node check of the new layout (before submitting):** the
+  silicon member passes phase three; the whole study reports ONLY that
+  `SiO2/` has not been prepared — the T-39 refusal is gone and the
+  message says how to prepare the missing material:
+
+  ```
+  - member 'si-sio2' -> wafer 'SiO2' environment library is not there:
+    .../demo_si_small_50ev_dpa3i/SiO2/environment_library.toml (run
+    `sabsim bootstrap generate` in that folder, or copy a prepared
+    'SiO2/' folder into the study — ARCHITECTURE §1, DESIGN §4.8 ...
+  ```
+
+- **Activate 16870691: COMPLETED in 43 min 59 s on g033 (H100), both
+  halves gated PASS** — the first non-zero library depth on the demo
+  (T-34 read a false 0.0 Å from the coordination test):
+
+  ```
+  surface A: gate PASSED, activated depth 12.0 A
+    radial_distribution    measured=2.375 threshold=0.3 ok
+    coordination           measured=0.212 threshold=(0.05, 0.6) ok
+    ring_statistics        measured=0.602 threshold=0.15 ok
+    amorphization_depth    measured=12.0 threshold=4.0 ok
+  surface B: gate PASSED, activated depth 14.0 A
+    amorphization_depth    measured=14.0 threshold=4.0 ok
+  ```
+
+- **Independent re-read of the gate's own descriptor dumps
+  (`gate_{a,b}/describe_gate.dump`) against `Si/` on the login node,
+  disordered fraction per 2 Å layer from the top atom, multiple 3:**
+
+  ```
+  half A (252 atoms, 7.1 % disordered overall)
+    0-2 Å 0 %   2-4 36 %   4-6 7 %   6-8 17 %   8-10 38 %
+    10-12 31 %  12-14 0 %  14-20 0 %          -> deepest layer 10-12
+  half B (252 atoms, 7.9 % disordered overall)
+    0-2 Å 8 %   2-4 29 %   4-6 35 %  6-8 22 %  8-10 6 %
+    10-12 31 %  12-14 8 %  14-20 0 %           -> deepest layer 12-14
+  ```
+
+  Reading: the reported depth is the whole-profile "deepest layer
+  above baseline" of DESIGN §3.5, and it is honest about what this
+  light demo dose makes — a PATCHY skin (no layer above 38 %
+  disordered), not a fully amorphous one; the 0 % top layer of half A
+  is the catalogued clean surface family doing its job (a healed-clean
+  top is not damage). A production dose should push the per-layer
+  fractions far higher; that is the §3.6 sweep's business, not this
+  test's. Dumps: `si-si-reference_activate_{a,b}.dump`,
+  `activated_{a,b}.dump`, `gate_{a,b}/describe_gate.dump` under the
+  study's scratch mirror.
+
+- **Scope NOT covered:** the bond/analyze jobs (running at the time of
+  writing — appended below when done); any material other than
+  silicon (the `SiO2/` folder is the first real test of two libraries
+  in one study); the re-based coordination/ring survivors (TODO).
