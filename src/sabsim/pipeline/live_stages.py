@@ -590,6 +590,13 @@ def _pull_note(result) -> str:
     return note
 
 
+def _wafer_of(member: MemberSpecification, handle: HalfHandle):
+    """The wafer a half handle stands for, by its A/B tag (§2.6)."""
+    if str(handle.wafer_tag).upper().endswith("B"):
+        return member.material.wafer_b
+    return member.material.wafer_a
+
+
 def activate_one_half(
         handle: HalfHandle,
         member: MemberSpecification,
@@ -599,10 +606,11 @@ def activate_one_half(
         library=None) -> tuple:
     """Cascade, heal and GATE one half, out-of-process (§10.1, §3.4).
 
-    ``library`` is the study's environment library (loaded ONCE per
-    activate job by :func:`activate_surfaces_live`); when a caller
-    passes none it is loaded here, so a single-half invocation still
-    works.
+    ``library`` is THIS wafer's environment library (each wafer has its
+    own, in its preparation subfolder of the study — DESIGN §1.2; loaded
+    per wafer by :func:`activate_surfaces_live`); when a caller passes
+    none it is loaded here for the wafer the handle's tag names, so a
+    single-half invocation still works.
 
     The cascade runs on the universal foundation MLIP, which lives in
     deepmd's own self-contained bundle and cannot load into this process
@@ -619,7 +627,8 @@ def activate_one_half(
     built = read_standalone_half(
         handle.data_file, handle.type_map, handle.identity)
     if library is None:
-        library, _warnings = load_environment_library(member)
+        library, _warnings = load_environment_library(
+            member, _wafer_of(member, handle))
     # The universal cascade force model (deepmd + ZBL); it refuses unless the
     # run opted into the not-yet-gate-cleared model (§4.7).
     cascade_force_model = resolve_cascade_generator(
@@ -754,18 +763,22 @@ def activate_surfaces_live(
     activation before anything is assembled.
     """
     half_seeds = derive_seeds(member.ensemble.master_seed, 2)
-    # The environment library the §3.5 gate judges against, loaded and
-    # checked ONCE for both halves (DESIGN §3.5, 2026-08-29); its
-    # temperature warning, if any, is said out loud before any cascade.
-    library, warnings = load_environment_library(member)
+    # The environment libraries the §3.5 gate judges against — ONE PER
+    # WAFER, each from its own preparation subfolder of the study
+    # (DESIGN §1.2/§3.5, revised 2026-08-29) — loaded and checked before
+    # any cascade; a temperature warning, if any, is said out loud.
+    library_a, warnings_a = load_environment_library(
+        member, member.material.wafer_a)
+    library_b, warnings_b = load_environment_library(
+        member, member.material.wafer_b)
     rank = comm.Get_rank() if comm is not None else 0
     if rank == 0:
-        for warning in warnings:
+        for warning in warnings_a + warnings_b:
             print(f"sabsim: WARNING — {warning}", flush=True)
     _outcome_a, amorphized_a, verdict_a, heal_a = activate_one_half(
-        handle_a, member, half_seeds[0], scratch_directory, comm, library)
+        handle_a, member, half_seeds[0], scratch_directory, comm, library_a)
     _outcome_b, amorphized_b, verdict_b, heal_b = activate_one_half(
-        handle_b, member, half_seeds[1], scratch_directory, comm, library)
+        handle_b, member, half_seeds[1], scratch_directory, comm, library_b)
 
     # Each wafer's DECLARED material species: the half's pre-cascade type
     # map minus the projectile beam. This is what the §3.5 gate keys the

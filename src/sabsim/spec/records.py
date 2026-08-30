@@ -63,6 +63,13 @@ class MaterialKnobs:
     cif_source: str                  # path to the authoritative CIF
     crystal_structure: str           # human label, e.g. "diamond"
     surface_face: tuple[int, int, int]   # Miller indices of the bond face
+    # Where this wafer's PREPARATORY work lives: the subfolder of the
+    # study folder named exactly by ``identity`` (``<study>/<label>/``,
+    # ARCHITECTURE §1; Paul, 2026-08-29). It holds the force-model
+    # recipe and what `sabsim bootstrap` manufactures from it — the
+    # environment library the §3.5 gate judges against. Set by the
+    # loader from the study file's own location, never typed by hand.
+    preparation_directory: str
 
 
 @dataclass(frozen=True)
@@ -117,12 +124,10 @@ class ProtocolKnobs:
     # study choice tied to the dose above, not a material property
     # (DESIGN.md §3.5, revised 2026-08-28).
     required_activated_depth: Quantity
-    # The environment library the §3.5 gate judges "crystalline" against
-    # (DESIGN §3.5, 2026-08-29): the path of the bootstrap-made pair
-    # (``environment_library.toml`` + ``.npz``), roots expanded by the
-    # loader like the weights. A run-time input of the activate job, never
-    # written by hand (ARCHITECTURE §2.3).
-    environment_library: str
+    # NO library path here (revised 2026-08-29 after LEDGER T-39): the
+    # environment library the §3.5 gate judges against is found PER
+    # WAFER at ``MaterialKnobs.preparation_directory``, never named in
+    # the study file (DESIGN §1.2).
     cascade_duration: Quantity       # NVE cascade time per impact (§3.3)
     between_impact_relaxation: Quantity   # border-cool between impacts
     reanneal_schedule: AnnealSchedule     # the post-cascade re-anneal

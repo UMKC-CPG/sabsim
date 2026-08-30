@@ -190,56 +190,74 @@ def _member_at(kelvin):
     return replace(member, protocol=protocol)
 
 
+def _check(library, member):
+    """Check against the member's wafer A (both wafers are Si here)."""
+    return check_library_against_study(
+        library, member, member.material.wafer_a)
+
+
 def test_matching_library_passes_with_no_warning():
-    assert check_library_against_study(
-        hand_built_library(), _member_at(300.0)) == []
+    assert _check(hand_built_library(), _member_at(300.0)) == []
 
 
 def test_library_from_another_model_is_refused():
     with pytest.raises(SpecificationError, match="rebuild"):
-        check_library_against_study(
-            hand_built_library(model_name="DPA-2.4-7M"), _member_at(300.0))
+        _check(hand_built_library(model_name="DPA-2.4-7M"),
+               _member_at(300.0))
 
 
 def test_library_from_another_engine_is_refused():
     with pytest.raises(SpecificationError, match="one engine"):
-        check_library_against_study(
-            hand_built_library(engine="imago-bispectrum"), _member_at(300.0))
+        _check(hand_built_library(engine="imago-bispectrum"),
+               _member_at(300.0))
 
 
 def test_library_lacking_the_wafer_face_is_refused():
     only_111 = [{"phase": "silicon-diamond", "face": "111",
                  "termination": 0, "species": ["Si"]}]
     with pytest.raises(SpecificationError, match=r"\(100\)"):
-        check_library_against_study(
-            hand_built_library(surfaces=only_111), _member_at(300.0))
+        _check(hand_built_library(surfaces=only_111), _member_at(300.0))
 
 
 def test_gate_temperature_a_little_above_the_warm_runs_warns():
-    warnings = check_library_against_study(
+    warnings = _check(
         hand_built_library(warm_run_temperature=600.0), _member_at(660.0))
     assert len(warnings) == 1 and "a little tight" in warnings[0]
 
 
 def test_gate_temperature_far_above_the_warm_runs_is_refused():
     with pytest.raises(SpecificationError, match="20 %"):
-        check_library_against_study(
-            hand_built_library(warm_run_temperature=600.0),
-            _member_at(750.0))
+        _check(hand_built_library(warm_run_temperature=600.0),
+               _member_at(750.0))
 
 
-def test_load_environment_library_reads_checks_and_reports(tmp_path):
-    manifest = write_environment_library(hand_built_library(), tmp_path)
-    member = _member_at(300.0)
-    member = replace(member, protocol=replace(
-        member.protocol, environment_library=str(manifest)))
-    library, warnings = load_environment_library(member)
+def _member_prepared_in(member, study_directory):
+    """The member with both wafers' preparation folders under
+    ``study_directory / <material label>`` (ARCHITECTURE §1)."""
+    def relocate(wafer):
+        return replace(wafer, preparation_directory=str(
+            study_directory / wafer.identity))
+    return replace(member, material=replace(
+        member.material,
+        wafer_a=relocate(member.material.wafer_a),
+        wafer_b=relocate(member.material.wafer_b)))
+
+
+def test_load_environment_library_finds_the_wafers_folder(tmp_path):
+    """The library lives at <study>/<material label>/ and the wafer's
+    label is the only key (Paul, 2026-08-29, after LEDGER T-39)."""
+    member = _member_prepared_in(_member_at(300.0), tmp_path)
+    wafer = member.material.wafer_a
+    assert wafer.preparation_directory == str(tmp_path / "Si")
+    (tmp_path / "Si").mkdir()
+    write_environment_library(hand_built_library(), tmp_path / "Si")
+    library, warnings = load_environment_library(member, wafer)
     assert library.model_name == "DPA-3.1-3M" and warnings == []
 
-    absent = replace(member, protocol=replace(
-        member.protocol, environment_library="/no/such/library"))
+    unprepared = _member_prepared_in(member, tmp_path / "elsewhere")
     with pytest.raises(SpecificationError, match="bootstrap generate"):
-        load_environment_library(absent)
+        load_environment_library(
+            unprepared, unprepared.material.wafer_a)
 
 
 # ---------------------------------------------------------------------

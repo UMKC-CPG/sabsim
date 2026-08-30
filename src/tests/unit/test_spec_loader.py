@@ -11,6 +11,7 @@ evolves.
 
 import os
 import re
+from pathlib import Path
 
 import pytest
 
@@ -85,13 +86,16 @@ def test_template_values_map_to_the_schema_fields():
 
 def test_environment_library_and_gate_knobs_are_parsed():
     """The §3.5 gate's inputs are study settings, not hidden constants
-    (revised 2026-08-29): the library path (roots expanded), the depth
-    profile's layer thickness, and the scatter multiple."""
+    (revised 2026-08-29): each wafer's library folder (the study folder
+    plus the wafer's material label, ARCHITECTURE §1 — never a typed
+    path), the depth profile's layer thickness, and the scatter
+    multiple."""
     study = load_and_validate_study(_TEMPLATE_PATH)
     member = study.members[0]
-    assert "$" not in member.protocol.environment_library
-    assert member.protocol.environment_library.endswith(
-        "environment_libraries/silicon/environment_library.toml")
+    study_directory = Path(_TEMPLATE_PATH).resolve().parent
+    for wafer in (member.material.wafer_a, member.material.wafer_b):
+        assert wafer.preparation_directory == str(
+            study_directory / wafer.identity)
     assert member.numerical.depth_bin_width.value == pytest.approx(2.0)
     assert member.numerical.depth_bin_width.unit == "angstrom"
     assert member.numerical.disorder_scatter_multiple == pytest.approx(3.0)

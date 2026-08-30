@@ -43,9 +43,10 @@ def test_the_shipped_template_resolves_completely():
 
     ONE named exception, until the bootstrap has run: the environment
     library (DESIGN §3.5, 2026-08-29) is MANUFACTURED by `sabsim
-    bootstrap generate`, so on a machine where the silicon library has
-    not yet been built the only problems the check may report are the
-    ones naming it. Anything else is a broken template.
+    bootstrap generate` into each wafer's material subfolder of the
+    study (ARCHITECTURE §1), and the template's folder holds none, so
+    the only problems the check may report are the ones naming a
+    wafer's library. Anything else is a broken template.
     """
     try:
         check_study_references(_template_study())
@@ -53,21 +54,31 @@ def test_the_shipped_template_resolves_completely():
         problems = [line for line in str(reported).splitlines()
                     if line.lstrip().startswith("- ")]
         assert problems, "a refusal with no listed problem"
-        assert all("environment_library" in line for line in problems), (
+        assert all("environment library" in line for line in problems), (
             f"the template points at something missing besides the "
             f"not-yet-built library:\n{reported}")
 
 
-def test_missing_environment_library_is_reported_on_the_login_node():
-    """A study naming a library nobody built fails phase three by name."""
-    study = _template_study()
-    members = tuple(
-        replace(member, protocol=replace(
-            member.protocol, environment_library="/no/such/library"))
-        for member in study.members)
+def _prepared_in(study, study_directory):
+    """Every wafer's preparation folder moved under study_directory."""
+    def relocate(wafer):
+        return replace(wafer, preparation_directory=str(
+            study_directory / wafer.identity))
+    return _with_members(study, [
+        replace(member, material=replace(
+            member.material,
+            wafer_a=relocate(member.material.wafer_a),
+            wafer_b=relocate(member.material.wafer_b)))
+        for member in study.members])
+
+
+def test_missing_environment_library_is_reported_on_the_login_node(
+        tmp_path):
+    """An unprepared wafer fails phase three by material label."""
+    study = _prepared_in(_template_study(), tmp_path)
     with pytest.raises(SpecificationError) as caught:
-        check_study_references(_with_members(study, members))
-    assert "/no/such/library" in str(caught.value)
+        check_study_references(study)
+    assert str(tmp_path / "Si") in str(caught.value)
     assert "bootstrap generate" in str(caught.value)
 
 
@@ -75,16 +86,35 @@ def test_a_mismatched_library_is_refused_before_any_node_hour(tmp_path):
     """The activate job's library checks run here too (PSEUDOCODE §2)."""
     from sabsim.driver.environment_library import write_environment_library
     from tests.unit.support import hand_built_library
-    manifest = write_environment_library(
-        hand_built_library(model_name="DPA-2.4-7M"), tmp_path)
-    study = _template_study()
-    members = tuple(
-        replace(member, protocol=replace(
-            member.protocol, environment_library=str(manifest)))
-        for member in study.members)
+    (tmp_path / "Si").mkdir()
+    write_environment_library(
+        hand_built_library(model_name="DPA-2.4-7M"), tmp_path / "Si")
+    study = _prepared_in(_template_study(), tmp_path)
+    only_silicon = _with_members(study, [
+        member for member in study.members
+        if member.name == "si-si-reference"])
     with pytest.raises(SpecificationError) as caught:
-        check_study_references(_with_members(study, members))
+        check_study_references(only_silicon)
     assert "DPA-2.4-7M" in str(caught.value)
+
+
+def test_only_the_members_being_run_need_their_libraries(tmp_path):
+    """LEDGER T-39: the silicon member must never be refused on the
+    silica members' account — a study is checked member by member, and
+    an A/A pair reads its one library once."""
+    from sabsim.driver.environment_library import write_environment_library
+    from tests.unit.support import hand_built_library
+    (tmp_path / "Si").mkdir()
+    write_environment_library(hand_built_library(), tmp_path / "Si")
+    study = _prepared_in(_template_study(), tmp_path)
+    only_silicon = _with_members(study, [
+        member for member in study.members
+        if member.name == "si-si-reference"])
+    check_study_references(only_silicon)          # passes quietly
+    with pytest.raises(SpecificationError) as caught:
+        check_study_references(study)             # the silica members
+    assert "SiO2" in str(caught.value)
+    assert "si-si-reference" not in str(caught.value)
 
 
 def test_missing_crystal_file_is_reported_with_every_path_tried():

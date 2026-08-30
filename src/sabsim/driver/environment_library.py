@@ -486,20 +486,33 @@ def _surface_catalogued(library: EnvironmentLibrary, wafer) -> bool:
     return False
 
 
+def library_manifest_path(wafer) -> str:
+    """Where one wafer's library lives: its preparation subfolder.
+
+    ``<study>/<material label>/environment_library.toml`` (ARCHITECTURE
+    §1, DESIGN §1.2; Paul, 2026-08-29 after LEDGER T-39): each wafer
+    has a library of its own, found by its ``material`` label, and the
+    study file names no path.
+    """
+    return os.path.join(wafer.preparation_directory, LIBRARY_MANIFEST_FILE)
+
+
 def check_library_against_study(
-        library: EnvironmentLibrary, member,
+        library: EnvironmentLibrary, member, wafer,
         bound_engine_name: str = DESCRIPTOR_ENGINE_NAME) -> list:
     """The three refusals and the temperature band (PSEUDOCODE §10.6).
 
-    Refuses (:class:`SpecificationError`) a library built under a model
-    other than the study's, computed by an engine other than the bound
-    one, or cataloguing no clean surface of a wafer's face — the slab's
+    Checks ONE wafer's library (the other wafer has its own). Refuses
+    (:class:`SpecificationError`) a library built under a model other
+    than the study's, computed by an engine other than the bound one,
+    or cataloguing no clean surface of THIS wafer's face — the slab's
     own faces would then read as damage. Then the warn/refuse band: the
     gate judges at the press temperature; above the library's warm-run
     temperature it WARNS, more than 20 % above it REFUSES (DESIGN §3.5).
     Returns the list of warning strings for the caller to print.
     """
-    context = f"member '{member.name}' environment library"
+    context = (f"member '{member.name}' wafer '{wafer.identity}' "
+               f"environment library")
     if library.model_name != member.potential.universal_model:
         raise SpecificationError(
             f"{context} was built under '{library.model_name}', the "
@@ -510,15 +523,12 @@ def check_library_against_study(
             f"{context} was computed with '{library.engine}', this "
             f"deployment binds '{bound_engine_name}' — both sides of the "
             f"comparison must use one engine (ARCHITECTURE §2.3)")
-    for role, wafer in (("wafer_a", member.material.wafer_a),
-                        ("wafer_b", member.material.wafer_b)):
-        if not _surface_catalogued(library, wafer):
-            face = "".join(str(c) for c in wafer.surface_face)
-            raise SpecificationError(
-                f"{context} catalogues no clean ({face}) surface of "
-                f"{role} '{wafer.identity}'; the slab's own faces would "
-                f"read as damage — add the face to the recipe's surfaces "
-                f"and rebuild (DESIGN §4.8)")
+    if not _surface_catalogued(library, wafer):
+        face = "".join(str(c) for c in wafer.surface_face)
+        raise SpecificationError(
+            f"{context} catalogues no clean ({face}) surface of the "
+            f"wafer; the slab's own faces would read as damage — add "
+            f"the face to the recipe's surfaces and rebuild (DESIGN §4.8)")
 
     warnings = []
     judged_at = to_metal(member.protocol.press_temperature, "temperature")
@@ -540,18 +550,22 @@ def check_library_against_study(
 
 
 def load_environment_library(
-        member, bound_engine_name: str = DESCRIPTOR_ENGINE_NAME) -> tuple:
-    """Read the study's library and check it; return ``(library, warnings)``.
+        member, wafer,
+        bound_engine_name: str = DESCRIPTOR_ENGINE_NAME) -> tuple:
+    """Read ONE wafer's library and check it; ``(library, warnings)``.
 
-    The path is the study file's ``[protocol.activation]
-    environment_library``, already root-expanded by the loader.
+    The library is found in the wafer's preparation subfolder of the
+    study (:func:`library_manifest_path`); a wafer whose folder holds
+    none has not been prepared, and the message says how to prepare it.
     """
-    path = member.protocol.environment_library
-    if not os.path.isfile(path) and not os.path.isdir(path):
+    path = library_manifest_path(wafer)
+    if not os.path.isfile(path):
         raise SpecificationError(
-            f"member '{member.name}': environment_library names a file "
-            f"that does not exist: {path} (it is manufactured by "
-            f"`sabsim bootstrap generate`, DESIGN §4.8)")
+            f"member '{member.name}': wafer '{wafer.identity}' has no "
+            f"environment library at {path} — run `sabsim bootstrap "
+            f"generate` in that folder, or copy a prepared "
+            f"'{wafer.identity}/' folder there (ARCHITECTURE §1, DESIGN "
+            f"§4.8)")
     library = read_environment_library(path)
     return library, check_library_against_study(
-        library, member, bound_engine_name)
+        library, member, wafer, bound_engine_name)

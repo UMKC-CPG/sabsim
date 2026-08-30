@@ -226,16 +226,16 @@ fluence = { value = 0.025, unit = "ions/angstrom^2" }
 # re-pinned by the 2026-07-21 sweep (§3.6); a demonstration at a lighter
 # dose must state the lighter depth it actually expects.
 required_activated_depth = { value = 7.0, unit = "angstrom" }
-# The ENVIRONMENT LIBRARY the gate judges "crystalline" against (§3.5,
-# revised 2026-08-29): a catalogue of the undamaged material's atomic
-# neighbourhoods (cold bulk, warm bulk, clean surfaces) as first-shell
-# bispectrum vectors, MANUFACTURED by `sabsim bootstrap generate` under
-# the same universal model this study runs (§4.8 part 2) and copied
-# under SABSIM_SHARE — never written by hand. The loader refuses a
-# library built under another model or engine, or lacking a wafer's
-# face, and warns/refuses if the press temperature is above the warm
-# runs it was measured at (by more than 20 %, refuses).
-environment_library = "$SABSIM_SHARE/share/environment_libraries/silicon/environment_library.toml"
+# NO library path here. The ENVIRONMENT LIBRARY the gate judges
+# "crystalline" against (§3.5, 2026-08-29) — a catalogue of the
+# undamaged material's atomic neighbourhoods as second-shell bispectrum
+# vectors, MANUFACTURED by `sabsim bootstrap generate` under the same
+# universal model this study runs (§4.8 part 2) — is found PER WAFER in
+# this study's folder, in the subfolder named by the wafer's `material`
+# label: `<study>/Si/environment_library.toml` for `material = "Si"`
+# (ARCHITECTURE §1). The loader refuses a library built under another
+# model or engine, or lacking the wafer's face, and warns/refuses if the
+# press temperature is above the warm runs it was measured at.
 # Per-impact cascade timing lives in PROTOCOL, not numerical (§2): these
 # are physical durations of the amorphization process. PINNED at 0.5 ps
 # each from the sweep, which produced 20 clean activation points on them.

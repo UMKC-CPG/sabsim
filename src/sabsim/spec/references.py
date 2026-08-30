@@ -165,36 +165,48 @@ def _potential_problems(study: Study) -> list:
 def _library_problems(member: MemberSpecification) -> list:
     """Report an environment library the activate job could not use.
 
-    The §3.5 gate judges "crystalline" against the bootstrap-made library
-    the study names (DESIGN §3.5, 2026-08-29). PSEUDOCODE §2 places its
-    checks in phase two; they live HERE because every one of them needs
-    to READ the library file — exactly the environment-dependence that
-    defines phase three. The file must exist, and if it does the same
-    rules the activate job applies (:func:`~sabsim.driver.
-    environment_library.check_library_against_study`: model, engine, the
-    wafers' faces, the temperature warn/refuse band) run now, so a
-    mismatch costs no node-hour. Warnings are returned as problems
-    prefixed ``WARNING`` only in the sense of being listed; they do not
-    fail the check — see :func:`check_study_references`.
+    The §3.5 gate judges "crystalline" against a bootstrap-made library
+    found PER WAFER in the study folder, in the subfolder named by the
+    wafer's ``material`` label (DESIGN §1.2/§3.5; Paul, 2026-08-29 after
+    LEDGER T-39). Every check here needs to READ a library file —
+    exactly the environment-dependence that defines phase three. For
+    each of the member's two wafers the file must exist, and if it does
+    the same rules the activate job applies (:func:`~sabsim.driver.
+    environment_library.check_library_against_study`: model, engine,
+    that wafer's face, the temperature warn/refuse band) run now, so a
+    mismatch costs no node-hour. Only the members being run are checked
+    (see :func:`check_study_references`), so the silicon member of a
+    study is never refused on the silica members' account.
     """
     from sabsim.driver.environment_library import (
         check_library_against_study,
+        library_manifest_path,
         read_environment_library,
     )
-    path = member.protocol.environment_library
-    context = f"member '{member.name}' -> environment_library"
-    if not (os.path.isfile(path) or os.path.isdir(path)):
-        return [f"{context} names a library that does not exist: {path} "
-                f"(manufactured by `sabsim bootstrap generate`, DESIGN "
-                f"§4.8 part 2)"]
-    try:
-        library = read_environment_library(path)
-        check_library_against_study(library, member)
-    except SpecificationError as refused:
-        return [str(refused)]
-    except Exception as unreadable:      # a corrupt or half-written pair
-        return [f"{context} could not be read: {unreadable}"]
-    return []
+    problems = []
+    seen = set()
+    for wafer in (member.material.wafer_a, member.material.wafer_b):
+        if wafer.identity in seen:       # A/A pairs share one library
+            continue
+        seen.add(wafer.identity)
+        path = library_manifest_path(wafer)
+        context = (f"member '{member.name}' -> wafer '{wafer.identity}' "
+                   f"environment library")
+        if not os.path.isfile(path):
+            problems.append(
+                f"{context} is not there: {path} (run `sabsim bootstrap "
+                f"generate` in that folder, or copy a prepared "
+                f"'{wafer.identity}/' folder into the study — "
+                f"ARCHITECTURE §1, DESIGN §4.8 part 2)")
+            continue
+        try:
+            library = read_environment_library(path)
+            check_library_against_study(library, member, wafer)
+        except SpecificationError as refused:
+            problems.append(str(refused))
+        except Exception as unreadable:  # a corrupt or half-written pair
+            problems.append(f"{context} could not be read: {unreadable}")
+    return problems
 
 
 def check_study_references(

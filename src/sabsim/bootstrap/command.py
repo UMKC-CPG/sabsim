@@ -62,6 +62,16 @@ def _read_structures(path: Path) -> list:
             for frame in frames]
 
 
+def _place_library_in_material_folder(manifest: Path, home: Path) -> Path:
+    """Copy the library pair (.toml + .npz) beside the recipe."""
+    import shutil
+    from sabsim.driver.environment_library import (
+        LIBRARY_ARRAYS_FILE, LIBRARY_MANIFEST_FILE)
+    for name in (LIBRARY_MANIFEST_FILE, LIBRARY_ARRAYS_FILE):
+        shutil.copy2(manifest.parent / name, home / name)
+    return home / LIBRARY_MANIFEST_FILE
+
+
 def generate(recipe_path: str, job_directory: str,
              collection1: bool = True, collection2: bool = True) -> dict:
     """Build Collection 1 and/or harvest Collection 2; write structures.
@@ -81,7 +91,13 @@ def generate(recipe_path: str, job_directory: str,
         calm, library_manifest = build_collection1(
             recipe, out_dir / "collection1")
         structures += calm
-        summary["environment_library"] = str(library_manifest)
+        # The library's HOME is the material folder this command runs
+        # in (`<study>/<material label>/`, ARCHITECTURE §1): exactly
+        # where the study's loader looks for that wafer's library, so
+        # nothing has to be copied by hand. The scratch copy stays too.
+        summary["environment_library"] = str(
+            _place_library_in_material_folder(
+                Path(library_manifest), Path(job_directory)))
     if collection2:
         structures += harvest_collection2(recipe)
     _write_structures(structures, out_dir / STRUCTURES_FILE)

@@ -132,7 +132,8 @@ def _require_face(table: dict, key: str, context: str) -> tuple:
 # field names, so the reader can see exactly how one becomes the other.
 # ---------------------------------------------------------------------
 
-def _material_from_wafer(table: dict, context: str) -> MaterialKnobs:
+def _material_from_wafer(table: dict, context: str,
+                         study_directory: Path) -> MaterialKnobs:
     """Build one wafer's MaterialKnobs from its ``[member.wafer_x]``.
 
     The ``cif`` key names the authoritative structure file (DESIGN.md
@@ -140,12 +141,25 @@ def _material_from_wafer(table: dict, context: str) -> MaterialKnobs:
     parses is checked by the structure builder when it opens it, the same
     way material composition against the type map is a later-wave check
     (§1.5) — not something this reader can know from the spec alone.
+
+    The ``material`` label also names the wafer's PREPARATION subfolder
+    of the study folder (``<study>/<label>/``, ARCHITECTURE §1; Paul,
+    2026-08-29), where its environment library is looked for. Whether
+    that folder and library exist is phase three's business
+    (:mod:`sabsim.spec.references`), not this reader's.
     """
+    identity = str(_require(table, "material", context))
+    if not identity or "/" in identity or identity in (".", ".."):
+        raise SpecificationError(
+            f"{context} -> material: '{identity}' cannot name a "
+            f"preparation subfolder of the study (it is empty or holds "
+            f"a path separator)")
     return MaterialKnobs(
-        identity=str(_require(table, "material", context)),
+        identity=identity,
         cif_source=str(_require(table, "cif", context)),
         crystal_structure=str(_require(table, "structure", context)),
         surface_face=_require_face(table, "face", context),
+        preparation_directory=str(study_directory / identity),
     )
 
 
@@ -193,9 +207,6 @@ def _protocol_from_tables(protocol: dict, context: str) -> ProtocolKnobs:
             activation, "fluence", act_ctx),
         required_activated_depth=_require_quantity(
             activation, "required_activated_depth", act_ctx),
-        environment_library=_expand_roots(
-            str(_require(activation, "environment_library", act_ctx)),
-            f"{act_ctx} -> environment_library"),
         cascade_duration=_require_quantity(
             activation, "cascade_duration", act_ctx),
         between_impact_relaxation=_require_quantity(
@@ -448,6 +459,10 @@ def load_and_validate_study(spec_path: str | Path) -> Study:
     path = Path(spec_path)
     with path.open("rb") as spec_file:
         raw = tomllib.load(spec_file)
+    # The study FOLDER: every wafer's preparation subfolder is found
+    # beneath it (ARCHITECTURE §1), so it is fixed by where the study
+    # file actually is, never by a typed path.
+    study_directory = path.resolve().parent
 
     study_table = _require(raw, "study", "top level")
     name = str(_require(study_table, "name", "[study]"))
@@ -476,10 +491,10 @@ def load_and_validate_study(spec_path: str | Path) -> Study:
             material=WaferPair(
                 wafer_a=_material_from_wafer(
                     _require(member_table, "wafer_a", context),
-                    f"{context} -> wafer_a"),
+                    f"{context} -> wafer_a", study_directory),
                 wafer_b=_material_from_wafer(
                     _require(member_table, "wafer_b", context),
-                    f"{context} -> wafer_b"),
+                    f"{context} -> wafer_b", study_directory),
             ),
             protocol=protocol,
             numerical=numerical,
