@@ -18,6 +18,8 @@ emission; later waves deepen the stages behind these same seams.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from sabsim.pipeline.contracts import (
     ACTIVATED_SLABS_CONTRACT,
     BOND_DEBOND_CONTRACT,
@@ -85,9 +87,6 @@ def exec_full_study(
     # because here is the last moment before node-hours are spent. The
     # skeleton never opens the §3.5 gate, so only a live stage set is
     # held to the environment library (DESIGN §3.5, 2026-08-29).
-    check_study_references(
-        study, activation_gate_will_run=stage_set is not W0_STAGES)
-
     members = study.members
     if only is not None:
         wanted = set(only)
@@ -98,6 +97,11 @@ def exec_full_study(
                 f"--only names members not in the study: "
                 f"{sorted(missing)}; the study has {sorted(present)}")
         members = tuple(m for m in members if m.name in wanted)
+    # Checked on the members that will actually RUN (PSEUDOCODE §2;
+    # LEDGER T-39), so an unprepared member never blocks a prepared one.
+    check_study_references(
+        replace(study, members=members),
+        activation_gate_will_run=stage_set is not W0_STAGES)
 
     member_results = tuple(
         exec_one_member(

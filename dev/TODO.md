@@ -2057,6 +2057,15 @@ foundations, interaction rules. -->
       baseline follows the multiple; the loader refusals and the band.
       (j) Rebuild the silicon Collection 1 to get a library, rerun the
       50 eV demo chain in a FRESH job folder with dumps, LEDGER entry.
+      STATUS 2026-08-29: (a)-(i) built (400 green); (j) T-38 built the
+      library, T-39 halted at validation — one study-wide library
+      cannot serve a dissimilar pair — and Paul's decision REPLACED
+      (e)'s `environment_library` knob: the library lives PER WAFER at
+      `<study>/<material label>/environment_library.toml` (ARCH §1,
+      DESIGN §1.2), the validator checks only the members being run,
+      `sabsim bootstrap generate` places the pair in the material folder
+      it runs from. Demo chain resubmitted from
+      `jobs/demo_si_small_50ev_dpa3i/` (T-40); LEDGER entry to follow.
 - [x] **Three small wins landed 2026-08-26 (Paul's direction).** (1) The
       force models are named in the study file's `[potential]` block
       (`universal_model`, `universal_weights`, `production_weights`,

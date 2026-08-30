@@ -25,7 +25,7 @@ either, unchanged (DESIGN.md §1.2, §14).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sabsim.deploy.registry import (
     ASSEMBLED_PAIR,
@@ -92,10 +92,14 @@ def run(study_spec_path, job_directory, stage_set, comm=None,
             study_spec_path, job_directory, stage_set, comm, only=only)
 
     validated = load_and_validate_study(study_spec_path)
+    selected = _select_members(validated, only)
     # Phase-three reference check, the same one exec_full_study runs before
     # spending node-hours (DESIGN.md §1.5): the spec is executable in
-    # principle, but does everything it points at exist?
-    check_study_references(validated)
+    # principle, but does everything it points at exist? Checked on the
+    # members this job actually RUNS (PSEUDOCODE §2; LEDGER T-39): a
+    # silicon member is never refused because a silica member of the
+    # same study has not been prepared yet.
+    check_study_references(replace(validated, members=tuple(selected)))
     job = registry_lookup(job_flag)
 
     return tuple(
@@ -103,7 +107,7 @@ def run(study_spec_path, job_directory, stage_set, comm=None,
             member,
             member_scratch(job_directory, validated.name, member.name),
             job, stage_set, comm)
-        for member in _select_members(validated, only))
+        for member in selected)
 
 
 def run_member_job(member, scratch_directory, job: JobKind,
