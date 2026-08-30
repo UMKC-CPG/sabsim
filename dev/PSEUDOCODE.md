@@ -24,7 +24,7 @@
 ---
 
 <!-- Sections mirror the pass-1 list in ARCHITECTURE §5.4: the Tier-A
-sequencer (§1), the member/study specification the sequencer loads (§2),
+sequencer (§1), the pair/project specification the sequencer loads (§2),
 the structure AND trajectory contracts that cross the simulation steps
 (§3), the measure-vector schema the analyzer emits (§4), and the
 quality-gate precedence chain that reads it (§5). Section 6 assembles
@@ -35,62 +35,61 @@ Every record is CLOSED — no field references a type left undefined. -->
 ## 1. Tier-A sequencer — the top-level control flow
 
 The sequencer owns the eight pipeline steps and the quality-gate loop
-(`ARCHITECTURE.md` §4.1, Tier A). The configured object is a **study** —
-**one or more** members plus **optional** relations among them
-(`DESIGN.md` §1.1). A study may hold a single system or several, run
-under different conditions, and a relation may compare them across
-**any** of the registered measures, not one privileged number. So the
-top entry point runs each member to a complete, self-standing report,
-then grades whatever relations were declared — of which there may be
-none. **A study of one member is fully valid:** it produces its report
-and no internal comparison, and the human who runs it is free to compare
-that report against anything else, outside the program.
+(`ARCHITECTURE.md` §4.1, Tier A). The configured object is a **project**
+— exactly **one wafer pair** in one project folder (`DESIGN.md` §1.1,
+revised 2026-08-30 (Paul)). A project holds no list of "members" and no
+relations: a reference pair (Si/Si beside a Si/SiO2 question) is a
+SEPARATE project folder the person makes and runs themselves, and the
+comparison between the two is theirs to draw, by hand, from the two
+reports. So the top entry point runs the one pair to a complete,
+self-standing report and stops. The word "member" is thereby freed to
+mean only a COMMITTEE member (§11, `DESIGN.md` §4.4).
+
+The pair runs as FOUR stage folders in the project (`ARCHITECTURE.md`
+§1): `prep_surf1_<a>/` and `prep_surf2_<b>/` prepare the two surfaces
+INDEPENDENTLY (each builds its own half in the pair's shared cell,
+bombards it, heals it and gates it), `bond_<a>_<b>/` brings the two
+prepared halves together and pulls them apart, and `analysis_<a>_<b>/`
+turns the pull into the measure vector. The whole-chain form below runs
+those four in order in one process (a login-node dry run, a small test);
+§14 cuts the same chain into four submitted jobs, the two preps side by
+side.
 
 ```
-function exec_full_study(study_specification, job_directory):
-    # Entry point. A study is members + relations (DESIGN §1.1). Each
-    # member is executed independently; the relations (e.g. the Si/SiO2-
-    # to-Si/Si ratio) are graded only after every member has produced its
-    # measure vector. job_directory is the run's home on the shared
-    # filesystem (ARCHITECTURE §4.1); the stages' bulky intermediates go in
-    # its scratch mirror, threaded EXPLICITLY from here so every written
-    # byte stays traceable to its inputs (VISION goal 3).
-    validated_study = load_and_validate_study(study_specification)
-
-    member_results = empty_list
-    for each member_specification in validated_study.members:
-        # Each member owns a scratch subtree keyed by study + member
-        # identity (the ARCHITECTURE §4.2 mirror); the file-writing stages
-        # RECEIVE it, never rebuild it from identity themselves.
-        member_scratch_dir = member_scratch(
-            job_directory, validated_study.name,
-            member_specification.name)
-        member_results.append(
-            exec_one_member(member_specification, member_scratch_dir))
-
-    # Relations are an OPTIONAL comparison layer, graded at the study
-    # level (there may be none). A relation compares a subset of the
-    # members across one or more registered measures; v1's bond-outcome
-    # ratio (DESIGN §7.4) is one such relation, not the only kind. With
-    # no relations the study report is simply the per-member reports.
-    study_report = evaluate_relations(validated_study.relations,
-                                      member_results)
-
-    emit_study(study_report, member_results)   # machine-readable output
-    return study_report
+function exec_full_project(project_specification):
+    # Entry point. A project is ONE pair (DESIGN §1.1, 2026-08-30). The
+    # project folder is where the project file sits; the loader records
+    # it, and every stage folder hangs off it (ARCHITECTURE §1). The
+    # stages' bulky intermediates go in the folder's scratch mirror,
+    # threaded EXPLICITLY from here so every written byte stays traceable
+    # to its inputs (VISION goal 3).
+    validated_project = load_and_validate_project(project_specification)
+    pair_result = exec_one_pair(validated_project.pair,
+                                validated_project.project_directory)
+    emit_project(pair_result)         # machine-readable output
+    return pair_result
 ```
 
 ```
-function exec_one_member(member_specification, scratch_directory):
-    # The eight-step pipeline for ONE member; its file-writing stages
-    # (build_slabs first, §7.1) get scratch_directory threaded in
-    # explicitly (ARCHITECTURE §4.3, VISION goal 3). In v1 the quality-gate
-    # loop executes its body ONCE and reports (VISION principle 5); the
-    # enclosing while-loop is the future automated target, shown so the
-    # seam for it exists, but not iterated in v1.
+function exec_one_pair(pair_specification, project_directory):
+    # The eight-step pipeline for ONE pair, run as its four stage folders
+    # in order. Each file-writing stage receives ITS OWN stage folder
+    # (deliverables) and that folder's scratch mirror (bulk), threaded in
+    # explicitly (ARCHITECTURE §4.3, VISION goal 3):
     #
-    # while not member_result.gate.passes:          # <- future closed loop
-    #     training_data += data_targeting(member_result.gate.weaknesses)
+    #   folders = stage_folders(pair_specification)      # §2, ONE place
+    #   prep_1  = stage_scratch(project_directory, folders.prep_surf1)
+    #   prep_2  = stage_scratch(project_directory, folders.prep_surf2)
+    #   bond    = stage_scratch(project_directory, folders.bond)
+    #   analysis = stage_scratch(project_directory, folders.analysis)
+    #
+    # In v1 the quality-gate loop executes its body ONCE and reports
+    # (VISION principle 5); the enclosing while-loop is the future
+    # automated target, shown so the seam for it exists, but not
+    # iterated in v1.
+    #
+    # while not pair_result.gate.passes:            # <- future closed loop
+    #     training_data += data_targeting(pair_result.gate.weaknesses)
     #
     # EVERY stage below is routed through run_to_contract (defined after
     # this function): run the stage, then HALT unless its output
@@ -101,7 +100,7 @@ function exec_one_member(member_specification, scratch_directory):
 
     # The potential is a CONTRACT, not a fixed implementation. Today
     # the universal foundation MLIP satisfies it as a committee of one
-    # (the study file's [potential] block names it); the bootstrap
+    # (the project file's [potential] block names it); the bootstrap
     # (steps 1-2) later satisfies it with the trained committee through
     # the SAME seam (ARCHITECTURE §5.1).
     #
@@ -109,17 +108,17 @@ function exec_one_member(member_specification, scratch_directory):
     # LOOKS UP a fingerprinted, already-manufactured potential (the
     # potential_ref of DESIGN §1.6); it does NOT train one inline. The
     # manufacturing is the bootstrap loop (§11, DESIGN §4.5), a SEPARATE
-    # top-level process that runs UPSTREAM of every member. That placement
+    # top-level process that runs UPSTREAM of every pair. That placement
     # decides WHERE the potential-quality gate ACTS: the bootstrap's
     # convergence criterion (§11.6) IS the acting form of the §5 gate --
     # inside it the potential is still mutable, so a fail DRIVES the loop.
-    # By the time a member reaches HERE the potential is FROZEN, so the
-    # same gate can only REPORT (§5, evaluate_member_gates). The
+    # By the time a pair reaches HERE the potential is FROZEN, so the
+    # same gate can only REPORT (§5, evaluate_pair_gates). The
     # production-side bulk/surface check reads as a reporter for THAT
     # reason, not by oversight -- DESIGN §7.2's "gate the build" is
     # discharged upstream, where acting is still possible.
     potential = run_to_contract(
-        () -> resolve_potential(member_specification),   # today: the
+        () -> resolve_potential(pair_specification),   # today: the
                                                           # foundation
                                                           # MLIP, alone
         POTENTIAL_CONTRACT)
@@ -133,95 +132,96 @@ function exec_one_member(member_specification, scratch_directory):
     # builder emits the crystalline pair in one piece (the Si/Si null
     # path) and the activate stage is skipped entirely.
 
-    # Step 3 — build both slabs to the shared coincidence cell (§7). Each
-    # is written to a data file under scratch_directory and returned as a
-    # HALF-HANDLE (§7.1); build_slabs is the first stage to write files.
-    (handle_A, handle_B, shared) = run_to_contract(
-        () -> build_slabs(member_specification, potential,
-                          scratch_directory),
-        SLABS_CONTRACT)
+    # PREP, one surface at a time (revised 2026-08-30 (Paul)). Steps 3
+    # and 4 for ONE wafer: relax both bulks and solve the pair's shared
+    # cell (deterministic, so both preps reach the same cell), build
+    # THIS half in it (§7.1 build_half), then cascade, heal and gate it
+    # in one session (§10.1). The healed, gated half is written to the
+    # prep folder as that stage's DELIVERABLE — the file the bond stage
+    # reads. Nothing about the other wafer is touched, so the two calls
+    # are independent and §14 submits them as two side-by-side jobs.
+    # ACTIVATED_HALF_CONTRACT checks the half is amorphized AND passed
+    # the §3.5 gate; a failure HALTS here, before any assembly.
+    activated_A = run_to_contract(
+        () -> prepare_surface(WAFER_A, pair_specification, potential,
+                              prep_1),
+        ACTIVATED_HALF_CONTRACT)
+    activated_B = run_to_contract(
+        () -> prepare_surface(WAFER_B, pair_specification, potential,
+                              prep_2),
+        ACTIVATED_HALF_CONTRACT)
 
-    # Step 4 — activate (amorphize) each slab's surface. A SEPARATE
-    # module (DESIGN §3); in the skeleton it is stubbed. It does NOT assume
-    # it ran before assembly (§5.3). Each call takes a HalfHandle, RE-READS
-    # the pristine half from its data file, runs the cascade, the heal and
-    # the §3.5 gate in one session, and writes the healed half back
-    # (§10.1; revised 2026-08-28 (Paul) — from 2026-08-08 to then the heal
-    # and gate rode the bond flow). So this stage returns ONE
-    # ActivatedSlabs (§10.1) carrying the two healed slabs AND their two
-    # verdicts; its contract checks both are amorphized and both passed,
-    # and a failure HALTS here, before any assembly.
-    activated = run_to_contract(
-        () -> activate_surfaces(handle_A, handle_B, member_specification,
-                                potential),
-        ACTIVATED_SLABS_CONTRACT)
-    slab_A = activated.slab_A   # the amorphized slabs; the healing and the
-    slab_B = activated.slab_B   # §3.5 gate happen in the bond flow below
-
-    # Step 5 — assemble the facing pair from the activated slabs (§7).
+    # BOND. Step 5 — read both deliverables back, check that the two
+    # halves carry the SAME lateral cell (each prep solved it alone; a
+    # disagreement means the two preps did not run from the same project
+    # file and is a loud stop), then assemble the facing pair (§7.5).
     structure = run_to_contract(
-        () -> assemble_pair(slab_A, slab_B, shared, member_specification),
+        () -> assemble_pair(activated_A, activated_B, pair_specification,
+                            bond),
         STRUCTURE_CONTRACT)
 
     # Steps 6-7: the bond flow, on the MLIP committee (here, the stand-in).
-    # The pair arrives already healed and gated (§10, revised 2026-08-28
-    # (Paul): the heal and the §3.5 gate ride the activate stage again),
-    # so the bond flow is the one-time lateral cell relax (§9.1, DESIGN
-    # §5.6), then press, settle and pull. The result is a
-    # BondDebondResult (§9.1): one press outcome + one reference + a
-    # per-rate list of pulls, NOT a bare Trajectory (§5.4's rate ladder).
+    # The pair arrives already healed and gated, so the bond flow is the
+    # one-time lateral cell relax (§9.1, DESIGN §5.6), then press, settle
+    # and pull. The result is a BondDebondResult (§9.1): one press
+    # outcome + one reference + a per-rate list of pulls, NOT a bare
+    # Trajectory (§5.4's rate ladder). Its manifests and ledgers are the
+    # bond folder's deliverables; its dumps stay in the mirror.
     bond_debond_trajectory = run_to_contract(
-        () -> run_bond_debond_md(structure, potential, member_specification),
+        () -> run_bond_debond_md(structure, potential, pair_specification,
+                                 bond),
         BOND_DEBOND_CONTRACT)
 
-    # The analyzer turns that result into a measure vector (DESIGN §6):
-    # it reads the press outcome into the Verdicts and iterates the
-    # per-rate pulls (§4). In the skeleton only the Imago-free mechanical
-    # measure is real; the rest report `unresolved`.
+    # ANALYSIS. The analyzer turns that result into a measure vector
+    # (DESIGN §6): it reads the press outcome into the Verdicts and
+    # iterates the per-rate pulls (§4). In the skeleton only the
+    # Imago-free mechanical measure is real; the rest report
+    # `unresolved`. The measure vector is the analysis folder's
+    # deliverable.
     measures = run_to_contract(
         () -> run_analyzer(structure, bond_debond_trajectory,
-                           member_specification),
+                           pair_specification, analysis),
         MEASURE_VECTOR_CONTRACT)
 
     # Step 8 characterization feeds additional measures. In the skeleton
     # this is MOCKED and returns schema-valid `unresolved` records.
     characterization = run_to_contract(
         () -> run_characterization(structure, bond_debond_trajectory,
-                                   member_specification),
+                                   pair_specification),
         MEASURE_VECTOR_CONTRACT)
     measures = merge_measures(measures, characterization)
 
     # The gate READS the measure vector and REPORTS; it never edits a
     # measure and, in v1, never acts (DESIGN §7). It is the terminal
     # reader, not a hand-off to a further stage, so it is not itself
-    # wrapped; the member's OWN output (MemberResult) is the last
-    # contract, checked at the member->study seam (§1's exec_full_study
-    # and emit_member).
-    gate_report = evaluate_member_gates(measures, member_specification,
-                                     potential)
+    # wrapped; the pair's OWN output (PairResult) is the last contract,
+    # checked at the pair->project seam (§1's exec_full_project and
+    # emit_pair).
+    gate_report = evaluate_pair_gates(measures, pair_specification,
+                                      potential)
 
-    member_result = record{
-        specification: member_specification,
+    pair_result = record{
+        specification: pair_specification,
         potential:     provenance_of(potential),
         measures:      measures,
         gate:          gate_report,
     }
-    emit_member(member_result)
-    return member_result
+    emit_pair(pair_result)
+    return pair_result
 ```
 
-The member's result is itself a contract — the seam between a member and
-the study that may relate it to others (its `measures` and `gate` types
-are defined in §4 and §5):
+The pair's result is itself a contract — the seam between the pair and
+the project report the person reads and, by hand, compares with other
+projects (its `measures` and `gate` types are defined in §4 and §5):
 
 ```
-record MemberResult:
-    specification: MemberSpecification   # what was asked for
+record PairResult:
+    specification: PairSpecification   # what was asked for
     potential:     Provenance         # which potential generation ran
     measures:      MeasureVector      # everything the analyzer emitted
-    gate:          GateReport         # the per-member diagnostic verdict
+    gate:          GateReport         # the per-pair diagnostic verdict
     trusted:       boolean            # default true; FALSE for a
-                                      # walking-skeleton plumbing member
+                                      # walking-skeleton plumbing pair
                                       # whose number is not
                                       # to be believed (ARCHITECTURE §5.3)
 ```
@@ -269,46 +269,52 @@ function run_to_contract(work, contract):
 The contracts named at the call sites are exactly the seam schemas of
 this document: `STRUCTURE_CONTRACT` and `BOND_DEBOND_CONTRACT` are §3,
 `MEASURE_VECTOR_CONTRACT` is §4. The structure stage's intermediate
-contracts are `SLABS_CONTRACT` (two valid `Slab`s plus their shared cell,
-§7.1) and `ACTIVATED_SLABS_CONTRACT` (both slabs amorphized — revised
-2026-08-08, §3.4: the activation gate no longer rides this seam; it moved
-to the bond flow, which gates the healed surfaces before pressing, so this
-contract now checks only that both slabs are amorphized, and the two §3.5
-verdicts are bond-flow artifacts).
+contracts are `ACTIVATED_HALF_CONTRACT` (one half built in the shared
+cell, amorphized, healed AND passed its §3.5 gate — the prep stage's
+deliverable, revised 2026-08-30 (Paul): each surface is prepared alone,
+so the contract is per half, and the gate verdict rides with it).
 `POTENTIAL_CONTRACT` is the one
 exception — not a record of ours but the external potential's loadable
 `pair_style` interface (its *quality* is judged separately by the §5
 gate — as a REPORT here, and as the ACTING convergence check inside the
 bootstrap, §11.6, that manufactured it; the guard here only checks it is
-a usable potential the member looks up by fingerprint).
+a usable potential the pair looks up by fingerprint).
 
-`[DEPTH-FIRST]` the bodies of the structure stages (`build_slabs` /
-`assemble_pair`, now in §7), `activate_surfaces`, `run_bond_debond_md`,
+`[DEPTH-FIRST]` the bodies of the structure stages (`build_half` /
+`assemble_pair`, now in §7), `prepare_surface`, `run_bond_debond_md`,
 `run_analyzer`, and `run_characterization` are the per-module algorithms;
 pass 1 fixes only their signatures and the contracts they exchange
 (§3, §4). `check_contract` and `halt_pipeline` are likewise
 contract-level here: the actual schema-validation logic is a depth-first
 concern.
 
-## 2. The member/study specification and its validator
+## 2. The pair/project specification and its validator
 
 The specification is the contract between the human and the pipeline
 (`DESIGN.md` §1). Pass 1 captures the fields the skeleton actually
 touches; the full five-group knob inventory is filled as modules land.
+A project file describes exactly ONE wafer pair (revised 2026-08-30
+(Paul)): there is no list of pairs and no relation between pairs; the
+person who wants a reference pair makes a second project folder.
 
 ```
-record Study:
-    members:   list of MemberSpecification    # ONE or more
-    relations: list of Relation            # zero or more (optional)
+record Project:
+    pair:              PairSpecification   # exactly ONE
+    project_directory: path                # the folder the project file
+                                           # sits in, set by the loader
+                                           # from the file's own location
+                                           # — never typed (ARCH §1)
 
-record MemberSpecification:
+record PairSpecification:
     # Five knob groups (DESIGN §1.2), minus deployment, which lives in
-    # a separate document the member spec cannot express (DESIGN §1.2).
+    # a separate document the pair spec cannot express (DESIGN §1.2).
+    # There is NO name field: the pair is identified by its derived
+    # pair_label (stage_folders, below), never by a typed label.
     material:      MaterialKnobs   # per-wafer crystal + face + identity
     protocol:      ProtocolKnobs   # activation, press, separate settings
     numerical:     NumericalKnobs  # tolerances, cutoffs, strides, budgets
     ensemble:      EnsembleKnobs   # master seed + two realization counts
-    potential_ref: string         # WHICH potential generation this member
+    potential_ref: string         # WHICH potential generation this pair
                                   # uses — a content fingerprint, or the
                                   # foundation-MLIP stand-in's name
                                   # today. The potential's CONTENTS are
@@ -316,23 +322,27 @@ record MemberSpecification:
                                   # (DESIGN §1.3); this POINTER is one,
                                   # for provenance (DESIGN §1.6, §6.6).
 
-record MaterialKnobs:             # one per wafer; two wafers per member
+record MaterialKnobs:             # one per wafer; two wafers per pair
     cif_source:        path        # AUTHORITATIVE crystal (a CIF):
                                    # symmetry/basis/connectivity, serves
                                    # ANY material (DESIGN §1.2)
     crystal_structure: string      # a human LABEL (e.g. "diamond"); the
                                    # CIF is authoritative, never this
     surface_face:      Miller indices
-    identity:          string      # the material itself; ALSO the name
-                                   # of this wafer's preparation
-                                   # subfolder of the study folder,
-                                   # <study>/<identity>/, which holds
-                                   # its recipe and environment library
-                                   # (DESIGN §1.2, ARCHITECTURE §1;
-                                   # Paul, 2026-08-29)
-    preparation_directory: path    # <study directory>/<identity>, set
-                                   # by the loader from the study
-                                   # file's own location — never typed
+    identity:          string      # the material itself; lower-cased
+                                   # it is ALSO the suffix of this
+                                   # wafer's preparation folder in the
+                                   # project (DESIGN §1.2, ARCHITECTURE
+                                   # §1; revised 2026-08-30 (Paul))
+    preparation_directory: path    # <project>/prep_surfN_<label>, N = 1
+                                   # for wafer_a and 2 for wafer_b,
+                                   # label = lower(identity); set by the
+                                   # loader from the project file's own
+                                   # location — never typed. Holds the
+                                   # recipe, one subfolder per single-
+                                   # material calculation, the
+                                   # environment library, and the
+                                   # amorphization of THIS surface
     # NEVER a lattice constant — the CIF fixes symmetry/basis but its
     # SCALE is a starting geometry only; §2.2 derives the working lattice
     # from the potential (DESIGN §1.3).
@@ -358,11 +368,11 @@ record ProtocolKnobs:
                                   # threshold AND the depth the §7.2
                                   # thickness floor builds for (DESIGN
                                   # §3.5/§2.5, revised 2026-08-28). A
-                                  # study choice, not a material fact
+                                  # project choice, not a material fact
     # NO library path here (revised 2026-08-29, Paul, after LEDGER
     # T-39): the environment library the §10.6 gate judges against is
     # found PER WAFER at MaterialKnobs.preparation_directory /
-    # environment_library.toml, never named in the study file. The
+    # environment_library.toml, never named in the project file. The
     # validator refuses a library whose recorded model is not
     # [potential] universal_model, or whose surfaces lack its wafer's
     # face.
@@ -458,78 +468,71 @@ record EnsembleKnobs:
     velocity_count:      integer  # thermal-velocity reseeds PER amorph
                                   # realization (the second axis; v1 = 1)
 
-record Relation:
-    # A relation compares a subset of the study's members across one or
-    # more MEASURES (by name, DESIGN §6.6) — not one privileged number.
-    # It is optional; the walking skeleton declares none.
-    kind:     one of {ratio, sweep, ...}   # v1's bond gate is `ratio`
-    members:  list of member-ids              # which members it relates
-    measures: list of measure-names        # which metrics it compares on
-    contrast: list of field-paths          # what it deliberately varies
-    controls: list of field-paths          # what it holds fixed
-    # Attached by the validator (below) and read by evaluate_relations:
-    difference_set:    DifferenceSet   # contrasted/entailed/incidental
-    confounded:        boolean         # more than one contrast
-    controls_disagree: boolean         # a declared control actually differs
-
-record DifferenceSet:
-    # Each field that differs between the members, classified (§1.1).
-    contrasted: list of field-paths   # the signal
-    entailed:   list of field-paths   # differs BECAUSE of the contrast
-    incidental: list of field-paths   # nobody decided to vary it
+# The four stage folders of a project are named in ONE place, so the
+# layout (ARCHITECTURE §1) is never written down twice. Prefix = the
+# stage, suffix = the wafer material label(s), lower-cased so the names
+# are shell-friendly; `surf1`/`surf2` fix which wafer is which, so a
+# homo pair (Si on Si) still has two distinct surfaces.
+function stage_folders(pair):
+    a = lower(pair.material.wafer_a.identity)
+    b = lower(pair.material.wafer_b.identity)
+    return record{
+        pair_label: a + "_" + b,               # "si_sio2", "si_si"
+        prep_surf1: "prep_surf1_" + a,         # surface 1 (wafer A)
+        prep_surf2: "prep_surf2_" + b,         # surface 2 (wafer B)
+        bond:       "bond_" + a + "_" + b,     # assemble..pull
+        analysis:   "analysis_" + a + "_" + b, # the measure vector
+    }
 ```
 
 ```
-function load_and_validate_study(study_specification):
-    study = deserialize(study_specification)   # [DEPTH-FIRST] format
+function load_and_validate_project(project_specification):
+    project = deserialize(project_specification)   # [DEPTH-FIRST] format
+    project.project_directory = parent folder of the project file,
+                                resolved                 # ARCHITECTURE §1
+    pair = project.pair
+    # The loader stamps each wafer's preparation folder from the folder
+    # the project file sits in and the stage_folders naming (above): a
+    # derived path, never a typed one.
+    folders = stage_folders(pair)
+    pair.material.wafer_a.preparation_directory =
+        project.project_directory / folders.prep_surf1
+    pair.material.wafer_b.preparation_directory =
+        project.project_directory / folders.prep_surf2
 
-    for each member in study.members:
-        # NO HIDDEN DEFAULTS: an incomplete specification is rejected,
-        # not silently completed (DESIGN §1.4). Defaults exist only as a
-        # separate generator that emits a fully-populated file to edit.
-        reject_if_incomplete(member)
+    # NO HIDDEN DEFAULTS: an incomplete specification is rejected,
+    # not silently completed (DESIGN §1.4). Defaults exist only as a
+    # separate generator that emits a fully-populated file to edit.
+    reject_if_incomplete(pair)
 
-        # Validation rejects a spec that cannot be EXECUTED — a species
-        # outside the potential's type map, a missing unit — never one
-        # whose COMPARISONS would be hard to interpret (DESIGN §1.5).
-        reject_if_not_executable(member)
+    # Validation rejects a spec that cannot be EXECUTED — a species
+    # outside the potential's type map, a missing unit — never one
+    # whose COMPARISONS would be hard to interpret (DESIGN §1.5).
+    reject_if_not_executable(pair)
 
-        # The environment library the §10.6 gate judges against is a
-        # run-time input like the weights, and its checks must OPEN the
-        # library file to compare model, engine, faces and temperature —
-        # so they belong to phase THREE, the "do the referenced files
-        # exist and make sense" phase that also opens the weights and
-        # crystal files (DESIGN §1.5; revised 2026-08-29 (Paul) from an
-        # earlier phase-2 placement). check_environment_libraries(
-        # member) runs there, on the login node, for EACH WAFER of the
-        # member against that wafer's own library (its material
-        # subfolder, DESIGN §1.2), with the same refusals and the
-        # temperature warn/refuse band as load_environment_library
-        # (§10.6), so a mismatch costs no node-hour. Only the members
-        # actually being run are checked, so the silicon member of a
-        # study is never refused on the silica members' account.
+    # The environment library the §10.6 gate judges against is a
+    # run-time input like the weights, and its checks must OPEN the
+    # library file to compare model, engine, faces and temperature —
+    # so they belong to phase THREE, the "do the referenced files
+    # exist and make sense" phase that also opens the weights and
+    # crystal files (DESIGN §1.5; revised 2026-08-29 (Paul) from an
+    # earlier phase-2 placement). check_environment_libraries(pair)
+    # runs there, on the login node, for EACH WAFER against that
+    # wafer's own library (its prep folder, DESIGN §1.2), with the same
+    # refusals and the temperature warn/refuse band as
+    # load_environment_library (§10.6), so a mismatch costs no
+    # node-hour. A wafer whose prep folder has no library yet is named
+    # in the refusal, so the person knows which surface still needs
+    # `sabsim bootstrap generate` (§11.3) or a copied prep folder.
 
-    for each relation in study.relations:
-        # REPORT, NEVER RESTRICT (DESIGN §1.1). A relation whose controls
-        # disagree, or which is confounded by more than one contrast, is
-        # still computed and still reported; only the gate's VERDICT is
-        # withheld. So validation here computes the difference set and
-        # flags confounds — it does not delete the relation.
-        relation.difference_set = sort_differences(
-            relation, study.members)          # contrasted/entailed/incidental
-        relation.confounded = (count(relation.contrast) > 1)
-        # A declared control that actually differs between members means
-        # the comparison is not the controlled one the relation claims.
-        relation.controls_disagree = any(
-            control appears in relation.difference_set
-            for control in relation.controls)
-
-    return study
+    # No relations to validate (revised 2026-08-30 (Paul)): the project
+    # holds one pair, and any comparison against a reference pair is
+    # the person's, drawn by hand from two project reports.
+    return project
 ```
 
 `[DEPTH-FIRST]` `deserialize` (the on-disk format), the exact protocol
-**content fingerprint** (`DESIGN.md` §1.4), and `sort_differences`'
-entailed-vs-incidental logic (`DESIGN.md` §1.1).
+**content fingerprint** (`DESIGN.md` §1.4).
 
 ## 3. The structure and trajectory contracts (steps 3-7)
 
@@ -681,13 +684,14 @@ from the live per-chunk SERIES, not from stored frames (`DESIGN.md`
 §5.5; §9.6). The frame stride is a NUMERICAL knob
 (`NumericalKnobs.frame_stride`, §2) — one stored configuration per N
 steps, typically 100-1000, never every step — and `FrameSetRef.stride`
-records the value a member actually used, for provenance.
+records the value a pair actually used, for provenance.
 
 ## 4. The measure-vector schema (the analyzer's output)
 
-The analyzer emits one machine-readable document per member; the gate
-reads
-it **by name and status, never by position** (`DESIGN.md` §6.6). A gate
+The analyzer emits one machine-readable document per pair — the
+`measure_vector` that is the analysis folder's deliverable
+(`ARCHITECTURE.md` §1) — and the gate reads it **by name and status,
+never by position** (`DESIGN.md` §6.6). A gate
 cannot consume prose, so this schema is what makes §5 (the gate) possible
 at all.
 
@@ -744,10 +748,10 @@ record CheckResult:
 
 ```
 function run_analyzer(structure, bond_debond_trajectory,
-                      member_specification):
+                      pair_specification, analysis_folder):
     # The analyzer is a REGISTRY of measures (DESIGN §6.7). Each measure
     # declares what it needs; the analyzer resolves those needs against
-    # what the member produced, computes what it can, and marks the rest
+    # what the pair produced, computes what it can, and marks the rest
     # `unresolved`. Adding a measure is registering one, not editing the
     # gate.
     #
@@ -806,7 +810,7 @@ record PotentialQualityVerdict:
 function potential_quality_gate(potential, measures):
     # THE potential-quality gate, as ONE named unit (DESIGN §7.2-§7.3), so
     # its two callers invoke the SAME object and only DIFFER in what they
-    # do with it: evaluate_member_gates (below) READS the verdict into the
+    # do with it: evaluate_pair_gates (below) READS the verdict into the
     # five-way diagnosis; the bootstrap's convergence check (§11.6) ACTS on
     # `.passes` to drive its loop. Identical gate, opposite consequence --
     # exactly the §1 marker's "acts upstream, reports downstream."
@@ -816,16 +820,17 @@ function potential_quality_gate(potential, measures):
         bulk_surface: bulk_surface, interface: interface,
         passes: (bulk_surface.passes and interface.passes) }
 
-function evaluate_member_gates(measures, member_specification, potential):
+function evaluate_pair_gates(measures, pair_specification, potential):
     # The potential-quality gate is READ here, not acted on -- v1's gate
     # reports (DESIGN §7, VISION principle 5). A failure is a POTENTIAL
     # problem -> the remedy is more training data.
     quality = potential_quality_gate(potential, measures)   # DESIGN §7.2-3
 
     # The five-way diagnosis routes the CAUSE of a questionable bond
-    # number using those per-member signals (DESIGN §7.6). The bond-outcome
-    # RATIO itself is a relation, graded at the study level (§1); a
-    # single member has no ratio to grade.
+    # number using those per-pair signals (DESIGN §7.6). The bond-outcome
+    # RATIO against a reference pair is NOT graded here or anywhere in
+    # the program (revised 2026-08-30 (Paul)): the reference pair is its
+    # own project, and the person forms the ratio from the two reports.
     return diagnose(measures, quality.bulk_surface, quality.interface)
 ```
 
@@ -867,43 +872,25 @@ record GateReport:
     # In v1 this is REPORTED, never acted on (DESIGN §7; VISION prin. 5).
 ```
 
-```
-function evaluate_relations(relations, member_results):
-    # Study-level grading of the OPTIONAL comparison layer. With no
-    # relations this returns nothing, and the study report is simply the
-    # per-member reports. A relation grades its members across its declared
-    # measures; v1's bond-outcome `ratio` (DESIGN §7.4) is one kind — the
-    # Si/SiO2-to-Si/Si work-of-separation ratio against the experimental
-    # ratio within combined (correlated) uncertainty, plus a loose
-    # absolute bracket that tests plumbing, not physics.
-    reports = empty_list
-    for each relation in relations:
-        if relation.confounded or relation.controls_disagree:
-            # REPORT, NEVER RESTRICT: still reported, verdict withheld
-            # (DESIGN §1.1). `unresolved` means "this gate is not
-            # competent to grade this comparison," never "no number."
-            reports.append(relation.as_unresolved_with_differences())
-        else:
-            reports.append(grade_relation(relation, member_results))
-    return reports
-```
+**No relation layer (revised 2026-08-30 (Paul)).** Earlier passes
+carried an `evaluate_relations` step that graded a declared comparison
+between two pairs of one study — v1's Si/SiO2-to-Si/Si work-of-
+separation ratio (`DESIGN.md` §7.4) against experiment. That machinery
+is retired with the study object itself: a project is one pair, the
+reference pair is a second project folder, and the ratio, its
+correlated uncertainty, and the honest list of everything that differs
+between the two runs are the person's to assemble from the two measure
+vectors. The program's whole job at this seam is to hand over a
+complete, self-describing report per pair (`DESIGN.md` §1.1: report,
+never restrict).
 
-In the walking skeleton the study holds a single Si/Si member and
-declares **no**
-relations, so there is nothing to grade and the study report is simply
-that member's report — a study of one is fully valid (`DESIGN.md` §1.1).
-The bond-outcome ratio first becomes gradable at the Si/SiO2 transition,
-when a second member exists to relate; and even then, comparison remains
-an optional layer the human may also perform outside the program.
-
-`[DEPTH-FIRST]` `check_bulk_surface`, `check_interface_fidelity` (the
-committee-uncertainty and all-electron cross-check math, `DESIGN.md`
-§7.3), and `grade_relation` — dispatched by `kind`, of which the `ratio`
-case carries the correlated-uncertainty propagation of `DESIGN.md` §7.4.
+`[DEPTH-FIRST]` `check_bulk_surface` and `check_interface_fidelity`
+(the committee-uncertainty and all-electron cross-check math,
+`DESIGN.md` §7.3).
 
 ## 6. The walking-skeleton configuration
 
-This is **not a separate function.** It is `exec_one_member` (§1) in the
+This is **not a separate function.** It is `exec_one_pair` (§1) in the
 **walking-skeleton build phase** (`ARCHITECTURE.md` §5.3 calls it Wave 0),
 showing what each stage RESOLVES to when the cheapest contract-satisfying
 stand-in sits behind its contract. Same code path — the stand-ins are
@@ -911,29 +898,29 @@ injected, not branched to. Nothing below is trusted for physics; it
 exists so every seam is exercised under real data flow.
 
 ```
-# exec_one_member, each stage resolved to its walking-skeleton stand-in:
+# exec_one_pair, each stage resolved to its walking-skeleton stand-in:
     potential  = stand_in_pair_style(...)       # steps 1-2 SKIPPED
-    (handle_A, handle_B, shared) = build_slabs(...)  # step 3, real
-    activated  = stub_activate(handle_A, handle_B)   # step 4, STUB:
-    slab_A     = activated.slab_A               # returns an ActivatedSlabs
-    slab_B     = activated.slab_B               # (§10.1), amorphized slabs
-    structure  = assemble_pair(slab_A, slab_B,   # step 5, trivial (Si/Si)
-                               shared)
+    activated_A = stub_prepare_surface(WAFER_A)  # prep_surf1: build the
+    activated_B = stub_prepare_surface(WAFER_B)  # half for real (§7.1),
+                                                # activation STUBBED;
+                                                # each returns an
+                                                # ActivatedHalf (§10.1)
+    structure  = assemble_pair(activated_A,     # bond: step 5, trivial
+                               activated_B)     # (Si/Si)
     bond_debond_trajectory = press_then_pull(structure)   # steps 6-7,
                                                           # real
     measures   = run_analyzer(structure,               # M1 real, the
                               bond_debond_trajectory)   # rest unresolved
     measures   = merge mock_characterization()  # step 8, MOCK
-    gate       = evaluate_member_gates(measures)
-    # -> the resulting MemberResult.trusted is FALSE (a plumbing member)
+    gate       = evaluate_pair_gates(measures)
+    # -> the resulting PairResult.trusted is FALSE (a plumbing pair)
 ```
 
-**What each stand-in must still honour:** `stub_activate` returns an
-`ActivatedSlabs` (§10.1) whose two slabs satisfy the amorphization contract
-— revised 2026-08-08 (§3.4), the §3.5 gate no longer rides this seam (it
-moved to the bond flow), so the contract checks amorphization, not a
-verdict — and it satisfies the same contract the real activation does, so
-§1's unpack is exercised, not special-cased; `mock_characterization`
+**What each stand-in must still honour:** `stub_prepare_surface`
+returns an `ActivatedHalf` (§10.1) whose slab satisfies the amorphization
+contract and carries a passing verdict, written to the prep folder like
+the real one, so §1's per-half handoff is exercised, not special-cased;
+`mock_characterization`
 returns
 schema-valid `unresolved` MeasureRecords (§4); `stand_in_pair_style`
 satisfies the same potential contract the trained MLIP will; and
@@ -944,7 +931,7 @@ moment a stand-in's output stops satisfying its contract, the pipeline
 stops — which is the signal the contract, not the module, needs
 attention (`ARCHITECTURE.md` §5.1).
 
-`[DEPTH-FIRST]` `build_slabs`, `assemble_pair`, and `press_then_pull` are
+`[DEPTH-FIRST]` `build_half`, `assemble_pair`, and `press_then_pull` are
 real even in the walking skeleton, but their algorithm bodies are written
 in the structure (§7) and MD (later) depth-first passes; here they are
 contract signatures only.
@@ -969,38 +956,65 @@ BETWEEN slab-building (step 3) and assembly (step 5). So the builder
 exposes entry points the sequencer calls in order, with activation
 injected between the second and third:
 
-  solve_shared_cell  ->  build_slab (x2)  --[activate]-->  assemble_pair
+  solve_shared_cell  ->  build_half (x2)  --[activate]-->  assemble_pair
 
-`[RESOLVED → §1]` pass-1's `exec_one_member` collapsed steps 3-4-5 into
-one `run_structure_stage` call, hiding activation. §1 now calls the three
-stages explicitly — `build_slabs` -> `activate_surfaces` (the separate
-activation module, `DESIGN.md` §3) -> `assemble_pair` — matching the
-honest form the walking-skeleton configuration (§6) already showed.
-Applied at the
-programmer's direction; `run_structure_stage` is retired.
+`[RESOLVED → §1]` pass-1's `exec_one_pair` collapsed steps 3-4-5 into
+one `run_structure_stage` call, hiding activation. §1 now calls the
+stages explicitly — `build_half` inside each surface's `prepare_surface`
+(the separate activation module, `DESIGN.md` §3, follows it in the same
+prep stage) -> `assemble_pair` — matching the honest form the
+walking-skeleton configuration (§6) already showed. Applied at the
+programmer's direction; `run_structure_stage` is retired. Revised
+2026-08-30 (Paul): the two halves are built by two INDEPENDENT prep
+stages, each solving the shared cell for itself, rather than by one
+`build_slabs` call that made both.
 
 ### 7.1 The module's top-level shape
 
 ```
-function build_slabs(member_specification, potential, scratch_directory):
-    # Steps up to and including step 3, for BOTH wafers. Stops before
-    # activation, which the sequencer runs next. The two results are
-    # STANDALONE half-cells, each in its OWN vacuum box (build_slab adds
-    # the vacuum, §7.4) — NOT the assembled pair. Each is WRITTEN to a data
-    # file under scratch_directory and returned as a HALF-HANDLE the
-    # activation stage loads on its own engine (ARCHITECTURE §4.3).
-    # build_slabs is the FIRST stage to write real files, so the sequencer
-    # threads it the run's scratch directory EXPLICITLY (traceable, never
-    # rebuilt from identity — VISION goal 3). assemble_pair (§7.5) reads
-    # the two AMORPHIZED halves back only after activation. Building the
-    # pair crystalline in one step is the activation-OFF null path (Si/Si,
-    # no cascade).
-    material_A, material_B = member_specification.material   # two wafers
-    numerical              = member_specification.numerical
+function prepare_surface(wafer, pair_specification, potential,
+                         prep_folder):
+    # ONE prep stage (revised 2026-08-30 (Paul)): steps up to and
+    # including 3 for THIS wafer, then step 4 (§10.1), then the write of
+    # the DELIVERABLE. Runs with no knowledge of the other wafer beyond
+    # its crystal, which the shared cell needs; so the two calls are
+    # independent and §14 submits them side by side. prep_folder is the
+    # stage's folder in the project (deliverables) with its scratch
+    # mirror (bulk) alongside (ARCHITECTURE §1, §4.3).
+    handle    = build_half(wafer, pair_specification, potential,
+                           prep_folder.scratch)                   # §7.1
+    activated = activate_surface(handle, pair_specification,
+                                 potential)                       # §10.1
+    # The deliverable: the healed, gated half as a data file plus a
+    # manifest carrying its verdict, its shared cell (so the bond stage
+    # can check the two halves agree), its measured skin and the run it
+    # came from. Written to the PROJECT folder, not the mirror, because
+    # it is small and the bond stage reads it (§14.6 artifact form).
+    write_artifact(prep_folder.project, ACTIVATED_HALF, activated)
+    return activated
 
-    # The shared cell is solved ONCE, on the two SUBSTRATE lattices, and
-    # is an invariant of the pair (DESIGN §2.1, §2.3). It reads two
-    # numerical knobs: the misfit tolerance and the atom-area budget.
+function build_half(wafer, pair_specification, potential,
+                    scratch_directory):
+    # Steps up to and including step 3, for ONE wafer. The result is a
+    # STANDALONE half-cell in its OWN vacuum box (build_slab adds the
+    # vacuum, §7.4) — NOT the assembled pair — WRITTEN to a data file
+    # under scratch_directory and returned as a HALF-HANDLE the
+    # activation stage loads on its own engine (ARCHITECTURE §4.3).
+    # build_half is the FIRST stage to write real files, so the caller
+    # threads it the stage's scratch directory EXPLICITLY (traceable,
+    # never rebuilt from identity — VISION goal 3). assemble_pair (§7.5)
+    # reads the two AMORPHIZED halves back only after both preps.
+    # Building the pair crystalline in one step is the activation-OFF
+    # null path (Si/Si, no cascade).
+    material_A, material_B = pair_specification.material   # two wafers
+    numerical              = pair_specification.numerical
+
+    # The shared cell is solved ONCE PER PREP, on the two SUBSTRATE
+    # lattices, and is an invariant of the pair (DESIGN §2.1, §2.3):
+    # both preps run the same deterministic solve on the same two
+    # crystals and reach the same cell, which the bond stage verifies.
+    # It reads two numerical knobs: the misfit tolerance and the
+    # atom-area budget.
     shared = solve_shared_cell(material_A, material_B, potential,
                                numerical.misfit_tolerance,
                                numerical.max_coincidence_area)
@@ -1008,26 +1022,23 @@ function build_slabs(member_specification, potential, scratch_directory):
     # Split the small residual misfit between the slabs (DESIGN §2.4).
     strain_A, strain_B = split_strain(shared, material_A, material_B,
                                       potential)
+    material, strain = (material_A, strain_A) if wafer is WAFER_A
+                       else (material_B, strain_B)
 
-    # Each half DECLARES the beam species (the activation projectile plus
+    # The half DECLARES the beam species (the activation projectile plus
     # any co-deposit) in its type map though it contains none yet: the
     # cascade CREATES those atoms, and the simulator can only make an atom
     # of a type its data file already declared (§10.3). Wafer A is built as
     # the bottom half, B as the top — the assembly invariant (DESIGN §2.6).
-    beam = projectile_species(member_specification)          # §10.3
+    beam = projectile_species(pair_specification)            # §10.3
     # write_standalone_half writes the data file and stamps the HANDLE:
     # WHICH wafer a half plays (bottom A / top B) is an assembly-ROLE fact,
     # not a geometry fact, so it lives on the handle, not on the slab —
     # build_standalone_half stays wafer-agnostic.
-    handle_A = write_standalone_half(
-        build_standalone_half(material_A, shared, strain_A, beam,
-                              potential, member_specification),
-        WAFER_A, scratch_directory)
-    handle_B = write_standalone_half(
-        build_standalone_half(material_B, shared, strain_B, beam,
-                              potential, member_specification),
-        WAFER_B, scratch_directory)
-    return (handle_A, handle_B, shared)
+    return write_standalone_half(
+        build_standalone_half(material, shared, strain, beam,
+                              potential, pair_specification),
+        wafer, shared, scratch_directory)
 ```
 
 ```
@@ -1039,12 +1050,13 @@ record SharedCell:
     residual_strain: StrainTensor          # misfit left after the match
 
 record HalfHandle:
-    # What build_slabs hands the activation stage for ONE half: everything
+    # What build_half hands the activation stage for ONE half: everything
     # needed to amorphize it, and NOTHING about the other half, so each is
     # a self-contained fan-out unit (the # C-EXPANSION unit, §4.3). The
     # activation stage RE-READS the slab geometry from data_file, never a
     # warm in-memory object, so the unit is restartable after a crash and
-    # identical whether it runs in the member's own job or a separate one.
+    # identical whether it runs in the whole-chain process or its own
+    # prep job (the normal case, §14).
     #
     # [SERIAL I/O] Under MPI the write above happens on ONE rank, then a
     # barrier, and each reader below re-reads the file for ITSELF. Every
@@ -1055,13 +1067,16 @@ record HalfHandle:
     type_map:  map        # species -> type id, WITH the beam declared
     identity:  string     # the material (report + reference lookup)
     wafer:     tag        # WAFER_A (bottom) or WAFER_B (top)
+    shared:    SharedCell # the cell this half was built in, carried so
+                          # the bond stage can check both halves agree
 ```
 
 A `Slab` is just a `Structure` (§3) for one material — one provenance
 label, and `grips` not yet set (assembly sets them, §7.5). Across the
 build→amorphize seam a half travels as a `HalfHandle` — its file plus the
 few facts the cascade needs — never as a live object (`ARCHITECTURE.md`
-§4.3 file handoff).
+§4.3 file handoff). Across the prep→bond seam it travels as the
+ACTIVATED_HALF artifact the prep folder holds (§14.6).
 
 ### 7.2 solve_shared_cell — lattices from the potential, then the match
 
@@ -1120,7 +1135,7 @@ to done, where the matcher (§7.6) needs two.
 
 ```
 function build_slab(material, shared, applied_strain, potential,
-                    member_specification):
+                    pair_specification):
     # Step 3 for one wafer. Adopted ASE machinery cleaves and tiles;
     # three decisions sit on top (DESIGN §2.5).
     # The crystal comes from material.cif_source (a CIF — DESIGN §1.2):
@@ -1134,13 +1149,13 @@ function build_slab(material, shared, applied_strain, potential,
 
     # Thickness is a CRITERION, not a constant (DESIGN §2.5):
     #   slab_thickness >= required_activated_depth + minimum_bulk_thickness
-    # The depth term is the study's REQUIREMENT on the activation (the
+    # The depth term is the project's REQUIREMENT on the activation (the
     # same number the §10.6 gate demands), because the build runs before
     # the gate has measured anything; v1 fixes thickness by a short
     # convergence study, applies this as a FLOOR, and records the margin.
     ensure_thickness(slab,
-        member_specification.protocol.required_activated_depth,
-        member_specification.numerical.minimum_bulk_thickness)
+        pair_specification.protocol.required_activated_depth,
+        pair_specification.numerical.minimum_bulk_thickness)
 
     # Where a face admits several terminations, ENUMERATE and select by
     # computed surface energy (DESIGN §2.5) — which the potential-quality
@@ -1160,9 +1175,18 @@ function build_slab(material, shared, applied_strain, potential,
 ### 7.5 assemble_pair — dividing surface, ejecta, clash, labeled groups
 
 ```
-function assemble_pair(slab_A, slab_B, shared, member_specification):
-    # Step 5, the BARRIER stage: the first to see BOTH halves. In the real
-    # pipeline each half is AMORPHIZED by now, read back from the data file
+function assemble_pair(activated_A, activated_B, pair_specification,
+                       bond_folder):
+    # Step 5, the BARRIER stage: the first to see BOTH halves — the two
+    # ACTIVATED_HALF deliverables the prep folders hold (§7.1, §14.6).
+    # Before anything else it checks the two halves' recorded shared
+    # cells AGREE (each prep solved the cell alone): a mismatch means the
+    # preps did not come from one project file, and is a loud stop.
+    #     if activated_A.shared != activated_B.shared: halt(...)
+    #     shared = activated_A.shared
+    #     slab_A, slab_B = activated_A.slab, activated_B.slab
+    # In the real pipeline each half is AMORPHIZED by now, read back from
+    # the data file
     # its activation stage wrote (ARCHITECTURE §4.3) — assembly receives
     # two read-back states, not live crystalline slabs. Both already share
     # `shared.lateral_cell` by construction, so ASSERT commensurability,
@@ -1198,11 +1222,11 @@ function assemble_pair(slab_A, slab_B, shared, member_specification):
     # range but not yet loading each other (DESIGN §2.6). Then check the
     # minimum cross-slab distance; if it violates the clash floor, back
     # the gap off and RECORD the adjustment rather than aborting the
-    # member (DESIGN §2.6).
+    # pair (DESIGN §2.6).
     pair = place_facing(slab_A, slab_B, surface_A, surface_B,
-                        member_specification.protocol.initial_gap)
+                        pair_specification.protocol.initial_gap)
     pair = relieve_clash(pair,
-                        member_specification.numerical.clash_floor)
+                        pair_specification.numerical.clash_floor)
 
     # NO registry search: an amorphous-amorphous contact has no registry
     # (STRUCTURAL 4, DESIGN §2.6). The lateral offset survives only as an
@@ -1279,7 +1303,7 @@ function coincidence_match(lattice_A, lattice_B, misfit_tolerance,
     if admissible is empty:
         # A FIRST-CLASS reported outcome, never a crash: within this
         # tolerance and this area budget the two lattices share no cell.
-        # The member's structure measures go `unresolved` with this
+        # The pair's structure measures go `unresolved` with this
         # reason — the very envelope §8.2 prices step 8 against
         # (DESIGN §2.3, §8.2). Loosening either knob is the human's
         # call, never a silent widening (DESIGN §1.4).
@@ -1311,7 +1335,7 @@ IS that candidate's twist — read out by `alignment_twist`, not imposed.
 For v1's goal (the smallest cell for a nominally untwisted Si/SiO2 bond)
 this discovered rotation is sufficient. An EXPLICIT grid becomes the
 mechanism only when twist is promoted to a CONTROLLED physical knob (a
-future study dimension), where it would wrap the enumerator in an outer
+future sweep dimension), where it would wrap the enumerator in an outer
 loop over grid angles. `DESIGN.md` §2.3 now carries this reconciliation
 directly — its earlier "over a grid" wording was updated to the
 discovered-twist reading.
@@ -1319,7 +1343,7 @@ discovered-twist reading.
 **7.6.2 The Si/Si null test.** For identical lattices the identity
 tiling matches exactly at zero strain and is trivially the smallest
 zero-strain cell, so the search returns identity tiling, zero twist,
-zero strain (`DESIGN.md` §2.3). The walking-skeleton Si/Si member (§6)
+zero strain (`DESIGN.md` §2.3). The walking-skeleton Si/Si pair (§6)
 is therefore ALSO the matcher's null test — a real exercise of this code
 path whose correct answer is the trivial one. Prior art's continued-
 fraction reasoning is the ONE-DIMENSIONAL shadow of this search
@@ -1813,8 +1837,8 @@ state, and a LIST of per-rate pulls — not a single trajectory.
 record BondDebondResult:
     # The concrete form of the §3 press/pull stage output (what §1 calls
     # BOND_DEBOND_CONTRACT). One press, one reference, many pulls. The
-    # §3.5 activation verdicts ride ActivatedSlabs (§10.1) again from
-    # 2026-08-28; between 2026-08-08 and then they rode this record.
+    # §3.5 activation verdicts ride each ActivatedHalf (§10.1) again
+    # from 2026-08-28; between 2026-08-08 and then they rode this record.
     press:        PressOutcome         # step 6 (§5.1, §5.2)
     reference:    StateRef             # gated zero-load reference (§5.3)
     pulls:        list of Trajectory   # one §3 Trajectory per pull rate
@@ -1842,9 +1866,12 @@ record StageLedger:
 ```
 
 ```
-function run_bond_debond_md(structure, potential, member_specification):
+function run_bond_debond_md(structure, potential, pair_specification,
+                            bond_folder):
+    # bond_folder: the stage's project folder (manifests, ledgers) with
+    # its scratch mirror (dumps, logs, data files) alongside (ARCH §1).
     driver = open_lammps_driver(structure, potential,
-                                member_specification)   # §9.2, persistent
+                                pair_specification)   # §9.2, persistent
 
     # The structure arrives HEALED and GATED (§10, revised 2026-08-28
     # (Paul)): each half was annealed, minimized and judged in its own
@@ -1856,17 +1883,17 @@ function run_bond_debond_md(structure, potential, member_specification):
     relax_lateral_cell_once(driver)                               # §5.6
 
     # Step 6: press the two healed surfaces together and let them bond.
-    press = press_and_bond(driver, member_specification)          # §9.3
+    press = press_and_bond(driver, pair_specification)          # §9.3
 
     # The gated zero-load reference the pull integrates from (§5.3).
-    reference = settle_reference(driver, press, member_specification)  # §9.4
+    reference = settle_reference(driver, press, pair_specification)  # §9.4
 
     # Step 7: pull ONCE PER RATE (§5.4), each from a fresh copy of the
     # reference (a pull deforms it). The press is NOT repeated.
     pulls = empty list
-    for each rate in member_specification.numerical.pull_rate_ladder:
+    for each rate in pair_specification.numerical.pull_rate_ladder:
         pulls.append(pull_at_rate(driver, reference, rate,
-                                  member_specification))     # §9.5, §9.6
+                                  pair_specification))     # §9.5, §9.6
     return BondDebondResult{ press: press, reference: reference,
                             pulls: pulls }
 ```
@@ -1888,7 +1915,7 @@ per-rate measures and reads `.press` into `Verdicts` (§4).
 ### 9.2 The persistent LAMMPS driver
 
 ```
-function open_lammps_driver(structure, potential, member_specification):
+function open_lammps_driver(structure, potential, pair_specification):
     # ONE persistent LAMMPS process for the whole press+pull, NOT a fresh
     # LAMMPS per impact with a full-slab disk round-trip (prior art's
     # antipattern, PRIOR_ART.md §1.7). Load the potential once, then CARVE
@@ -1923,9 +1950,9 @@ function open_lammps_driver(structure, potential, member_specification):
 ### 9.3 press_and_bond — mode, no impact, honest thermostat, dual contact
 
 ```
-function press_and_bond(driver, member_specification):
-    protocol  = member_specification.protocol
-    numerical = member_specification.numerical
+function press_and_bond(driver, pair_specification):
+    protocol  = pair_specification.protocol
+    numerical = pair_specification.numerical
     # Pluggable control mode at ONE seam (§5.2). v1 freezes load-control;
     # displacement-control is the SAME seam, run once on Si/Si as a
     # cross-check (their disagreement measures press irreversibility).
@@ -1973,7 +2000,7 @@ function press_and_bond(driver, member_specification):
     # The driver advances one control_interval at a time and reads back
     # between chunks; the stress mean spans contact_stress_window chunks;
     # the search stops at press_time_budget and REPORTS no contact (§5.2,
-    # 2026-08-28 — all three are study knobs, no longer driver constants).
+    # 2026-08-28 — all three are project knobs, not driver constants).
     stage_steps.press_start = current_step(driver)
     run_until(driver, step = numerical.control_interval,
         budget = numerical.press_time_budget,
@@ -2010,8 +2037,8 @@ function press_and_bond(driver, member_specification):
 ### 9.4 settle_reference — a gated zero-load state (`DESIGN.md` §5.3)
 
 ```
-function settle_reference(driver, press, member_specification):
-    numerical = member_specification.numerical
+function settle_reference(driver, press, pair_specification):
+    numerical = pair_specification.numerical
     # The pull's curve must start at rest under NO applied load. Prior art
     # minimizes, re-heats, and pulls at once, integrating from a stressed
     # state (its PE jumps 481 eV in 0.5 ps). SABSIM GATES the reference.
@@ -2025,12 +2052,12 @@ function settle_reference(driver, press, member_specification):
     # handle at the depth it reached. Without this the reference would
     # equilibrate WHILE STILL BEING PRESSED and the zero-load gate would
     # be a lie.
-    release_press_drive(driver, member_specification)
+    release_press_drive(driver, pair_specification)
     press.stage_steps.settle_start = current_step(driver)   # ledger, §9.3
     minimize(driver)                          # to a local minimum
     # Settle at temperature for settle_duration, one control_interval at
     # a time, reading BOTH grip reactions and the potential energy back
-    # after each chunk (§5.3, 2026-08-28: both are study knobs).
+    # after each chunk (§5.3, 2026-08-28: both are project knobs).
     series = equilibrate_under_thermostat(driver, numerical.settle_duration,
                                           numerical.control_interval)
     press.stage_steps.settle_end = current_step(driver)
@@ -2055,8 +2082,8 @@ function settle_reference(driver, press, member_specification):
 ### 9.5 pull_at_rate — one rung of the ladder (`DESIGN.md` §5.4)
 
 ```
-function pull_at_rate(driver, reference, rate, member_specification):
-    numerical = member_specification.numerical
+function pull_at_rate(driver, reference, rate, pair_specification):
+    numerical = pair_specification.numerical
     restore(driver, reference)           # a FRESH copy; the pull deforms it
     hold(driver.grips.bottom)            # bottom grip held
     drive_grip(driver.grips.top, rate)   # top grip at constant rate
@@ -2090,7 +2117,7 @@ function pull_at_rate(driver, reference, rate, member_specification):
     series = run_pull_gathering_series(driver, rate, numerical)
 
     return reduce_to_trajectory(driver, series, frames_ref, reference,
-                                rate, member_specification)        # §9.6
+                                rate, pair_specification)        # §9.6
 ```
 
 ### 9.6 reduce_to_trajectory — two curves, separation, and the gates
@@ -2123,8 +2150,8 @@ function interface_geometry(driver, recorded_plane, numerical):
 
 
 function reduce_to_trajectory(driver, series, frames_ref, reference,
-                              rate, member_specification):
-    numerical = member_specification.numerical
+                              rate, pair_specification):
+    numerical = pair_specification.numerical
     # The reduction is built ENTIRELY from the per-chunk SERIES gathered
     # live in the loop (§9.5) — displacement, force, opening, bridges.
     # `frames_ref` is the SEPARATE coordinate archive (§3): carried
@@ -2178,7 +2205,7 @@ function reduce_to_trajectory(driver, series, frames_ref, reference,
         complete:             ran_to_completion(driver),
         atom_count_conserved: atom_count_unchanged(driver),
         grip_reaction:        both_grip_curves(driver),
-        provenance:           provenance_of(rate, member_specification),
+        provenance:           provenance_of(rate, pair_specification),
         frames:               frames_ref }
 ```
 
@@ -2254,13 +2281,13 @@ Their existence is pinned here; their numbers are a §5.9 DESIGN task.
 
 This is the **fourth (and final) depth-first module pass**
 (`ARCHITECTURE.md` §5.4), on `DESIGN.md` §3. It refines the
-`activate_surfaces` body — §1's step-4 seam, guarded by
-`ACTIVATED_SLABS_CONTRACT` — to code-readiness, and it defines the
-concrete form of that contract. Like §9 it runs on a persistent LAMMPS
-driver, and the cascade runs under a `hybrid/overlay` splice of the
-universal foundation MLIP with two ZBL cores, **not** the committee
-(DESIGN §4.7); the heal (§10.5), on the same model, delegates back to
-§9.7.
+`activate_surface` body — the step-4 seam inside each prep stage
+(§1, §7.1), guarded by `ACTIVATED_HALF_CONTRACT` — to code-readiness,
+and it defines the concrete form of that contract. Like §9 it runs on
+a persistent LAMMPS driver, and the cascade runs under a
+`hybrid/overlay` splice of the universal foundation MLIP with two ZBL
+cores, **not** the committee (DESIGN §4.7); the heal (§10.5), on the
+same model, delegates back to §9.7.
 
 Prior art built and RAN this stage, so its failures are concrete
 (`PRIOR_ART.md` §1.2, §1.5): argon-only ZBL channels, SiO₂-hardcoded
@@ -2279,26 +2306,29 @@ surface-activated bonding (`DESIGN.md` §3.1). **Revised 2026-08-28 (Paul,
 §3.4): activation is cascade + heal + gate again.** Each half is
 bombarded, stripped of the projectile, healed (anneal then minimize,
 §10.5) and judged by the §3.5 gate (§10.6) in its own session, and only
-two passing halves are assembled. So `activate_surfaces` returns the
-concrete form of `ACTIVATED_SLABS_CONTRACT` carrying the two HEALED
-slabs and their two verdicts; a failed verdict halts at this seam,
-before any assembly. (From 2026-08-08 to 2026-08-28 the heal and gate
-rode the bond flow on the assembled pair at a wide gap; that placement
+two passing halves are assembled. So `activate_surface` returns the
+concrete form of `ACTIVATED_HALF_CONTRACT` — ONE healed slab with its
+verdict, the deliverable of its prep stage (revised 2026-08-30 (Paul));
+a failed verdict halts that prep at this seam, before any assembly.
+(From 2026-08-08 to 2026-08-28 the heal and gate rode the bond flow on
+the assembled pair at a wide gap; that placement
 existed only because the heal then ran under a potential whose engine
 lived in the bond job, and one universal model for cascade and heal
 dissolved the reason.)
 
 ```
-record ActivatedSlabs:
-    # The concrete form of §1's ACTIVATED_SLABS_CONTRACT (revised
-    # 2026-08-28): two HEALED slabs and the §3.5 verdict for each. The
-    # contract checks both slabs are amorphized AND both verdicts passed;
-    # a failure halts the member here, before assemble_pair.
-    slab_A:    Structure           # healed slab A (grips still unset)
-    slab_B:    Structure           # healed slab B
-    verdict_A: ActivationVerdict   # A's healed-surface gate (§10.6)
-    verdict_B: ActivationVerdict   # B's healed-surface gate
-    # Each slab also records the MD step at which its heal began
+record ActivatedHalf:
+    # The concrete form of §1's ACTIVATED_HALF_CONTRACT (revised
+    # 2026-08-30 (Paul); from 2026-08-28 to then an ActivatedSlabs pair
+    # carried both halves at once): ONE healed slab and its §3.5
+    # verdict, the deliverable of one prep stage. The contract checks
+    # the slab is amorphized AND the verdict passed; a failure halts the
+    # prep here, before any assembly.
+    slab:    Structure             # the healed half (grips still unset)
+    verdict: ActivationVerdict     # its healed-surface gate (§10.6)
+    wafer:   tag                   # WAFER_A (bottom) or WAFER_B (top)
+    shared:  SharedCell            # the cell it was built in (§7.1)
+    # The slab also records the MD step at which its heal began
     # (heal_start_step), written by the cascade session as a marker
     # beside its recording, so a consumer of the activate movie can
     # tell the cascade-hot frames from the healed ones (§11.3).
@@ -2317,51 +2347,39 @@ record MetricVerdict:
 ```
 
 `[SEAM — rippled in code, 2026-07-18; re-scoped 2026-08-08; restored
-2026-08-28]` the sequencer runs `activate_surfaces` to one
-`ActivatedSlabs`, HALTS unless `.verdict_A.passed` and
-`.verdict_B.passed` (the "gate, not warn" discipline at the seam where
-failure is cheapest), and rebinds `slab_A` / `slab_B` from it to feed
-`assemble_pair`.
+2026-08-28; per half 2026-08-30]` each prep stage runs
+`prepare_surface` to one `ActivatedHalf`, HALTS unless
+`.verdict.passed` (the "gate, not warn" discipline at the seam where
+failure is cheapest), and the bond stage reads the two halves back to
+feed `assemble_pair`.
 
-```
-function activate_surfaces(handle_A, handle_B, member_specification,
-                           potential):
-    # Each surface is activated INDEPENDENTLY (both are still in vacuum,
-    # not yet facing). Two calls, never one co-activation; the pair does
-    # not co-exist here. Each call takes a HalfHandle (§7.1): it opens its
-    # own engine, RE-READS the pristine half from handle.data_file (never a
-    # warm object from build_slabs), amorphizes it, and writes the
-    # amorphized half back to disk for assemble_pair (§7.5) to read — the
-    # ARCHITECTURE §4.3 file handoff. [SERIAL I/O] The snapshot taken out
-    # of the engine is collective (every rank holds the full atom set),
-    # but ONE rank writes it and a barrier publishes it, so assemble_pair
-    # finds it on whichever rank reads it back (§7.1).
-    #
-    # v1 runs the two as this SERIAL pair inside one job (Approach A), each
-    # bombardment on the job's FULL core allocation (ARCHITECTURE §4.3 —
-    # serial slabs, not two-at-once in one job). These two calls, times the
-    # N realization seeds the ensemble (§10.8) loops above, are the 2 x N
-    # independent units; the separate-job fan-out (Approach C) stays
-    # AVAILABLE through the files but is not the plan. Because each call is
-    # a pure function of (half, seed) handing off through files, that
-    # fan-out is a change of submission wrapper, not of stage code — so keep
-    # it free of cross-call state (# C-EXPANSION, ARCHITECTURE §4.3).
-    activated_A = activate_surface(handle_A, member_specification,
-                                   potential)
-    activated_B = activate_surface(handle_B, member_specification,
-                                   potential)
-    return ActivatedSlabs{
-        slab_A: activated_A.slab, slab_B: activated_B.slab,
-        verdict_A: activated_A.verdict, verdict_B: activated_B.verdict }
-```
+Each surface is activated INDEPENDENTLY (both are still in vacuum, not
+yet facing): `activate_surface` (below) is called once per prep stage
+by `prepare_surface` (§7.1), never as a co-activation — the pair does
+not co-exist here. Each call takes a HalfHandle (§7.1): it opens its
+own engine, RE-READS the pristine half from `handle.data_file` (never a
+warm object from `build_half`), amorphizes it, and the prep stage
+writes the result to its folder for `assemble_pair` (§7.5) to read —
+the `ARCHITECTURE.md` §4.3 file handoff. [SERIAL I/O] The snapshot
+taken out of the engine is collective (every rank holds the full atom
+set), but ONE rank writes it and a barrier publishes it, so the reader
+finds it on whichever rank reads it back (§7.1).
+
+Revised 2026-08-30 (Paul): the two activations no longer share a job.
+Each runs in ITS OWN prep job on the job's FULL core allocation, and
+the scheduler runs the two side by side — the separate-job fan-out
+`ARCHITECTURE.md` §4.3 called Approach C, arriving through the files
+at no cost in stage code. Each call is a pure function of (half, seed)
+handing off through files, so it must stay free of cross-call state
+(# C-EXPANSION). The N realization seeds the ensemble (§10.8) loops
+above multiply the prep jobs, never the bond job.
 
 `[DISTILLATION — in code, 2026-07-19; re-scoped 2026-08-08; restored
 2026-08-28]` the driver (`driver/cascade.py`) runs the cascade and the
 heal, and the gate judges the healed half as it is read back, returning
 an `ActivationResult` carrying the rich `ActivationVerdict`; the pipeline
-distills that to the contract `Verdict` at THIS seam, so
-`exec_artifacts.ActivatedSlabs` carries both verdicts and the HALT is
-here.
+distills that to the contract `Verdict` at THIS seam, so the written
+`ActivatedHalf` carries its verdict and the HALT is here.
 
 The mechanism is a SEAM, not a hard-coded procedure (`DESIGN.md` §3.1).
 v1 registers one mechanism — energetic-particle bombardment — but plasma
@@ -2371,10 +2389,10 @@ molecular dynamics, so both are one setting of the projectile spec
 (§10.3), not separate mechanisms.
 
 ```
-function activate_surface(handle, member_specification, potential):
+function activate_surface(handle, pair_specification, potential):
     # RE-READ the pristine half from disk into a slab — the standalone
     # geometry plus the beam-declaring type map the handle carries (§7.1),
-    # never a warm object from build_slabs (ARCHITECTURE §4.3). From here
+    # never a warm object from build_half (ARCHITECTURE §4.3). From here
     # DOWN the slab is in-memory WITHIN this one engine/stage, which is
     # exactly what the file discipline allows; it forbids only carrying a
     # live object ACROSS the seam between two stages.
@@ -2386,29 +2404,29 @@ function activate_surface(handle, member_specification, potential):
     # v1 registers exactly one; the seam is what makes a plasma or
     # reactive method a NON-invasive addition later.
     mechanism = ACTIVATION_MECHANISMS[
-        member_specification.protocol.activation_mechanism]
-    return mechanism(slab, member_specification, potential)
+        pair_specification.protocol.activation_mechanism]
+    return mechanism(slab, pair_specification, potential)
 ```
 
 ```
-function energetic_particle_bombardment(slab, member_specification,
+function energetic_particle_bombardment(slab, pair_specification,
                                         potential):
     # The v1 mechanism (DESIGN §3.2–§3.5). Revised 2026-08-28 (Paul):
     # cascade, strip, HEAL and GATE, all in this one session. Derive the
     # concrete impact plan and run the cascade (universal MLIP + ZBL,
     # §4.7) to the target fluence; strip the projectile; heal (§10.5);
     # gate the healed surface (§10.6). The verdict travels with the slab.
-    spec    = derive_bombardment_spec(slab, member_specification)   # §10.3
+    spec    = derive_bombardment_spec(slab, pair_specification)   # §10.3
     driver  = open_cascade_driver(slab, potential,
-                                  member_specification)             # §10.2
+                                  pair_specification)             # §10.2
     damaged = run_cascade_to_fluence(driver, spec)                  # §10.4
     damaged = strip_projectile(damaged)                # DESIGN §3.4 cleanup
-    healed  = heal_surface(driver, member_specification)            # §10.5
+    healed  = heal_surface(driver, pair_specification)            # §10.5
     verdict = activation_gate(healed,
-                              crystalline_reference(member_specification),
-                              member_specification,
+                              crystalline_reference(pair_specification),
+                              pair_specification,
                               load_environment_library(
-                                  member_specification, wafer))     # §10.6
+                                  pair_specification, wafer))     # §10.6
                               # ^ THIS half's wafer's own library
     # The skin label records what the cascade amorphized, at the depth the
     # gate MEASURED (§10.7).
@@ -2419,7 +2437,7 @@ function energetic_particle_bombardment(slab, member_specification,
 ### 10.2 open_cascade_driver — the correctness core
 
 > **Revised 2026-08-26/28 (Paul).** The cascade has exactly ONE
-> generator: the universal foundation MLIP the study file names, with
+> generator: the universal foundation MLIP the project file names, with
 > the two ZBL cores spliced in (DESIGN §4.7). The analytic forms an
 > earlier draft carried were removed on 2026-08-26 and nothing falls
 > back to anything.
@@ -2429,14 +2447,14 @@ This is the part prior art gets wrong (`DESIGN.md` §3.3). It mirrors
 are cascade-specific.
 
 ```
-function open_cascade_driver(slab, potential, member_specification):
+function open_cascade_driver(slab, potential, pair_specification):
     # ONE persistent LAMMPS process for the WHOLE impact train, NOT a
     # fresh process + full-slab disk round-trip per impact (prior art's
     # antipattern, DESIGN §3.3 — the same one §9.2 refuses). At the doses
     # SAB needs (thousands of impacts) that overhead is prohibitive.
     #
     # POTENTIAL: hybrid/overlay of the UNIVERSAL FOUNDATION MLIP the
-    # study file names (DESIGN §4.7; one row of the supported-model
+    # project file names (DESIGN §4.7; one row of the supported-model
     # table, never a hard-coded model) with TWO ZBL hard cores. The MLIP
     # does the bonding; ZBL #1 (longer cutoff)
     # the projectile-substrate collision; ZBL #2 (short cutoff, below the
@@ -2480,9 +2498,9 @@ record BombardmentSpec:
     cascade_duration: number         # NVE time per impact (§10.4)
     between_impact_relaxation: number  # settle between impacts (§10.4)
 
-function derive_bombardment_spec(slab, member_specification):
-    protocol = member_specification.protocol
-    ensemble = member_specification.ensemble
+function derive_bombardment_spec(slab, pair_specification):
+    protocol = pair_specification.protocol
+    ensemble = pair_specification.ensemble
 
     # PROJECTILE is species-generic (DESIGN §3.2): argon by default, an
     # OPTIONAL co-species (iron first) co-deposited at a set fraction.
@@ -2568,7 +2586,7 @@ cascade-hot — the first rung of the fidelity ladder (§4.5).
 
 **Revised 2026-08-28 (Paul): back in the activate stage, per half.** The
 heal runs at the end of each half's own cascade session, in vacuum, on
-the SAME driver (§10.2): after the projectile strip, the study's
+the SAME driver (§10.2): after the projectile strip, the project's
 `[protocol.reanneal]` schedule is applied — hold the mobile atoms hot,
 cool to the press temperature — and THEN the slab is minimized. It
 DELEGATES to §9.7's `anneal_then_minimize`. A kinetically trapped glass
@@ -2579,11 +2597,11 @@ existed only because the heal then ran under a potential whose engine
 lived in the bond job.)
 
 ```
-function heal_surface(driver, member_specification):
+function heal_surface(driver, pair_specification):
     # Same driver, same universal model, after the last impact and the
     # projectile strip. The frozen base stays frozen; the mobile atoms
     # take the recorded schedule; the result is a 0 K healed half.
-    schedule = member_specification.protocol.reanneal_schedule
+    schedule = pair_specification.protocol.reanneal_schedule
     return anneal_then_minimize(current_slab(driver), driver.potential,
                                 schedule)                          # §9.7
 ```
@@ -2592,7 +2610,7 @@ function heal_surface(driver, member_specification):
 
 ```
 function activation_gate(healed_surface, crystalline_slab,
-                         member_specification, environment_library):
+                         pair_specification, environment_library):
     # A GATE, not a report (DESIGN §3.5). Revised 2026-08-28 (Paul): it
     # is called from the ACTIVATE stage (§10.1), once per half, on the
     # HEALED half as it is read back from its cascade session — before
@@ -2611,7 +2629,7 @@ function activation_gate(healed_surface, crystalline_slab,
     # a criterion of the GATE, not a knob of the experiment (DESIGN §3.5) —
     # so they are looked up here, keyed by the species set.
     references = load_activation_references(
-        species_of(activated_slab), member_specification)
+        species_of(activated_slab), pair_specification)
 
     # One disorder score per atom, computed ONCE and shared by every
     # metric that wants it (the depth metric today; the others as they
@@ -2619,7 +2637,7 @@ function activation_gate(healed_surface, crystalline_slab,
     # metrics can disagree about which atoms are disordered.
     disordered = disordered_atoms(
         activated_slab, environment_library,
-        member_specification.numerical.disorder_scatter_multiple)
+        pair_specification.numerical.disorder_scatter_multiple)
 
     # Everything a metric may want, in ONE record, so the survivors and
     # the re-based metrics share a signature (the code's GateContext).
@@ -2627,7 +2645,7 @@ function activation_gate(healed_surface, crystalline_slab,
         activated: activated_slab, crystalline: crystalline_slab,
         references: references, disordered: disordered,
         library: environment_library,
-        member_specification: member_specification }
+        pair_specification: pair_specification }
 
     per_metric = empty map
     for each metric in ACTIVATION_METRICS:   # a registry, like §8 measures
@@ -2647,7 +2665,7 @@ function activation_gate(healed_surface, crystalline_slab,
 ```
 
 ```
-function load_activation_references(species, member_specification):
+function load_activation_references(species, pair_specification):
     # References + thresholds are NOT physics-spec knobs (DESIGN §3.5). Read
     # them keyed by the species set — so a new material adds a reference
     # FILE, not code — searching an easily-locatable, version-controlled
@@ -2733,7 +2751,7 @@ record EnvironmentLibrary:
     # by the bootstrap (§11.2), never written by hand.
     model_name:       string        # the universal model the source
                                     # structures were made under; must
-                                    # equal the study's universal_model
+                                    # equal the project's universal_model
     engine:           string        # which descriptor engine computed
                                     # every vector here (ARCHITECTURE
                                     # §2.3: LAMMPS sna/atom, a Python
@@ -2754,7 +2772,7 @@ record EnvironmentLibrary:
                                     # distance, kept so the FALSE-ALARM
                                     # RATE — the depth profile's
                                     # baseline — can be recomputed at
-                                    # whatever scatter multiple a study
+                                    # whatever scatter multiple a project
                                     # names, not only the recipe's
     self_check:       record{ scatter_multiple: number,
                               warm_disordered: number,
@@ -2766,20 +2784,21 @@ record EnvironmentLibrary:
     warm_run_temperature: Quantity  # the LOWEST temperature among the
                                     # warm runs catalogued: what the
                                     # thermal scatter was measured at.
-                                    # The study loader's warn/refuse
+                                    # The project loader's warn/refuse
                                     # band (DESIGN §3.5) is judged
                                     # against this
     provenance:       record{ families: list, frame_counts: map,
                               surfaces: list of (species, face) }
                                     # what was catalogued; the validator
-                                    # checks the member's face is here
+                                    # checks the wafer's face is here
 
 
-function load_environment_library(member_specification, wafer):
+function load_environment_library(pair_specification, wafer):
     # DESIGN §3.5 / §4.8 part 2 / ARCHITECTURE §2.3 and §1. The library
-    # is a run-time input found PER WAFER in the study folder, in the
-    # subfolder named by the wafer's material label (revised 2026-08-29,
-    # Paul, after LEDGER T-39; the study file names no path). Three
+    # is a run-time input found PER WAFER in the project folder, in
+    # that wafer's prep folder `prep_surfN_<label>/` (revised 2026-08-29
+    # (Paul) after LEDGER T-39, folder renamed 2026-08-30; the project
+    # file names no path). Three
     # refusals and one warn/refuse band, all decidable on the login
     # node; the §2 validator runs the same rules
     # (check_environment_libraries) so no node-hour is spent on a
@@ -2788,12 +2807,12 @@ function load_environment_library(member_specification, wafer):
     if not exists(path):
         halt("wafer '<identity>' has no environment library at <path>; "
              "run `sabsim bootstrap generate` in that folder, or copy "
-             "a prepared folder there (ARCHITECTURE §1)")
+             "a prepared prep_surf*_<label>/ folder there (ARCH §1)")
     library = read_environment_library(path)     # the .toml + .npz pair
 
-    if library.model_name != member_specification.potential.universal_model:
+    if library.model_name != pair_specification.potential.universal_model:
         halt("environment library was built under '<library model>', the "
-             "study runs '<study model>' — rebuild the library")
+             "project runs '<project model>' — rebuild the library")
     if library.engine != DESCRIPTOR_ENGINE.name:
         halt("environment library was computed with '<engine>', this "
              "deployment binds '<bound engine>' — both sides of the "
@@ -2811,14 +2830,14 @@ function load_environment_library(member_specification, wafer):
 
     # The warn/refuse band (DESIGN §3.5, Paul 2026-08-29): the gate
     # judges at the heal's cool-to target, the press temperature.
-    judged_at = member_specification.protocol.press_temperature
+    judged_at = pair_specification.protocol.press_temperature
     if judged_at > library.warm_run_temperature:
         if judged_at > 1.20 * library.warm_run_temperature:
-            halt("study judges the gate at <judged_at>, more than 20 % "
+            halt("project judges the gate at <judged_at>, more than 20 % "
                  "above the library's warm runs at <warm>; the tolerance "
                  "no longer describes the slab — rebuild the library "
-                 "with a warm run at the study's temperature")
-        warn("study judges the gate at <judged_at>, above the library's "
+                 "with a warm run at the project's temperature")
+        warn("project judges the gate at <judged_at>, above the library's "
              "warm runs at <warm>: the tolerance was measured a little "
              "tight, some crystalline atoms may read as disordered")
     return library
@@ -2848,14 +2867,14 @@ function disordered_atoms(slab, library, scatter_multiple):
 
 function amorphization_depth_metric.evaluate(activated, crystalline, refs,
                                             disordered, library,
-                                            member_specification):
+                                            pair_specification):
     # DESIGN §3.5 (revised 2026-08-29). Disorder(z): the FRACTION of
     # disordered atoms in each horizontal layer of depth_bin_width, from
     # the free surface down. Every layer is judged — a layer of four
     # atoms is four verdicts, not noise — so there is NO sparse-layer
     # cut-off (the Phase-1 stand-in's fixed 10-atom cut-off skipped the
     # real skin of LEDGER T-34's half B).
-    width   = member_specification.numerical.depth_bin_width
+    width   = pair_specification.numerical.depth_bin_width
     surface = free_surface_height(activated)
     profile = []                      # (layer_top, layer_bottom, fraction)
     for each layer of thickness width from surface DOWN to the slab base:
@@ -2870,7 +2889,7 @@ function amorphization_depth_metric.evaluate(activated, crystalline, refs,
     # earlier "deep third of the slab" baseline included the frozen
     # bottom face, whose atoms are under-coordinated by construction,
     # and the polluted baseline swallowed the real skin: T-34.)
-    multiple = member_specification.numerical.disorder_scatter_multiple
+    multiple = pair_specification.numerical.disorder_scatter_multiple
     baseline = max over species present of
         fraction of library.warm_distances[species]
             > multiple * library.thermal_scatter[species]
@@ -2885,12 +2904,12 @@ function amorphization_depth_metric.evaluate(activated, crystalline, refs,
         if fraction > baseline: deepest = bottom
     depth = 0 if deepest is none else surface - deepest
 
-    # The THRESHOLD is the study's requirement, not a material reference
-    # (DESIGN §3.5, revised 2026-08-28): how deep THIS study needs the
-    # skin is the study's call.
-    target = member_specification.protocol.required_activated_depth
+    # The THRESHOLD is the project's requirement, not a material
+    # reference (DESIGN §3.5, revised 2026-08-28): how deep THIS project
+    # needs the skin is the project's call.
+    target = pair_specification.protocol.required_activated_depth
     return MetricVerdict{
-        measured: depth, reference: "study: required_activated_depth",
+        measured: depth, reference: "project: required_activated_depth",
         threshold: target, passed: depth >= target }
 ```
 
@@ -2899,7 +2918,7 @@ per deployment, with the contract `describe(atoms, settings) -> one
 vector per atom`. The engine name and settings recorded in the library
 are the ones the gate uses; `load_environment_library` (§10.1) refuses a
 library whose engine is not the bound one, whose model is not the
-study's, or whose surfaces lack the member's face.
+project's, or whose surfaces lack the wafer's face.
 
 `RING_BACKEND` is a pluggable seam (DESIGN §3.5): v1 binds it to a
 `networkx` implementation of `ring_size_histogram(graph) -> {size: count}`;
@@ -2938,7 +2957,7 @@ the same driver, a near-equilibrium schedule. Activation AUTHORED the
 disorder; §9.7 relaxes it.
 
 `[DELEGATE -> POTENTIAL, DESIGN §4]` the cascade generator — the
-universal foundation MLIP the study file names, via the §4.7 generator
+universal foundation MLIP the project file names, via the §4.7 generator
 seam and its supported-model table — and the per-pair MLIP committee
 (step 2) are §4 concerns; this module CONSUMES both, never authors
 them.
@@ -2966,7 +2985,7 @@ numbers and the reference curves are a DESIGN task.
 This is the **fifth and last depth-first module pass**
 (`ARCHITECTURE.md` §5.4), on `DESIGN.md` §4 (especially §4.5). It is the
 one buildable unit (`ARCHITECTURE.md` §5.2) that had no pass until now:
-the process that MANUFACTURES the machine-learned potential every member
+the process that MANUFACTURES the machine-learned potential every pair
 consumes. The earlier "all modules at depth" was really FOUR — this
 closes the count to five.
 
@@ -2981,11 +3000,11 @@ bond/debond (§9) stages already written — run to HARVEST the
 configurations they visit, not to produce a measurement. So this pass is
 short and mostly delegates; §11.7 is a long ledger for that reason.
 
-**It sits ABOVE `exec_one_member`.** The bootstrap runs ONCE per
-material pair (the species union, STRUCTURAL 1a) and emits ONE
-fingerprinted potential that many members then look up by `potential_ref`
-(§1, `DESIGN.md` §1.6). So it is a top-level process alongside
-`exec_full_study` (§1), NOT a stage inside the per-member pipeline —
+**It sits ABOVE `exec_one_pair`.** The bootstrap runs ONCE per
+material (the species union, STRUCTURAL 1a) and emits ONE fingerprinted
+potential that many projects then look up by `potential_ref` (§1,
+`DESIGN.md` §1.6). So it is a top-level process alongside
+`exec_full_project` (§1), NOT a stage inside the per-pair pipeline —
 which is exactly why §1's `resolve_potential` is a LOOKUP, not a call
 that trains.
 
@@ -3001,7 +3020,7 @@ is why this is a LOOP and not a straight line.
 The loop is generate -> label -> train -> refine, repeated until the
 potential passes BOTH convergence tests (§11.6). This is one pass of the
 OUTER loop (`VISION.md` principle 5), run by hand in v1: the inner
-refine-loop iterates, but re-entry for MORE pairs or study-driven
+refine-loop iterates, but re-entry for MORE pairs or project-driven
 weaknesses is manual.
 
 **The INPUT record, which every function below threads.** This object
@@ -3010,10 +3029,11 @@ was passed through twelve call sites under the name
 this is its shape. The name changed with the definition, because the old
 one was wrong twice: it is keyed by a species UNION and a DOMAIN rather
 than by a pair, and it is a manufacturing RECIPE rather than a
-description. It is the third input file of the project, alongside the
-study specification (§2) and the deployment configuration, and it
+description. It is the third input file, alongside the project
+specification (§2) and the deployment configuration — it lives in the
+prep folder of the surface it prepares (`ARCHITECTURE.md` §1) — and it
 changes on a third clock: manufactured once, costing weeks, then
-consumed unchanged by many members.
+consumed unchanged by many projects.
 
 ```
 record ReferenceSettings:
@@ -3239,7 +3259,7 @@ record GenerationPlan:
                                      # reference, pressed cell, pulled
                                      # cell
     cascade_model:  string           # the §4.7 foundation MLIP + ZBL,
-                                     # named the way a member's
+                                     # named the way a pair's
                                      # potential_ref is (§2)
     protocol_model: string           # the SAME foundation MLIP for the
                                      # press and pull. NOT a committee:
@@ -3432,18 +3452,18 @@ record ForceModelRecipe:
 
     # --- Part 1: the key. What this model covers. ---
     species_union:  set of string   # STRUCTURAL 1a; fixes the §4.3 global
-                                    # type map every member inherits
+                                    # type map every pair inherits
     domain:         string          # the structural/chemical REGIME. The
                                     # species alone cannot identify a
                                     # model: one composition spans
                                     # different chemistries (carbon as
                                     # diamond or graphite; silica from
                                     # alpha-quartz to an amorphous
-                                    # network). A member's material_domain
+                                    # network). A pair's material_domain
                                     # (§2) must lie INSIDE this one —
                                     # containment, not equality, since a
                                     # silicon-and-silica recipe covers a
-                                    # silica-only member.
+                                    # silica-only pair.
 
     # --- Part 2: what is computed first. ---
     starting_collection: StartingCollection
@@ -3527,7 +3547,7 @@ record ForceModelRecipe:
                                      # gate's ruler
     gate_scatter_multiple: number    # the scatter multiple the library
                                      # is self-checked and baselined at
-                                     # (§11.2); a study's own
+                                     # (§11.2); a project's own
                                      # disorder_scatter_multiple may
                                      # refine it
     # The name is COMPUTED, not stated — see fingerprint_of below — so a
@@ -3537,12 +3557,12 @@ record ForceModelRecipe:
 
 **Validation, mirroring §2's three phases.** A recipe is rejected if any
 field of parts 1–6 is absent (§1.4's no-hidden-defaults applies here
-exactly as it does to a study; parts 7–8 are required once `train` and
+exactly as it does to a project; parts 7–8 are required once `train` and
 `refine` are built, 2026-08-26), if `domain` is empty,
 if `species_union` disagrees with the phases listed in the starting
 collection, or if `production_settings.audited` is false without the
 run having declared itself exploratory. The third phase — does every
-REFERENCED artifact actually exist — is built on the study side
+REFERENCED artifact actually exist — is built on the project side
 (`spec/references.py`) and this recipe's version reuses it: the
 `reference_data_ref` must resolve, and every phase named in the starting
 collection must have a crystal file that opens.
@@ -3562,7 +3582,7 @@ record BootstrapResult:
 function bootstrap_potential(force_model_recipe, reference_data):
     # STEP 1 (generate, ONCE, on the universal foundation MLIP): build
     # Collection 1 from the recipe (§11.2) and harvest Collection 2 from
-    # a member run recorded under that same model (§11.3). No committee
+    # a pair run recorded under that same model (§11.3). No committee
     # exists yet and none is needed -- the foundation model is the
     # generator (DESIGN §4.5 step 1), which is what breaks the
     # circularity.
@@ -3655,7 +3675,7 @@ function build_environment_library(structures, force_model_recipe):
     # is measured too tight; the recipe validator checks that.
 
     # Self-check and baseline at the scatter multiple the recipe names
-    # (the study may refine it; the library records what it was built
+    # (the project may refine it; the library records what it was built
     # and checked with).
     multiple = force_model_recipe.gate_scatter_multiple
     warm_disordered = fraction of warm-run atoms whose nearest-cold
@@ -3686,11 +3706,11 @@ function build_environment_library(structures, force_model_recipe):
 > (the §7 slab builder), and the melt-quench and warm-run families as
 > short LAMMPS scripts run out-of-process under the universal model
 > with strided dumps. (2) It HARVESTS Collection 2 from an existing
-> member run's recorded trajectories — the activate dumps (family 7,
+> pair run's recorded trajectories — the prep dumps (family 7,
 > the healed tail), the press dump (families 8–10, keyed by the
 > StageLedger of §9.3 that the bond result manifest carries) and the
 > pull dumps (family 11) — cut to the §6.4 sub-cell
-> with `bootstrap/subcell.py`. The member run is an ordinary
+> with `bootstrap/subcell.py`. The pair run is an ordinary
 > `sabsim run --dump-visuals` under the universal model; nothing forks.
 > The committee-of-one below is that model until ALF trains one.
 > (3) It WRITES the environment library (§11.2, DESIGN §3.5; built
@@ -3699,10 +3719,13 @@ function build_environment_library(structures, force_model_recipe):
 > distances — and its sidecar `environment_library.toml` — model,
 > engine, settings, thermal scatter, self-check fractions, warm-run
 > temperature and provenance, readable by a person. The pair lands in
-> the MATERIAL FOLDER the command is run from
-> (`<study>/<material label>/`, ARCHITECTURE §1; the working copy under
-> scratch is kept too), which is exactly where the study's loader looks
-> for that wafer's library — nothing is copied anywhere.
+> the PREP FOLDER the command is run from
+> (`<project>/prep_surfN_<label>/`, ARCHITECTURE §1, revised
+> 2026-08-30; the working copy under scratch is kept too), which is
+> exactly where the project's loader looks for that surface's library —
+> nothing is copied anywhere. A homo pair's second prep folder may
+> simply receive a copy of the first's library pair, since the library
+> is a fact about the material, not the surface.
 
 
 The one genuinely OURS step, and the one worth stating carefully: the
@@ -3723,7 +3746,7 @@ function generate_hard_configs(force_model_recipe):
     # LABEL, not a pipeline stop (the §1 halt is a PRODUCTION rule, not
     # a generation one).
     candidates = empty list
-    run = member_run_named_by(force_model_recipe.generation_plan)
+    run = pair_run_named_by(force_model_recipe.generation_plan)
 
     # (a) Healed activated surfaces (family 7) -- the tail of each
     # half's activate recording, after the heal (§10.5). The committee
@@ -3841,7 +3864,7 @@ function test_convergence(committee, store, force_model_recipe):
     below = uncertainty.measured <= uncertainty.threshold
 
     # Test 2 — THE §5 potential-quality gate: call the SAME shared
-    # potential_quality_gate function evaluate_member_gates (§5) calls, but
+    # potential_quality_gate function evaluate_pair_gates (§5) calls, but
     # ACT on its `.passes` to drive the loop, where §5 only reads it. That
     # one shared object is what makes the §1 marker's "acts here, reports
     # there" literally true. The bulk/surface half folds in §3.5's
@@ -3886,11 +3909,11 @@ here. The prototype at `prototypes/alf_deepmd/` already implements and
 unit-tests the two ALF contracts and the converter round-trip.
 
 `[DELEGATE -> §5]` the acting convergence gate (§11.6) calls the SAME
-shared `potential_quality_gate` function §5's `evaluate_member_gates`
+shared `potential_quality_gate` function §5's `evaluate_pair_gates`
 calls; only its CONSEQUENCE differs — act versus report.
 
 `[ABOVE this module]` re-entry — more material pairs, or new training
-targeted at a study's gate weaknesses (§1's commented outer loop) — is by
+targeted at a project's gate weaknesses (§1's commented outer loop) — is by
 hand in v1 (`VISION.md` principle 5). This module manufactures ONE
 potential per invocation.
 
@@ -3941,7 +3964,7 @@ record AnalysisUnit:
     consumer:   one of {m4_endpoint, m5_frame}    # which measure it feeds
     detector:   DetectorClass or none   # for an m5_frame, which detector
                                         # found it; none for an m4 endpoint
-    provenance: Provenance     # member, trajectory, frame index, subcell,
+    provenance: Provenance     # pair, trajectory, frame index, subcell,
                                # potential generation, seed set (§8.5)
 
 record Manifest:
@@ -3950,7 +3973,7 @@ record Manifest:
     units: list of AnalysisUnit
 
 function run_characterization(structure, bond_debond_trajectory,
-                              member_specification):
+                              pair_specification):
     # DESIGN §8. Turn a finished press/pull into the all-electron and
     # descriptor measures, or into schema-valid `unresolved` records when
     # the subcell is unaffordable (§8.2) or Imago is late (§8.8). Returns
@@ -3961,7 +3984,7 @@ function run_characterization(structure, bond_debond_trajectory,
     # exceeds the affordable envelope, step 8 cannot run for this pair
     # without breaking a §6.4 rule — SAY SO, do not break one quietly.
     subcell = extract_interface_subcell(
-        structure, member_specification)     # [DELEGATE -> §6.4 / §8.2]
+        structure, pair_specification)     # [DELEGATE -> §6.4 / §8.2]
     if not subcell.affordable:
         return all_unresolved(
             "interface subcell exceeds the step-8 envelope (§8.2)")
@@ -3970,7 +3993,7 @@ function run_characterization(structure, bond_debond_trajectory,
     # endpoints are NOT detected — they are computed states from §5, and
     # they enter the batch unconditionally (§8.3).
     frames    = select_frames(bond_debond_trajectory, subcell,
-                              member_specification)          # §12.2
+                              pair_specification)          # §12.2
     endpoints = relaxed_endpoints(bond_debond_trajectory,
                               subcell)   # [DELEGATE -> §5 / §8 M2 relax]
 
@@ -3985,13 +4008,13 @@ function run_characterization(structure, bond_debond_trajectory,
 
     # HARVEST into §6.6 records, reporting coverage BY DETECTOR CLASS
     # because all-electron runs fail on the hard frames, not at random.
-    return harvest(manifest, results, member_specification)  # §12.5
+    return harvest(manifest, results, pair_specification)  # §12.5
 ```
 
 ### 12.2 select_frames — three detectors, on the subcell, merged by event
 
 ```
-function select_frames(trajectory, subcell, member_specification):
+function select_frames(trajectory, subcell, pair_specification):
     # DESIGN §8.3. The genuinely OURS piece, and a PURE, DETERMINISTIC
     # function of the trajectory and the settings — re-runnable, auditable
     # long after the MD is gone, part of provenance (§1.6). Three
@@ -3999,7 +4022,7 @@ function select_frames(trajectory, subcell, member_specification):
     #   - PE local MINIMA in the hold -> a bond forming, shedding energy
     #   - PE local MAXIMA in the pull -> a bond stretched to its limit
     #   - sharp DROPS in sigma_zz     -> a bond breaking, shedding load
-    numerical = member_specification.numerical
+    numerical = pair_specification.numerical
 
     # FIX 1 — measure where the event IS. Read per-atom PE and virial
     # summed over the FROZEN SUBCELL SET alone, stress from the subcell's
@@ -4081,7 +4104,7 @@ function build_manifest(units):
     # -> identical id, so Kaleidoscope's cache is correct by construction;
     # any change -> a new id, so a stale result is never served for a
     # structure that no longer exists. A frame-number / directory /
-    # timestamp id COLLIDES across members — prior art's newest-file-wins
+    # timestamp id COLLIDES across projects — prior art's newest-file-wins
     # failure (§5.7) in new clothes.
     for unit in units:
         unit.identifier = content_fingerprint(unit.skeleton)   # [-> §1.4]
@@ -4104,7 +4127,7 @@ function dispatch_batch(manifest):
     # CONFIGURATION, not a degradation (§6.7).
     return kaleidoscope_run(manifest)
 
-function harvest(manifest, results, member_specification):
+function harvest(manifest, results, pair_specification):
     # DESIGN §8.6. Read results BY the manifest — never a results-dir
     # scan, never newest-file-wins (§5.7). Two channels: ASE-vocabulary
     # quantities (energy, forces) cross through ASE; Imago's own outputs
@@ -4277,7 +4300,7 @@ function load_checkpoint(checkpoint_dir):
 ### 13.3 Fresh or resuming, decided by what is on disk
 
 ```
-function begin_or_resume_pull(driver, reference, rate, member,
+function begin_or_resume_pull(driver, reference, rate, pair,
                               checkpoint_dir):
     # No new flag (DESIGN §11.3): the presence of the pair decides.
     checkpoint = load_checkpoint(checkpoint_dir)
@@ -4292,13 +4315,13 @@ function begin_or_resume_pull(driver, reference, rate, member,
         drive_grip(driver.grips.top, rate)
         return new Ledger{
             starting_atom_count = atom_count(driver),
-            input_hash          = input_hash(member, reference, rate),
+            input_hash          = input_hash(pair, reference, rate),
             saved_step          = driver.step }        # 0 on a fresh run
 
     # RESUMING. Trust FIRST (§13.4), so a wrong-run resume stops before
     # it touches the engine. Then restore the saved atoms and reconcile
     # the record to them.
-    verify_inputs_or_stop(checkpoint, member, reference, rate)
+    verify_inputs_or_stop(checkpoint, pair, reference, rate)
     read_restart(driver, checkpoint.engine_state)
     drive_grip(driver.grips.top, rate)         # re-arm the constant pull
     return reconcile(checkpoint.ledger, driver.step)
@@ -4318,8 +4341,8 @@ function reconcile(ledger, restored_step):
 ### 13.4 The trust alert: warn, and stop
 
 ```
-function input_hash(member, reference, rate):
-    # What identifies "the same run" (DESIGN §11.4): the study's CONTENT
+function input_hash(pair, reference, rate):
+    # What identifies "the same run" (DESIGN §11.4): the project's CONTENT
     # fingerprint (DESIGN §1.4, the identity §12.4 builds on), the
     # identity of the settled reference the pull restores from, and the
     # pull RATE — the only input that tells one rung from another, since
@@ -4327,13 +4350,13 @@ function input_hash(member, reference, rate):
     # (DESIGN §11.4). NOT paths, NOT the wall-clock — only things whose
     # change means a genuinely different experiment. The exact fields
     # ride on the same open follow-on as the fingerprint (DESIGN §1.8).
-    return content_hash(member.fingerprint, reference.identity, rate)
+    return content_hash(pair.fingerprint, reference.identity, rate)
 
-function verify_inputs_or_stop(checkpoint, member, reference, rate):
+function verify_inputs_or_stop(checkpoint, pair, reference, rate):
     # A guardrail, not a correctness gate (DESIGN §11.4). Resuming reuses
     # what a previous run left in a directory, so it owes one check that
     # the inputs still match the run the checkpoint came from.
-    if input_hash(member, reference, rate) == checkpoint.ledger.input_hash:
+    if input_hash(pair, reference, rate) == checkpoint.ledger.input_hash:
         return                                  # the common case: proceed
     warn("this run's inputs differ from the run this checkpoint was "
          "written for; refusing to stitch new inputs onto old dynamics")
@@ -4355,9 +4378,9 @@ gates, unchanged; the only difference is that the series comes from the
 ledger. The coordinate archive is handled exactly as in §9.5.
 
 ```
-function pull_at_rate(driver, reference, rate, member, control,
+function pull_at_rate(driver, reference, rate, pair, control,
                       checkpoint_dir):                            # §9.5
-    numerical = member.numerical
+    numerical = pair.numerical
     timestep  = numerical.md_timestep
     # chunk_steps and checkpoint_cadence are RunControl ENGINEERING
     # settings (the same home as §9's chunk controls), NOT NumericalKnobs
@@ -4365,7 +4388,7 @@ function pull_at_rate(driver, reference, rate, member, control,
     # against write cost. Provisional values live in code, not the spec.
     cadence   = control.checkpoint_cadence       # engine steps per save
 
-    ledger = begin_or_resume_pull(driver, reference, rate, member,
+    ledger = begin_or_resume_pull(driver, reference, rate, pair,
                                   checkpoint_dir)   # §13.3
 
     # The loop of §9.5, now step-keyed. On a fresh run the ledger is
@@ -4409,7 +4432,7 @@ function pull_at_rate(driver, reference, rate, member, control,
     frames_ref = the strided dump on disk if a consumer is in play,
                  else none
     return reduce_to_trajectory(driver, ledger, frames_ref, reference,
-                                rate, member)                        # §9.6
+                                rate, pair)                          # §9.6
 ```
 
 ### 13.6 Completeness and provenance are unchanged
@@ -4445,7 +4468,7 @@ averaging, the two curves, the separation point, and the §5.6 gates are
 all §9's; §13 only re-keys the displacement and threads the ledger
 through them. The MEASUREMENT is unchanged.
 
-`[DELEGATE -> fingerprint, `DESIGN.md` §1.4]` the study identity the
+`[DELEGATE -> fingerprint, `DESIGN.md` §1.4]` the project identity the
 trust hash draws on is the content fingerprint of `DESIGN.md` §1.4 (the
 same machinery `PSEUDOCODE.md` §12.4 uses); this module composes it with
 the settled-reference identity and the pull rate, then compares, but does
@@ -4473,18 +4496,27 @@ kill against time spent writing state.
 
 The CONSUMER of the machine-local deployment file (`ARCHITECTURE.md`
 §4.1, §4.4; `DESIGN.md` §10). It is two commands that share one registry:
-a WRITER, `prepare`, that reads the study spec AND the deployment rc and
-emits ready-to-submit scripts; and an EXECUTOR, `run`, that lives INSIDE
-each script and does one job's worth of the pipeline. `sabsim` submits
-NOTHING and watches nothing (the login-node wall, §4.1); the human
-submits the scripts and inspects each gate before sending the next.
+a WRITER, `prepare`, that reads the project spec AND the deployment rc
+and emits ready-to-submit scripts; and an EXECUTOR, `run`, that lives
+INSIDE each script and does one job's worth of the pipeline. `sabsim`
+submits NOTHING and watches nothing (the login-node wall, §4.1); the
+human submits the scripts and inspects each gate before sending the
+next.
 
 Nothing here trains a potential or layers in a physics default. The force
-model a member uses is a LOOKUP behind the §1 `resolve_potential` seam —
+model a pair uses is a LOOKUP behind the §1 `resolve_potential` seam —
 the universal foundation MLIP today, the trained committee once the
 bootstrap (§11, a SEPARATE upstream Tier-B process) has produced one — so
-the same three jobs run either, unchanged. Deployment is "where," never
+the same four jobs run either, unchanged. Deployment is "where," never
 "what" (`DESIGN.md` §1.2).
+
+Revised 2026-08-30 (Paul): a project is ONE pair, and its jobs are the
+four STAGE FOLDERS of `ARCHITECTURE.md` §1 — `prep_surf1_<a>`,
+`prep_surf2_<b>`, `bond_<a>_<b>`, `analysis_<a>_<b>` — named by
+`stage_folders` (§2). The script that runs a stage carries the same
+name as the folder it fills, so a person reading the project folder
+sees one name per stage: the script, the folder of deliverables, and
+the folder of bulk under `intermediate/`.
 
 ### 14.1 The deployment records (CLOSED)
 
@@ -4495,7 +4527,9 @@ record DeploymentConfig:              # the parsed rc (DESIGN §10, §4.1)
     default_account:  text
     module_paths:     list of path    # `module use` roots (§4.4)
     partitions:       map[resource_class -> Partition]  # "cpu" / "gpu"
-    usage:            map[job_kind -> UsageBlock]        # keyed by KIND
+    usage:            map[usage_key -> UsageBlock]      # keyed by KIND:
+                                      # "prep" (both prep jobs read it),
+                                      # "bond", "analysis"
 
 record Partition:                     # one [hardware.partitions.*]
     name:          text               # the REAL scheduler partition
@@ -4532,103 +4566,140 @@ roots read from the sourced `.sabsim/sabsimrc`, `DESIGN.md` §10.5]`.
 
 ```
 # The SINGLE source of truth for what the jobs are and in what order they
-# run. Each entry names the job, the abstract resource class the rc
-# resolves to a partition, and the CONTIGUOUS SUB-STAGE of the §1 member
-# chain it owns -- with the on-disk artifact it READS at entry and WRITES
-# at exit. That handoff (ARCHITECTURE §4.3) is exactly what lets one job
-# start mid-chain in its own submission.
+# run. Each entry names the job, the usage block the rc resolves to a
+# partition, the CONTIGUOUS SUB-STAGE of the §1 pair chain it owns --
+# with the on-disk artifact it READS at entry and WRITES at exit -- and
+# which stage folder it fills. That handoff (ARCHITECTURE §4.3) is
+# exactly what lets one job start mid-chain in its own submission.
 #
 # A SUB-STAGE is a run of ADJACENT pipeline stages -- a section of the
 # whole §1 stage sequence, NOT a piece of any one stage. Each job owns
 # one; the `stages` field lists the stages that make it up.
 record JobKind:
-    name:            text             # "activate" / "bond" / "analyze"
-    resource_class:  text             # -> a UsageBlock + a Partition
+    name:            text             # "prep_surf1" / "prep_surf2" /
+                                      # "bond" / "analysis"
+    usage_key:       text             # -> a UsageBlock ("prep" for both
+                                      # preps, else the job's own name)
+    folder:          field of stage_folders   # WHICH stage folder it
+                                      # fills (deliverables in the
+                                      # project, bulk in the mirror)
     stages:          ordered list of Stage   # the stages of its sub-stage
-    reads:           artifact_name or NONE    # entry file in member scratch
-    writes:          artifact_name            # exit file in member scratch
+    reads:           list of (folder, artifact_name)  # entry files, by
+                                      # the stage folder that holds them
+    writes:          artifact_name    # exit file, in ITS OWN folder
+    depends_on:      list of job names  # what must have FINISHED first;
+                                      # EMPTY for both preps, which is
+                                      # what lets them run side by side
 
 JOB_REGISTRY = ordered [
-    JobKind("activate", "cpu",
-            stages = [build_slabs,        # §7
-                      activate_surfaces,  # §10 (its own §3.5 gate)
-                      assemble_pair],     # §7
-            reads  = NONE,                # starts from the spec
-            writes = ASSEMBLED_PAIR),     # the assembled-pair data file
-    JobKind("bond", "gpu",
-            stages = [press_and_bond,     # §9.3
+    JobKind("prep_surf1", usage_key = "prep", folder = prep_surf1,
+            stages = [build_half,         # §7.1, wafer A
+                      activate_surface],  # §10.1 (its own §3.5 gate)
+            reads  = [],                  # starts from the spec
+            writes = ACTIVATED_HALF,      # the healed, gated half
+            depends_on = []),
+    JobKind("prep_surf2", usage_key = "prep", folder = prep_surf2,
+            stages = [build_half,         # §7.1, wafer B
+                      activate_surface],
+            reads  = [],
+            writes = ACTIVATED_HALF,
+            depends_on = []),             # INDEPENDENT of prep_surf1
+    JobKind("bond", usage_key = "bond", folder = bond,
+            stages = [assemble_pair,      # §7.5 (checks the cells agree)
+                      press_and_bond,     # §9.3
                       settle_reference,   # §9.4
                       pull_ladder],       # §9.5 (rungs, committee in-proc)
-            reads  = ASSEMBLED_PAIR,
-            writes = PULL_RESULTS),       # per-rung curves + trajectories
-    JobKind("analyze", "cpu",
+            reads  = [(prep_surf1, ACTIVATED_HALF),
+                      (prep_surf2, ACTIVATED_HALF)],
+            writes = PULL_RESULTS,        # per-rung curves + trajectories
+            depends_on = ["prep_surf1", "prep_surf2"]),
+    JobKind("analysis", usage_key = "analysis", folder = analysis,
             stages = [run_analyzer,          # §4 measure vector, PLUS
                       run_characterization], #   the mocked step-8 char
-            reads  = PULL_RESULTS,
-            writes = MEASURE_VECTOR),     # the §4 vector, GATED (§14.3)
+            reads  = [(bond, PULL_RESULTS)],
+            writes = MEASURE_VECTOR,      # the §4 vector, GATED (§14.3)
+            depends_on = ["bond"]),
 ]
 ```
-Inserting a job later (§10.3, say a relax between activate and bond) is
-ONE entry here; the `run` flags, the written filenames, and the guided
-index all follow — the truth is never written twice.
+Inserting a job later (§10.3, say a relax between the preps and bond)
+is ONE entry here; the `run` flags, the written filenames, the guided
+index and the dependency lines all follow — the truth is never written
+twice. The two preps are the `ARCHITECTURE.md` §4.3 "Approach C"
+fan-out: the same stage code, submitted as two jobs the scheduler may
+run at once, joined at the bond job's barrier by the files.
 
 ### 14.3 The run selector — one job, or the whole chain (§10.4)
 
 ```
-function run(study_spec_path, job_flag, only_member):
-    # job_flag is at most ONE of {activate, bond, analyze}, or NONE for
-    # the whole member chain (§10.4). only_member narrows a multi-member
-    # study to one. This is the line that lives INSIDE each generated
-    # script; it runs within an allocation and submits nothing itself.
-    validated = load_and_validate_study(study_spec_path)     # §2
-    members   = validated.members
-    if only_member is given:
-        members = [ the member named only_member ]           # or STOP
-    for each member in members:
-        scratch = member_scratch(job_directory, validated.name,
-                                 member.name)                # §1
-        if job_flag is NONE:
-            exec_one_member(member, scratch)                 # §1 whole chain
-        else:
-            run_member_job(member, scratch,
-                           registry_lookup(job_flag))
+function run(project_spec_path, job_flag):
+    # job_flag is at most ONE of {prep_surf1, prep_surf2, bond,
+    # analysis}, or NONE for the whole pair chain (§10.4). There is no
+    # `--only`: a project holds one pair (revised 2026-08-30 (Paul)).
+    # This is the line that lives INSIDE each generated script; it runs
+    # within an allocation and submits nothing itself.
+    validated = load_and_validate_project(project_spec_path)   # §2
+    pair      = validated.pair
+    if job_flag is NONE:
+        exec_one_pair(pair, validated.project_directory)      # §1 chain
+    else:
+        run_pair_job(pair, validated.project_directory,
+                     registry_lookup(job_flag))
 ```
 
 ```
-function run_member_job(member, scratch, job):
-    # ONE job's contiguous SUB-STAGE of the §1 chain. It ENTERS by re-reading
-    # its `reads` artifact from the member scratch -- the same
-    # read-from-file handoff activate_surfaces already uses (§1 re-reads the
-    # pristine half), so this process needs NONE of the stages before it.
-    # The potential is the LOOKUP every job does (§1 resolve_potential):
-    # foundation MLIP now, trained committee later, SAME seam.
+function run_pair_job(pair, project_directory, job):
+    # ONE job's contiguous SUB-STAGE of the §1 chain. It ENTERS by
+    # re-reading its `reads` artifacts from the stage folders that hold
+    # them -- the same read-from-file handoff activate_surface already
+    # uses (§10.1 re-reads the pristine half), so this process needs NONE
+    # of the stages before it. The potential is the LOOKUP every job
+    # does (§1 resolve_potential): foundation MLIP now, trained
+    # committee later, SAME seam.
+    folders = stage_folders(pair)                                 # §2
+    home    = stage_scratch(project_directory, job.folder)       # its
+                                     # project folder + scratch mirror,
+                                     # this run's fresh `run-<id>/` made
     potential = run_to_contract(
-        () -> resolve_potential(member), POTENTIAL_CONTRACT)  # §1
-    seed = (job.reads is NONE)
-           ? member                            # activate: from the spec
-           : read_artifact(scratch, job.reads) # bond/analyze: from disk
+        () -> resolve_potential(pair), POTENTIAL_CONTRACT)        # §1
+    seeds = [ read_artifact(project_directory / folder, name)
+              for (folder, name) in job.reads ]      # [] for a prep job
     # Run this job's stages exactly as §1 runs them, but only this
     # sub-stage, each guarded by run_to_contract so a bad artifact HALTS
-    # here (§5.1). The final stage writes job.writes into scratch; the NEXT
-    # job (a separate submission) reads it. Nothing crosses in memory.
-    run_sub_stage(job.stages, seed, member, potential, scratch)
+    # here (§5.1). The final stage writes job.writes into ITS OWN stage
+    # folder (the deliverable) with the bulk in the folder's mirror; the
+    # NEXT job (a separate submission) reads it. Nothing crosses in
+    # memory.
+    run_sub_stage(job.stages, seeds, pair, potential, home)
 ```
-`[DELEGATE -> the exact per-stage calls and signatures are §1's; `run_
-member_job` reuses them, differing only in that it starts from `seed`
-rather than the previous in-memory handle.]`
+`[DELEGATE -> the exact per-stage calls and signatures are §1's;
+`run_pair_job` reuses them, differing only in that it starts from
+`seeds` rather than the previous in-memory handle.]`
 
-The analyze job's sub-stage is the WHOLE tail of `exec_one_member` (§1),
+The analysis job's sub-stage is the WHOLE tail of `exec_one_pair` (§1),
 not just `run_analyzer`: after it, the job MERGES the mocked step-8
 characterization (`run_characterization`, §4) and READS the §5 gate, so
-the MEASURE_VECTOR it writes is the GATED member result (§1's
-MemberResult), not a bare measure list. The gate adds no stage -- it only
-reads the vector and reports (§5, VISION principle 5) -- which is why
-§14.2 lists the two producing stages while the gate rides along here.
+the MEASURE_VECTOR it writes is the GATED pair result (§1's PairResult),
+not a bare measure list. The gate adds no stage -- it only reads the
+vector and reports (§5, VISION principle 5) -- which is why §14.2 lists
+the two producing stages while the gate rides along here.
+
+**Where a stage's files go (`stage_scratch`).** Each stage has TWO
+homes with ONE name (`ARCHITECTURE.md` §1, §4.1): `<project>/<stage
+folder>/` for DELIVERABLES — the manifests, ledgers, gate reports, the
+activated-half handoff, the measure vector; small, precious, kept with
+the project — and `<project>/intermediate/<stage folder>/` for BULK —
+dumps, LAMMPS logs, data files, generated inputs; large, regenerable,
+on scratch. `intermediate` is the link into the scratch mirror of the
+project's own path, so there is no study or pair key inside it: the
+mirror repeats the four folder names and nothing else. A rerun NEVER
+overwrites: `stage_scratch` makes a fresh `run-<scheduler job id>/`
+(or a dated name off the scheduler) under the stage's bulk folder for
+each run, and the deliverable manifest records which run it came from.
 
 ### 14.4 prepare — the writer (§10.5, §10.6)
 
 ```
-function prepare(study_spec_path, deployment_rc_path):
+function prepare(project_spec_path, deployment_rc_path):
     # Reads BOTH inputs and writes scripts; submits nothing (§10.1). Runs
     # on the login node, so it must FAIL THERE, readably, rather than emit
     # scripts that die on a compute node an hour in.
@@ -4636,35 +4707,46 @@ function prepare(study_spec_path, deployment_rc_path):
     if any root does not resolve:
         STOP on the login node, naming the missing root   # §10.5 gate
     deployment = load_deployment(deployment_rc_path)      # §14.1
-    validated  = load_and_validate_study(study_spec_path) # §2
+    validated  = load_and_validate_project(project_spec_path) # §2, incl.
+                                          # BOTH wafers' libraries (§10.6)
+    folders    = stage_folders(validated.pair)            # §2
+    make the four stage folders under validated.project_directory
+    if they do not exist (never touching one that does)
 
     guide = new submission guide          # the ORDERED index (§10.5)
-    for each member in validated.members:
-        for each job in JOB_REGISTRY:     # activate -> bond -> analyze
-            usage     = deployment.usage[job.name]
-            partition = deployment.partitions[usage.resource_class]
-            # Two cheap checks (§10.6): compare numbers already written in
-            # the rc. Predict NOTHING about run length or footprint.
-            if usage.walltime > partition.max_walltime:
-                STOP on the login node, naming job + ceiling  # §10.6 gate
-            if usage.gpus_per_node > 0 and (
-                    usage.gpus_per_node > partition.gpus_per_node):
-                STOP on the login node, naming job + GPU ceiling  # §10.6
-            script = render_job_script(validated, member, job,
-                                       usage, partition, deployment, roots)
-            path   = semantic_name(member, job)   # "activate" / "bond" /
-                                                  # "analyze" -- NO ordinal
-            write script to path
-            guide.append(member, job, path)       # ORDER lives here, §10.5
+    for each job in JOB_REGISTRY:         # preps -> bond -> analysis
+        usage     = deployment.usage[job.usage_key]
+        partition = deployment.partitions[usage.resource_class]
+        # Two cheap checks (§10.6): compare numbers already written in
+        # the rc. Predict NOTHING about run length or footprint.
+        if usage.walltime > partition.max_walltime:
+            STOP on the login node, naming job + ceiling  # §10.6 gate
+        if usage.gpus_per_node > 0 and (
+                usage.gpus_per_node > partition.gpus_per_node):
+            STOP on the login node, naming job + GPU ceiling  # §10.6
+        script = render_job_script(validated, job, usage, partition,
+                                   deployment, roots)
+        path   = folders[job.folder] + ".slurm"   # SAME name as the
+                                                  # folder -- NO ordinal
+        write script to path
+        guide.append(job, path, job.depends_on)   # ORDER lives here
     write guide beside the scripts        # a submission GUIDE, not "readme"
     return guide
 ```
 
+The guide (§10.5) reads as the dependency graph, in plain words: submit
+`prep_surf1_<a>.slurm` and `prep_surf2_<b>.slurm` (in either order, or
+together); when BOTH have finished and their gate reports are to your
+liking, submit `bond_<a>_<b>.slurm`; then `analysis_<a>_<b>.slurm`. It
+also prints the one-line chained form for a person who trusts the
+gates: the two preps, then bond with `--dependency=afterok:<id1>:<id2>`,
+then analysis with `afterok:<bond id>`.
+
 ### 14.5 What a generated script contains (§10.5, §10.7)
 
 ```
-function render_job_script(study, member, job, usage, partition,
-                           deployment, roots):
+function render_job_script(project, job, usage, partition, deployment,
+                           roots):
     # A small, boring preamble plus the run line. Anything already true of
     # the activated install is NOT restated (§10.5).
     return a script with, in order:
@@ -4675,7 +4757,8 @@ function render_job_script(study, member, job, usage, partition,
         emitted as `--mem`; without it the job takes the partition's small
         per-job default and can be OOM-killed (§10.6, T-E5-ACTIVATE).
         usage.gpus_per_node is emitted as `--gres=gpu:N` ONLY when
-        positive, so a CPU job gets no --gres (§10.6).
+        positive, so a CPU job gets no --gres (§10.6). The job NAME is
+        the stage folder's name, so `squeue` reads like the project.
       - `module use <p>` for each p in deployment.module_paths, THEN
         `module load <m>` for each m in usage.modules (§4.4: the cpg tree
         is not on the default path; bond loads the ONE deepmd engine,
@@ -4683,18 +4766,26 @@ function render_job_script(study, member, job, usage, partition,
         DEEPMD_LMP_PLUGIN).
       - the three location roots BAKED IN as resolved values -- a frozen
         snapshot, not a re-read of the rc at run time (§10.5, §1.4).
-        The activate job's two DATA inputs -- the root-relative universal
-        weights and each wafer's environment library in its material
-        subfolder of the study (§10.6, 2026-08-29) -- are resolved by
+        A prep job's two DATA inputs -- the root-relative universal
+        weights and ITS wafer's environment library in that wafer's
+        prep folder (§10.6, revised 2026-08-30) -- are resolved by
         prepare's fail-fast gate before anything is written, so a
-        missing library stops on the login node.
-      - the launcher + `python -m sabsim run <study> --<job.name>
-        --only <member.name>` (§14.3) -- e.g. `mpirun -np <N>` INSIDE the
+        missing library stops on the login node and names the surface.
+      - `cd` to the PROJECT folder (the folder holding the project file),
+        so relative paths in the script mean the same thing whichever
+        folder the person submits from.
+      - the launcher + `python -m sabsim run <project file>
+        --<job.name>` (§14.3) -- e.g. `mpirun -np <N>` INSIDE the
         allocation, never on the login node (§4.1). N = usage.nodes x
         usage.tasks_per_node, emitted as `--ntasks-per-node` so the
-        scheduler's own $SLURM_NTASKS drives the launcher.
+        scheduler's own $SLURM_NTASKS drives the launcher. Every dynamic
+        run passes `--dump-visuals`, so a trajectory is always there to
+        look at.
       - on success, a printed line naming what to check and which script
-        to submit next (§10.5), reinforcing the guide.
+        to submit next (§10.5), reinforcing the guide: a prep job names
+        its gate report and says "when the OTHER prep has also passed,
+        submit bond"; bond names its stage ledger and says "submit
+        analysis"; analysis says the measure vector is written.
 ```
 `[DELEGATE -> the deepmd `plugin load`: the bond job's LAMMPS INPUT issues
 `variable dp getenv DEEPMD_LMP_PLUGIN; plugin load ${dp}` inside the
@@ -4703,15 +4794,16 @@ NOT here -- render_job_script only loads the module that exports the var.]`
 
 ### 14.6 The handoff artifact form (`read_artifact`/`write_artifact`)
 
-§14.3 delegated the READ and WRITE at the two mid-chain seams; this pins
+§14.3 delegated the READ and WRITE at the mid-chain seams; this pins
 what those artifacts physically ARE. A job submitted on its own re-reads
 its entry artifact in a FRESH process -- it does not inherit the warm
-in-memory object the whole-chain run passes stage to stage. So the two
-mid-chain artifacts (ASSEMBLED_PAIR, which activate writes and bond
-reads; PULL_RESULTS, which bond writes and analyze reads) must be
-COMPLETE on disk: everything the downstream job needs, reconstructible
-from files alone. Each takes the SAME shape the §3 trajectory already
-uses -- small things INLINE, large things BY REFERENCE.
+in-memory object the whole-chain run passes stage to stage. So the
+mid-chain artifacts (ACTIVATED_HALF, which each prep writes and bond
+reads twice; PULL_RESULTS, which bond writes and analysis reads) must
+be COMPLETE on disk: everything the downstream job needs,
+reconstructible from files alone. Each takes the SAME shape the §3
+trajectory already uses -- small things INLINE, large things BY
+REFERENCE.
 
 ```
 record HandoffArtifact:              # one written mid-chain artifact
@@ -4728,53 +4820,60 @@ record HandoffArtifact:              # one written mid-chain artifact
                          # manifest; the manifest references these by name.
 ```
 
-So ASSEMBLED_PAIR is the LAMMPS `assembled_pair.data` (the atoms -- a
-payload the assemble stage already writes) plus a manifest carrying the
-labeled-group geometry the bond job CANNOT re-derive from the atoms: the
-per-wafer z-ranges, the interface plane, and the MEASURED activated_skin
-atom-index set (`DESIGN.md` §2.6 -- a measured set, not a depth cut, so
-it MUST travel). PULL_RESULTS is a manifest of each rung's reduced fields
-(rate, complete, separation_index, atoms_conserved, the verdicts) plus
-its reduced curves (grip_displacement, force_vs_grip): a curve small
-enough stays inline, a curve large enough becomes a payload file -- the
-SAME small-inline / large-by-reference rule, applied field by field. The
-full per-atom trajectory is ALREADY a §3 FrameSetRef payload on scratch
-and is NOT duplicated here.
+So ACTIVATED_HALF is the LAMMPS data file of the healed half (the atoms
+-- a payload the cascade session already writes) plus a manifest
+carrying what the bond job CANNOT re-derive from the atoms: which wafer
+it is, the SHARED CELL it was built in (so bond can check the two
+halves agree, §7.5), the gate verdict with its measured depth, the
+MEASURED activated_skin atom-index set (`DESIGN.md` §2.6 -- a measured
+set, not a depth cut, so it MUST travel), and the run it came from.
+Bond's own assembled pair (`assembled_pair.data` + its manifest with the
+per-wafer z-ranges and the interface plane) is written to the bond
+folder as an internal record. PULL_RESULTS is a manifest of each rung's
+reduced fields (rate, complete, separation_index, atoms_conserved, the
+verdicts) plus its reduced curves (grip_displacement, force_vs_grip): a
+curve small enough stays inline, a curve large enough becomes a payload
+file -- the SAME small-inline / large-by-reference rule, applied field
+by field. The full per-atom trajectory is ALREADY a §3 FrameSetRef
+payload on scratch and is NOT duplicated here.
 
-`write_artifact(scratch, name, record)` writes the manifest and any
-payloads under the member scratch; `read_artifact(scratch, name)` reads
-the manifest and rehydrates the record, opening a payload only when a
-consumer needs it. In v1 the ASSEMBLED_PAIR groups and the PULL_RESULTS
-curves are both small enough to sit inline, so no payload beyond the
-existing LAMMPS data file is written yet -- but the seam IS the
+`write_artifact(folder, name, record)` writes the manifest (and any
+small payload) into the stage's PROJECT folder and any bulky payload
+into its mirror, recording the resolved path; `read_artifact(folder,
+name)` reads the manifest and rehydrates the record, opening a payload
+only when a consumer needs it. In v1 the ACTIVATED_HALF groups and the
+PULL_RESULTS curves are both small enough to sit inline, so no payload
+beyond the LAMMPS data file is written yet -- but the seam IS the
 by-reference one, so a field that GROWS large is externalized later
 without changing the contract.
 
-One more re-read the analyze job makes. `run_analyzer` needs the interface
-AREA (the assembled pair's lateral cell) to reduce the work per unit area,
-which the PULL_RESULTS does not carry. So analyze reads its OWN entry
-artifact (PULL_RESULTS) AND re-reads the earlier ASSEMBLED_PAIR from the
-SAME member scratch -- both artifacts persist there, so this is a plain
+One more re-read the analysis job makes. `run_analyzer` needs the
+interface AREA (the assembled pair's lateral cell) to reduce the work
+per unit area, which the PULL_RESULTS does not carry. So analysis reads
+its OWN entry artifact (PULL_RESULTS) AND re-reads the bond folder's
+assembled-pair manifest -- both persist there, so this is a plain
 re-read, not a new hand-off. A job's `reads` field (§14.2) names its
-DEFINING upstream; a job may still re-open any earlier artifact its member
-scratch holds.
+DEFINING upstream; a job may still re-open any earlier artifact the
+project's stage folders hold.
 
 `[DELEGATE -> the manifest's on-disk syntax and the compression codec for
 a bulky payload are CODE-level. The manifest is written as TOML, keeping
-it consistent with the study-spec and rc files a human reads and edits.
-The standard library READS TOML (`tomllib`) but cannot WRITE it, so the
-code emits the few value types a manifest uses (scalars, scalar arrays,
-nested tables, arrays of tables) through a small hand-rolled writer; a
-null field is simply OMITTED, since TOML has no null, and the read side
-maps a missing key back to "none". The CONTRACT here is only "readable
-manifest + referenced payloads, small-inline / large-by-reference."]`
+it consistent with the project-spec and rc files a human reads and
+edits. The standard library READS TOML (`tomllib`) but cannot WRITE it,
+so the code emits the few value types a manifest uses (scalars, scalar
+arrays, nested tables, arrays of tables) through a small hand-rolled
+writer; a null field is simply OMITTED, since TOML has no null, and the
+read side maps a missing key back to "none". The CONTRACT here is only
+"readable manifest + referenced payloads, small-inline /
+large-by-reference."]`
 
 `[CODE level, below pseudocode]` the exact directive syntax (SLURM
 `#SBATCH`), the script templating, and the guide's on-disk format.
 
 `[ABOVE this module / OUT of scope]` the BOOTSTRAP (steps 1-2, §11) is NOT
-one of these three jobs and NOT a `run` flag: it is a separate Tier-B
+one of these four jobs and NOT a `run` flag: it is a separate Tier-B
 process (ALF's own Parsl loop plus direct VASP seed jobs, `DESIGN.md`
-§4.5) that MANUFACTURES the potential upstream of every member. `prepare`
-writes the three MEMBER jobs that CONSUME it; deploying the bootstrap
+§4.5) that MANUFACTURES the potential upstream of every pair, run from
+inside a prep folder (`sabsim bootstrap generate`, §11.3). `prepare`
+writes the four STAGE jobs that CONSUME it; deploying the bootstrap
 itself is ALF's concern, not this consumer's (§4.1, "no Parsl-in-Parsl").

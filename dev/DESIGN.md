@@ -38,132 +38,100 @@ backend + bootstrap) first, as the most mature (already prototyped and
 unit-tested). Each heading below carries a one-line scope note and its
 sources; bodies are written section by section. -->
 
-## 1. Member specification and settings layer
+## 1. Pair specification and settings layer
 
-This section designs the specification a user writes to point the
-pipeline at a study, and the rules that keep it honest. It was written
-last on purpose. §2 through §7 each deposited knobs, tolerances and
-seeds as they went, and only with all of them on the table does the
+This section designs the specification a person writes to point the
+pipeline at one wafer pair, and the rules that keep it honest. It was
+written last on purpose. §2 through §7 each deposited knobs, tolerances
+and seeds as they went, and only with all of them on the table does the
 shape of the settings layer become visible — it is not one list but
 five, and the divisions between them carry meaning.
 
 Prior art states the problem by contradiction. Its `primeinput.py` reads
-a member's parameters out of the directory path it happens to be
-sitting in
-(`jobs/<stage>/<material>/<layer>/<energy>/`) and bakes a partition
+a run's parameters out of the directory path it happens to be sitting
+in (`jobs/<stage>/<material>/<layer>/<energy>/`) and bakes a partition
 name, a personal email address, and module versions into the scripts it
 emits (`PRIOR_ART.md` §1.2 item 7). SABSIM inverts this completely:
 **the configuration is an object, and the directory is an output.**
 
-### 1.1 The object is a study, and a member still stands alone
+### 1.1 The object is a pair, and the comparison is the person's
 
-The naive top-level object is a member: one material pair, one protocol,
-one number out. But §7.4's headline criterion is a **ratio** — the work
-of separation of the Si/SiO₂ pair divided by that of the Si/Si reference
-— and a ratio is a property of a *pair* of members, belonging to neither
-one. Give the settings layer only members and the primary measure has
-nowhere to live. This is §2.1's discovery in a different costume: the
-object worth modelling sits one level above where you would first put
-it.
-
-So a **study** names its members and declares the **relations** among them
-— which member is the subject and which the reference. Beneath it a
-**member** is one material pair under one protocol, and beneath that a
+The top-level object is a **pair**: two wafers facing each other, one
+protocol, one number out. One pair lives in one **project folder** —
+`jobs/si_sio2/`, say — whose name is the person's own label and means
+nothing to the program (`ARCHITECTURE.md` §1). The project's
+`sabsim.toml` describes exactly that pair; beneath the pair a
 **realization** is one seed.
 
-**A caution on the word "member."** The member here is a *material
-pair*. It is NOT the *committee member* of §4.4 — one of the `n_models`
-machine-learned potentials whose mutual disagreement is the uncertainty
-signal. These are different axes: a **study** is composed of members
-(material pairs), whereas a single **potential** is composed of
-committee members (models). Both borrow the word only because each is
-one element of a set — nothing else connects them. One leaf directory
-runs one material-pair member under a committee of (by default four)
-models.
+An earlier version of this section (2026-07 to 2026-08-30) put a
+**study** above the pair: a named list of "members" (material pairs)
+with declared **relations** among them, so that §7.4's headline ratio —
+the work of separation of Si/SiO₂ divided by that of the Si/Si
+reference — would have a place to live inside the program. That layer
+is retired (revised 2026-08-30 (Paul)). SABSIM no longer models a
+study, a member list, or a relation programmatically. The person who
+wants the ratio runs the reference pair as a **second project folder**
+(`jobs/si_si/`), reads the two measure vectors, and forms the ratio
+themselves. The reasons are the same ones that once argued for the
+study, now pointing the other way.
 
-But a member must remain **self-contained and independently
-reproducible**, executable on its own and identical whether or not a
-study ever mentions it. A study is a composition over members, not an
-owner of them, and it may be assembled after the fact from members that
-already exist.
+**The physics of a ratio still needs shared systematics.** §7.4 trusts
+a ratio because the systematic errors common to both pairs cancel to
+first order — the pull rate, the cell size, the thermostat, the
+mismatch of timescales. That cancellation requires the two projects to
+actually share a potential and a protocol, and nothing in the program
+now checks it. What the program does instead is make the check EASY:
+every measure vector carries the pair's fully resolved specification
+(§1.6), so laying two `sabsim.toml` files side by side, or diffing the
+two provenance blocks, shows every field that differs. The reader
+should sort those differences the way the retired relation machinery
+would have:
 
-That freedom has a price, and paying it is the interesting part. §7.4
-trusts the ratio because **the systematic errors common to both members
-cancel to first order** — the pull rate, the cell size, the thermostat,
-the mismatch of timescales. Cancellation requires that those systematics
-actually be shared. Two members made with different potentials, or
-different press loads, cancel nothing, and their ratio is worthless.
-
-**A relation declares what it varies and what it holds fixed.** It is
-tempting to write the precondition as a fixed rule — *the members must
-share a potential and a protocol* — but that rule forbids one of the
-studies we most want to run. Comparing two **protocols** on the same
-material pair (an activation-dose sweep, a press-load sweep) is a study
-in exactly the same sense, and there the protocol is the thing that must
-differ. The precondition cannot be a property of the settings layer. It
-is a property of **each relation**.
-
-So a relation names two sets of fields:
-
-- its **contrast** — the fields it deliberately varies. This is the
-  independent variable, the reason the comparison is being made at all.
-- its **controls** — the fields it intends to hold fixed, checked
-  rather than assumed.
-
-v1's ratio contrasts the **material pair** (Si/SiO₂ against Si/Si) while
-controlling the potential and the protocol. A dose sweep would contrast
-the **activation fluence** while controlling the material pair and
-everything else. Same machinery, opposite fields.
-
-**Report, never restrict.** Nothing in this section may prevent a member,
-a study, or a comparison from being performed. When a relation's
-controls disagree, or when it carries more than one contrast and is
-therefore *confounded* — a change in the result attributable to neither
-variable — the relation is still computed, still reported, and still
-carries its full difference set. What changes is only whether the
-**gate** is willing to issue a verdict on it.
-
-Refusing to evaluate and refusing to certify are different acts, and
-SABSIM performs only the second. §7.4's automated criterion is a narrow
-instrument, competent to judge one particular ratio under one particular
-set of controls; `unresolved` is a statement about **that instrument's
-competence**, never about whether a number may exist or be looked at.
-The scientist who runs many material pairs many different ways is the
-person this project is built to serve, and they routinely learn from
-comparisons no automated criterion is qualified to bless. Handing them
-the number, the contrast, and the difference set is the whole job. A
-machine that declines to compute what a scientist asked for, on the
-grounds that it would not know how to grade the answer, has mistaken its
-role.
-
-**Every relation emits a difference set.** Controls agreeing is not the
-same as the members being alike, and the gap between those two statements
-is where a misleading comparison lives. Every field that differs is
-therefore reported alongside the value, sorted by *why* it differs:
-
-- **Contrasted** — it differs by design. This is the signal.
-- **Entailed** — it differs *because* of the contrast, and cannot be
-  removed without removing the contrast. Si/Si has no lattice mismatch
-  and Si/SiO₂ does; that residual-strain systematic is precisely the
-  term §7.4 would like to see cancel, and it cannot, because you cannot
-  contrast two material pairs without contrasting their mismatch. An
-  entailed difference is not a mistake. It is the **irreducible price of
-  the contrast**, and the relation is marked as only *partially
-  cancelling* on its account.
+- **Contrasted** — it differs by design; this is the signal.
+- **Entailed** — it differs *because* of the contrast and cannot be
+  removed without removing it. Si/Si has no lattice mismatch and
+  Si/SiO₂ does; you cannot contrast two material pairs without
+  contrasting their mismatch, so the residual-strain systematic is the
+  irreducible price of the comparison, not a mistake in it.
 - **Incidental** — it differs for no declared reason. These are the
-  dangerous ones, and naming them that way is the point: an incidental
-  difference is an uncontrolled variable that nobody decided to vary.
+  dangerous ones: an incidental difference is an uncontrolled variable
+  nobody decided to vary, and it is the least examined thing in the
+  comparison, not the most.
 
-Note which category deserves suspicion. An earlier draft of this section
-called the last group "believed harmless," which is backwards — a
-difference nobody intended is the least examined thing in the
-comparison, not the most. **SABSIM cannot know in general which
-differences break a cancellation**; that judgment rests on physics the
-settings layer does not encode. What it can do is refuse to hide them.
-A reader given the full difference set can decide whether a ratio, or
-any other comparison, means what it appears to mean. A reader handed a
-bare number cannot. The obligation belongs to *comparison* itself, so
-every relation we add later inherits it.
+SABSIM cannot know in general which differences break a cancellation;
+that judgment rests on physics the settings layer does not encode. What
+it can do — and this is all it now claims to do — is refuse to hide
+them, by making every specification reconstructible from every output.
+
+**Report, never restrict.** The retired machinery could withhold a
+**verdict** on a comparison whose controls disagreed; it could never
+refuse to compute it, and that spirit survives the retirement in
+stronger form. The scientist who runs many material pairs many
+different ways is the person this project is built to serve, and they
+routinely learn from comparisons no automated criterion is qualified
+to bless. SABSIM hands over each pair's numbers, uncertainties and
+provenance; it does not grade comparisons between pairs. A machine that
+declined to compute what a scientist asked for, on the grounds that it
+would not know how to grade the answer, would have mistaken its role —
+and a machine that grades comparisons it cannot understand mistakes it
+the other way.
+
+**Why the study layer was more cost than help.** A study composed over
+members needed member names, a relation grammar with contrasts and
+controls, a validator that could tell an entailed difference from an
+incidental one, a `--only` selector to run one member of several, and
+a scratch tree keyed by study and member. Every one of those existed
+only to automate a comparison the scientist makes better by hand. The
+pair, by contrast, must be **self-contained and independently
+reproducible** whatever else exists — which it now is by construction,
+because nothing else exists in the program to mention it. Sweeps over
+dose, load or material remain what §1.8 always said they were: a SET of
+project folders, not a feature of the machinery.
+
+**On the word "member."** With the study gone, "member" means exactly
+one thing in this document: a **committee member** of §4.4 — one of the
+`n_models` machine-learned potentials whose mutual disagreement is the
+uncertainty signal. The material pair is a **pair**.
 
 ### 1.2 Five groups, divided by what refinement does to them
 
@@ -180,12 +148,15 @@ on it.
   read off the file — so one uniform input serves every material with no
   per-material code. What we are studying. The material identity is a
   LABEL the person chooses (`material = "SiO2"`), and it does one
-  concrete job beyond reporting: it names the subfolder of the study
-  folder where that material's preparatory work lives — its force-model
-  recipe and the environment library the §3.5 gate judges against
-  (`<study>/<material label>/`, `ARCHITECTURE.md` §1; Paul, 2026-08-29).
-  Two wafers with the same label share one preparation; two crystals of
-  one formula that must be told apart get two labels.
+  concrete job beyond reporting: lower-cased, it names this surface's
+  PREPARATION folder in the project — `prep_surf1_<label>/` for wafer
+  A, `prep_surf2_<label>/` for wafer B — where everything done to that
+  surface before bonding lives: the recipe of single-material
+  calculations, the environment library the §3.5 gate judges against,
+  and the surface's own amorphization (`ARCHITECTURE.md` §1; revised
+  2026-08-30 (Paul)). A homo pair has two folders, `prep_surf1_si/` and
+  `prep_surf2_si/`, because it has two surfaces; two crystals of one
+  formula that must be told apart get two labels.
 - **Protocol** — the activation species, energy, angle of incidence and
   fluence, the activated depth the surface is REQUIRED to reach (the
   §3.5 gate's depth threshold, revised 2026-08-28); the press mode,
@@ -200,13 +171,13 @@ on it.
   carefully we compute.
 - **Ensemble** — the master seed and the realization count.
 - **Deployment** — resource class, node counts, walltime, modules. This
-  lives in a *separate document* (`ARCHITECTURE.md` §4.1) and the member
+  lives in a *separate document* (`ARCHITECTURE.md` §4.1) and the pair
   specification cannot express it at all. That document is a single
   machine-local config with two sections — a hardware inventory (the
   per-cluster swap unit) and a per-**kind-of-job** usage map (§4.1) — and
-  it is the ONLY input route outside the study spec. The strict-vs-layered
-  input question is resolved in favor of strict: the CWD study
-  specification carries material, protocol, numerical, and ensemble
+  it is the ONLY input route outside `sabsim.toml`. The strict-vs-layered
+  input question is resolved in favor of strict: the project's
+  `sabsim.toml` carries material, protocol, numerical, and ensemble
   **self-completely** (§1.4), and the deployment file is deployment-ONLY —
   it never layers a scientific or numerical default into the spec, so
   nothing that moves the answer can hide in a settings file.
@@ -328,25 +299,27 @@ pipeline must first produce.
   must equal the potential's global type map** (§4.3), which is
   STRUCTURAL 1a enforced at the earliest possible moment rather than
   discovered at an intermixed interface.
-- **Reference resolution, before the first engine opens** (added
-  2026-07-24). A specification can be well-formed and executable in
-  principle while POINTING AT things that are not there: a crystal file
-  at a path nobody created, a `material_domain` (§4.8) no registry entry
-  covers. These are not type errors, so the static pass admits them; and
-  they are not measured quantities, so the deferred pass never looks.
-  They surface instead partway through a run, after the node-hours that
-  reached them were spent. This phase is separated from the static one
-  by a single property: it needs the ENVIRONMENT — a filesystem, the
-  registry — rather than the file's text. Keeping it out of the loader
-  leaves parsing pure and testable from anywhere, and puts the check at
-  the last moment before compute is committed. It reports EVERY
-  unresolved reference at once rather than the first, because these
-  failures cluster — a moved data directory breaks every crystal path
-  together — and fixing a specification one error per run is a bad
-  afternoon. What it cannot yet check it NAMES rather than skips:
-  `potential_ref` points at a manufactured force model, and the
-  bootstrap that produces one is not built, so there is nothing to
-  resolve it against. When that store exists, its lookup belongs here.
+- **Reference resolution, before the first engine opens** (added 2026-07-24). A
+  specification can be well-formed and executable in principle while POINTING
+  AT things that are not there: a crystal file at a path nobody created, a
+  `material_domain` (§4.8) no registry entry covers. These are not type errors,
+  so the static pass admits them; and they are not measured quantities, so the
+  deferred pass never looks. They surface instead partway through a run, after
+  the node-hours that reached them were spent. This phase is separated from the
+  static one by a single property: it needs the ENVIRONMENT — a filesystem, the
+  registry — rather than the file's text. Since 2026-08-30 it also resolves
+  BOTH surfaces' environment libraries,
+  `prep_surf1_<a>/environment_library.toml` and
+  `prep_surf2_<b>/environment_library.toml` (§3.5), so a project that has
+  prepared only one surface is told so on the login node. Keeping it out of the
+  loader leaves parsing pure and testable from anywhere, and puts the check at
+  the last moment before compute is committed. It reports EVERY unresolved
+  reference at once rather than the first, because these failures cluster — a
+  moved data directory breaks every crystal path together — and fixing a
+  specification one error per run is a bad afternoon. What it cannot yet check
+  it NAMES rather than skips: `potential_ref` points at a manufactured force
+  model, and the bootstrap that produces one is not built, so there is nothing
+  to resolve it against. When that store exists, its lookup belongs here.
 - **Deferred validation, at the point of use.** Some requirements
   reference quantities that do not exist until the pipeline has run.
   §2.5's criterion — `slab_thickness >= activated_depth +
@@ -362,10 +335,9 @@ other thing. They reject a specification that **cannot be executed** — a
 species the potential has never heard of, a fluence in the wrong units,
 a slab too thin to contain its own activated layer. They never reject a
 specification whose *comparisons* would be hard to interpret. Whether
-two members are worth comparing is a scientific judgment, made by a
-person, downstream, with the difference set in hand. Whether a member
-can be
-performed at all is a mechanical question, answered here.
+two pairs are worth comparing is a scientific judgment, made by a
+person, downstream, with the two specifications in hand (§1.1). Whether
+a pair can be performed at all is a mechanical question, answered here.
 
 ### 1.6 The specification is the provenance record
 
@@ -409,40 +381,38 @@ convention.
 
 **Replace:** working-directory-as-configuration (→ the configuration is
 an object, the directory an output); site details baked into emitted
-scripts (→ a separate deployment document, §4.1, which the member spec
+scripts (→ a separate deployment document, §4.1, which the pair spec
 cannot express); hand-typed lattice constants (→ derived from the
 potential, §2.2); hidden defaults (→ the loader rejects an incomplete
 specification); an unnamed, unrecorded protocol (→ inline values with a
 content fingerprint); and numbers that cannot say where they came from
 (→ the specification is reconstructible from any output).
 
-**Frozen for v1:** the study is the **Si/SiO₂ facing pair plus the Si/Si
-same-material reference**, sharing one potential and one protocol, with
-the ratio between them as §7.4's criterion. Every protocol knob takes a
-single value — written down, not hardcoded — and the design already
-admits distributions (an energy or angle spread) without changing shape.
-Iterating over composition, dopant, activation level, pressure,
-temperature or crystal face is the outer-loop sweep deferred in
-`TODO.md`; §1's contribution to it is that a sweep becomes a set of
-specifications rather than an edit to the machinery.
+**Frozen for v1:** the project is ONE pair — the **Si/SiO₂ facing pair** — and
+the **Si/Si same-material reference** is a second project the person runs
+beside it, sharing one potential and one protocol so that §7.4's ratio can be
+formed by hand (revised 2026-08-30 (Paul)). Every protocol knob takes a single
+value — written down, not hardcoded — and the design already admits
+distributions (an energy or angle spread) without changing shape. Iterating
+over composition, dopant, activation level, pressure, temperature or crystal
+face is the outer-loop sweep deferred in `TODO.md`; §1's contribution to it is
+that a sweep becomes a set of specifications rather than an edit to the
+machinery.
 
 **Serialization format — TOML** (ratified 2026-07-13), for both the
-study input file and the deployment rc file. TOML was chosen for its
+project's `sabsim.toml` and the deployment rc file. TOML was chosen for its
 readable, typed key/value tables and unambiguous parse; a change would
 need a concrete blocker. The **schema mechanism** built on top of it
 (how required-versus-optional keys are declared and validated) is still
 a follow-on.
 
-**Still DESIGN follow-ons:** the schema
-mechanism; the exact fingerprint definition (which fields are included,
-and how a value declared irrelevant to comparability is excluded); the
-initial classification of difference-set fields into
-weakens-the-comparison and believed-harmless, which is a physics
-judgment and will need revisiting as relations are added; how relations
-beyond `ratio` are expressed; and the values themselves. That last one
-is not a small matter — **every numeric follow-on left open by §2
-through §7 lands in this file**, and §1's real service is to have given
-them a single, inspectable home.
+**Still DESIGN follow-ons:** the schema mechanism; the exact fingerprint
+definition (which fields are included, and how a value declared irrelevant to
+comparability is excluded); and the values themselves. (The difference-set
+classification and the relation grammar were follow-ons of the retired study
+layer, §1.1, and are gone with it.) That last one is not a small matter —
+**every numeric follow-on left open by §2 through §7 lands in this file**, and
+§1's real service is to have given them a single, inspectable home.
 
 ## 2. Structure builder
 
@@ -467,9 +437,9 @@ and two surface faces, and emits, in one atomic step:
 - for each slab, the **integer tiling** that carries its own surface
   lattice into that cell (an output of the solver, never a user knob);
 - for each slab, the **residual strain** it must absorb, recorded in
-  the member's provenance record (`VISION.md` goal 3) and passed forward
-  as
-  a training-configuration dimension the MLIP must cover (STRUCTURAL 1b);
+  the pair's provenance record (`VISION.md` goal 3) and passed forward
+  as a training-configuration dimension the MLIP must cover (STRUCTURAL
+  1b);
 - the two slabs themselves, already strained, already tiled.
 
 Prior art's failure is the direct consequence of the opposite choice.
@@ -667,9 +637,9 @@ one-dimensional shadow of this search, and remains a good way to seed
 candidate whole numbers.
 
 **A note on v1.** Si/Si has no mismatch, so the solver must return the
-identity tiling, zero twist, and exactly zero strain. That makes the
-same-material reference member (`ARCHITECTURE.md` §2.3) double as the
-matcher's null test.
+identity tiling, zero twist, and exactly zero strain. That makes a
+same-material pair such as the Si/Si reference project
+(`ARCHITECTURE.md` §2.3) double as the matcher's null test.
 
 ### 2.4 Splitting the residual strain
 
@@ -740,18 +710,17 @@ of §3.5. This makes step 3 and step 4 mutually dependent, so v1 fixes
 thickness by a short convergence study (prior art's one genuinely good
 idea here) and records the margin actually achieved.
 
-In code the criterion is a FLOOR, not a formula that sets thickness: the
-build takes the larger of the chosen `slab_thickness` and
-`required_activated_depth + minimum_bulk_thickness`, where — because the
-build runs before §3.5 measures anything — the depth term is the depth
-the study REQUIRES the activation to reach (`[protocol.activation]
-required_activated_depth`, the same number the §3.5 gate then demands;
-revised 2026-08-28, retiring the separate build-time estimate
-`expected_activated_depth` — the depth you build for is the depth you
-require), and it records the resulting margin on the shared-cell
-provenance. All terms are study inputs, so a new material re-sizes with
-no code change, and the silicon defaults preserve the §3.6-anchored
-55 Å cell (55 > 7 + 30) rather than shrinking it.
+In code the criterion is a FLOOR, not a formula that sets thickness: the build
+takes the larger of the chosen `slab_thickness` and `required_activated_depth +
+minimum_bulk_thickness`, where — because the build runs before §3.5 measures
+anything — the depth term is the depth the project REQUIRES the activation to
+reach (`[protocol.activation] required_activated_depth`, the same number the
+§3.5 gate then demands; revised 2026-08-28, retiring the separate build-time
+estimate `expected_activated_depth` — the depth you build for is the depth you
+require), and it records the resulting margin on the shared-cell provenance.
+All terms are project inputs, so a new material re-sizes with no code change,
+and the silicon defaults preserve the §3.6-anchored 55 Å cell (55 > 7 + 30)
+rather than shrinking it.
 
 **Termination is chosen by surface energy.** Prior art takes
 `sym_slabs[0]` with the comment "first candidate is sufficient" — the
@@ -863,7 +832,7 @@ unlucky adatom away from truncating the slab.
 **The gap and the clash.** The initial separation is a knob, measured
 between the two dividing surfaces, and it is the opening the PRESS
 STARTS FROM (revised 2026-08-28 (Paul)): each half arrives at assembly
-already healed and gated in its own activation session (§3.4, §3.5), so
+already healed and gated by its own prep job (§3.4, §3.5, §10.2), so
 the pair is stacked close — near contact, but with the two faces not
 yet loading each other — and the bond job's press begins from there
 with no vacuum to cross. (From 2026-08-08 to 2026-08-28 the pair was
@@ -872,7 +841,7 @@ both surfaces in one box and then cut the vacuum out; with the heal
 back in the activation stage that gap and that cut are gone.) After
 placement the minimum cross-slab atomic distance is checked; if it
 violates the floor, the gap is backed off and the adjustment is
-recorded, rather than aborting the member as prior art does.
+recorded, rather than aborting the pair as prior art does.
 
 **The opening and the interface plane are GEOMETRIC, never by
 provenance (revised 2026-08-30 (Paul), after LEDGER T-40).** Once the
@@ -959,7 +928,7 @@ cell-area budget set to admit the amorphous interlayer's buffering
 (STRUCTURAL 4). β-cristobalite is cubic and the closest lattice match to
 silicon, so (100) is a clean low-index face on both sides. The face,
 the polymorph, and the target material are v1 **defaults**, not freezes:
-each is a study-input knob a user may change later. Still DESIGN
+each is a `sabsim.toml` knob a user may change later. Still DESIGN
 follow-ons: the misfit tolerance and cell-area budget values themselves.
 
 ## 3. Surface activation (amorphization)
@@ -1018,7 +987,7 @@ molecular dynamics, and both are one setting of the projectile spec below.
 
 This is the correctness core, and the part prior art gets wrong. The
 cascade runs on a **universal foundation MLIP + ZBL** (STRUCTURAL 1b):
-a `hybrid/overlay` splice of the universal model the study file names
+a `hybrid/overlay` splice of the universal model `sabsim.toml` names
 (§4.7) with **two ZBL hard cores, not one**. The first, longer-range,
 covers the projectile-substrate collisions; the second, with a very
 short cutoff below the bond length, covers every substrate-substrate
@@ -1097,7 +1066,7 @@ will not fully rearrange, so the cascade start must be a reasonable basin
 (revised 2026-08-28 (Paul)).** Each amorphized half is healed in the
 same LAMMPS session that bombarded it, under the same universal model,
 before it is written out and before the two halves ever meet. The
-schedule is the study's `[protocol.reanneal]` block, applied as
+schedule is the project's `[protocol.reanneal]` block, applied as
 **anneal, then minimize**: hold the mobile atoms at the hold
 temperature for the hold duration, cool them to the press temperature
 over the same span, then relax to the nearest local minimum. Anneal
@@ -1122,12 +1091,12 @@ move removed from the bond flow: the wide assembly gap, the vacuum
 scaffolding for a two-potential mismatch that no longer exists.
 
 **Where it runs, and the consequence for the gate.** The heal is the last
-phase of the activate stage's cascade session, so the §3.5 gate runs in
-the activate stage too, on each healed half as it is read back, and only
-a passing gate proceeds to assembly. The gate is again the checkpoint
-BETWEEN the activate job and the bond job, where a human inspects the
-healed surfaces before the bond job's press/settle/pull is submitted
-(`ARCHITECTURE.md` §4.1, §10.2).
+phase of the prep job's cascade session, so the §3.5 gate runs in the
+prep job too, on the healed half as it is read back, and only a passing
+gate makes that half a deliverable. The gate is again the checkpoint
+BETWEEN each surface's prep job and the bond job, where a human inspects
+the healed surfaces before the bond job's press/settle/pull is submitted
+(`ARCHITECTURE.md` §4.1, §10.2; "prep" replaced "activate" 2026-08-30).
 
 **Stripping the projectile.** The cascade embeds the beam species (argon in
 v1), which is not part of the activated surface, and the committee's
@@ -1159,11 +1128,12 @@ naming the first that fails so a halt is diagnosable. The registry is the
 same idiom as the §6 measures and the §8 analyzer: adding a metric, or
 swapping how one is computed, touches nothing else.
 
-**When and where it runs (revised 2026-08-28 (Paul)).** The gate runs in
-the ACTIVATE stage, on each healed half as it is read back from its own
-cascade session (§3.4), BEFORE the two halves are assembled. Each half is
-one free surface judged against one reference, and a failed gate halts
-the member before any assembly — the cheapest possible failure. (From
+**When and where it runs (revised 2026-08-28, 2026-08-30 (Paul)).** The
+gate runs in each surface's PREP job, on the healed half as it is read
+back from its own cascade session (§3.4), BEFORE the two halves are
+assembled. Each half is one free surface judged against one reference,
+and a failed gate halts that surface's prep before any assembly — the
+cheapest possible failure. (From
 2026-08-08 to 2026-08-28 the gate ran in the bond job on the assembled
 pair at a wide gap; that placement followed the heal, and the heal has
 moved back here.)
@@ -1212,31 +1182,36 @@ SABSIM therefore defines crystallinity WITHOUT a coordination number:
   surface — computed under the same universal model the slab was built
   with. It is a product of the bootstrap's Collection 1 (§4.8 part 2),
   not a hand-written reference: it exists before the first gate ever
-  runs, and it is found PER WAFER in the study folder, in the subfolder
-  named by that wafer's `material` label
-  (`<study>/<material label>/environment_library.toml`, §1.2,
-  `ARCHITECTURE.md` §1). The loader refuses a library whose recorded
-  model is not the study's `[potential] universal_model`.
+  runs, and it is found PER SURFACE in the project folder, in that
+  surface's preparation folder named by the wafer's `material` label
+  (`<project>/prep_surfN_<label>/environment_library.toml`, §1.2,
+  `ARCHITECTURE.md` §1; revised 2026-08-30). The loader refuses a
+  library whose recorded model is not the project's `[potential]
+  universal_model`.
 
-  Why per wafer, and why no shared repository (Paul, 2026-08-29, after
-  LEDGER T-39): a library is built from one recipe, so it describes ONE
-  material, and a dissimilar pair such as silicon on silica needs two.
-  T-39 halted because the study named a single library for every
-  member and the silicon one could not catalogue a silica face. A
+  Why per surface, and why no shared repository (Paul, 2026-08-29 after
+  LEDGER T-39, and 2026-08-30): a library is built from one recipe, so
+  it describes ONE material, and a dissimilar pair such as silicon on
+  silica needs two. T-39 halted because one library had been named for
+  every pair and the silicon one could not catalogue a silica face. A
   shared, cluster-wide collection keyed by chemical formula was
   considered and rejected: a formula does not identify a crystal
   (quartz and cristobalite are both SiO2), so it would have needed a
-  second layer of naming, and a folder many studies write into is a
-  folder many studies can quietly break. Keeping the preparation inside
-  the study, under the label the person already wrote, needs no rule
-  to learn; reuse is a copy of the folder.
+  second layer of naming, and a folder many projects write into is a
+  folder many projects can quietly break. Keeping the preparation
+  inside the project, in the folder of the surface it serves, needs no
+  rule to learn; reuse is a copy of that folder into another project
+  under the slot it needs there (`prep_surf2_si/`, say). For a homo
+  pair the second folder starts as a copy of the first — the library
+  is a property of the material, while the amorphization inside the
+  folder is the surface's own.
 - An atom in the healed slab is **crystalline** if the library holds an
   environment of its species within the library's own THERMAL SCATTER
   of it — "does this neighbourhood exist anywhere in the undamaged
   material?" — and **disordered** otherwise. The tolerance is a
   measured quantity: the scatter of the warm-run environments about
   their cold counterparts, multiplied by the numerical knob
-  `disorder_scatter_multiple` of the study file (§1.2's test: refine it
+  `disorder_scatter_multiple` of `sabsim.toml` (§1.2's test: refine it
   and the depth must converge, so it is numerical, not protocol).
 
 Asking "does this environment exist in the undamaged material" rather
@@ -1276,10 +1251,10 @@ judges a slab at the temperature the heal cools it to (the press
 temperature, §3.4). A slab hotter than the library's warm runs jiggles
 more than the library expects, so some of its crystalline atoms would
 read as disordered. The library records its warm-run temperature, and
-the study LOADER compares: a study judged at or below it is fine; one
+the project LOADER compares: a pair judged at or below it is fine; one
 judged above it gets a WARNING that the tolerance was measured a little
 tight; one judged more than **20 % above** it is REFUSED. The band is a
-criterion of the loader, not a study knob — it is a validation
+criterion of the loader, not a project knob — it is a validation
 tolerance in the sense of §7.5, a statement of when the comparison stops
 meaning anything. The number follows from how thermal displacement
 scales: its amplitude grows roughly with the square root of temperature,
@@ -1287,7 +1262,7 @@ so a slab 20 % hotter scatters about 10 % wider — inside a single
 scatter multiple, where a warning is honest and a refusal would be
 pedantic. Beyond that the library's tolerance no longer describes the
 slab, and a refusal on the login node is cheaper than a misjudged skin
-after an hour on a GPU. The remedy is a warm run at the study's
+after an hour on a GPU. The remedy is a warm run at the project's
 temperature, i.e. a rebuilt library.
 
 The registered metrics, each with what it actually discriminates:
@@ -1336,7 +1311,7 @@ The registered metrics, each with what it actually discriminates:
 - **A robust amorphization-depth profile (revised 2026-08-29, Paul).**
   The fraction of DISORDERED atoms (the library definition above) in
   each horizontal layer of thickness `depth_bin_width` (a numerical knob
-  of the study file), from the free surface down. The depth is the
+  of `sabsim.toml`), from the free surface down. The depth is the
   distance from the free surface to the LOWER edge of the deepest layer
   whose disordered fraction still exceeds the **baseline**, scanning the
   WHOLE profile — not stopping at the first crystalline-looking layer,
@@ -1344,9 +1319,9 @@ The registered metrics, each with what it actually discriminates:
   top-contiguous walk, which is that bug under another name (LEDGER
   T-34's half B: 0.0 Å reported beneath a visibly disordered skin).
   The baseline is NOT measured on the damaged slab: it is the library's
-  own false-alarm rate — the fraction of warm-run atoms the study's
+  own false-alarm rate — the fraction of warm-run atoms the project's
   tolerance calls disordered, computed from the warm-run scatter the
-  library records, so it follows the tolerance when a study refines
+  library records, so it follows the tolerance when a project refines
   it. (The earlier design took the baseline from the "deep third" of
   the slab being judged, and
   the first real run showed why that fails: the deep third contained
@@ -1359,46 +1334,42 @@ The registered metrics, each with what it actually discriminates:
   (§2.5) only estimated a-priori, closing that loop, and that labels
   the activated skin (`PSEUDOCODE.md` §10.7).
 
-**Where the references and thresholds live (revised 2026-08-28 and
-2026-08-29, Paul).** Three kinds of number are told apart. The
-ENVIRONMENT LIBRARY — what the undamaged material looks like, atom by
-atom — is MANUFACTURED by the bootstrap under the study's own universal
-model (§4.8 part 2) and named by the study; it is never written by
-hand, and it carries the model name, the descriptor settings, the
-families and frame counts it was built from, and its self-check
-fractions, so a reader can tell exactly what "crystalline" was compared
-against. The remaining MATERIAL references — what an amorphous network
-of this material looks like: the first g(r) peak, and for the v1
-survivors the coordination-defect band, the ring population and the
-bond cutoff — are properties of the material, not choices of the
-experiment, so they live in an **easily-locatable, version-controlled
-`share/` directory** in the repository (`share/activation/<species>.toml`,
-the discoverable-reference-data convention Imago uses), auditable and
-travelling with the code; as each v1 survivor is re-based on the
-disorder score, its hand-written number leaves that file. The DEPTH
-REQUIREMENT is different: how deep
-the activated skin must reach is set by the study's own dose and energy
-budget (§3.6) and changes from study to study — a demonstration at a
-light dose cannot and should not meet a production threshold — so it is
-a **protocol knob of the study file**, `[protocol.activation]
-required_activated_depth`, and the gate reads it from there. (Until
-2026-08-28 it sat in the reference file as `[depth] target_angstrom`;
-the first run of the heal-in-activation flow, LEDGER T-33, halted a
-50 eV demonstration on the production 7 Å and made the mismatch plain.)
-The same number is the depth the §2.5 thickness floor builds for.
-For v1 the material references are **documented STAND-INS anchored to
-the literature** (for amorphous silicon: a first g(r) peak near 2.35 Å,
-a nearly four-fold network with a few percent three- and
-five-coordinated defects, and a five-/six-/seven-ring population), each
-flagged as a stand-in; the production template's depth requirement is
-the **measured** 7 Å re-pinned in §3.6 from this pipeline's own sweep,
-pending the work-of-separation study that will derive it from the bond
-instead. The real anchors — a DFT / experimental g(r), and the group's existing
-amorphous-silicon continuous-random-network model — replace them as they
-are prepared; a large real reference need not bloat the repository, since
-the reference-data resolver can also read it from the deployment
-`SABSIM_SHARE` root (`ARCHITECTURE.md` §4.1). Pinning these numbers and
-curves is a §3.6 / STRUCTURAL-1b DESIGN follow-on.
+**Where the references and thresholds live (revised 2026-08-28 and 2026-08-29,
+Paul).** Three kinds of number are told apart. The ENVIRONMENT LIBRARY — what
+the undamaged material looks like, atom by atom — is MANUFACTURED by the
+bootstrap under the project's own universal model (§4.8 part 2) in the
+surface's preparation folder; it is never written by hand, and it carries the
+model name, the descriptor settings, the families and frame counts it was built
+from, and its self-check fractions, so a reader can tell exactly what
+"crystalline" was compared against. The remaining MATERIAL references — what an
+amorphous network of this material looks like: the first g(r) peak, and for the
+v1 survivors the coordination-defect band, the ring population and the bond
+cutoff — are properties of the material, not choices of the experiment, so they
+live in an **easily-locatable, version-controlled `share/` directory** in the
+repository (`share/activation/<species>.toml`, the discoverable-reference-data
+convention Imago uses), auditable and travelling with the code; as each v1
+survivor is re-based on the disorder score, its hand-written number leaves that
+file. The DEPTH REQUIREMENT is different: how deep the activated skin must
+reach is set by the project's own dose and energy budget (§3.6) and changes
+from project to project — a demonstration at a light dose cannot and should not
+meet a production threshold — so it is a **protocol knob of `sabsim.toml`**,
+`[protocol.activation] required_activated_depth`, and the gate reads it from
+there. (Until 2026-08-28 it sat in the reference file as `[depth]
+target_angstrom`; the first run of the heal-in-activation flow, LEDGER T-33,
+halted a 50 eV demonstration on the production 7 Å and made the mismatch
+plain.) The same number is the depth the §2.5 thickness floor builds for. For
+v1 the material references are **documented STAND-INS anchored to the
+literature** (for amorphous silicon: a first g(r) peak near 2.35 Å, a nearly
+four-fold network with a few percent three- and five-coordinated defects, and a
+five-/six-/seven-ring population), each flagged as a stand-in; the production
+template's depth requirement is the **measured** 7 Å re-pinned in §3.6 from
+this pipeline's own sweep, pending the work-of-separation study that will
+derive it from the bond instead. The real anchors — a DFT / experimental g(r),
+and the group's existing amorphous-silicon continuous-random-network model —
+replace them as they are prepared; a large real reference need not bloat the
+repository, since the reference-data resolver can also read it from the
+deployment `SABSIM_SHARE` root (`ARCHITECTURE.md` §4.1). Pinning these numbers
+and curves is a §3.6 / STRUCTURAL-1b DESIGN follow-on.
 
 This is the "did the surface activate, and is its structure sane?" check
 that feeds the potential-quality gate (§7; STRUCTURAL 1b).
@@ -1447,8 +1418,8 @@ not the SAB one modelled here). It remains a MEASUREMENT-ANCHORED
 OPERATING THRESHOLD, not yet a physics-derived one: the work-of-
 separation convergence study (`dev/TODO.md`, the skin-thickness item)
 is what will replace it with the thinnest skin that still gives the
-converged bond. It is written in the study file as `[protocol.activation]
-required_activated_depth` (revised 2026-08-28; a study that runs a
+converged bond. It is written in `sabsim.toml` as `[protocol.activation]
+required_activated_depth` (revised 2026-08-28; a project that runs a
 lighter dose states a lighter requirement, and says so). Iterate the
 dose until §3.5's depth profile clears it;
 v1 freezes the
@@ -1460,7 +1431,7 @@ the universal foundation MLIP + ZBL of §4.7 (revised 2026-08-26; the
 Stillinger-Weber + ZBL form decided 2026-07-17 was removed), with the
 two hard cores of §3.3; the heal and the validation gate are both
 mandatory, not optional. Energy, angle, and seed count are v1 defaults,
-not freezes — each is a study-input knob.
+not freezes — each is a `sabsim.toml` knob.
 
 ## 4. MLIP backend and bootstrap
 
@@ -1654,12 +1625,12 @@ Ar.
 yet, so the production potential's slot is filled by a stand-in: the
 SAME universal foundation MLIP that runs the cascade and the heal (§4.7)
 also runs the press, settle and pull of §5 — as a committee of one,
-named by the study file's `[potential] production_weights` and carrying
+named by `sabsim.toml`'s `[potential] production_weights` and carrying
 no uncertainty signal. It wears the same `ForceModel` / `pair_style`
 seam the trained committee will, which is precisely what lets the swap
 be deferred without disturbing anything upstream of it. Two
 consequences are worth stating plainly. First, a material is described
-in exactly ONE place — the study file's `[potential]` block — so
+in exactly ONE place — `sabsim.toml`'s `[potential]` block — so
 bringing up a new material is a file edit, not a code edit. Second, the
 cascade and the quiet stages differ only by ZBL: the cascade splices in
 the hard cores of §3.3 because it drives atoms together at keV energies,
@@ -1715,7 +1686,7 @@ SEAM, and the user — not the code — says which universal model fills
 it.
 
 **The user names the model; the code holds a table of the models it
-supports.** The study file's `[potential]` block names the universal
+supports.** The `[potential]` block of `sabsim.toml` names the universal
 model by its identity (`universal_model`, e.g. "DPA-3.1-3M") and by its
 concrete weights file (`universal_weights`); the bootstrap recipe's
 `[generator]` block names the same pair for the manufacturing run
@@ -1725,12 +1696,12 @@ license, the exact VERSION (a foundation model is a large network that
 shifts between releases, so "DPA" alone would let reproducibility erode
 as upstream re-trains), the LAMMPS pair style it loads through, whether
 it needs the global atom map, and its validation status. Phase-three
-validation (§1.5) checks that the study file's name is a row in that
+validation (§1.5) checks that the name in `sabsim.toml` is a row in that
 table and that the weights file exists. Bringing up a new universal
 model — a DPA-4, a MACE release, anything that runs inside LAMMPS — is
 a new ROW, never a resolver edit: the cascade driver (`PSEUDOCODE.md`
 §10.2) never names a model, it asks the resolver for the setup the
-study file named. Today the table has ONE row, DPA-3.1-3M; that is a
+project named. Today the table has ONE row, DPA-3.1-3M; that is a
 statement of what has been validated, not a limit of the design.
 
 **The mechanism.** The resolver returns a complete cascade setup:
@@ -1781,10 +1752,10 @@ is marked unvalidated, and the resolver REFUSES it, raising rather than
 quietly running a model whose fidelity nobody yet has evidence for. But
 a material's FIRST activation run is precisely what produces that
 evidence, so the refusal cannot be absolute. The escape hatch is the
-study file's `[potential] allow_unvalidated = true` (revised 2026-08-26;
-it was an environment variable before). It lives in the study file
+project's `[potential] allow_unvalidated = true` (revised 2026-08-26;
+it was an environment variable before). It lives in `sabsim.toml`
 deliberately: no one is tempted to flip the table's status before the
-evidence exists, and because the study file is the provenance record
+evidence exists, and because `sabsim.toml` is the provenance record
 (§1.6) the choice stays in the run's own permanent record. Anything
 produced under it is EXPLORATORY, and both the run and any report drawn
 from it must say so. A gate-passing activation is what flips the row to
@@ -1829,9 +1800,9 @@ own torch and MPI, so the universal cascade runs OUT-OF-PROCESS: the
 cascade, the projectile strip and the heal are scripted as one LAMMPS
 input and run as the bundle's `lmp` in a subprocess, the healed half
 handed back through a file (`ARCHITECTURE.md` §4.1/§4.3/§4.4); the §3.5
-gate then judges that file in the sabsim process. The activate job sets
+gate then judges that file in the sabsim process. The prep job sets
 `SABSIM_CASCADE_ENGINE_PREFIX` (the bundle); the weights are named by
-the study file's `[potential] universal_weights`. The §2.2 lattice
+the project's `[potential] universal_weights`. The §2.2 lattice
 derivation rides the same subprocess. The press, settle and pull run the
 same model in-process through the bundle's Python binding (the
 `sabsim-dp3` environment, LEDGER T-25), which is what lets the bond
@@ -1840,7 +1811,7 @@ flow read forces and stresses back mid-run (§5).
 DPA-3.1-3M is registered unvalidated because it has not yet cleared the
 §3.5 gate on any material; its first gate-passing activation flips the
 row. The weights are a large deploy-time artifact rather than a
-checked-in file, so the table pins the model IDENTITY and the study file
+checked-in file, so the table pins the model IDENTITY and `sabsim.toml`
 names the concrete artifact path.
 
 Remaining v1 follow-ons (logged in `TODO.md`): running DPA-3.1-3M
@@ -1856,22 +1827,25 @@ loop consumes. `PSEUDOCODE.md` §11 threads an object it calls the
 `pair_specification` through twelve call sites — it seeds the first
 committee, drives config generation, chooses what gets labelled, and
 decides when to stop — and that object is defined nowhere in the chain.
-The study specification, by contrast, gets the whole of §1: five groups
+The pair specification, by contrast, gets the whole of §1: five groups
 of knobs, every value carrying its unit, nothing defaulting silently,
 validation in three phases, the file itself serving as the provenance
 record. The most expensive artifact in the project deserves the same
 treatment. This section gives it one.
 
 **Why the force model needs a file of its own.** Three inputs change on
-three different clocks. The study specification says WHAT to simulate,
+three different clocks. The pair specification says WHAT to simulate,
 and a researcher edits it constantly. The deployment configuration says
 WHERE to run, and changes when the machine does. The force model is the
 third: manufactured once, costing weeks of machine time, then consumed
-UNCHANGED by many members. It cannot live inside a member's file,
-because it is shared by all of them — whichever member held the recipe
+UNCHANGED by many projects. It cannot live inside `sabsim.toml`,
+because it is shared by all of them — whichever project held the recipe
 would become a hidden master copy the others drift away from silently,
 which is the same failure §1.6 avoids by making the specification the
-provenance record rather than one member's private state.
+provenance record rather than one project's private state. (Where the
+recipe and its products live on disk is the surface's preparation
+folder, `ARCHITECTURE.md` §1; a project that reuses another's model
+copies that folder.)
 
 **What the recipe is keyed by, and why the species union is not
 enough.** STRUCTURAL 1a fixes ONE model over the union of the pair's
@@ -1912,7 +1886,7 @@ domain carries a short human-readable label, but the label is a handle,
 not the truth — the truth is the enumerated starting collection of part
 2 below, which states exactly which phases were taught. Two consequences
 follow, and they are deliberately at opposite ends of the cost scale. A
-member whose structures fall outside the declared domain is refused at
+pair whose structures fall outside the declared domain is refused at
 LOAD time, in §1.5's second validation phase, before a single node-hour
 is spent. And the committee spread of §4.4 remains the RUNTIME backstop
 for the case where the declaration itself was too generous. The cheap
@@ -1925,7 +1899,7 @@ student can read the file and know what was manufactured.
 1. **Species union and domain.** The elements the single shared model
    must handle, fixing the type-map ordering every downstream simulation
    inherits (§4.3), together with the declared domain above. This is the
-   key a member's `potential_ref` ultimately resolves against.
+   key a pair's `potential_ref` ultimately resolves against.
 2. **The starting collection — COLLECTION 1 of the settled recipe.**
    The calm structures, computed accurately before anything else and
    needing no protocol run to produce. Six families, ALL REQUIRED
@@ -1952,7 +1926,7 @@ student can read the file and know what was manufactured.
       about the cold cell.
    6. **Warm runs** — short runs of each crystal in the NVT and NPT
       ensembles at the temperature the protocol's quiet stages and the
-      §3.5 gate run at (300 K for the production study; revised
+      §3.5 gate run at (300 K for the production project; revised
       2026-08-29 from "modestly elevated", LEDGER T-37).
 
    Families 2 and 6 are the two whose necessity is easiest to doubt, so
@@ -1978,53 +1952,47 @@ student can read the file and know what was manufactured.
 
    **Collection 1 also emits the environment library (added 2026-08-29,
    Paul).** The §3.5 gate's definition of "crystalline" — an atom whose
-   second-shell bispectrum matches some environment of the undamaged
-   material — needs a catalogue of those environments, and this
-   collection is where they already are. So building Collection 1 also
-   writes the library: the descriptors of every atom in family 1 (the
-   cold ideal sites), family 6 (the same sites with their thermal
-   spread — this is what fixes the gate's tolerance, and what its
-   false-alarm baseline is measured on) and family 4 (the clean faces,
-   so a slab's own surfaces are not mistaken for damage). Family 2 is
-   EXCLUDED, because it is carried past the point where bonds fail and
-   a broken environment must not be catalogued as crystalline; family 3
-   is not catalogued either, but it is the library's self-check — the
-   disorder every tolerance must recognise (§3.5). Three requirements
-   follow. The library RECORDS the temperature its warm runs were made
-   at (the lowest, if several), and the STUDY loader compares the
-   temperature at which the gate will judge a slab (the heal cools to
-   the press temperature, §3.4) against it — a warning if the study is
-   hotter, a refusal if it is more than 20 % hotter (§3.5 states the
-   band and why); the recipe itself declares nothing about studies it
-   has never seen. The declared surfaces must include the FACE the
-   study's slab is cut with (matched by face and species; the
-   termination — which atomic plane the clean cut ends on — is
-   deliberately NOT matched, because every surface is bombarded to an
-   amorphous skin before the gate sees it, so the termination makes no
-   difference; Paul, 2026-08-29), checked between library and study at
-   load time, not discovered as a mis-flagged face. And the descriptor
-   engine and its settings are recipe settings
-   recorded in the library, and the gate uses that record, never its
-   own copy, so both sides of the comparison are computed identically.
-   The cutoff is stated as a PHYSICAL length — the radius of the first
-   neighbour shell — together with the expansion order and per-species
-   weights; the engine's own parameters are DERIVED from it and never
-   exposed raw (for LAMMPS `compute sna/atom`, whose cutoff is
-   `rcutfac × (R_i + R_j)`, the per-species radii are set so that sum
-   equals the physical cutoff, and the neighbour list is built at least
-   that wide — the trap LEDGER T-35 fell into; `ARCHITECTURE.md` §2.3).
-   The engine is a pluggable seam, bound 2026-08-29 to LAMMPS's own
-   bispectrum compute (`ARCHITECTURE.md` §2.3/§4). The strain of a
-   matched slab (§2.4, up to ~2 %) is
-   expected to sit inside the thermal tolerance; the self-check is
-   the test of that expectation, and adding the study's strained bulk
-   cell to the library is the remedy if it fails.
-   The purpose is stated out loud, because it is easy to over-invest:
-   this collection exists so the FIRST committee does not fly apart,
-   not to make it accurate. (It anchors that first committee; it is no
-   longer a separate seed STAGE, §4.5 step 1.) Accuracy comes from the
-   configurations the protocol actually visits — Collection 2 — and
-   from the refinement loop.
+   second-shell bispectrum matches some environment of the undamaged material —
+   needs a catalogue of those environments, and this collection is where they
+   already are. So building Collection 1 also writes the library: the
+   descriptors of every atom in family 1 (the cold ideal sites), family 6 (the
+   same sites with their thermal spread — this is what fixes the gate's
+   tolerance, and what its false-alarm baseline is measured on) and family 4
+   (the clean faces, so a slab's own surfaces are not mistaken for damage).
+   Family 2 is EXCLUDED, because it is carried past the point where bonds fail
+   and a broken environment must not be catalogued as crystalline; family 3 is
+   not catalogued either, but it is the library's self-check — the disorder
+   every tolerance must recognise (§3.5). Three requirements follow. The
+   library RECORDS the temperature its warm runs were made at (the lowest, if
+   several), and the PROJECT loader compares the temperature at which the gate
+   will judge a slab (the heal cools to the press temperature, §3.4) against it
+   — a warning if the project is hotter, a refusal if it is more than 20 %
+   hotter (§3.5 states the band and why); the recipe itself declares nothing
+   about projects it has never seen. The declared surfaces must include the
+   FACE the project's slab is cut with (matched by face and species; the
+   termination — which atomic plane the clean cut ends on — is deliberately NOT
+   matched, because every surface is bombarded to an amorphous skin before the
+   gate sees it, so the termination makes no difference; Paul, 2026-08-29),
+   checked between library and project at load time, not discovered as a
+   mis-flagged face. And the descriptor engine and its settings are recipe
+   settings recorded in the library, and the gate uses that record, never its
+   own copy, so both sides of the comparison are computed identically. The
+   cutoff is stated as a PHYSICAL length — the radius of the first neighbour
+   shell — together with the expansion order and per-species weights; the
+   engine's own parameters are DERIVED from it and never exposed raw (for
+   LAMMPS `compute sna/atom`, whose cutoff is `rcutfac × (R_i + R_j)`, the
+   per-species radii are set so that sum equals the physical cutoff, and the
+   neighbour list is built at least that wide — the trap LEDGER T-35 fell into;
+   `ARCHITECTURE.md` §2.3). The engine is a pluggable seam, bound 2026-08-29 to
+   LAMMPS's own bispectrum compute (`ARCHITECTURE.md` §2.3/§4). The strain of a
+   matched slab (§2.4, up to ~2 %) is expected to sit inside the thermal
+   tolerance; the self-check is the test of that expectation, and adding the
+   project's strained bulk cell to the library is the remedy if it fails. The
+   purpose is stated out loud, because it is easy to over-invest: this
+   collection exists so the FIRST committee does not fly apart, not to make it
+   accurate. (It anchors that first committee; it is no longer a separate seed
+   STAGE, §4.5 step 1.) Accuracy comes from the configurations the protocol
+   actually visits — Collection 2 — and from the refinement loop.
 3. **The production reference settings.** The block below.
 4. **The accuracy audit.** The block below.
 5. **How the hard configurations are manufactured — COLLECTION 2 of
@@ -2132,21 +2100,20 @@ configuration, a fixed grid is exactly what would make one settings
 block unable to serve both. This is what makes the inheritance rule
 implementable at all.
 
-**The inheritance rule, and the three kinds of reference.** One
-production block per recipe, established once and reused unchanged by
-every consumer that computes an accurate number for comparison. But the
-rule binds only the references we COMPUTE, and the design must not
-overstate it. §7.2 speaks of checking "against VASP and experiment" as
-though those were one category; they are not, and §3.5's shipped
-reference file proves it — every number there is a literature-guided
-placeholder flagged `real = false` — while the required amorphization
-depth, a study knob since 2026-08-28, is neither literature nor DFT but
-a value MEASURED by this pipeline's own sweep, and the environment
-library (§3.5) is a third thing again, manufactured under the model
-being judged. So there are three kinds of reference: values we
-compute accurately, values taken from published experiment, and values
-measured by our own simulations. Only the first inherits. The other two
-carry their own provenance and are compared to as they stand.
+**The inheritance rule, and the three kinds of reference.** One production
+block per recipe, established once and reused unchanged by every consumer that
+computes an accurate number for comparison. But the rule binds only the
+references we COMPUTE, and the design must not overstate it. §7.2 speaks of
+checking "against VASP and experiment" as though those were one category; they
+are not, and §3.5's shipped reference file proves it — every number there is a
+literature-guided placeholder flagged `real = false` — while the required
+amorphization depth, a project knob since 2026-08-28, is neither literature nor
+DFT but a value MEASURED by this pipeline's own sweep, and the environment
+library (§3.5) is a third thing again, manufactured under the model being
+judged. So there are three kinds of reference: values we compute accurately,
+values taken from published experiment, and values measured by our own
+simulations. Only the first inherits. The other two carry their own provenance
+and are compared to as they stand.
 
 **The audited flag, reusing an idiom the project already has twice.**
 §4.7's registry marks each entry `validated` and refuses an unvalidated
@@ -2176,35 +2143,32 @@ chosen until the audit of part 4 has been run for the first time. The
 (species, domain) key is BUILT — §4.7's registry carries it and the
 marker is gone. What remains are follow-ons logged in `TODO.md`: the
 record definition `PSEUDOCODE.md` §11's twelve call sites already assume,
-carrying a chosen domain on the member specification so the resolvers can
+carrying a chosen domain on the pair specification so the resolvers can
 be handed one instead of relying on the single-domain shortcut, and the
-load-time check that refuses a member whose structures fall outside it.
+load-time check that refuses a pair whose structures fall outside it.
 
-**Built state (2026-08-26): the recipe is a file, and the first slice
-is silicon.** The recipe of the eight parts above is a TOML file,
+**Built state (2026-08-26): the recipe is a file, and the first slice is
+silicon.** The recipe of the eight parts above is a TOML file,
 `force_model_recipe.toml` (template in `share/templates/`), loaded by
-`src/sabsim/bootstrap/recipe.py` with the study file's own discipline:
-every key required, units carried, three validation phases. The
-production settings block is the LEAN recipe of
-`dev/notes/vasp-labelling-recipe-lean.md` (chosen cheap on purpose, to
-learn the cost by spending): PAW `Si`, `O`, `Li`, `Nb_pv`; PBE;
-`ENCUT = 350 eV`; Γ only for every non-bulk system and `KSPACING =
-0.5 Å⁻¹` for the two bulk families; Gaussian smearing 0.1 eV; `EDIFF
-1e-4`; single points. The audit block (part 4) is DECLARED but
-`audited = false`, so everything the first recipe manufactures is
-exploratory, exactly as the flag idiom above intends. Parts 7–8 (the
-learning loop and the stopping rule) are parsed when present but not
-yet consumed: the first slice builds the recipe, the Collection-1
-generators, the Collection-2 frame harvester, and the direct VASP
-labeller (`sabsim bootstrap generate | label | harvest`); the ALF
-training bridge and the refine loop follow. Collection 2 is NOT
-generated by new MD: the bootstrap harvests the trajectory frames the
-ordinary member jobs record when run with `--dump-visuals` under the
-universal model (`production_weights` pointing at the DPA `.pth`), the
-"consumer difference" of `PSEUDOCODE.md` §11.3. Interface frames are
-cut to sub-cells that keep only a couple of crystalline layers under
-each activated skin (Paul, 2026-08-26 — the surface atoms are what the
-training is for).
+`src/sabsim/bootstrap/recipe.py` with `sabsim.toml`'s own discipline: every key
+required, units carried, three validation phases. The production settings block
+is the LEAN recipe of `dev/notes/vasp-labelling-recipe-lean.md` (chosen cheap
+on purpose, to learn the cost by spending): PAW `Si`, `O`, `Li`, `Nb_pv`; PBE;
+`ENCUT = 350 eV`; Γ only for every non-bulk system and `KSPACING = 0.5 Å⁻¹` for
+the two bulk families; Gaussian smearing 0.1 eV; `EDIFF 1e-4`; single points.
+The audit block (part 4) is DECLARED but `audited = false`, so everything the
+first recipe manufactures is exploratory, exactly as the flag idiom above
+intends. Parts 7–8 (the learning loop and the stopping rule) are parsed when
+present but not yet consumed: the first slice builds the recipe, the
+Collection-1 generators, the Collection-2 frame harvester, and the direct VASP
+labeller (`sabsim bootstrap generate | label | harvest`); the ALF training
+bridge and the refine loop follow. Collection 2 is NOT generated by new MD: the
+bootstrap harvests the trajectory frames the ordinary prep and bond jobs record
+when run with `--dump-visuals` under the universal model (`production_weights`
+pointing at the DPA `.pth`), the "consumer difference" of `PSEUDOCODE.md`
+§11.3. Interface frames are cut to sub-cells that keep only a couple of
+crystalline layers under each activated skin (Paul, 2026-08-26 — the surface
+atoms are what the training is for).
 
 ## 5. Bond/debond MD protocol
 
@@ -2370,7 +2334,7 @@ sustained *tensile* stress across a closed gap is two surfaces that have
 already bonded and are pulling on each other, the opposite of an
 asperity, and a press too weak to register as compression on a small
 footprint would otherwise never declare contact (LEDGER T-30/T-31).
-Both the window and the floor are numerical knobs of the study file
+Both the window and the floor are numerical knobs of `sabsim.toml`
 (§1.2), carried with their units — the window in chunks, the floor in
 bar — and their influence must vanish as they are refined. (Revised
 2026-08-28 (Paul); the trailing mean and the two-sided floor were first
@@ -2378,7 +2342,7 @@ applied in code on 2026-08-27 and are recorded here as the design.)
 (Prior art measures its gap between extremal atoms, which is exactly the
 asperity failure the stress criterion guards against; we fix both.)
 
-**The press is driven in chunks, and the chunking is a study setting
+**The press is driven in chunks, and the chunking is a project setting
 too (revised 2026-08-28, Paul).** The driver advances the simulation a
 `control_interval` at a time (a time, ~1 ps), reads the opening and the
 stress back between chunks, and decides; that interval is the
@@ -2411,7 +2375,7 @@ SABSIM makes the reference state a gated artifact: **release the press
 load first** — remove the drive, and in load-controlled mode re-freeze
 the driven grip that was given mass in §5.2, so nothing is still pressing
 the interface — then minimize, then equilibrate under the thermostat for
-`settle_duration` (a numerical knob of the study file, revised
+`settle_duration` (a numerical knob of `sabsim.toml`, revised
 2026-08-28; until then a constant of twenty chunks inside the driver),
 reading the two grip reactions and the potential energy back every
 `control_interval`, then **assert** two things. First, that the net
@@ -2723,7 +2687,7 @@ ladder of {1, 3.2, 10} m/s** (three rungs, one decade, log-spaced —
 §5.4 wants ≥3 rates over a decade, and slower is better but cost-bounded,
 with M3 reporting the distance to quasi-static); bonded/not-bonded plus
 contact quality always reported. Pressure, temperature, hold, and the
-rate ladder are v1 defaults, not freezes — each is a study-input knob.
+rate ladder are v1 defaults, not freezes — each is a `sabsim.toml` knob.
 Still DESIGN follow-ons: the noise-floor thresholds for the reference
 state and for "force returned to zero," and the contact-quality
 definition's bond-counting cutoff.
@@ -3089,7 +3053,7 @@ read them, which is precisely how a truncated trajectory and a
 wrong-file fetch survived into a quoted result. The schema below is
 therefore not bookkeeping — it is what makes §7 possible at all.
 
-The analyzer emits one machine-readable document per member, containing:
+The analyzer emits one machine-readable document per pair, containing:
 
 - **Provenance** (`VISION.md` goal 3): the potential generation and
   committee size, the seed set, the press mode with the load and depth
@@ -3129,7 +3093,7 @@ extracted scalar later is a §6.7 registration, not a schema change.
 
 Each measure declares what it needs — the bonded structure, the
 separated fragments, a force curve, a snapshot series — and emits
-records. The analyzer resolves those needs against what the member
+records. The analyzer resolves those needs against what the pair
 produced, computes what it can, and marks the rest `unresolved`. This is
 what makes the measure vector **pluggable** (`ARCHITECTURE.md` §2.3):
 adding an Imago descriptor, or a second all-electron reference, is
@@ -3181,7 +3145,7 @@ in §6.5.
 
 ## 7. Quality gates and diagnosis
 
-This section designs the two checks that decide whether a member is
+This section designs the two checks that decide whether a pair is
 worth believing, and the reasoning that turns a bad number into an
 instruction
 about what to do next. It realizes STRUCTURAL 3.
@@ -3431,27 +3395,30 @@ so their errors are **correlated**, and treating them as independent
 would overstate the ratio's uncertainty and weaken a test that ought to
 be strong. The covariance is carried, not assumed away.
 
-Nor is the cancellation assumed to be complete. The ratio is a
-**relation** in the sense of §1.1: it contrasts the material pair while
-controlling the potential and the protocol. The gate checks those
-controls, and reports the relation's **difference set** beside the
-result.
+Nor is the cancellation assumed to be complete, and — revised
+2026-08-30 (Paul) — the ratio is no longer something the program forms.
+Each pair is its own project (§1.1); the Si/SiO₂ project and the Si/Si
+project each emit a work of separation with its uncertainty and its
+fully resolved specification, and the scientist divides one by the
+other. What the retired relation machinery would have checked — that
+the two projects share a potential and a protocol — the scientist
+checks by laying the two specifications side by side, sorting every
+difference as contrasted, entailed or incidental (§1.1). The gate
+described here therefore judges ONE pair: it reports the absolute
+number, its uncertainty, and the bracket below; it does not grade the
+comparison, because a criterion calibrated for one comparison has no
+standing to suppress another, and it is the scientist, not the gate,
+who decides what a comparison was worth.
 
-When the controls do not hold, the gate withholds its **verdict**, not
-the number. The ratio is computed and reported either way, because a
-criterion calibrated for one comparison has no standing to suppress
-another (§1.1). `unresolved` here means *this gate is not competent to
-grade this comparison*, and it is the scientist, not the gate, who
-decides what the comparison was worth.
-
-One entry in that set is unavoidable. Si/Si has no lattice mismatch and
-Si/SiO₂ does, so the residual-strain systematic that this criterion
-would most like to see cancel does not — and no care in setting up the
-members can fix it, because **you cannot contrast two material pairs
-without contrasting their mismatch.** It is an *entailed* difference,
-the irreducible price of the contrast rather than a flaw in it. The
-ratio is reported as only partially cancelling on its account. The gate
-does not decide what that is worth; it refuses to let a reader miss it.
+One entry in that side-by-side is unavoidable. Si/Si has no lattice
+mismatch and Si/SiO₂ does, so the residual-strain systematic that this
+criterion would most like to see cancel does not — and no care in
+setting up the two projects can fix it, because **you cannot contrast
+two material pairs without contrasting their mismatch.** It is an
+*entailed* difference, the irreducible price of the contrast rather
+than a flaw in it; the ratio is only partially cancelling on its
+account, and each project's provenance records the strain so a reader
+cannot miss it.
 
 **The bracket is a sanity check, and it is not science.** A ratio stays
 perfectly correct when both of its numbers are wrong by the same factor
@@ -3529,7 +3496,7 @@ the front, ahead of every question about cause, and it did not exist in
 `ARCHITECTURE.md`'s original three-way routing — it falls out of §5's
 refusal to accept truncated trajectories and §6.5's checks. The second
 is that the chain reports the *first* actionable cause while **all**
-checks still run and are recorded, so a member with two problems does
+checks still run and are recorded, so a pair with two problems does
 not hide the second one; it simply names the one that must be fixed
 first.
 
@@ -3562,16 +3529,15 @@ that no protocol check need fire to make true — and a reader who sees
 `by_elimination` knows at once to weigh it as inference rather than
 observation.
 
-The field also makes our own ignorance **countable**. If most protocol
-verdicts across a study are reached by elimination and few by evidence,
-that is a measurable statement that the protocol checks are too sparse,
-and it becomes a task rather than a silent weakness. The protocol checks
-available today all come from §5 and §6 — the pull-rate ladder failing
-to converge, the press never reaching the contact quality of §5.1, the
-dissipation identity or the ladder-closure check of §6.5 breaking — and
-that set was assembled for other purposes. **It has not been argued to
-span the ways a protocol can be wrong**, and the `basis` field is how we
-find out.
+The field also makes our own ignorance **countable**. If most protocol verdicts
+across many projects are reached by elimination and few by evidence, that is a
+measurable statement that the protocol checks are too sparse, and it becomes a
+task rather than a silent weakness. The protocol checks available today all
+come from §5 and §6 — the pull-rate ladder failing to converge, the press never
+reaching the contact quality of §5.1, the dissipation identity or the
+ladder-closure check of §6.5 breaking — and that set was assembled for other
+purposes. **It has not been argued to span the ways a protocol can be wrong**,
+and the `basis` field is how we find out.
 
 ### 7.8 The diagnostic-label schema
 
@@ -3610,7 +3576,7 @@ undertrained potential (`bulk_model`); a trajectory truncated partway
 (`void`); a structure with atoms lost through the boundary (`void`); a
 measure vector with an energy in the wrong units (the sanity bracket);
 a potential trained only on bulk configurations (`interface_coverage`);
-and a member whose interface reference is missing entirely
+and a pair whose interface reference is missing entirely
 (`undiagnosed`, never `pass`).
 
 This is the one requirement that most directly answers §1.8. Prior art's
@@ -3911,18 +3877,18 @@ one inside the other (`ARCHITECTURE.md` §4.1).
 
 Each unit is self-describing: where its skeleton lives, a stable
 identifier, which consumer it serves (an M4 endpoint, or an M5 frame and
-which detector found it), and provenance backpointers — the member, the
+which detector found it), and provenance backpointers — the pair, the
 trajectory, the frame index, the subcell, the potential generation, the
 seed set.
 
 **The identifier is a content fingerprint of the skeleton**, reusing §1.4's
-rule rather than inventing a second one. Identical content yields an
-identical identifier, so Kaleidoscope's cache is correct by construction;
-any change to the structure or the settings yields a new one, so a stale
-result cannot be served for a structure that no longer exists. An
-identifier built from a frame number, a directory name, or a timestamp
-collides across members — and a cache keyed on a colliding identifier is
-prior art's newest-file-wins failure (§5.7) wearing new clothes.
+rule rather than inventing a second one. Identical content yields an identical
+identifier, so Kaleidoscope's cache is correct by construction; any change to
+the structure or the settings yields a new one, so a stale result cannot be
+served for a structure that no longer exists. An identifier built from a frame
+number, a directory name, or a timestamp collides across projects — and a cache
+keyed on a colliding identifier is prior art's newest-file-wins failure (§5.7)
+wearing new clothes.
 
 **What Kaleidoscope owns:** dispatch, caching, and tracking which units
 succeeded and which failed. **What it must not own:** what a snapshot
@@ -3932,7 +3898,7 @@ signal to adopt a real one instead — `VISION.md` principle 3 names this
 temptation in advance because it is a natural one.
 
 The manifest is retained as an artifact, because it *is* step 8's
-provenance record. Re-running an unchanged study should be a cache hit
+provenance record. Re-running an unchanged project should be a cache hit
 from end to end; if it is not, something changed, and the fingerprints
 say precisely what.
 
@@ -4081,11 +4047,12 @@ starting contract, not a frozen one.
 
 ### 9.1 The canonical result — one structured summary as the contract
 
-Every downstream consumer — the human report, the study roll-up, a future
-automated step — reads ONE machine-readable summary per run
-(`summary.json`), never the prose report or the raw logs (the §6.6 "a gate
-cannot consume prose" discipline, extended to the whole result). It holds:
-the member identity and resolved spec; the measure vector (§6); the
+Every downstream consumer — the human report, a person's comparison
+across projects, a future automated step — reads ONE machine-readable
+summary per run (`summary.json`), never the prose report or the raw
+logs (the §6.6 "a gate cannot consume prose" discipline, extended to
+the whole result). It holds: the pair identity and resolved spec; the
+measure vector (§6); the
 activation and gate verdicts with their per-metric detail (§3.5, §7); the
 run's provenance (git commit, seeds, potential and reference data with
 their stand-in flags, software versions, host); and POINTERS (resolved
@@ -4104,9 +4071,11 @@ disorder-vs-depth profile, and, for the bond stage, the force-vs-opening
 curve and the rate ladder — with matplotlib; atomistic snapshots rendered
 through Ovito are deliberately DEFERRED (a heavier dependency), while the
 dumps that feed them are kept readily accessible (§9.3) so a viewer can
-open them by hand. The study roll-up is the same idea one level up: it
-renders the cross-member comparison — the §7 Si/Si vs Si/SiO2 ratio and
-its combined uncertainty — from the member summaries.
+open them by hand. A comparison across projects — the §7.4 Si/Si vs
+Si/SiO2 ratio and its combined uncertainty — is the person's own,
+formed from two such summaries (§1.1, revised 2026-08-30); the summary
+carries everything that comparison needs, and SABSIM renders no roll-up
+of its own.
 
 ### 9.3 The visualization dumps — trajectories, well-marked
 
@@ -4136,10 +4105,10 @@ field that lights up the amorphized layer. A single endpoint frame may also
 be written into the job directory as a convenience, but it is secondary to
 the trajectory.
 
-## 10. Deployment — preparing and submitting a study to a cluster
+## 10. Deployment — preparing and submitting a project to a cluster
 
 Every section above says *what* to compute. This one says *where* it
-runs — how a study becomes jobs a scheduler will accept, on whatever
+runs — how a project becomes jobs a scheduler will accept, on whatever
 machine you happen to be sitting at. The policy is already fixed one
 level up in `ARCHITECTURE.md` §4.1: three execution tiers (a thin
 sequencer we own, opaque Parsl sub-orchestrators we adopt, and plain
@@ -4152,11 +4121,11 @@ section designs — is the **consumer**: the mechanism that reads that file
 and acts on it.
 
 Two rules from §1 bound the whole design and are never bent here. The
-study spec may **never** express where it runs (§1.2), so nothing in
-deployment leaks back into it. And convenience lives in *writing* a
-complete file, never in a silent fallback at load time (§1.4), so the
-deployment consumer is a **generator**, exactly as the study-spec loader
-is.
+pair specification may **never** express where it runs (§1.2), so
+nothing in deployment leaks back into it. And convenience lives in
+*writing* a complete file, never in a silent fallback at load time
+(§1.4), so the deployment consumer is a **generator**, exactly as the
+specification loader is.
 
 ### 10.1 The consumer is a writer, not a submitter
 
@@ -4166,52 +4135,61 @@ them to completion. It must not, for a concrete reason recorded in
 on a login node — that is one of the six execution walls. So the consumer
 **writes ready-to-submit scripts and hands them back**; the human submits
 them and watches them. This is the §1.4 generator pattern lifted from the
-study spec to deployment — the same tool that emits a complete, editable
-study spec now also emits complete, editable submission scripts with the
-site-specifics already filled in. Nothing is submitted for you, and
-nothing runs on the login node except the writing itself.
+pair specification to deployment — the same tool that emits a complete,
+editable specification now also emits complete, editable submission
+scripts with the site-specifics already filled in. Nothing is submitted
+for you, and nothing runs on the login node except the writing itself.
 
 The consumer is two commands:
 
-- **`sabsim prepare <spec>`** — the writer. It reads *both* the study
-  spec (which members, and what each one needs) *and* the deployment file
-  (which hardware each kind of job wants), and writes the scripts. It is
-  the single place the two inputs meet: the study spec still never names
-  the cluster, and `prepare` joins the two only at the moment of writing.
-- **`sabsim run <spec> --activate|--bond|--analyze`** — the executor.
-  It runs one job's worth of the pipeline, and this is the line that
-  lives *inside* each generated script. It runs within an allocation
-  (wrapped in the launcher), submits nothing itself, and does the actual
-  science.
+- **`sabsim prepare`** — the writer, run inside the project folder. It
+  reads *both* `sabsim.toml` (which pair, and what each surface needs)
+  *and* `deployment.toml` (which hardware each kind of job wants), and
+  writes the scripts. It is the single place the two inputs meet: the
+  pair specification still never names the cluster, and `prepare` joins
+  the two only at the moment of writing.
+- **`sabsim run --prep-surf1|--prep-surf2|--bond|--analysis`** — the
+  executor. It runs one job's worth of the pipeline, and this is the
+  line that lives *inside* each generated script. It runs within an
+  allocation (wrapped in the launcher), submits nothing itself, and
+  does the actual science.
 
-### 10.2 One member is three per-kind jobs
+### 10.2 One pair is four jobs (revised 2026-08-30 (Paul))
 
-A member's eight steps neither all want the same machine nor all want to
-run without a human looking. So a member is prepared as **three jobs**,
-submitted in order, each watched to completion and checked for
-correctness before the next is submitted:
+A pair's eight steps neither all want the same machine nor all want to
+run without a human looking, and its two surfaces are prepared ALONE
+before they ever meet (§3.1). So a pair is prepared as **four jobs**,
+each named like the project folder it works in (`ARCHITECTURE.md` §1):
 
-- **activate** (GPU): build both wafers, roughen both surfaces with the
-  cascade (§3), HEAL each half in the same session (§3.4) and run the
-  **activation gate** (§3.5) on each healed half — the human-inspected
-  checkpoint, here, before any assembly — then, only if both pass,
-  bring them together at the press-start opening (§2.6) and hand the
-  assembled pair to the bond job. (Revised 2026-08-28 (Paul); from
-  2026-08-08 the heal and gate had ridden the bond job.)
-- **bond** (GPU): read the pair, run the one-time lateral cell relax
-  (§5.6), then press, settle, and pull (§5), with the committee of MLIP
-  models evaluated together in one process. It also writes the stage
-  ledger of §5.5.
-- **analyze** (ordinary / CPU): measure (§6). Split into its *own* job —
+- **prep_surf1** and **prep_surf2** (GPU, INDEPENDENT of each other):
+  each prepares ONE surface of the pair. It relaxes the bulk of BOTH
+  materials (§2.2 — both are needed to solve the shared cell, and the
+  relaxation is cheap and deterministic), solves the shared lateral
+  cell (§2.3), builds ITS half in that cell (§2.5), roughens it with
+  the cascade (§3), HEALS it in the same session (§3.4), and runs the
+  **activation gate** (§3.5) on the healed half — the human-inspected
+  checkpoint, before any assembly. The gated, healed half is the job's
+  DELIVERABLE, written into `prep_surfN_<label>/` for the bond job to
+  read. Because the two jobs share no state until assembly, they may be
+  submitted at once and run side by side; this is the separate-job
+  fan-out `ARCHITECTURE.md` §4.3 kept available through the files,
+  arriving at no cost. (From 2026-08-28 to 2026-08-30 one `activate`
+  job prepared both halves serially and assembled them.)
+- **bond** (GPU): read both halves, check that their lateral cells
+  agree, bring them together at the press-start opening (§2.6), run the
+  one-time lateral cell relax (§5.6), then press, settle, and pull (§5),
+  with the committee of MLIP models evaluated together in one process.
+  It also writes the stage ledger of §5.5.
+- **analysis** (ordinary / CPU): measure (§6). Split into its *own* job —
   not folded into bond — because the all-electron characterization (§8)
   will eventually be heavy, and drawing the boundary now avoids moving it
   later.
 
 This is **mirrored in `ARCHITECTURE.md` §4.3**, since updated from the
-single-job member it first described. §4.3 was written to *allow* the
+single-job chain it first described. §4.3 was written to *allow* the
 split — every stage hands off through a file on disk, so a boundary may
-fall between any two stages — and this section fixes where the boundaries
-actually fall.
+fall between any two stages — and this section fixes where the
+boundaries actually fall.
 
 **The committee runs within the one bond job.** All committee models are
 loaded together in the single bond process, evaluated on each
@@ -4224,13 +4202,16 @@ adds jobs.
 
 The real safeguard against the two commands drifting apart is that the
 set of jobs is defined **once** in code, as a small **ordered registry**:
-activate → bond → analyze, each entry naming the job, the pipeline stages
-it runs, and the abstract resource *class* it needs (which the deployment
-file resolves to a real partition). *Both* the `run` selector's flags and
-the `prepare` writer read from this one registry.
+prep_surf1 → prep_surf2 → bond → analysis, each entry naming the job,
+the pipeline stages it runs, the folder it works in, and the abstract
+resource *class* it needs (which the deployment file resolves to a real
+partition). The two prep entries are marked as a **parallel group**: the
+order between them is a listing order, not a dependency, and bond
+depends on both. *Both* the `run` selector's flags and the `prepare`
+writer read from this one registry.
 
 The payoff is extensibility. Inserting a new kind of job later — say, a
-relaxation between activate and bond — is a one-line edit to the registry,
+relaxation between prep and bond — is a one-line edit to the registry,
 and the flags, the written filenames, the guided index, and the run
 selector all follow from it. No truth about *what the jobs are and in
 what order they run* is ever written down twice, which is why the CLI
@@ -4239,12 +4220,13 @@ scatters that truth.
 
 ### 10.4 The run selector
 
-`sabsim run <spec>` accepts **at most one** of three mutually exclusive
-flags — `--activate`, `--bond`, `--analyze` — each selecting exactly the
-stages that job owns, per the registry. Giving **no** flag runs the whole
-member chain end to end; that is what a login-node `--dry-run` exercises
-and what a small local test uses. Adding `--only <member>` narrows any of
-these to a single member when a study defines several.
+`sabsim run` accepts **at most one** of four mutually exclusive flags —
+`--prep-surf1`, `--prep-surf2`, `--bond`, `--analysis` — each selecting
+exactly the stages that job owns, per the registry. Giving **no** flag
+runs the whole pair chain end to end, the two preps in turn; that is
+what a login-node `--dry-run` exercises and what a small local test
+uses. There is no selector for "which pair": a project holds exactly
+one (§1.1), so the flags say only which of its jobs to run.
 
 The flags deliberately carry no category noun — there is no
 `--stage bond`. Dropping the noun lets the verbs stand alone, and it
@@ -4271,45 +4253,47 @@ environment being installed and activated — not restated in every script.
     the three roots actually resolve. If they do not, it **stops and
     reports on the login node** — where the message is readable — rather
     than emitting scripts that would fail on a compute node an hour into
-    a job. This is the same discipline as the study-reference check
-    (§1.5) and the activation gate (§3.5): catch the missing piece early,
+    a job. This is the same discipline as the reference check (§1.5)
+    and the activation gate (§3.5): catch the missing piece early,
     name it, and refuse.
-- **The outside tools to switch on are per kind of job**, not
-  machine-wide. The activate script switches on only the
-  molecular-dynamics engine, bond only the GPU force-model engine, and
-  analyze only what its measurement needs. This **reshapes the
-  deployment file**: the tool list moves out of the machine-wide
-  `[hardware]` inventory and into each per-kind `[usage.*]` block, so a
-  script loads exactly what its job needs and nothing that could conflict
-  with it. It matches the by-kind routing the file already uses for
-  partitions. **What analyze needs is broader than electronic structure,
-  and in v1 it is nothing extra.** Analyze owns the whole measurement
-  tail: the mechanical work-of-separation (M1, §6), the structural
-  characterization (radial pair-distribution, structural descriptors,
-  §8/§12), and the report plots (force and stress/strain curves). All of
-  that is the already-installed Python stack (numpy / matplotlib / ASE),
-  so v1 loads NO dedicated science module — which is why `[usage.analyze]`
-  carries `modules = []`. The one genuinely electronic-structure piece is
-  the all-electron characterization, and it is Tier-B: Imago/Kaleidoscope
-  owns its own Parsl + SLURM submission (§4.1), so analyze does not load
-  it as a module. A DIRECT electronic-structure tool would join the
-  analyze block only if such analysis were ever run OUTSIDE that Tier-B
-  loop.
+- **The outside tools to switch on are per kind of job**, not machine-wide. A
+  prep script switches on only the molecular-dynamics engine, bond only the GPU
+  force-model engine, and analysis only what its measurement needs. This
+  **reshapes the deployment file**: the tool list moves out of the machine-wide
+  `[hardware]` inventory and into each per-kind `[usage.*]` block, so a script
+  loads exactly what its job needs and nothing that could conflict with it. It
+  matches the by-kind routing the file already uses for partitions. **What
+  analyze needs is broader than electronic structure, and in v1 it is nothing
+  extra.** Analyze owns the whole measurement tail: the mechanical
+  work-of-separation (M1, §6), the structural characterization (radial
+  pair-distribution, structural descriptors, §8/§12), and the report plots
+  (force and stress/strain curves). All of that is the already-installed Python
+  stack (numpy / matplotlib / ASE), so v1 loads NO dedicated science module —
+  which is why `[usage.analysis]` carries `modules = []`. The one genuinely
+  electronic-structure piece is the all-electron characterization, and it is
+  Tier-B: Imago/Kaleidoscope owns its own Parsl + SLURM submission (§4.1), so
+  analyze does not load it as a module. A DIRECT electronic-structure tool
+  would join the analyze block only if such analysis were ever run OUTSIDE that
+  Tier-B loop.
 - **Everything else gets no home in the script.** The gate's reference
   files are found through the shared-data root (they are reference data,
   in §3.5's registry idiom); the Python interpreter and the launcher come
   from the activated install. None of these is hand-named in a generated
-  script. The activate job's two run-time DATA inputs — the universal
-  model's weights and the environment library (§3.5, 2026-08-29) — are
-  the weights named by the study file as a root-relative path, the
-  library found in each wafer's material subfolder of the study (§1.2)
-  — and `prepare`'s fail-fast gate resolves BOTH before writing, so a
-  missing library is reported on the login node exactly as a missing
-  weights file is (§1.5's third validation phase).
+  script. A prep job's two run-time DATA inputs — the universal model's
+  weights and the environment library (§3.5, 2026-08-29) — are the
+  weights named by `sabsim.toml` as a root-relative path and the library
+  found in that surface's preparation folder,
+  `prep_surfN_<label>/environment_library.toml` (§1.2) — and
+  `prepare`'s fail-fast gate resolves BOTH surfaces' inputs before
+  writing, so a missing library is reported on the login node exactly as
+  a missing weights file is (§1.5's third validation phase).
 
-**Filenames are semantic and carry no ordinal number** — `activate`,
-`bond`, `analyze`, named for the work. Ordinals were rejected because
-inserting a job between two existing ones would break the numbering.
+**Filenames are semantic and carry no ordinal number** — a script is
+named for the folder its job works in (`prep_surf1_si.slurm`,
+`prep_surf2_sio2.slurm`, `bond_si_sio2.slurm`, `analysis_si_sio2.slurm`;
+`ARCHITECTURE.md` §1), so the name says the work AND the surface or
+pair it is done to. Ordinals were rejected because inserting a job
+between two existing ones would break the numbering.
 Order lives in one place instead: a short, descriptively named guided
 index the writer drops beside the scripts (a submission *guide*, never
 `index` or `readme`), reinforced by each script printing, on success,
@@ -4404,21 +4388,51 @@ roots-via-sourced-rc mechanism.
 
 **Replace:** the hardcoded partition / account / paths of those throwaway
 scripts (→ values `prepare` fills from the deployment file); one coarse
-job per member (→ three per-kind jobs, revising `ARCHITECTURE.md` §4.3);
+job per pair (→ four per-kind jobs, two of them independent, revising
+`ARCHITECTURE.md` §4.3);
 a machine-wide tool list (→ per-kind `[usage.*]` tool lists); any notion
 of the tool submitting or babysitting jobs (→ a writer plus a human); and
 a tool that budgets walltime (→ a human-provided walltime with a cheap
 ceiling check).
 
-**Frozen for v1:** three jobs named activate / bond / analyze; `prepare`
-writes and the human submits; the ordered registry as the single source
-of job identity and order; baked-in frozen roots guarded by a
-resolve-or-refuse gate; per-kind tool lists; user-provided walltime with
-the partition-ceiling check; and overrun handled by human continuation.
-DESIGN follow-ons: the installer plus INSTALL/README that emit the
-deployment rc (the packaging story); and whether a per-study walltime
-override on `prepare` is worth adding once studies vary widely. (The
+**Frozen for v1:** four jobs named prep_surf1 / prep_surf2 / bond / analysis
+(revised 2026-08-30); `prepare` writes and the human submits; the ordered
+registry as the single source of job identity and order; baked-in frozen roots
+guarded by a resolve-or-refuse gate; per-kind tool lists; user-provided
+walltime with the partition-ceiling check; and overrun handled by human
+continuation. DESIGN follow-ons: the installer plus INSTALL/README that emit
+the deployment rc (the packaging story); and whether a per-project walltime
+override on `prepare` is worth adding once projects vary widely. (The
 restart/resume mechanism the continuation relies on is now built as §11.)
+
+### 10.8 Deliverables beside the inputs, bulk on scratch (2026-08-30)
+
+Each job works in the scratch mirror of its own folder —
+`intermediate/prep_surf1_si/`, `intermediate/bond_si_sio2/`, and so on
+(`ARCHITECTURE.md` §4.1) — and that is where the bulky, regenerable
+files live: LAMMPS data files and inputs, the trajectory dumps of §9.3,
+the engine logs. The job's **deliverables** — the small files another
+job or a person reads: the gated healed half a prep job hands to bond,
+the assembled-pair and pull manifests, the stage ledger of §5.5, the
+gate reports, and `measure_vector.toml` — are written into the
+project's own stage folder (`prep_surf1_si/`, `bond_si_sio2/`,
+`analysis_si_sio2/`). The rule is a size-and-value rule, not a file
+type: a project folder copied WITHOUT following the `intermediate`
+link must still hold every input needed to reproduce the pair and
+every number that came out of it, and nothing that could be
+regenerated from those. Each deliverable records which run of the job
+produced it (the resolved scratch path and the scheduler's job id), so
+a manifest always names its bytes (§1.6, `ARCHITECTURE.md` §4.2).
+
+**A rerun never overwrites.** Submitting the same job again gives its
+work a fresh subfolder of the job's intermediate folder, named by the
+scheduler's job id (`run-<job id>/`; a dated name when no scheduler is
+involved), and the deliverable in the project folder is replaced only
+when the new run finishes — it then names the new run. The previous
+run's files stay where they were. This is what let LEDGER T-40 keep a
+failed pull beside the corrected one for comparison, and it is the
+general case: a rerun is evidence about the earlier run, which is
+destroyed if the rerun writes over it.
 
 ## 11. Resuming an interrupted run
 
@@ -4497,19 +4511,18 @@ discipline the stage handoffs already follow (`ARCHITECTURE.md` §4.3).
 
 ### 11.4 The trust alert: warn, and stop
 
-Resuming reuses what a previous run left in a directory, so it owes one
-guard against the rare mistake of continuing the *wrong* run — a directory
-in which something genuinely different ran before. The checkpoint
-therefore carries a **hash of the run's inputs**, drawn from the study's
-content fingerprint (§1), the identity of the upstream artifact the pull
-reads, and the **pull rate**. The rate is in the hash because the rungs of
-one member share both the study fingerprint and the single settled
-reference they all restore from, so the rate is the only input that tells
-them apart; folding it in means a checkpoint carried into the wrong rung's
-directory is caught rather than silently continued. On resume, if the
-current inputs hash differently, the run **warns and stops**: it refuses
-to continue until the person confirms with an explicit override, rather
-than quietly stitching new inputs onto old dynamics.
+Resuming reuses what a previous run left in a directory, so it owes one guard
+against the rare mistake of continuing the *wrong* run — a directory in which
+something genuinely different ran before. The checkpoint therefore carries a
+**hash of the run's inputs**, drawn from the pair's content fingerprint (§1),
+the identity of the upstream artifact the pull reads, and the **pull rate**.
+The rate is in the hash because the rungs of one pair share both the
+specification fingerprint and the single settled reference they all restore
+from, so the rate is the only input that tells them apart; folding it in means
+a checkpoint carried into the wrong rung's directory is caught rather than
+silently continued. On resume, if the current inputs hash differently, the run
+**warns and stops**: it refuses to continue until the person confirms with an
+explicit override, rather than quietly stitching new inputs onto old dynamics.
 
 This is a guardrail, not a correctness gate, and it is mild in spirit even
 though it stops. In practice it is hard to resume the wrong run by

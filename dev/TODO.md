@@ -28,6 +28,11 @@
       when propagating the ratio's uncertainty, since assuming
       independence would throw away the very cancellation that makes the
       ratio worth testing (`VISION.md` goal 4 and principle 5).
+      UPDATE 2026-08-30 (Paul): the reference pair is NOT part of the
+      same run any more. Each wafer pair is its own PROJECT FOLDER
+      (`ARCHITECTURE.md` §1), the person runs the reference as a second
+      project, and forms the ratio themselves; SABSIM reports each
+      pair's numbers and never grades a comparison (`DESIGN.md` §1.1).
 - [ ] Define what "characterize the bond" (step 8) actually outputs,
       and how those numbers turn into experimental advice
       (`VISION.md` goal 4). Headline output now decided — a work of
@@ -39,6 +44,31 @@
 ## ARCHITECTURE
 
 <!-- Tasks related to layout, modules, build. -->
+
+- [ ] **Project-folder convention — code migration** (decided
+      2026-08-30, Paul; documented top-down in `ARCHITECTURE.md` §1/§4.3,
+      `DESIGN.md` §1.1/§10, `PSEUDOCODE.md` §2/§14). One wafer pair per
+      project folder; no study, no members, no relations, no `--only`;
+      four stage folders `prep_surf1_<a>/ prep_surf2_<b>/ bond_<a>_<b>/
+      analysis_<a>_<b>/` (labels lower-cased) mirrored under
+      `intermediate/`; four jobs from `sabsim prepare` with the two prep
+      jobs independent. CODE TO CHANGE: `spec/records.py` (Study ->
+      Project, MemberSpecification -> PairSpecification, Relation
+      removed, `stage_folders`), `spec/loader.py` (one pair at top
+      level, `project_directory`), `spec/references.py` (both prep
+      folders), `deploy/registry.py` (four JobKinds, parallel prep
+      group), `deploy/prepare.py` (four scripts, guide, dependency
+      hints), `deploy/scratch.py` (`stage_scratch`, `run-<jobid>/`
+      reruns), `pipeline/member_jobs.py` -> `pair_jobs.py`,
+      `pipeline/sequencer.py`, `pipeline/live_stages.py` (one-surface
+      prep, bond reads two deliverables and checks the lateral cells
+      agree), `cli.py` (flags), `bootstrap/command.py` (library into
+      the prep folder), `share/templates/study_spec.toml` ->
+      `project_spec.toml`, and every test. First project under the
+      convention: `jobs/si_si/` from the T-40 artifacts, then
+      `jobs/si_sio2/` with `prep_surf2_sio2/` generated on a node.
+      Old job folders archived to `jobs/archive/` (gitignored, kept);
+      `$CPG_SHARE/share/environment_libraries` renamed `..._OLD_shared_repo`.
 
 - [ ] **Clean deployment-environment rebuild (`sabsim_dev`) — the ROOT fix
       for the engine failures** (opened 2026-07-31). The hand-built env had

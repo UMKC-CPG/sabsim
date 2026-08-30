@@ -29,36 +29,73 @@ sabsim/
   CLAUDE.md           AI assistant guidance
 ```
 
-A STUDY FOLDER (one per study, e.g. `jobs/si_sio2/`; its name is the
-person's own label and means nothing to the program) holds everything
-that study needs, so that a study is self-contained and can be copied,
-archived and reproduced as one thing (`VISION.md`). Decided 2026-08-29
-(Paul, after LEDGER T-39) when a single study-wide environment library
-could not serve a dissimilar pair:
+A PROJECT FOLDER holds ONE WAFER PAIR and everything that pair needs,
+so that a project is self-contained and can be copied, archived and
+reproduced as one thing (`VISION.md`). Its name (e.g. `jobs/si_sio2/`)
+is the person's own label and means nothing to the program. Decided
+2026-08-30 (Paul), replacing the earlier "study of members" folder of
+2026-08-29 and settling the layout for good:
 
 ```
-  <study>/
-    sabsim.toml         the study file (DESIGN §1.2)
-    deployment.toml     the machine-local rc file (§4.1)
-    <material label>/   ONE SUBFOLDER PER DISTINCT WAFER MATERIAL, named
-                        EXACTLY by the wafer's `material` label in the
-                        study file (`material = "SiO2"` -> `SiO2/`).
-                        Every preparatory calculation for that material
-                        is made here: the force-model recipe
-                        (`recipe.toml`) and what `sabsim bootstrap`
-                        manufactures from it — the ENVIRONMENT LIBRARY
-                        the §3.5 gate judges against (DESIGN §3.5) and,
-                        as the bootstrap grows, its training structures
-                        and the trained committee.
-    <member>_activate.slurm, ... the per-member jobs `prepare` writes
+  <project>/
+    sabsim.toml           the project file: the SCIENCE of this pair —
+                          two wafers, one protocol, numerics, ensemble,
+                          potential (DESIGN §1.2). Nothing about where
+                          it runs.
+    deployment.toml       the machine-local rc file (§4.1)
+    prep_surf1_<a>/       surface 1 (wafer A, bottom) prepared ALONE
+    prep_surf2_<b>/       surface 2 (wafer B, top) prepared ALONE
+    bond_<a>_<b>/         assemble -> cell relax -> press -> settle ->
+                          pull ladder
+    analysis_<a>_<b>/     the measure vector, curves, characterization
+    prep_surf1_<a>.slurm, prep_surf2_<b>.slurm, bond_<a>_<b>.slurm,
+    analysis_<a>_<b>.slurm       the four jobs `prepare` writes (§4.3)
+    intermediate ->  $SABSIM_SCRATCH/<mirror of this project's path>/
+                          the bulky, regenerable files, in the SAME
+                          four folder names as above (§4.1)
 ```
 
-There is deliberately NO shared repository of prepared materials. The
-label is chosen by the person, so quartz and cristobalite are simply
-two labels (`"SiO2-quartz"`, `"SiO2-cristobalite"`) with two folders,
-and the program never has to guess which crystal a chemical formula
-means. Reusing last month's silicon preparation is a plain copy of its
-folder into the new study under the label the new study uses.
+The PREFIX of a stage folder names the stage; the SUFFIX is the wafer
+material label(s) from `sabsim.toml`, LOWER-CASED so the names are
+shell-friendly (`material = "SiO2"` -> `sio2`). `surf1`/`surf2` fix
+which wafer is which, so a same-material pair has two DISTINCT
+surfaces: silicon on silicon is `prep_surf1_si/`, `prep_surf2_si/`,
+`bond_si_si/`, `analysis_si_si/`; silicon on silica is
+`prep_surf1_si/`, `prep_surf2_sio2/`, `bond_si_sio2/`,
+`analysis_si_sio2/`.
+
+A `prep_surf*` folder is everything done to that surface before the
+two ever meet. It holds `recipe.toml` — the ordered set of
+single-material calculations: ground state, NVT, NPT, strained,
+surface, and the AMORPHIZATION of this surface — with one subfolder
+per calculation (`ground_state/`, `nvt/`, `npt/`, `strained/`,
+`surface/`, `amorphization/`), plus the ENVIRONMENT LIBRARY the §3.5
+gate judges against (`environment_library.toml` + `.npz`, DESIGN
+§3.5). Because the folder belongs to a surface OF THIS PAIR, the
+pair's shared cell (DESIGN §2.5) is already known when the surface is
+prepared, so the amorphization is built in that cell, bombarded,
+healed and gated right here — and the activated half is the prep
+stage's DELIVERABLE to the bond stage.
+
+Small, precious outputs (manifests, ledgers, gate reports, the
+activated-half handoff files, `measure_vector.toml`) live in the
+project's stage folders; every bulky, regenerable file (trajectory
+dumps, LAMMPS logs, data files, inputs) lives behind `intermediate`
+under the same folder name. A rerun of a stage never overwrites: it
+gets a fresh `run-<job id>/` subfolder, and the deliverable records
+which run it came from.
+
+There is deliberately NO shared repository of prepared materials, and
+NO "study" that groups several pairs. A reference pair (silicon on
+silicon, for a silicon-on-silica question) is a SEPARATE project the
+person makes and runs themselves, and the comparison between projects
+is theirs, by hand — SABSIM reports each pair's numbers and never
+restricts what may be compared. The label is chosen by the person, so
+quartz and cristobalite are simply two labels (`"SiO2-quartz"`,
+`"SiO2-cristobalite"`) with two folders, and the program never has to
+guess which crystal a chemical formula means. Reusing last month's
+silicon preparation is a plain copy of its `prep_surf*_si/` folder
+into the new project under the slot name that project needs.
 
 SABSIM is the **orchestration project**: the code we write here wires
 together many *external* programs. Two tools from the prior effort are
@@ -155,31 +192,24 @@ is.
   pipeline at a different material pair and drive it from their own
   code. Hand-editable settings are a convenience side door, not the
   main entrance.
-- **Member specification — the study, and five groups of knobs [BUILD].**
-  Per `VISION.md` goal 2 and principle 1, everything a user changes to
-  point the pipeline at a new study lives in one editable place, apart
-  from the fixed machinery. `DESIGN.md` §1 refines this in two ways.
-  First, the configured object is a **study** — a set of members plus the
-  **relations** among them — because the bond-outcome criterion is a
-  *ratio* between two members and so belongs to neither one alone. A
-  member
-  remains self-contained and independently reproducible, and a study may
-  be assembled after the fact from members that already exist. Each
-  relation declares its own **contrast** (the fields it deliberately
-  varies) and its **controls** (the fields it holds fixed) — the
-  precondition cannot be a fixed rule, because a study comparing two
-  *protocols* on one material pair needs the protocol to differ. Every
-  relation emits a **difference set** sorting each differing field as
-  contrasted, *entailed* (it differs because of the contrast and cannot
-  be removed without it — Si/Si has no lattice mismatch and Si/SiO2
-  does), or *incidental* (nobody decided to vary it — the dangerous
-  kind). **Report, never restrict:** a relation whose controls disagree,
-  or which is confounded by more than one contrast, is still computed
-  and still reported; only the gate's *verdict* is withheld. Refusing to
-  evaluate and refusing to certify are different acts, and SABSIM
-  performs only the second — the scientist comparing many pairs run many
-  ways is who this is for, and they routinely learn from comparisons no
-  automated criterion can grade.
+- **Pair specification — one wafer pair, and five groups of knobs
+  [BUILD].** Per `VISION.md` goal 2 and principle 1, everything a user
+  changes to point the pipeline at a new wafer pair lives in one
+  editable place, apart from the fixed machinery. `DESIGN.md` §1
+  refines this in two ways. First, the configured object is a **pair**
+  — two wafers under one protocol — and the project file describes
+  exactly one (revised 2026-08-30 (Paul)). An earlier design made the
+  object a "study": a set of pairs plus the *relations* among them,
+  because the bond-outcome criterion is a ratio between two pairs and
+  belongs to neither one alone. That machinery is retired. A reference
+  pair (silicon on silicon, for a silicon-on-silica question) is a
+  SEPARATE project the person makes and runs, and the comparison
+  between projects — the ratio, and the list of every setting that
+  differs between them — is theirs, by hand. What survives of the old
+  argument is its one firm rule, **report, never restrict:** SABSIM
+  computes and reports each pair's numbers and never declines a
+  comparison the scientist wants to make; the scientist comparing many
+  pairs run many ways is who this is for.
   Second, the knobs split into **five** groups, not two, divided by a
   sharp test: *a numerical setting's influence on the answer must vanish
   as it is refined; a protocol knob's influence on the answer* is *the
@@ -187,7 +217,7 @@ is.
   cutoffs, strides, windows, budgets), ensemble (the master seed and the
   realization count — a coordinate one samples, not a knob one tunes),
   and deployment, which lives in a separate document (§4.1) that the
-  member specification cannot express.
+  pair specification cannot express.
   - **Material knobs:** per wafer, a crystal structure and one surface
     face (its Miller indices), plus the material identity itself —
     **never a lattice constant**, which §2.2 derives from the potential
@@ -204,18 +234,19 @@ is.
     single value; the design admits distributions (energy/angle spread)
     later.
   v1 **freezes every protocol knob to a single value** so one complete
-  member is reachable within time constraints; *iterating* over them
+  pair is reachable within time constraints; *iterating* over them
   (composition, dopant, activation level, pressure, temperature,
   crystal face) is deferred to the outer-loop coupling and convergence
   work still open in `TODO.md`. The design stays open-ended for that
   future sweep. v1 fixes the material knobs to the **Si/SiO2** pair
   (covalent, a Maszara calibration anchor) and additionally runs a
-  **Si/Si same-material reference**, because the bond-outcome metric
-  calibrates on the *relative* Si-Si-to-Si-SiO2 ratio (`VISION.md`
-  goal 4) — one system yields only a point, the ratio needs both. Si/Si
-  reuses the same {Si, O} potential (Si is a subset of its species) and
-  has no lattice mismatch, so it is a cheap second member under the *same*
-  frozen protocol. Ionic / polar pairs such as
+  **Si/Si same-material reference** as its own project, because the
+  bond-outcome metric calibrates on the *relative* Si-Si-to-Si-SiO2
+  ratio (`VISION.md` goal 4) — one system yields only a point, the
+  ratio needs both. Si/Si reuses the same {Si, O} potential (Si is a
+  subset of its species) and has no lattice mismatch, so it is a cheap
+  second project under the *same* frozen protocol, and the person
+  forms the ratio between the two projects. Ionic / polar pairs such as
   SiO2/LiNbO3 are supported by keeping the structure builder and the
   potential species-generic, with hooks documented for the extra
   polar-slab and long-range-electrostatics work those pairs need (see
@@ -352,11 +383,12 @@ is.
   the descriptors of Collection 1's cold bulk, warm bulk and clean
   surfaces, its self-check fractions, and full provenance (model name,
   engine, settings, families and frame counts). It is a run-time
-  input of the activate job, found PER WAFER: each wafer's library is
-  `<study>/<material label>/environment_library.toml`, the subfolder
-  named by that wafer's `material` label (§1; Paul, 2026-08-29, after
-  LEDGER T-39 showed one study-wide library cannot serve a dissimilar
-  pair). The study file names no library path at all. It is NOT in
+  input of each prep job, found PER SURFACE: wafer A's library is
+  `<project>/prep_surf1_<a>/environment_library.toml` and wafer B's is
+  `<project>/prep_surf2_<b>/environment_library.toml`, the folders
+  named by the wafers' `material` labels (§1; Paul, 2026-08-29 and
+  2026-08-30, after LEDGER T-39 showed one shared library cannot serve
+  a dissimilar pair). The project file names no library path. It is NOT in
   `share/activation/`, because that directory holds hand-written,
   version-controlled references and the library is neither.
 - **Training-data physics — VASP [ADOPT].** Produces the varied
@@ -473,24 +505,24 @@ is.
   `src/sabsim/bootstrap/` behind its own verb, `sabsim bootstrap`, with
   one sub-verb per phase (`generate`, `label`, `harvest`; `train` and
   `refine` follow), because the bootstrap runs on a third clock — once
-  per material domain, before any study — and must never be confused
-  with the three per-member jobs. Like `sabsim prepare` it is a WRITER:
+  per material domain, before any pair is run — and must never be
+  confused with the four per-pair jobs. Like `sabsim prepare` it is a WRITER:
   `label` writes a VASP job array and submits nothing. Building
   Collection 1 also EMITS the environment library the §3.5 gate
   consumes (DESIGN §4.8 part 2, added 2026-08-29): `generate` runs the
   descriptor engine over families 1, 4 and 6, measures the tolerance
   and its false-alarm baseline on the warm family, runs the
-  melt-quench self-check, and writes the library into the MATERIAL
-  FOLDER it is run from (`<study>/<material label>/`, §1) beside the
-  recipe. A study that never bootstraps still needs a library, so
+  melt-quench self-check, and writes the library into the PREP FOLDER
+  it is run from (`<project>/prep_surf*_<label>/`, §1) beside the
+  recipe. A project that never bootstraps still needs a library, so
   a material is not usable by the gate until its recipe's Collection 1
   has been built at least once — the same dependency order the model
   weights already impose. Its runs are
   their own jobs, routed by a `[usage.label]` block of the deployment rc
   (CPU `vasp_gam` by default; the CUDA build is a switch of the same
-  block), never by the member map (§4.1). The generation phase does no
-  MD of its own for the hard configurations: it harvests the frames the
-  ordinary member jobs record when run with `--dump-visuals` under the
+  block), never by the per-pair job map (§4.1). The generation phase
+  does no MD of its own for the hard configurations: it harvests the
+  frames the ordinary pair jobs record when run with `--dump-visuals` under the
   universal model (`PSEUDOCODE.md` §11.3, "generate mode is a consumer
   difference"), and builds only the calm Collection-1 structures itself.
   First slice built: recipe + generate + label/harvest, silicon only.
@@ -608,7 +640,7 @@ is.
     the basis on which it was reached** (`direct_evidence` when a named
     protocol check fired, `by_elimination` when none did). Nothing is
     discarded, a reader can weigh inference differently from
-    observation, and a study whose protocol verdicts are mostly reached
+    observation, and a project whose protocol verdicts are mostly reached
     by elimination is telling us our protocol checks are too sparse.
     In v1 all of this is a REPORTED diagnostic label, not an automated
     action (the gate is a reporter); wiring it to `data_targeting` is
@@ -781,7 +813,7 @@ dependencies, by work group, are:
   dead-simple with plain `sbatch` scripts**; Parsl-driven submission
   arrives with automation. Still OPEN is only the *heavier workflow /
   provenance manager* that may sit on top once we query across hundreds
-  of members or close the loop — candidates unchanged, light to heavy:
+  of pairs or close the loop — candidates unchanged, light to heavy:
   **Snakemake** (files-produce-files, weak at loops), **jobflow**
   (Python loops + moderate history), **AiiDA** (best-in-class provenance,
   heavy, hard to leave). Recommendation stands: provenance by discipline,
@@ -870,7 +902,7 @@ stated in a file the user owns rather than inferred by code, and the
 generator is exactly the "defaults exist only as a generator that emits
 a complete file" escape hatch (`DESIGN.md` §1.4). That generation starts
 from a *tracked* template, `share/templates/sabsimrc`, sitting beside the
-study-spec and deployment-rc templates — the distributable source of
+project-file and deployment-rc templates — the distributable source of
 truth that carries the lab's own paths as a WORKED example, exactly as
 `deployment_rc.toml` does, not as code-level defaults. The v1 install
 instantiates it by copying the template to `.sabsim/sabsimrc`, guarded so
@@ -964,7 +996,7 @@ number traceable to its exact inputs, so **the manifest records the
 resolved absolute path and the fingerprint of whatever actually won** —
 never the logical name. An override that is not recorded is a silent
 reproducibility hole: two people get different numbers from "the same"
-study because one had a personal potential shadowing the group's, and
+project because one had a personal potential shadowing the group's, and
 nothing in either record says so. Recorded, the override is auditable;
 unrecorded, it is a trap. That recording is the only machinery v1 builds
 here — `SABSIM_LOCAL` is **declared but inert**, an empty override that
@@ -973,24 +1005,32 @@ costs nothing now and cannot be retrofitted cheaply later.
 
 **Scratch is a mirror tree, linked from the project.** Run output is
 bulky, and a scratch path is long, machine-specific, and easy to lose
-track of. So scratch holds a *mirror* of the project's own directory
-layout, and each job directory carries a symlink named `intermediate`
-pointing into it — the pattern this group's other codes (imago, olcao)
-already use, so the muscle memory carries across. The job directory
-stays small and legible while the bytes live where the sysadmins want
-them, and a reader who lands in a job directory follows one obvious link
-instead of reconstructing a path. The link matters more than it looks:
-a scratch directory nothing points at is an orphan that survives only as
+track of. So scratch holds a *mirror* of the project folder, and the
+project folder carries a symlink named `intermediate` pointing into it
+— the pattern this group's other codes (imago, olcao) already use, so
+the muscle memory carries across. The project folder stays small and
+legible while the bytes live where the sysadmins want them, and a
+reader who lands in a project folder follows one obvious link instead
+of reconstructing a path. The link matters more than it looks: a
+scratch directory nothing points at is an orphan that survives only as
 long as someone remembers it exists.
 
-The mirror is keyed **by path down to the job, then by identity inside
-it**. Path, because `jobs/` may nest several levels before the job
-itself (`jobs/2026-07/si-ladder/`) and that nesting is the researcher's
-own organisation — flattening it to a bare job name would collide across
-groups and discard the grouping. Identity inside, because within a job
-the pipeline iterates over studies and members, and a path cannot
-express "member 3 of study X" without reinventing a naming convention
-the spec already has. The realization is `sabsim/deploy/scratch.py`;
+The mirror is keyed **by the project folder's path, and inside it by
+the same four stage-folder names the project uses** (§1; revised
+2026-08-30 (Paul)). Path, because `jobs/` may nest several levels
+before the project itself (`jobs/2026-07/si-ladder/`) and that nesting
+is the researcher's own organisation — flattening it to a bare name
+would collide across groups and discard the grouping. The same folder
+names inside, because a person who opens `bond_si_sio2/` in the
+project and `intermediate/bond_si_sio2/` on scratch is looking at the
+two halves of ONE stage: the small, precious deliverables in the
+first, the bulky, regenerable working files in the second. Nothing is
+keyed by a study or a member name any more, so the path no longer
+repeats the project's name inside its own mirror. Each stage works in
+its `intermediate/<stage folder>/` and writes its deliverables to the
+project's `<stage folder>/`; a rerun gets a fresh `run-<job id>/`
+subfolder under the stage's intermediate folder and never overwrites
+an earlier one. The realization is `sabsim/deploy/scratch.py`;
 `jobs/` is untracked, since nothing in it is needed to reproduce a run
 once the manifest holds the resolved path.
 
@@ -1084,29 +1124,30 @@ that same session (revised 2026-08-28 (Paul)):
 | Press / settle / pull (bond)           | GPU (`deepmd`) |
 | Imago (step 8)                         | CPU            |
 
-**Settled (this table ↔ `DESIGN.md` §10.2): the activate job's class
-follows the cascade potential.** Step 4's cascade dominates the activate
-job, and the cascade runs on the universal MLIP, so activate is GPU work.
+**Settled (this table ↔ `DESIGN.md` §10.2): a prep job's class
+follows the cascade potential.** Step 4's cascade dominates each prep
+job, and the cascade runs on the universal MLIP, so prep is GPU work.
 (Resolved 2026-08-06, superseding the earlier CPU-only-activate
 assumption; the CPU opt-in that briefly existed was removed 2026-08-26.)
 
-**The heal + gate ride the ACTIVATE job again (revised 2026-08-28
-(Paul)).** From 2026-08-08 to 2026-08-28 the heal was done once on the
+**The heal + gate ride the PREP job (revised 2026-08-28 (Paul); the
+job was renamed from "activate" to "prep" and split per surface on
+2026-08-30).** From 2026-08-08 to 2026-08-28 the heal was done once on the
 ASSEMBLED pair at a wide gap, as the bond job's first phase, and the
 §3.5 gate ran there — because the heal then ran under a production
 potential whose engine lived only in the bond job. With ONE universal
 model running both the cascade and the heal (`DESIGN.md` §3.4, §4.7),
 that reason is gone, and healing each half at the end of its own
 cascade session is strictly cheaper: no second engine is opened, the
-two halves heal in parallel when the halves run as separate jobs, and
-a failed gate halts BEFORE any assembly. So the activate job is
-build → cascade → heal → gate → assemble at the press-start distance →
-write the pair, and the bond job is read the pair → one-time lateral
-cell relax (§5.6) → press → settle → pull. The gate verdict is an
-activate-job artifact again, and the human inspection point sits
-between activate and bond, where it originally was. The wide assembly
-gap and the vacuum "scissors" that the bond job used to cut it are
-gone with the move.
+two halves heal in parallel because the halves ARE separate jobs, and
+a failed gate halts BEFORE any assembly. So each prep job is
+build its half → cascade → heal → gate → write the activated half, and
+the bond job is read both halves → assemble at the press-start
+distance → one-time lateral cell relax (§5.6) → press → settle → pull.
+The gate verdict is a prep-job artifact, and the human inspection
+point sits between prep and bond, where it originally was. The wide
+assembly gap and the vacuum "scissors" that the bond job used to cut
+it are gone with the move.
 
 **Structure of the deployment config — two concerns, one file.** The
 config separates *what the machine has* from *how each kind of work uses
@@ -1117,43 +1158,46 @@ it*, because the two change on different clocks:
   stack, the scheduler. Stable; it changes only when the machine does, so
   it is the **per-cluster swap unit** — retargeting to a new HPC rewrites
   this section and nothing above it.
-- **Usage section** — keyed by **kind of member job**, not by script or
-  by tool: the three per-kind jobs `activate` / `bond` / `analyze` that a
-  member is prepared as (`DESIGN.md` §10.2). Each block names a resource
-  *class* (CPU or GPU), a size (node / GPU counts, walltime), and the
-  module(s) that job switches on. This is mostly machine-independent — an
-  activate job wants "CPU, ~1 node" on any cluster — so it travels with
-  the pipeline, not with the site. This REPLACES an earlier tool-kind
-  keying (`cascade-md` / `bond-md` / direct `vasp` / `sequence`); the
-  member-job axis is the one DESIGN §10 fixed and PSEUDOCODE §14 loads.
+- **Usage section** — keyed by **kind of pair job**, not by script or
+  by tool: the kinds `prep` / `bond` / `analysis` behind the four jobs
+  a pair is prepared as (`DESIGN.md` §10.2; the two prep jobs share one
+  usage block, since both surfaces want the same machine). Each block
+  names a resource *class* (CPU or GPU), a size (node / GPU counts,
+  walltime), and the module(s) that job switches on. This is mostly
+  machine-independent — a prep job wants "GPU, ~1 node" on any cluster
+  — so it travels with the pipeline, not with the site. This REPLACES
+  an earlier tool-kind keying (`cascade-md` / `bond-md` / direct `vasp`
+  / `sequence`); the pair-job axis is the one DESIGN §10 fixed and
+  PSEUDOCODE §14 loads.
 
 The seam between the two is the word **class**: a usage block names an
 abstract class plus a size, and the hardware section binds that class to
 *this* machine's concrete partition, so retargeting is a one-section
-swap. Keying usage by *kind of member job* rather than by script follows
+swap. Keying usage by *kind of pair job* rather than by script follows
 from "routing is per job, not per step" and `VISION.md` principle 7: the
-three member jobs want different machines (activate and analyze CPU, bond
-GPU — `DESIGN.md` §10.2), and each switches on only the tool it needs, so
-one key per member job keeps those resource shapes from lumping together.
+pair jobs want different machines (prep and bond GPU, analysis CPU —
+`DESIGN.md` §10.2), and each switches on only the tool it needs, so one
+key per kind of job keeps those resource shapes from lumping together.
 
 **The Tier-B boundary — not all resource config is ours.** The usage
-section covers the three **Tier-C** member jobs (`activate` / `bond` /
-`analyze`) — the LAMMPS cascade and assembly, the press / pull, and the
-measure. It carries no `sequence` footprint: `sabsim` writes scripts and
-the human submits them (`DESIGN.md` §10.1), so the **Tier-A** sequencer
-never claims an allocation of its own — its control flow runs INSIDE each
-member job. **Tier B is excluded by design:** ALF (DeePMD training and
+section covers the **Tier-C** pair jobs (`prep` / `bond` /
+`analysis`) — the LAMMPS cascade per surface, the assembly and press /
+pull, and the measure. It carries no `sequence` footprint: `sabsim`
+writes scripts and the human submits them (`DESIGN.md` §10.1), so the
+**Tier-A** sequencer never claims an allocation of its own — its control
+flow runs INSIDE each pair job. **Tier B is excluded by design:** ALF
+(DeePMD training and
 the VASP-inside-ALF labeling) and Kaleidoscope (Imago characterization)
 each own their own Parsl + SLURM submission (the "no Parsl in Parsl" rule
 and wall 5), so the deployment config *points at* their configs rather
 than duplicating them — DeePMD GPU counts live in ALF's Parsl config, not
 here. The bootstrap's direct VASP labelling jobs (steps 1-2) are likewise NOT
-among the three member jobs (`PSEUDOCODE.md` §14.5): manufacturing the
+among the four pair jobs (`PSEUDOCODE.md` §14.5): manufacturing the
 potential is a separate upstream process. They ARE routed by this same
 rc, through their own `[usage.label]` block (partition, module, binary
 — `vasp_gam` on the CPU build by default, the CUDA build as a switch),
 which `sabsim bootstrap label` reads to write its job array
-(2026-08-26); the member map still routes only its three consumers.
+(2026-08-26); the pair-job map still routes only its own consumers.
 
 **Execution walls, flagged for DESIGN.**
 1. **Parsl-in-Parsl** — avoided by the tier separation above.
@@ -1187,56 +1231,63 @@ made legible — VISION goal 3 (traceability across the six codes) made
 concrete. The intent below is firm; the exact names and sub-layout are
 expected to ADAPT to practical realities met during implementation.
 
-**Runs land in the SUBMISSION directory.** A user works in a per-member
-job directory — `jobs/<study>/<member>/` — and submits from there, so the
-result appears where they already are, not in a separate root. One
-directory holds one member (one material pair + protocol + seed); a study
-of several members is a set of sibling directories under `jobs/<study>/`,
-with a study-level roll-up (below) at that parent.
+**Runs land in the PROJECT folder.** A user works in a project folder
+— `jobs/<project>/`, one wafer pair (§1) — and submits from there, so
+the result appears where they already are, not in a separate root.
+Each stage's outputs land in that stage's folder (`prep_surf1_<a>/`,
+`prep_surf2_<b>/`, `bond_<a>_<b>/`, `analysis_<a>_<b>/`). There is no
+roll-up across pairs: a comparison between two projects is the
+person's own (revised 2026-08-30 (Paul)).
 
-**Per-run subdirectories, with a `latest` pointer.** Re-running a member
-(a new seed, a tweaked energy) must never silently clobber the previous
-result, so each run writes a timestamped/id'd subdirectory (`run-<id>/`)
-and updates a `latest` symlink to it — "open the latest report" stays one
-step while the history is preserved.
+**Per-run subdirectories, never a silent overwrite.** Re-running a
+stage (a new seed, a tweaked energy) must never clobber the previous
+result, so each run writes its working files to a fresh `run-<id>/`
+subfolder under the stage's `intermediate/` mirror, and the
+deliverable left in the project's stage folder records which run it
+came from — "open the latest result" stays one step while the history
+is preserved.
 
-**Small keepable things in the job dir; large raw data on scratch.** The
-report, the canonical structured result, the manifest index, and the
-provenance record are small and are written INTO the run subdirectory. The
-large raw data — the strided trajectories, the LAMMPS logs, the data files
-— stay on `SABSIM_SCRATCH`, reached from the job directory through the
-existing `intermediate` symlink (§4.1) but under clear, human-readable
-names (`<member>_cascade.dump`, `<member>_pull.dump`), so opening one is
-`ovito intermediate/<member>_cascade.dump`. A single endpoint frame may
-also sit directly in the job directory as a cheap convenience, though the
-trajectory is the artifact that conveys the dynamics.
+**Small keepable things in the stage folder; large raw data on
+scratch.** The report, the canonical structured result, the manifest
+index, the gate report, the handoff files between stages and the
+provenance record are small and are written INTO the project's stage
+folder. The large raw data — the strided trajectories, the LAMMPS
+logs, the data files — stay on `SABSIM_SCRATCH`, reached through the
+`intermediate` symlink (§4.1) under the SAME stage-folder name and
+clear, human-readable file names (`prep_surf1_si_cascade.dump`,
+`bond_si_sio2_pull_20mps.dump`), so opening one is
+`ovito intermediate/bond_si_sio2/bond_si_sio2_press.dump`. A single
+endpoint frame may also sit directly in the stage folder as a cheap
+convenience, though the trajectory is the artifact that conveys the
+dynamics.
 
 **The manifest is the index, and provenance is first-class.** One manifest
 per run points at every piece — report, structured result, the scratch
 trajectories (by resolved path + fingerprint), logs — so all of a run is
 discoverable from one file. It records what makes the run reproducible
-(VISION goal 3): the git commit of the code, the resolved member spec, the
+(VISION goal 3): the git commit of the code, the resolved pair spec, the
 master seed and its derivations, the potential and reference data used
-(with their `real`/stand-in flags), the software versions, and the host. A
-study roll-up aggregates the member manifests and their structured results,
-and is where the §7 cross-member comparison (the Si/Si vs Si/SiO2 ratio)
-surfaces.
+(with their `real`/stand-in flags), the software versions, and the host.
+The cross-project comparison (the Si/Si vs Si/SiO2 ratio) is formed by
+the person from two projects' manifests; SABSIM writes no roll-up.
 
 The algorithmic shape — the canonical result schema, the swappable report
 renderer, and the standard visualization-dump columns — is `DESIGN.md` §9.
 
-### 4.3 Member execution sequence — file-handoff stages, serial slabs
+### 4.3 Pair execution sequence — file-handoff stages, two surfaces apart
 
-A member is not one run; it is a CHAIN of stages, several of which open a
-LAMMPS engine and hand their result to the next through a FILE. §4.1 fixed
-the linking rule — steps decouple through file contracts on the shared
-filesystem. This section applies that rule at the altitude of a single
-bonding member: what the stages are, which of them touch a compute node,
-and why the file handoff holds even though a member runs its stages
-SERIALLY. The file handoff is NOT a concession to a parallel future: it is
-how the simulator takes its input, how each result becomes a durable
-record, and how a crash mid-chain keeps the finished stages. Parallelism
-is a bonus the files happen to also enable (below), never their reason.
+A pair is not one run; it is a CHAIN of stages, several of which open a
+LAMMPS engine and hand their result to the next through a FILE. §4.1
+fixed the linking rule — steps decouple through file contracts on the
+shared filesystem. This section applies that rule at the altitude of a
+single bonding pair: what the stages are, which of them touch a compute
+node, and how the chain is cut into the four jobs of §1 (revised
+2026-08-30 (Paul); until then the pair was three jobs with both halves
+inside one "activate" job). The file handoff is NOT a concession to a
+parallel future: it is how the simulator takes its input, how each
+result becomes a durable record, and how a crash mid-chain keeps the
+finished stages. Parallelism is a bonus the files happen to also enable
+(below), never their reason.
 
 **Every LAMMPS stage is a self-contained data-file → data-file unit.** A
 stage opens an engine, loads the data file its predecessor wrote, does its
@@ -1252,117 +1303,120 @@ input and the archived artifact. Third, a stage that writes its result
 before the next begins survives a crash — the finished stages stay
 finished, and a native crash is a failed job the sequencer halts on
 cleanly (wall 4). The file ALSO lets a stage run wherever its resource
-class is served (§4.1's per-job routing), which is the bonus the optional
-fan-out (below) trades on. The live in-process read-back §4.1 describes is
-WITHIN a stage (the press's mid-run contact test), never across the seam
-between two.
+class is served (§4.1's per-job routing), which is what lets the two
+surfaces be separate jobs (below). The live in-process read-back §4.1
+describes is WITHIN a stage (the press's mid-run contact test), never
+across the seam between two.
 
-**The chain for a bonding member.** With activation on, steps 3–5 are not
-one build; they are a chain with one independent pair in the middle:
+**The chain for a bonding pair.** With activation on, steps 3–5 are not
+one build; they are a chain whose first half is TWO independent jobs:
 
 ```
-relax-bulk (per material)      small LAMMPS, once per potential
-        v
-solve-shared-cell              pymatgen, no LAMMPS, once
-        v
-build-standalone-halves        ASE, no LAMMPS, geometry once
-        v
-  +-----+-----+                SERIAL: one half, then the other (§4.3)
-  v           v
-amorphize   amorphize          cascade + re-anneal + gate (LAMMPS)
- half A      half B
-  v           v
-  +-----+-----+                BARRIER: assemble needs both halves
-        v
-   assemble                    read both data files back, flip top
-        v
-  press -> pull -> analyze     LAMMPS, then analysis
+  prep_surf1_<a>  (GPU job)          prep_surf2_<b>  (GPU job)
+  relax-bulk, BOTH materials         relax-bulk, BOTH materials
+        v                                  v
+  solve-shared-cell                  solve-shared-cell
+        v                                  v
+  build half A in that cell          build half B in that cell
+        v                                  v
+  cascade -> heal -> gate            cascade -> heal -> gate
+        v                                  v
+  write activated half A             write activated half B
+        +----------------+-----------------+
+                         v      BARRIER: bond needs both halves
+                  bond_<a>_<b>  (GPU job)
+                  check the two lateral cells agree
+                  assemble at the press-start opening
+                  one-time cell relax -> press -> settle -> pull ladder
+                         v
+                  analysis_<a>_<b>  (CPU job)
+                  measure (M1, curves, characterization)
 ```
 
-Two facts drive everything below. First, **each half is built and
+Three facts drive everything below. First, **each half is built and
 amorphized ALONE, in vacuum** — the whole point of surface-activated
 bonding is that each surface is prepared before the two ever meet
 (`DESIGN.md` §3.1). So step 3 builds each half ALONE with the existing
-per-half `build_slab` (which already cuts in vacuum) and emits two
-STANDALONE half-cells, not the assembled pair; the cascade stage adds the
-beam species to each half so it can create projectiles. The crystalline
-all-in-one `build_facing_pair` is the activation-OFF null path (Si/Si with
-no cascade), not the bonding path. Second, **the two amorphizations are
-independent** — different materials, separate engines, no shared state
-until `assemble` reads both halves' data files back and stacks them
+per-half `build_slab` (which already cuts in vacuum) and emits a
+STANDALONE half-cell, not the assembled pair; the cascade stage adds the
+beam species to the half so it can create projectiles. The crystalline
+all-in-one `build_facing_pair` is the activation-OFF null path (Si/Si
+with no cascade), not the bonding path. Second, **the two preparations
+are independent** — different materials, separate engines, no shared
+state until `assemble` reads both halves' files back and stacks them
 (`DESIGN.md` §2.6). Assembly is the BARRIER: the first stage that needs
-both halves at once.
+both halves at once. Third, **each half must be built in the pair's
+SHARED cell** (`DESIGN.md` §2.5), so both prep jobs begin by relaxing
+the bulk of BOTH materials and solving the same shared cell. That
+duplication is deliberate and cheap: the bulk relax and the cell match
+are deterministic and take seconds, and repeating them keeps each prep
+job a pure function of the project file — no hidden hand-off of a
+"cell" file between the two prep jobs, and the bond job checks that
+the two halves it reads agree on the lateral cell before it stacks
+them.
 
-**The units are independent, but v1 runs them SERIALLY (Approach A).** In
-principle the two halves — and, above them, the N amorphization
-realizations the bond metric averages over (STRUCTURAL 4), each a
-different master seed — are independent and could run at once.
-`relax-bulk`, `solve-shared-cell`, and the half GEOMETRY (`build-halves`)
-are deterministic and SHARED across realizations, computed once; what
-repeats per realization is writing a fresh half data file and amorphizing
-it, then `assemble` through `pull`. But v1 does NOT fan those units out
-(Approach A): the two halves are bombarded one after the other, each
-using its job's FULL core allocation, rather than split into concurrent
-jobs. That concurrency choice is ORTHOGONAL to how the serial chain is
-handed to the scheduler, which the next paragraph settles.
+**The independent units run as SEPARATE jobs (Approach C, arrived at
+through the files).** The two halves are independent and so, above
+them, would be the N amorphization realizations the bond metric
+averages over (STRUCTURAL 4), each a different master seed. Earlier
+drafts ran the two halves one after the other inside one job (Approach
+A), reasoning that for a fixed core count in-turn is no slower than
+splitting the cores. That reasoning still holds INSIDE a job — the
+pipeline never splits one allocation between two engines — but the
+2026-08-30 layout cuts the chain BETWEEN the halves: each surface is
+its own folder, its own recipe, its own gate verdict and its own job,
+so the scheduler runs the two prep jobs together whenever it has two
+GPUs free, and a failed gate on one surface never wastes the other's
+work. This is exactly the fan-out the file handoff was always designed
+to allow: a change of submission wrapper, never of stage code. The
+per-realization fan-out (a SLURM array over master seeds, each in its
+own `run-<id>/` subfolder, joined by the manifest) remains available
+the same way and is not built; the sites where it would attach are
+marked `# C-EXPANSION` in the code — the loop over seeds, the per-run
+scratch subfolder, the assemble barrier, and the engine lifetime.
 
-**The serial chain is submitted as THREE per-kind jobs.** Approach A
-keeps the independent units serial; it does NOT make the whole member a
-single submission. The chain is cut where the HARDWARE KIND changes and
-a human should stop to look — into **activate** (CPU: build and amorphize
-both halves, then assemble), **bond** (GPU: press, settle, pull), and
-**analyze** (CPU: measure) — three jobs submitted in order, each watched
-to completion and checked before the next is sent (`DESIGN.md` §10.2).
-The cut costs nothing precisely because every stage already hands off
-through a file (above): a job boundary is just a file-handoff seam the
-human elects to pause at. So a member runs as three sequential per-kind
-jobs, and the two-halves-serial choice of Approach A lives INSIDE the
-activate job.
+**The chain is submitted as FOUR jobs.** The cut falls where a stage
+folder begins and where a human should stop to look — into
+**prep_surf1** and **prep_surf2** (GPU: build, amorphize, heal and gate
+ONE half each; independent, submitted together), **bond** (GPU:
+assemble, cell relax, press, settle, pull), and **analysis** (CPU:
+measure) — with bond depending on both preps and analysis on bond
+(`DESIGN.md` §10.2). The cut costs nothing precisely because every
+stage already hands off through a file (above): a job boundary is just
+a file-handoff seam the human elects to pause at. The parallelism v1
+relies on is therefore three levels: different PROJECTS run as
+independent job sets, the two SURFACES of one pair run as independent
+jobs, and each single bombardment is itself a multi-core (MPI)
+simulator run.
 
-**Why serial slabs, not two-at-once inside one job.** Running the two
-halves concurrently in a single job would mean SPLITTING that job's cores
-between them — and for a fixed core count that is no faster than running
-them in turn on all the cores, while being markedly more code to steer two
-core-groups through different work. The one case where fewer-cores-per-
-slab genuinely wins — a slab too small to use the whole allocation
-efficiently — is captured BETTER by submitting each slab as its own
-smaller job and letting the scheduler run them together, never by
-splitting cores in-process. So in-process cross-slab concurrency is a
-DOMINATED option and is not built. The parallelism v1 relies on is the two
-levels it already has: different MEMBERS run as independent job sets, and
-each single bombardment is itself a multi-core (MPI) simulator run.
+**Why never two halves at once INSIDE one job.** Running the two halves
+concurrently in a single job would mean SPLITTING that job's cores
+between them — and for a fixed core count that is no faster than
+running them in turn on all the cores, while being markedly more code
+to steer two core-groups through different work. The one case where
+fewer-cores-per-slab genuinely wins — a slab too small to use the whole
+allocation efficiently — is captured BETTER by the separate prep jobs
+above and the scheduler running them together, never by splitting
+cores in-process. So in-process cross-slab concurrency is a DOMINATED
+option and is not built.
 
-**The separate-job fan-out stays available, for free, through the files
-(Approach C).** Should the small-slab efficiency win ever be wanted, the
-file handoff already allows it: submit the independent half/realization
-amorphizations as separate jobs (a SLURM array or a dependency graph),
-each in its own scratch subtree, with a barrier before assembly, joined by
-the manifest (§4.2) — a change of SUBMISSION WRAPPER, never of stage code.
-To keep that option open (and to keep the serial loop clean and
-restartable), each amorphization is written as a pure function of (which
-half, which seed) with NO cross-iteration state, and the sites where the
-serial loop would become separate jobs are marked `# C-EXPANSION` in the
-code. They are available extension points, not planned work: the loop
-over (half, seed), the per-unit scratch subtree, the assemble barrier, and
-the engine lifetime.
-
-**The build → amorphize handoff: a per-half handle.** `build-halves` writes
-the two pristine standalone slabs to files and hands the amorphization a
-small HANDLE per half — the file path, the species→type numbering (with
-the beam declared), the material identity, and which wafer it is (bottom A
-/ top B). The amorphization RE-READS the slab geometry from the file
-rather than leaning on an in-memory object, so it stays a self-contained
-"read a file, do the work, write a file" unit: restartable after a crash,
-and identical whether it runs in the member's own job or, later, a
-separate one. `build-halves` is the FIRST stage to write real files, so
-the sequencer threads it the run's scratch directory EXPLICITLY (the
-traceable form, not a path the stage rebuilds from identity), keeping every
+**The build → amorphize handoff: a per-half handle.** `build-half` writes
+the pristine standalone slab to a file and hands the amorphization a
+small HANDLE — the file path, the species→type numbering (with the beam
+declared), the material identity, and which wafer it is (bottom A / top
+B, i.e. `surf1` / `surf2`). The amorphization RE-READS the slab geometry
+from the file rather than leaning on an in-memory object, so it stays a
+self-contained "read a file, do the work, write a file" unit:
+restartable after a crash, and identical whichever job it runs in.
+`build-half` is the FIRST stage to write real files, so the sequencer
+threads it the stage's scratch directory EXPLICITLY (the traceable
+form, not a path the stage rebuilds from identity), keeping every
 written byte traceable to its inputs (`VISION.md` goal 3).
 
-This keeps the "don't build something that must be torn apart" discipline
-without paying for concurrency the plan does not need: the serial member
-chain and the optional separate-job fan-out share the same stage code and
-the same files — only the submission wrapper differs.
+This keeps the "don't build something that must be torn apart"
+discipline without paying for concurrency the plan does not need: the
+per-surface chain and the per-realization fan-out share the same stage
+code and the same files — only the submission wrapper differs.
 
 ### 4.4 Engine acquisition — the LAMMPS module scheme
 
@@ -1412,8 +1466,8 @@ Publishing a rebuild is repointing a prefix; a NEW version is a second
 modulefile beside the first. Feature parity is deliberate and verified
 (job 15683172): the conda build carries the 25 packages every style the
 pipeline emits needs; only `ML-HDNNP` and `VORONOI` are dropped, neither
-used by any code path, both restorable from the recipe if a later study
-needs them.
+used by any code path, both restorable from the recipe if a later
+project needs them.
 
 **The DeePMD engine is a second version, not a fork.** The machine-
 learned-potential runs (§2.2's force model, once the trained MLIP exists)
@@ -1458,7 +1512,7 @@ mid-run read-back: every impact is seed-derived and each cascade ends on an
 in-LAMMPS halt, so the sabsim process builds the slab before and reads the
 amorphized structure back for assembly after, from a dump rather than a live
 engine. The heal DOES ride this subprocess (revised 2026-08-28
-(Paul)): the script ends with the study's re-anneal schedule — hold
+(Paul)): the script ends with the project's re-anneal schedule — hold
 hot, cool to the press temperature, minimize — under the same universal
 model, so the dump the caller reads back is the HEALED half, and the
 §3.5 gate is judged on that read-back in the sabsim process before the
@@ -1466,9 +1520,9 @@ half is assembled. The bundle is selected by the in-repo
 `SABSIM_CASCADE_ENGINE_PREFIX` env (a per-machine, GPU-architecture-
 specific prefix, so a path rather than a checked-in module), and the
 subprocess is launched in a fully-reset environment so no sabsim-side
-torch or plugin path leaks in and crashes it. The activate job carries
-no parameter files of its own: everything it needs is the universal
-model's weights file named in the study file's `[potential]` block.
+torch or plugin path leaks in and crashes it. A prep job carries no
+parameter files of its own: everything it needs is the universal
+model's weights file named in the project file's `[potential]` block.
 
 **The §2.2 lattice derivation rides the SAME subprocess (universal path).**
 Because the §2.2 bulk relax derives the working lattice under the same
@@ -1518,12 +1572,12 @@ an order set by risk, not by step number.
   name and status (`DESIGN.md` §6.6), the manifest and its content-
   fingerprint identity into Kaleidoscope (`DESIGN.md` §8.5, §1.4), the
   file-contracts-on-shared-filesystem linking model (§4.1), and the
-  member specification itself (`DESIGN.md` §1). A seam schema, once
-  written,
-  changes only by deliberate amendment with a recorded note — the same
+  pair specification itself (`DESIGN.md` §1). A seam schema, once
+  written, changes only by deliberate amendment with a recorded note —
+  the same
   discipline the design chain itself uses.
 - **A walking skeleton before any depth.** Build the thinnest end-to-end
-  thread first: a member spec for the **Si/Si** reference → structure
+  thread first: a pair spec for a **Si/Si** project → structure
   builder → a **stand-in potential behind the MLIP's `pair_style` seam**
   (today the universal foundation MLIP as a committee of one) → LAMMPS
   press/pull → analyzer emitting only the mechanical work-integral
@@ -1577,7 +1631,7 @@ frame that wraps every step.
 | 1, 2  | Bootstrap (training)  | VASP · ALF/DeePMD       | §4         |
 | 6, 7  | Bond/debond MD        | LAMMPS + MLIP           | §5         |
 | 8     | Characterization      | Imago/Kaleidoscope      | §8         |
-| —     | Frame                 | member-spec·schema·gate | §1, §6, §7 |
+| —     | Frame                 | pair-spec·schema·gate   | §1, §6, §7 |
 
 So construction sequences five units and a frame, not eight steps in
 numeric order.
@@ -1634,9 +1688,9 @@ contract; hard-wiring either would forfeit the choice that is real.
 
 The immediate next level obeys the same spine: **breadth-first shallow,
 then depth-first per module.** The first pseudocode pass covers control
-flow and the seam schemas — the Tier-A sequencer, member-spec
-load/validate,
-the structure contract, the measure schema, the gate's precedence chain —
+flow and the seam schemas — the Tier-A sequencer, pair-spec
+load/validate, the structure contract, the measure schema, the gate's
+precedence chain —
 which is the walking skeleton expressed as pseudocode. The deep per-module
 algorithms (the coincidence matcher, the UDD bias, the detector
 prominence math) are filled in as each module is implemented, behind a
