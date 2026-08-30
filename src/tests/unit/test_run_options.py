@@ -21,9 +21,7 @@ from sabsim.pipeline.run_options import (
     set_trajectory_options,
     trajectory_options,
 )
-from sabsim.spec.loader import load_and_validate_study
-
-_TEMPLATE = "share/templates/study_spec.toml"
+from tests.unit.support import template_pair
 
 
 @pytest.fixture(autouse=True)
@@ -35,19 +33,19 @@ def _isolate_options():
 
 
 @pytest.fixture
-def member():
-    """A real member, so the spec's frame_stride is the real one."""
-    return load_and_validate_study(_TEMPLATE).members[0]
+def pair():
+    """A real pair, so the spec's frame_stride is the real one."""
+    return template_pair()
 
 
-def test_recording_without_a_dump_file_still_logs_the_forces(member):
+def test_recording_without_a_dump_file_still_logs_the_forces(pair):
     """The MEASUREMENT survives with recording off — that is the point.
 
     The analyzer reads the grip reactions out of the thermo line. If
     making frames optional had also made the thermo optional, a run
     without visuals would silently stop being measurable.
     """
-    commands = recording_commands(member)
+    commands = recording_commands(pair)
 
     assert any(line.startswith("thermo_style custom") for line in commands)
     assert any("f_hold_bottom[3]" in line and "c_top_reaction" in line
@@ -56,9 +54,9 @@ def test_recording_without_a_dump_file_still_logs_the_forces(member):
 
 
 def test_recording_with_a_dump_file_adds_frames_and_keeps_the_forces(
-        member):
+        pair):
     """Asking for frames ADDS to the measurement, never replaces it."""
-    commands = recording_commands(member, "/scratch/run/pull.dump")
+    commands = recording_commands(pair, "/scratch/run/pull.dump")
 
     assert any(line.startswith("dump traj all custom") for line in commands)
     assert any("/scratch/run/pull.dump" in line for line in commands)
@@ -66,7 +64,7 @@ def test_recording_with_a_dump_file_adds_frames_and_keeps_the_forces(
     assert any(line.startswith("thermo_style custom") for line in commands)
 
 
-def test_dump_commands_sort_by_identity(member):
+def test_dump_commands_sort_by_identity(pair):
     """A viewer needs a stable atom order across frames.
 
     The cascade creates and deletes projectile atoms, so without an
@@ -80,11 +78,11 @@ def test_dump_commands_sort_by_identity(member):
                for line in commands)
 
 
-def test_stage_dump_files_are_named_for_member_and_stage():
+def test_stage_dump_files_are_named_for_pair_and_stage():
     """A directory of trajectories should read as an account of the run."""
-    path = stage_dump_file("/scratch/run", "si-si-reference", "press")
+    path = stage_dump_file("/scratch/run", "si_si", "press")
 
-    assert path == "/scratch/run/si-si-reference_press.dump"
+    assert path == "/scratch/run/si_si_press.dump"
 
 
 def test_recording_is_off_by_default():
@@ -101,17 +99,17 @@ def test_an_explicit_stride_overrides_the_specification():
     assert trajectory_options().stride_or(100) == 100
 
 
-def test_stage_trajectory_returns_no_path_when_recording_is_off(member):
+def test_stage_trajectory_returns_no_path_when_recording_is_off(pair):
     """Stages ask one helper, and get None when nobody wants frames."""
     from sabsim.pipeline.live_stages import _stage_trajectory
 
-    path, stride = _stage_trajectory("/scratch/run", member, "press")
+    path, stride = _stage_trajectory("/scratch/run", pair, "press")
     assert path is None
-    assert stride == member.numerical.frame_stride
+    assert stride == pair.numerical.frame_stride
 
     set_trajectory_options(TrajectoryOptions(enabled=True, stride=42))
-    path, stride = _stage_trajectory("/scratch/run", member, "press")
-    assert path == f"/scratch/run/{member.name}_press.dump"
+    path, stride = _stage_trajectory("/scratch/run", pair, "press")
+    assert path == f"/scratch/run/{pair.pair_label}_press.dump"
     assert stride == 42
 
 
@@ -197,7 +195,7 @@ class _RecordingEngine:
         pass
 
 
-def _press_commands(member, trajectory_file, stride=None):
+def _press_commands(pair, trajectory_file, stride=None):
     """Run the real press setup and return the commands it issued."""
     from types import SimpleNamespace
 
@@ -216,11 +214,11 @@ def _press_commands(member, trajectory_file, stride=None):
     force_model = ForceModel(
         pair_style="zero 6.0", pair_coeff=("* *",))
     return _press_setup(
-        built, member, force_model, "ref.data", 1, RegionGeometry(),
+        built, pair, force_model, "ref.data", 1, RegionGeometry(),
         trajectory_file, stride)
 
 
-def _press_and_bond_commands(member, trajectory_file, stride=None):
+def _press_and_bond_commands(pair, trajectory_file, stride=None):
     """Drive the REAL press phase and return what it issued to LAMMPS.
 
     Deliberately goes through ``press_and_bond`` rather than the setup
@@ -253,14 +251,14 @@ def _press_and_bond_commands(member, trajectory_file, stride=None):
 
     engine = Engine()
     press_and_bond(
-        engine, built, member,
+        engine, built, pair,
         ForceModel(pair_style="zero 6.0", pair_coeff=("* *",)),
         "pair.data", 1, control=RunControl(max_chunks=1),
         trajectory_file=trajectory_file, trajectory_stride=stride)
     return engine.issued
 
 
-def test_press_emits_a_dump_only_when_given_a_file(member):
+def test_press_emits_a_dump_only_when_given_a_file(pair):
     """The press must actually RECORD when asked to — the bug was here.
 
     press_and_bond took a trajectory_file and forwarded it nowhere, so a
@@ -269,15 +267,15 @@ def test_press_emits_a_dump_only_when_given_a_file(member):
     this test called the setup helper directly and passed even with the
     bug reinstated, which is exactly how the defect survived once.
     """
-    silent = _press_and_bond_commands(member, None)
+    silent = _press_and_bond_commands(pair, None)
     assert not any(line.startswith("dump ") for line in silent)
 
-    recorded = _press_and_bond_commands(member, "/scratch/run/press.dump")
+    recorded = _press_and_bond_commands(pair, "/scratch/run/press.dump")
     assert any(line.startswith("dump traj all custom") and
                "/scratch/run/press.dump" in line for line in recorded)
 
 
-def test_press_honours_an_explicit_stride(member):
+def test_press_honours_an_explicit_stride(pair):
     """An override must reach LAMMPS, not be quietly replaced by the spec.
 
     The stride was being discarded at the call site and the spec's
@@ -285,10 +283,10 @@ def test_press_honours_an_explicit_stride(member):
     a coarser stride had been asked for.
     """
     recorded = _press_and_bond_commands(
-        member, "/scratch/run/press.dump", 2000)
+        pair, "/scratch/run/press.dump", 2000)
     dump = next(line for line in recorded if line.startswith("dump traj"))
     assert " 2000 " in dump
 
-    default = _press_and_bond_commands(member, "/scratch/run/press.dump")
+    default = _press_and_bond_commands(pair, "/scratch/run/press.dump")
     dump = next(line for line in default if line.startswith("dump traj"))
-    assert f" {member.numerical.frame_stride} " in dump
+    assert f" {pair.numerical.frame_stride} " in dump

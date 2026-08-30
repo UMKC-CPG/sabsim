@@ -13,6 +13,8 @@ impact has none — the physical-time halt ends it from inside LAMMPS.
 import dataclasses
 import math
 import os
+
+from tests.unit.support import si_si_pair
 from types import SimpleNamespace
 
 import numpy as np
@@ -31,26 +33,22 @@ from sabsim.driver.cascade import (
 )
 from sabsim.driver.cascade_potential import resolve_cascade_generator
 from sabsim.driver.commands import CascadeGeometry
-from sabsim.spec.loader import load_and_validate_study
 
-_TEMPLATE_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "study_spec.toml"))
 
 
 def _template_member():
-    """The template's SILICON member — a real MemberSpecification.
+    """A SILICON pair — a real PairSpecification.
 
-    Deliberately the si-si-reference member rather than the first one:
-    every cell fixture in this file is a silicon slab, and a member
+    Deliberately the Si/Si pair rather than the template's Si/SiO2 one:
+    every cell fixture in this file is a silicon slab, and a pair
     declares the structural/chemical domain its force model must cover
     (DESIGN.md §4.8). Pairing a silicon-only cell with the Si/SiO2
-    member would ask the registry for silicon in the silicon-and-silica
+    pair would ask the registry for silicon in the silicon-and-silica
     domain, which is correctly not a registered combination. The
     protocol, numerical and ensemble knobs these tests assert on are
-    shared across all members, so nothing else changes.
+    the template's, so nothing else changes.
     """
-    return load_and_validate_study(_TEMPLATE_PATH).members[1]
+    return si_si_pair()
 
 
 def _cascade_built():
@@ -168,14 +166,14 @@ def test_build_activate_script_emits_setup_impacts_cleanup_and_handoff():
     then judges the healed half the final dump hands back.
     """
     built = _cascade_built()
-    member = _template_member()
+    pair = _template_member()
     spec = _small_spec()
     cascade = resolve_cascade_generator(
         built.type_map, projectile_species={"Ar"},
         weights_path="/models/dpa3.pth", allow_unvalidated=True)
 
     script = build_activate_script(
-        built, member, cascade, data_file="slab.data", spec=spec,
+        built, pair, cascade, data_file="slab.data", spec=spec,
         seed=99, projectile_types=[2],
         output_structure_file="activated.dump",
         heal_marker_file="activated.heal_step")
@@ -216,21 +214,21 @@ def test_activate_script_records_a_trajectory_when_asked():
     watches pays nothing (`run_options`).
     """
     built = _cascade_built()
-    member = _template_member()
+    pair = _template_member()
     spec = _small_spec()
     cascade = resolve_cascade_generator(
         built.type_map, projectile_species={"Ar"},
         weights_path="/models/dpa3.pth", allow_unvalidated=True)
 
     quiet = build_activate_script(
-        built, member, cascade, data_file="slab.data", spec=spec,
+        built, pair, cascade, data_file="slab.data", spec=spec,
         seed=99, projectile_types=[2],
         output_structure_file="activated.dump",
         heal_marker_file="activated.heal_step")
     assert not any(line.startswith("dump traj") for line in quiet)
 
     movie = build_activate_script(
-        built, member, cascade, data_file="slab.data", spec=spec,
+        built, pair, cascade, data_file="slab.data", spec=spec,
         seed=99, projectile_types=[2],
         output_structure_file="activated.dump",
         heal_marker_file="activated.heal_step",

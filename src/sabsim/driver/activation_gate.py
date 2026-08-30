@@ -15,7 +15,7 @@ slab is described by its first-shell bispectrum
 LIBRARY of the undamaged material that the bootstrap manufactured
 (:mod:`sabsim.driver.environment_library`): an atom whose neighbourhood
 exists nowhere in that library, within the library's own thermal
-scatter times the study's ``disorder_scatter_multiple``, is DISORDERED.
+scatter times the project's ``disorder_scatter_multiple``, is DISORDERED.
 That per-atom verdict is computed ONCE here and shared by every metric
 through the :class:`GateContext`, so no two metrics can disagree about
 which atoms are disordered. The coordination and ring metrics are v1
@@ -359,7 +359,7 @@ class GateControl:
     The depth profile's layer thickness and its "too sparse to judge"
     cut-off used to live here too. Both shaped the measurement, so
     neither could hide in an engineering record (DESIGN §1.4): the layer
-    thickness is now the study's ``depth_bin_width`` and the cut-off is
+    thickness is now the project's ``depth_bin_width`` and the cut-off is
     GONE — the disorder verdict is per atom, so a layer of four atoms is
     four verdicts, not noise (DESIGN §3.5, revised 2026-08-29).
     """
@@ -398,10 +398,10 @@ class GateContext:
     # revised 2026-08-29), and what it was judged against.
     disordered: np.ndarray
     library: EnvironmentLibrary
-    disorder_scatter_multiple: float      # study knob: the tolerance
-    depth_bin_width: float                # study knob: the profile layer (Å)
-    # How deep the study REQUIRES the activated skin to reach (Å): the
-    # depth metric's threshold, from the study file's [protocol.activation]
+    disorder_scatter_multiple: float      # project knob: the tolerance
+    depth_bin_width: float                # project knob: the profile layer (Å)
+    # How deep the project REQUIRES the activated skin to reach (Å): the
+    # depth metric's threshold, from the project file's [protocol.activation]
     # required_activated_depth — not from the material reference (DESIGN
     # §3.5, revised 2026-08-28).
     required_depth: float
@@ -528,7 +528,7 @@ class AmorphizationDepthMetric:
         target = float(context.required_depth)
         return MetricVerdict(
             name=self.name, measured=depth,
-            reference="study: required_activated_depth",
+            reference="project: required_activated_depth",
             threshold=target, passed=depth >= target)
 
     def _depth(self, context: GateContext) -> float:
@@ -548,7 +548,7 @@ class AmorphizationDepthMetric:
 
         The BASELINE is not measured on the damaged slab: it is the
         library's own false-alarm rate — what the tolerance flags in a
-        slab that was never bombarded — at the study's scatter multiple,
+        slab that was never bombarded — at the project's scatter multiple,
         the largest over the species present. (The earlier "deep third of
         the slab" baseline included the frozen bottom face, whose atoms
         are under-coordinated by construction, and the polluted baseline
@@ -618,9 +618,9 @@ def activation_gate(
     builds the one :class:`GateContext` every metric reads. Passes iff
     EVERY metric passes, naming the first failure. The depth metric
     supplies ``activated_depth`` and judges it against ``required_depth``
-    — the study file's ``[protocol.activation] required_activated_depth``
+    — the project file's ``[protocol.activation] required_activated_depth``
     in Å; ``disorder_scatter_multiple`` and ``depth_bin_width`` are the
-    study's two numerical knobs for this gate (DESIGN §3.5). With no
+    project's two numerical knobs for this gate (DESIGN §3.5). With no
     material reference at all (a missing file), every reference-based
     metric is UNRESOLVED and the gate fails — a stand-in is never
     silently defaulted.

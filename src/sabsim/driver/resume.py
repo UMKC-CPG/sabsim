@@ -19,7 +19,7 @@ import os
 from dataclasses import asdict, dataclass, field
 
 from sabsim.driver.engine import Engine
-from sabsim.spec.records import MemberSpecification, Quantity
+from sabsim.spec.records import PairSpecification, Quantity
 
 
 # The two files that make up the pair on disk (§13.2). Their names are
@@ -187,21 +187,21 @@ def resume_override_is_set() -> bool:
     return setting.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def input_hash(member: MemberSpecification, reference_file: str,
+def input_hash(pair: PairSpecification, reference_file: str,
                rate: Quantity) -> str:
     """A short hash of the run's inputs, for the resume trust guard (§13.4).
 
-    What identifies "the same run": the study's CONTENT — here the
+    What identifies "the same run": the project's CONTENT — here the
     protocol's knobs, the same material `DESIGN.md` §1.4's fingerprint
     draws on — the identity of the settled reference the pull restores
-    from, and the pull RATE, the only input that tells one rung of a member
+    from, and the pull RATE, the only input that tells one rung of a pair
     from another (they share the protocol and the one reference). Paths and
     the wall-clock are deliberately excluded: only a genuinely different
     experiment should change this. The exact fields are `DESIGN.md` §1.8's
     open follow-on; this is a sufficient guard, not the last word.
     """
     protocol = json.dumps(
-        asdict(member.protocol), sort_keys=True, default=str)
+        asdict(pair.protocol), sort_keys=True, default=str)
     reference_id = _reference_identity(reference_file)
     rate_id = f"{rate.value}:{rate.unit}"
     material = "|".join([protocol, reference_id, rate_id])
@@ -226,27 +226,28 @@ def _reference_identity(reference_file: str) -> str:
 
 
 def verify_inputs_or_stop(checkpoint: Checkpoint,
-                          member: MemberSpecification,
+                          pair: PairSpecification,
                           reference_file: str, rate: Quantity) -> bool:
     """Halt a resume whose inputs differ from the checkpointed run (§13.4).
 
-    A guardrail, not a correctness gate. It checks that the current study,
-    settled reference, and rate still hash to what the checkpoint was
-    written for. On a match it returns ``False`` (no override needed). On a
-    mismatch it STOPS by raising :class:`ResumeInputMismatch` — the stop is
-    what makes the warning seen rather than scrolled past — UNLESS the
+    A guardrail, not a correctness gate. It checks that the current
+    project file, settled reference, and rate still hash to what the
+    checkpoint was written for. On a match it returns ``False`` (no
+    override needed). On a mismatch it STOPS by raising
+    :class:`ResumeInputMismatch` — the stop is what makes the warning
+    seen rather than scrolled past — UNLESS the
     person has set the override, in which case it returns ``True`` so the
     caller can record that an override was used (§13.6). In practice it is
     hard to resume the wrong run by accident, because the checkpoint sits
     in the run's own directory, which is exactly where the resume looks.
     """
     stored = checkpoint.ledger.input_hash
-    if input_hash(member, reference_file, rate) == stored:
+    if input_hash(pair, reference_file, rate) == stored:
         return False
     if resume_override_is_set():
         return True
     raise ResumeInputMismatch(
         "resume inputs differ from the run this checkpoint was written "
-        "for (study, settled reference, or rate changed); refusing to "
+        "for (project file, settled reference, or rate changed); refusing to "
         "stitch new inputs onto old dynamics. Set "
         f"{_RESUME_OVERRIDE_VARIABLE}=1 to continue anyway.")

@@ -1,0 +1,266 @@
+# =====================================================================
+# SABSIM project specification — jobs/si_si (Si/Si small demo)
+# ---------------------------------------------------------------------
+# This file is what the DESIGN.md §1.4 generator emits: a FULLY
+# populated project file for the user to edit. There are no hidden
+# defaults — the loader REJECTS an incomplete file rather than filling
+# a blank from the machinery (§1.4). Every knob the pipeline reads is
+# written here, in the open. "Frozen" means written down in one place,
+# not absent.
+#
+# ONE WAFER PAIR PER PROJECT (Paul, 2026-08-30; ARCHITECTURE §1). This
+# file sits in a project folder whose name is the person's own label
+# (`jobs/si_sio2/`) and means nothing to the program. Beside it the
+# pipeline finds and fills four stage folders, named from the two
+# wafers' material labels lower-cased: `prep_surf1_si/`,
+# `prep_surf2_sio2/`, `bond_si_sio2/`, `analysis_si_sio2/`. A reference
+# pair (Si/Si for this question) is a SEPARATE project folder the
+# person makes and runs; the comparison between the two is theirs, by
+# hand (DESIGN §1.1). There is no list of members and no relation
+# layer in this file.
+#
+# Populated to the full PSEUDOCODE.md §2 knob inventory. Where §2 marks
+# a numerical knob [DEPTH-FIRST] (filled as its module lands) and no
+# value is yet ratified, the entry carries a PROVISIONAL starting value
+# and says so in its comment — honest provenance (§1.6), not a claim
+# that the number is converged. A convergence study REFINES such a
+# value; it does not excuse leaving it blank, because a value the run
+# uses but the file omits is exactly the hidden default §1.4 forbids.
+#
+# Units are carried (§1.5): a physical quantity is written as an inline
+# table { value = <number>, unit = "<unit>" } so the loader can validate
+# dimensions. Counts, seeds, Miller indices, and identifiers are bare.
+#
+# What is NOT here, on purpose (§1.3 — "not a setting"): lattice
+# constants, the shared cell / tiling / strain, bond cutoffs, the
+# interface-subcell size, and the ACTIVATED DEPTH. Each is DERIVED by
+# the section that owns it; typing one in is how a pipeline comes to
+# disagree with itself. The amorphized skin depth in particular is a
+# MEASURED outcome of the §3.5 gate, never a protocol input — the knob
+# is the fluence, and the depth is what it is tuned to reach. The
+# potential is referenced by its generation identifier, never chosen
+# by hand.
+# =====================================================================
+
+[project]
+# ONE wafer pair per project folder (ARCHITECTURE §1, 2026-08-30). This
+# is the silicon/silicon SMALL DEMO (252 atoms per half, 50 eV argon)
+# that LEDGER T-40 ran as a study member; it is the first project under
+# the folder convention. A reference for a Si/SiO2 question is exactly
+# this kind of folder, run beside the Si/SiO2 project and compared by
+# hand (DESIGN §1.1).
+description     = "Si(100)/Si(100) small demo, 50 eV Ar, DPA-3.1-3M"
+potential_ref   = "PENDING-BOOTSTRAP"    # resolved by §11 on convergence
+material_domain = "diamond-cubic"        # {Si} has one registered domain
+
+# Surface 1 (wafer A, bottom) and surface 2 (wafer B, top) are the SAME
+# material here, so the project has two prep folders, prep_surf1_si/
+# and prep_surf2_si/, each with its own activation (different seeds)
+# and a copy of the one silicon environment library.
+[wafer_a]
+material  = "Si"
+cif       = "src/sabsim/structure/data/si_diamond.cif"
+structure = "diamond"        # human label; the CIF is authoritative
+face      = [1, 0, 0]        # Miller indices of the bonding surface
+[wafer_b]
+material  = "Si"
+cif       = "src/sabsim/structure/data/si_diamond.cif"
+structure = "diamond"
+face      = [1, 0, 0]
+
+[potential]
+# The universal foundation model that derives each material's working
+# lattice (§2.2) and runs the ion-beam cascade spliced with ZBL cores
+# (§4.7). The name must match the identity pinned in the code
+# (driver/cascade_potential.py, UNIVERSAL_CASCADE_MODEL) so a project
+# cannot quietly run under a different release than the validated one.
+universal_model   = "DPA-3.1-3M"
+# Its weights: a portable PyTorch .pth that pair_style deepmd loads on
+# any GPU (an architecture-specific .pt2 also works, faster, per-GPU).
+universal_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
+# The PRODUCTION model for the gentle stages — heal, press, settle, pull
+# (§3.4, §5). The design target is the ALF-trained DeePMD committee each
+# pair's potential_ref will name (§4.5); until that bootstrap exists
+# this names ONE frozen DeePMD file, a committee of one, and results
+# under it carry no committee uncertainty.
+production_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"   # DPA-3 for the bond too (T-25 env)
+# The universal model has passed the Tier-0 crystal-below-damaged screen
+# on silicon but has NOT cleared the §3.5 activation gate on any
+# material, so it is still marked unvalidated in the code. Running it
+# needs this explicit, on-the-record opt-in; everything produced under
+# it is EXPLORATORY. Set false once validated=True is flipped (§4.7).
+allow_unvalidated = true
+
+# ---------------------------------------------------------------------
+# PROTOCOL group (§1.2): HOW the experiment is performed. Every knob
+# here is a physics choice — its influence on the answer IS the result,
+# so it is frozen by being written down, not by being hidden.
+# ---------------------------------------------------------------------
+[protocol.activation]
+mechanism = "bombardment"
+species   = "Ar"
+# Ar-only baseline for v1 (§3.2). Iron is the first accommodated
+# co-species, deferred to the outer-loop sweep (§1.8) — none here.
+cospecies          = "none"
+cospecies_fraction = 0.0
+# 75 eV, PINNED from the 2026-07-21 energy x dose sweep (DESIGN §3.6).
+# The old 500 eV default OVER-SPUTTERS — it vaporized a small slab — and
+# the sweep found 40-75 eV amorphizes cleanly with ZERO sputtered atoms
+# at every dose tried, while 100 eV and up strip the surface and then
+# fail the gate outright. Within that clean band ENERGY is what sets the
+# REACHABLE skin depth (it is the ion range), so 75 eV is chosen as the
+# top of it: the setting with the most margin over the 7 A threshold.
+energy = { value = 50.0, unit = "eV" }    # DEMO-50: the sputter-free band of the 2026-07-21 sweep
+angle  = { value = 0.0,   unit = "deg" }      # from the surface normal
+# Dose is the KNOB (§3.6). The amorphized skin DEPTH is NOT set here; it
+# is measured by the §3.5 gate — iterate this dose until the gate's depth
+# profile clears the 7 A threshold (a §3.5 acceptance criterion living
+# with the gate's reference data, not a protocol input — §1.3). TWO FORMS
+# are accepted (§3.2): a per-area FLUENCE (unit "ions/angstrom^2"), the
+# general size-independent form, or a plain impact COUNT (unit "impacts"),
+# a shortcut for a single fixed cell. The AREAL form is used now that the
+# cell size is pinned in `live_stages`: the count follows from the area
+# (0.025 x ~1474 A^2 = 37 impacts), so widening the slab later keeps the
+# same PHYSICAL dose instead of silently thinning it.
+# 0.025 PINNED from the sweep — paired with 75 eV it measured 10.25 A of
+# skin, a 3.25 A margin over the threshold, the largest on the grid.
+# Raising it to 0.030 buys nothing (depth saturates at 10.26 A) while
+# costing ~20% more impacts, and each impact is ~10 s of wall clock.
+fluence = { value = 0.025, unit = "ions/angstrom^2" }
+required_activated_depth = { value = 4.0, unit = "angstrom" }  # DEMO-g (T-33)
+# Per-impact cascade timing lives in PROTOCOL, not numerical (§2): these
+# are physical durations of the amorphization process. PINNED at 0.5 ps
+# each from the sweep, which produced 20 clean activation points on them.
+# The old ~5-10 ps band was sized for a ~500 eV cascade; a 75 eV cascade
+# is a far smaller, shorter event, and the border thermostat drains it
+# correspondingly fast. These remain STAND-INS in the sense that no
+# convergence check has been run ON the durations themselves — that is a
+# §3.6 follow-on, cheap to do by re-running one point at 1 and 2 ps.
+cascade_duration          = { value = 0.5, unit = "ps" }   # NVE cascade
+between_impact_relaxation = { value = 0.5, unit = "ps" }   # border cool
+
+[protocol.reanneal]
+# The MLIP re-anneal (§3.4, §10.5) as a PSEUDOCODE §2 AnnealSchedule:
+# relax, hold briefly, quench back to 300 K. Deliberately gentle — a
+# kinetically trapped glass bounds how far it may go, so it must NOT
+# un-trap the frozen amorphous skin.
+# The hold is PINNED at 2 ps from the sweep (was 30 ps): the re-anneal
+# only has to relieve the cascade's leftover strain in a ~10 A skin, not
+# re-equilibrate a thick damaged layer, and a longer gentle hold risks
+# un-trapping the very disorder the quench froze in.
+hold_temperature = { value = 300.0, unit = "K" }   # DEMO re-press: settle cool (Paul)
+hold_duration    = { value = 2.0,   unit = "ps" }  # sweep-pinned
+ensemble         = "nvt"                            # constant-volume hold
+
+[protocol.assembly]
+# The surface-to-surface opening the pair is assembled at (§2.6, revised
+# 2026-08-28): each half arrives HEALED and GATED from its own activation
+# session, so the pair is stacked directly at the distance the press
+# starts from — within the model's ~6 Å cutoff yet not touching. DEMO-f
+# (2026-08-28): first run of the heal-in-activation flow.
+initial_gap = { value = 7.0, unit = "angstrom" }
+
+[protocol.press]
+mode        = "load"           # load- vs displacement-controlled press
+pressure    = { value = 1.0,   unit = "MPa" }   # ~1 MPa (ratified)
+temperature = { value = 300.0, unit = "K" }     # room temperature (SAB)
+duration    = { value = 10.0, unit = "ps" }     # DEMO: short hold (production: 150 ps)
+# Displacement-mode target: unused while mode = "load", but written so
+# the Si/Si reference's displacement cross-check (§5.9) has its value.
+depth        = { value = 5.0, unit = "angstrom" }
+# Grip approach/ramp speed, bounded by the no-impact guard (§9.3) so the
+# close is a press, not a collision.
+approach_rate = { value = 1.0, unit = "m/s" }
+
+[protocol.pull]
+# Single-rate special case (§2 separation_speed). The real v1 pull uses
+# the numerical.pull_rate_ladder below; this names the one rate used
+# when a pair is run at a single speed (the middle rung).
+separation_speed = { value = 3.2, unit = "m/s" }
+
+# ---------------------------------------------------------------------
+# NUMERICAL group (§1.2): HOW CAREFULLY we compute. A numerical knob's
+# influence on the answer must VANISH as it is refined; if a number here
+# moves the result, that is a convergence problem, not a physics result.
+# These are Tier-B engineering defaults (V1_VALUES.md). Several are
+# marked [DEPTH-FIRST] in §2 — their converging module has not landed,
+# so their values here are PROVISIONAL starting points, flagged as such.
+# ---------------------------------------------------------------------
+[numerical]
+md_timestep      = { value = 1.0, unit = "fs" }   # MLIP MD
+cascade_timestep = { value = 0.1, unit = "fs" }   # stiff ZBL close approach
+langevin_damping = { value = 0.5, unit = "ps" }
+# Pull-rate ladder (§5.4): >=3 rates spanning a decade, log-spaced. It
+# lives in NUMERICAL (§2) because it is a convergence instrument — M3
+# reports the remaining distance to the quasi-static limit, and the
+# answer should stop moving as the rate falls.
+pull_rate_ladder = [   # DEMO: fast rungs so each separates in tens of ps
+  { value = 20.0,  unit = "m/s" },
+  { value = 50.0,  unit = "m/s" },
+  { value = 100.0, unit = "m/s" },
+]
+# Averaging window for the pull force, in grip-DISPLACEMENT units
+# (§5.4, §9.5): the force-vs-displacement curve is smoothed over a fixed
+# LENGTH so its peak resolves identically at every rate rung. A time
+# window would smear each rate by a different displacement and corrupt
+# the ladder. Small vs a bond length; provisional value (redline later).
+force_average_window = { value = 0.5, unit = "angstrom" }
+frame_stride         = 100        # store 1 frame per N MD steps (§5.4)
+# --- [DEPTH-FIRST] in §2: provisional starting values, converged when
+# --- each owning module lands. Present so nothing the run uses hides.
+noise_floor          = { value = 0.05, unit = "eV/angstrom" }
+# ^ peak/curve threshold set relative to thermal RMS (§5.4); provisional.
+misfit_tolerance     = 0.02       # max strain component in the match (§2.3)
+max_coincidence_area = { value = 400.0, unit = "angstrom^2" }
+# ^ atom-area budget bounding atoms per layer (§7.6); provisional.
+target_footprint_area = { value = 140.0, unit = "angstrom^2" }   # DEMO: 3x3 cell, ~4 impacts
+# ^ dose-spreading footprint (§3.6): the matched cell is tiled up to
+#   ~this in-plane area so no single impact dominates the areal dose.
+#   1475 Å² ~ the pinned 38.4 Å Si cell (the old 10x10). A convergence
+#   knob, NOT a limit — raise it for more impact statistics.
+# --- Slab sizing (§2.5): thickness is a CRITERION, not a bare constant.
+# A cut slab must keep enough undamaged crystal beneath the damaged skin
+# to still act like a substrate: thickness >= expected_activated_depth +
+# minimum_bulk_thickness. v1 FIXES the thickness by the §3.6 convergence
+# project (slab_thickness) and enforces the criterion as a FLOOR, recording
+# the margin actually achieved. The damage depth is only MEASURED after
+# bombardment (§3.5), so at cut time expected_activated_depth stands in as
+# the build-time estimate (the §3.6 operating depth).
+minimum_bulk_thickness = { value = 30.0, unit = "angstrom" }
+# ^ undamaged-crystal cushion beneath the skin (§2.5).
+slab_thickness         = { value = 37.0, unit = "angstrom" }   # DEMO: at the §2.5 floor
+# ^ chosen total slab thickness (the §3.6-pinned 55 Å cell). The floor
+#   max(slab_thickness, expected_activated_depth + minimum_bulk_thickness)
+#   guarantees the §2.5 criterion for any material; here 55 > 7 + 30 = 37.
+# ^ build-time skin-depth estimate (§3.6 operating depth); the §3.5 gate
+#   MEASURES the real depth once activation runs.
+slab_vacuum            = { value = 30.0, unit = "angstrom" }
+# ^ vacuum above the face so the beam has room to spawn (§3.6).
+bulk_cells_per_axis    = 3
+# ^ §2.2 bulk-relax block size per axis; a numerical knob whose influence
+#   vanishes as it grows, kept small for the cheapest stable relax.
+clash_floor          = { value = 1.8, unit = "angstrom" }   # §2.6 min gap
+contact_grid_spacing = { value = 5.0, unit = "angstrom" }   # ~cutoff/cell
+contact_gap_threshold = { value = 6.0, unit = "angstrom" }  # rough amorphous skins: density surfaces sit ~4-5 A apart when interlocked (T-31)
+contact_gap_window   = 3          # chunks in the opening's trailing mean (§5.2)
+contact_stress_floor = { value = 500.0, unit = "bar" }  # |stress| floor
+contact_stress_window = 5   # chunks in the stress running mean
+control_interval     = { value = 1.0,   unit = "ps" }   # §5.2
+press_time_budget    = { value = 500.0, unit = "ps" }   # §5.2
+settle_duration      = { value = 20.0,  unit = "ps" }   # §5.3
+depth_bin_width          = { value = 2.0, unit = "angstrom" }
+disorder_scatter_multiple = 3.0   # §3.5 tolerance, in thermal scatters
+bonded_contact_threshold = 0.5    # contact quality => "bonded" (§9.3, §5.1)
+reference_pe_drift   = { value = 0.001, unit = "eV/atom" }
+# ^ max PE drift for the reference to count as settled (§9.4); provisional.
+
+# ---------------------------------------------------------------------
+# ENSEMBLE group (§1.2): a seed is a coordinate we SAMPLE, not a knob.
+# One master seed reproduces the whole ensemble; every per-realization
+# seed derives from it deterministically (§3.6). Two axes (§2, revised):
+# independent amorphization realizations and thermal-velocity reseeds.
+# ---------------------------------------------------------------------
+[ensemble]
+master_seed         = 20260713
+amorphization_count = 3         # v1 (ratified); more tightens the spread
+velocity_count      = 1         # thermal reseeds per amorph realization

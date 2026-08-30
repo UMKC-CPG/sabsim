@@ -1,17 +1,17 @@
 """The typed records the pipeline produces during execution (§1).
 
-These are the outputs of executing a member: both the artifacts that
-flow BETWEEN stages (Slab, Structure, …) and the execution
-RESULTS (MemberResult, StudyReport) that ``exec_one_member`` and
-``exec_full_study`` return. They contrast with the input records in
-:mod:`sabsim.spec.records`, which a human writes; everything here the
-pipeline itself produces. Each stage of ``exec_one_member`` hands the
+These are the outputs of executing a pair: both the artifacts that
+flow BETWEEN stages (Slab, ActivatedHalf, Structure, …) and the
+execution RESULTS (PairResult, ProjectReport) that ``exec_one_pair``
+and ``exec_full_project`` return. They contrast with the input records
+in :mod:`sabsim.spec.records`, which a human writes; everything here
+the pipeline itself produces. Each stage of ``exec_one_pair`` hands the
 next a typed artifact, and ``run_to_contract`` (see
 :mod:`sabsim.pipeline.contracts`) checks it against the contract the
 next stage depends on. In the walking skeleton (ARCHITECTURE.md §5,
 wave 0) most are light placeholders — the point of W0 is that a
 well-formed artifact travels EVERY seam, not that any physics is real —
-but the provenance stamp and the member/study results are the permanent
+but the provenance stamp and the pair/project results are the permanent
 shapes that later waves fill in behind the same contracts.
 """
 
@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 
 from sabsim.driver.activation_gate import ActivationVerdict
 from sabsim.pipeline.measures import MeasureVector
-from sabsim.spec.records import MemberSpecification
+from sabsim.spec.records import PairSpecification
 
 
 def content_fingerprint(record: object) -> str:
@@ -46,12 +46,12 @@ def content_fingerprint(record: object) -> str:
 class Provenance:
     """Which force models ran and the exact protocol they ran under (§1.6).
 
-    This is the stamp every :class:`MemberResult` carries so a number can
+    This is the stamp every :class:`PairResult` carries so a number can
     always be traced to the potential generation, the two model files the
-    study named, the master seed, and the fingerprinted protocol that
-    produced it. It is built from the member specification alone: the
-    study file is the provenance record, so nothing here is discovered at
-    run time.
+    project file named, the master seed, and the fingerprinted protocol
+    that produced it. It is built from the pair specification alone: the
+    project file is the provenance record, so nothing here is discovered
+    at run time.
     """
     potential_ref: str             # the potential generation identifier
     universal_model: str           # the pinned universal model name
@@ -60,14 +60,14 @@ class Provenance:
     protocol_fingerprint: str      # content fingerprint of the protocol
 
 
-def build_provenance(member: MemberSpecification) -> Provenance:
-    """Assemble the provenance stamp for one member's run (§1.6)."""
+def build_provenance(pair: PairSpecification) -> Provenance:
+    """Assemble the provenance stamp for one pair's run (§1.6)."""
     return Provenance(
-        potential_ref=member.potential_ref,
-        universal_model=member.potential.universal_model,
-        production_weights=member.potential.production_weights,
-        master_seed=member.ensemble.master_seed,
-        protocol_fingerprint=content_fingerprint(member.protocol),
+        potential_ref=pair.potential_ref,
+        universal_model=pair.potential.universal_model,
+        production_weights=pair.potential.production_weights,
+        master_seed=pair.ensemble.master_seed,
+        protocol_fingerprint=content_fingerprint(pair.protocol),
     )
 
 
@@ -154,7 +154,7 @@ class HalfHandle:
     so each is a self-contained unit (the fan-out unit, ARCHITECTURE §4.3).
     The activation stage RE-READS the slab geometry from ``data_file``
     (never a warm in-memory object), so the unit is restartable and
-    identical whether it runs in the member's own job or a separate one.
+    identical whether it runs in the pair's own job or a separate one.
     ``type_map`` declares the beam species (a zero-atom type) so the
     cascade can create projectiles against it; ``wafer_tag`` records which
     wafer this is — bottom A or top B (the assembly invariant, DESIGN §2.6).
@@ -182,15 +182,39 @@ class ActivatedSlabs:
     its own activation session (DESIGN.md §3.4/§3.5), so the verdicts
     ride this seam again — the ACTIVATED_SLABS_CONTRACT checks that both
     slabs are present AND both verdicts passed, and a failure halts the
-    member here, before the pair is ever assembled. (From 2026-08-08 to
+    pair here, before it is ever assembled. (From 2026-08-08 to
     2026-08-28 the gate ran in the bond flow and its verdicts rode the
-    BondDebondResult instead.)
+    BondDebondResult instead.) Since 2026-08-30 each half is prepared by
+    its OWN prep job as an :class:`ActivatedHalf`; the bond stage reads
+    the two halves back and joins them into this record for assembly.
     """
 
     slab_a: Slab
     slab_b: Slab
     verdict_a: ActivationVerdict | None = None
     verdict_b: ActivationVerdict | None = None
+
+
+@dataclass(frozen=True)
+class ActivatedHalf:
+    """ONE healed, gated half — a prep job's deliverable (§14.6).
+
+    Revised 2026-08-30 (Paul): each surface of the pair is prepared by
+    its own job, in its own ``prep_surfN_<label>/`` folder, so the
+    activation stage yields one half at a time. Besides the healed
+    :class:`Slab` and its §3.5 verdict, the record carries what the bond
+    job cannot re-derive: WHICH wafer this is (``wafer_tag`` — bottom A
+    or top B, the assembly invariant of DESIGN §2.6), the SHARED CELL
+    the half was built in (so bond can refuse two halves that were not
+    built for each other), and the id of the run that made it (so the
+    bulky files under ``intermediate/`` can be found again).
+    """
+
+    slab: Slab
+    verdict: ActivationVerdict | None
+    wafer_tag: int                 # WAFER_A_TAG (bottom) / WAFER_B_TAG
+    shared: SharedCell             # the coincidence cell it was cut on
+    run_id: str = ""               # the ``run-<id>`` folder that made it
 
 
 @dataclass(frozen=True)
@@ -301,11 +325,16 @@ class BondDebondResult:
     press: PressOutcome
     reference_ok: bool             # the §5.3 gated zero-load reference
     pulls: tuple[PullOutcome, ...]
+    # The ``run-<id>`` folder under the bond stage's intermediate mirror
+    # that holds this result's bulky files (dumps, logs, checkpoints), so
+    # a consumer — the bootstrap harvest, a viewer — can find them from
+    # the deliverable alone. Empty when no run folder was involved.
+    run_id: str = ""
 
 
 @dataclass(frozen=True)
 class GateReport:
-    """The per-member diagnostic verdict (DESIGN.md §7).
+    """The per-pair diagnostic verdict (DESIGN.md §7).
 
     In v1 the gate only REPORTS; it never acts (VISION principle 5). W0
     fills the permanent shape with a skeleton summary; the live gate and
@@ -318,15 +347,15 @@ class GateReport:
 
 
 @dataclass(frozen=True)
-class MemberResult:
-    """One member's self-standing report (PSEUDOCODE.md §1).
+class PairResult:
+    """One pair's self-standing report (PSEUDOCODE.md §1).
 
-    ``trusted`` is False for a walking-skeleton member whose number is
+    ``trusted`` is False for a walking-skeleton pair whose number is
     plumbing, not physics (ARCHITECTURE.md §5.3); later waves flip it to
     True as the stand-ins are replaced behind the same contracts.
     """
 
-    specification: MemberSpecification
+    specification: PairSpecification
     potential: Provenance
     measures: MeasureVector
     gate: GateReport
@@ -334,25 +363,16 @@ class MemberResult:
 
 
 @dataclass(frozen=True)
-class RelationOutcome:
-    """The graded result of one declared relation (DESIGN.md §7.4).
+class ProjectReport:
+    """The whole project's output: ONE pair's report (§1).
 
-    A relation is reported, never used to restrict (DESIGN.md §1.1), so
-    even an untrusted or unresolved outcome is carried with the reason.
+    A project holds exactly one pair (revised 2026-08-30, Paul), so its
+    report is that pair's result plus the project's own description and
+    the pair's label. There is no relation layer: a comparison between
+    two pairs is made by the person from two projects' summaries
+    (DESIGN.md §1.1).
     """
 
-    kind: str
-    members: tuple[str, ...]
-    value: float | None            # None when the relation is unresolved
-    unit: str
-    trusted: bool                  # False if any related member is
-    note: str
-
-
-@dataclass(frozen=True)
-class StudyReport:
-    """The whole study's output: per-member reports plus relations (§1)."""
-
-    study_name: str
-    member_results: tuple[MemberResult, ...]
-    relation_outcomes: tuple[RelationOutcome, ...]
+    description: str
+    pair_label: str
+    result: PairResult

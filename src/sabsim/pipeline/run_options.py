@@ -1,11 +1,11 @@
 """Run-time options that are operational, not physical (ARCHITECTURE §4).
 
-A study specification describes the PHYSICS of a run: which materials,
+A project file describes the PHYSICS of a run: which materials,
 which beam energy, which pull speeds. It deliberately says nothing about
 how the run is operated — how many processors, where scratch lives,
 whether this particular invocation should keep visual output. Those are
 properties of the invocation, not of the science, and two runs that
-differ only in them must still be the same study.
+differ only in them must still be the same project.
 
 This module holds that second kind of setting. It exists because the
 pipeline stages are invoked through a generic contract runner with fixed

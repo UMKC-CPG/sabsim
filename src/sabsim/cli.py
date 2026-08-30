@@ -1,6 +1,6 @@
 """The ``sabsim`` command — the project's front door (ARCHITECTURE.md §4).
 
-One entry point to run a surface-activated-bonding study end to end, so a
+One entry point to run a surface-activated-bonding project end to end, so a
 run is a single supported command instead of a hand-written driver. It runs
 INSIDE an allocation you provide (wrap it in ``srun``); it does not submit
 its own job. Two ways to invoke it:
@@ -11,7 +11,7 @@ its own job. Two ways to invoke it:
 (and simply ``sabsim run ...`` once the package is installed, e.g. ``pip
 install -e . --no-deps``, which registers the console command.)
 
-The study specification is POSITIONAL and OPTIONAL, defaulting to
+The project file is POSITIONAL and OPTIONAL, defaulting to
 ``sabsim.toml`` in the current directory; the run's home IS the current
 directory. To run somewhere else you make that directory, ``cd`` into it,
 and put a ``sabsim.toml`` there — the run's location is where you launch it,
@@ -19,8 +19,8 @@ never a guessed path (VISION.md principle 1). Outputs land under that
 directory's scratch mirror (§4.2).
 
 The run/restart/refresh/test operations are FLAGS on ``run``, not separate
-verbs. v1 ships ``--dry-run`` (the login-node stub run) and ``--only`` (a
-member subset); ``--dump-visuals`` (record every dynamic stage for viewing) and
+verbs. v1 ships ``--dry-run`` (the login-node stub run) and the four
+job flags; ``--dump-visuals`` (record every dynamic stage for viewing) and
 ``--dump-stride``; ``--resume`` (reuse finished intermediates) and
 ``--refresh`` (recompute clean) land next, with reuse-by-default the
 intended policy once the stages learn to skip finished work.
@@ -43,46 +43,41 @@ def _build_parser() -> argparse.ArgumentParser:
     """Assemble the ``sabsim`` argument parser (one verb so far: run)."""
     parser = argparse.ArgumentParser(
         prog="sabsim",
-        description="Run a surface-activated-bonding study end to end.")
+        description="Run a surface-activated-bonding project — one wafer "
+                    "pair — end to end, or one of its four jobs.")
     subcommands = parser.add_subparsers(dest="command")
 
     run = subcommands.add_parser(
         "run",
-        help="run a study: build -> amorphize -> assemble -> press -> "
-             "pull -> measure")
+        help="run a project: prepare each surface -> assemble -> press "
+             "-> pull -> measure")
     run.add_argument(
         "spec", nargs="?", default="sabsim.toml",
-        help="the study specification (default: sabsim.toml here)")
+        help="the project file (default: sabsim.toml here); its folder "
+             "is the project folder the stage folders live in")
     run.add_argument(
         "--dry-run", action="store_true",
         help="run the placeholder stages on the login node — validate the "
              "spec and exercise the whole control flow with no "
              "supercomputer and no real physics")
-    run.add_argument(
-        "--only", action="append", metavar="MEMBER",
-        help="run only this member (repeatable); default is every member")
 
-    # The three per-kind member jobs (DESIGN.md §10.2, §14.3), mutually
-    # exclusive: a run does ONE job's sub-stage of the chain, or — no
-    # flag — the whole chain. store_const on one shared dest gives both
-    # the exclusivity and a single job_flag value. These are the lines a
-    # generated deployment script carries; the human submits activate,
-    # then bond, then analyze, checking each before the next (§10.5).
+    # The four pair jobs (DESIGN.md §10.2, §14.3), mutually exclusive: a
+    # run does ONE job's stage of the chain, or — no flag — the whole
+    # chain. store_const on one shared dest gives both the exclusivity
+    # and a single job_flag value. The flags are spelled from the job
+    # registry (ONE source of the job set, §10.3): --prep-surf1,
+    # --prep-surf2, --bond, --analysis. These are the lines a generated
+    # deployment script carries; the human submits both preps, then
+    # bond, then analysis, checking each before the next (§10.5).
+    from sabsim.deploy.registry import JOB_REGISTRY
     jobs = run.add_mutually_exclusive_group()
-    jobs.add_argument(
-        "--activate", dest="job_flag", action="store_const",
-        const="activate",
-        help="run only the activate job: build both wafers, roughen the "
-             "surfaces, assemble the pair (CPU); writes the assembled pair")
-    jobs.add_argument(
-        "--bond", dest="job_flag", action="store_const", const="bond",
-        help="run only the bond job: press, settle, and pull on the MLIP "
-             "(GPU); reads the assembled pair, writes the pull results")
-    jobs.add_argument(
-        "--analyze", dest="job_flag", action="store_const",
-        const="analyze",
-        help="run only the analyze job: reduce the pull to the measure "
-             "vector (CPU); reads the pull results, writes the measures")
+    for job in JOB_REGISTRY:
+        jobs.add_argument(
+            job.flag, dest="job_flag", action="store_const",
+            const=job.name,
+            help=f"run only the {job.name} job ({job.resource_class}): "
+                 f"{', '.join(job.stages)}; writes {job.writes} into "
+                 f"the {job.folder_key} stage folder")
     run.set_defaults(job_flag=None)
     run.add_argument(
         "--dump-visuals", action=argparse.BooleanOptionalAction,
@@ -99,16 +94,17 @@ def _build_parser() -> argparse.ArgumentParser:
              "frame_stride. Only meaningful with --dump-visuals; raise it "
              "for smaller files, lower it for smoother playback")
 
-    # `prepare` — the WRITER (DESIGN.md §10.1, PSEUDOCODE §14.4): reads the
-    # study spec AND the machine-local deployment rc, and writes one
-    # ready-to-submit script per (member, job) plus a submission guide. It
+    # `prepare` — the WRITER (DESIGN.md §10.1, PSEUDOCODE §14.4): reads
+    # the project file AND the machine-local deployment rc, and writes
+    # one ready-to-submit script per job plus a submission guide. It
     # submits nothing; the human submits the scripts in order.
     prepare = subcommands.add_parser(
         "prepare",
-        help="write ready-to-submit scripts for a study (submits nothing)")
+        help="write ready-to-submit scripts for a project (submits "
+             "nothing)")
     prepare.add_argument(
         "spec", nargs="?", default="sabsim.toml",
-        help="the study specification (default: sabsim.toml here)")
+        help="the project file (default: sabsim.toml here)")
     prepare.add_argument(
         "--rc", metavar="PATH", default="deployment.toml",
         help="the machine-local deployment rc (default: deployment.toml "
@@ -127,7 +123,7 @@ def _build_parser() -> argparse.ArgumentParser:
     generate = phases.add_parser(
         "generate",
         help="build Collection 1 (needs a compute node for its dynamics) "
-             "and harvest Collection 2 from the member run the recipe "
+             "and harvest Collection 2 from the pair run the recipe "
              "names; writes structures.extxyz")
     generate.add_argument("recipe", help="the force-model recipe TOML")
     generate.add_argument(
@@ -135,7 +131,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="harvest Collection 2 only (no dynamics; login-node safe)")
     generate.add_argument(
         "--skip-collection2", action="store_true",
-        help="build Collection 1 only (no member dumps needed)")
+        help="build Collection 1 only (no pair dumps needed)")
     label_parser = phases.add_parser(
         "label",
         help="write one VASP directory per selected structure and ONE "
@@ -188,12 +184,12 @@ def _bootstrap(args: argparse.Namespace) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    """Execute ``sabsim run``: pick the stage set, run the study, report."""
-    from sabsim.pipeline.member_jobs import run as run_study
+    """Execute ``sabsim run``: pick the stage set, run the project, report."""
+    from sabsim.pipeline.pair_jobs import run as run_project
 
     if not os.path.isfile(args.spec):
-        print(f"sabsim: no study spec at '{args.spec}' — give a path, or "
-              f"put a sabsim.toml in this directory", file=sys.stderr)
+        print(f"sabsim: no project file at '{args.spec}' — give a path, "
+              f"or put a sabsim.toml in this directory", file=sys.stderr)
         return 2
 
     # A job flag selects ONE sub-stage of the chain, for a compute-node
@@ -203,17 +199,20 @@ def _run(args: argparse.Namespace) -> int:
     # assembled pair has no built geometry to hand across a job boundary.
     if args.job_flag is not None and args.dry_run:
         print("sabsim: --dry-run runs the whole chain on the login node; "
-              "it does not combine with --activate/--bond/--analyze, which "
-              "are real per-job runs inside an allocation (§10.4). Drop "
-              "the flag for a dry run, or drop --dry-run to run the job.",
-              file=sys.stderr)
+              "it does not combine with --prep-surf1/--prep-surf2/--bond/"
+              "--analysis, which are real per-job runs inside an "
+              "allocation (§10.4). Drop the flag for a dry run, or drop "
+              "--dry-run to run the job.", file=sys.stderr)
         return 2
 
-    # The run's home is where it was launched (decision: CWD, not a flag).
-    job_directory = os.getcwd()
+    # The run's home is the PROJECT FOLDER: the directory the project
+    # file sits in, where its stage folders and prep folders live
+    # (ARCHITECTURE.md §1, revised 2026-08-30). Not the CWD, so a run
+    # launched from elsewhere still lands in the project.
+    project_directory = os.path.dirname(os.path.abspath(args.spec))
 
     # Trajectory recording is an OPERATIONAL choice, not a physical one:
-    # two runs differing only in it are the same study, so it is a flag
+    # two runs differing only in it are the same project, so it is a flag
     # here rather than a field in the specification. Fixed once, before
     # any stage runs, because the stages are invoked through a generic
     # contract runner whose signatures cannot carry it (§4).
@@ -238,9 +237,9 @@ def _run(args: argparse.Namespace) -> int:
         stage_set = LIVE_STAGES
 
     try:
-        report = run_study(
-            args.spec, job_directory, stage_set, comm,
-            job_flag=args.job_flag, only=args.only)
+        report = run_project(
+            args.spec, project_directory, stage_set, comm,
+            job_flag=args.job_flag)
     except Exception as failure:                       # noqa: BLE001
         # A run that halts (a broken contract, an unresolved spec) reports
         # WHY and exits non-zero, rather than a raw traceback the user must
@@ -302,48 +301,39 @@ def _refuse_live_off_allocation() -> int | None:
 
 
 def _print_summary(report, dry_run: bool) -> None:
-    """Print a concise per-member summary of the finished study."""
+    """Print a concise summary of the finished project's one pair."""
     mode = ("DRY RUN — placeholder stages, no physics"
             if dry_run else "run")
-    print(f"\nsabsim {mode}: study '{report.study_name}'")
-    for result in report.member_results:
-        trust = "trusted" if result.trusted else "UNTRUSTED"
-        print(f"  member '{result.specification.name}' [{trust}]")
-        for measure in result.measures.measures:
-            value = ("unresolved" if measure.value is None
-                     else f"{measure.value:.4g} {measure.unit_native}")
-            print(f"      {measure.name}: {value} ({measure.status.value})")
-    for outcome in report.relation_outcomes:
-        value = ("unresolved" if outcome.value is None
-                 else f"{outcome.value:.4g}")
-        print(f"  relation {outcome.kind} {list(outcome.members)}: {value}")
+    print(f"\nsabsim {mode}: project '{report.description}'")
+    result = report.result
+    trust = "trusted" if result.trusted else "UNTRUSTED"
+    print(f"  pair '{report.pair_label}' [{trust}]")
+    for measure in result.measures.measures:
+        value = ("unresolved" if measure.value is None
+                 else f"{measure.value:.4g} {measure.unit_native}")
+        print(f"      {measure.name}: {value} ({measure.status.value})")
 
 
-def _print_job_summary(results) -> None:
-    """Print what ONE per-kind job produced, and what to submit next.
+def _print_job_summary(result) -> None:
+    """Print what ONE pair job produced, and what to submit next.
 
-    A per-job run is one checkpoint in the hand-driven submission sequence
-    (DESIGN.md §10.2, §10.5), so the summary names the artifact each member
-    wrote and — reinforcing the guided index — which job comes next in the
-    registry order, or that the chain is complete.
+    A per-job run is one checkpoint in the hand-driven submission
+    sequence (DESIGN.md §10.2, §10.5), so the summary names the
+    deliverable the job wrote and — reinforcing the guide — which jobs
+    wait on it in the registry's dependency graph, or that the chain is
+    complete.
     """
-    from sabsim.deploy.registry import JOB_NAMES
+    from sabsim.deploy.registry import jobs_depending_on
 
-    if not results:
-        print("\nsabsim run: no members ran")
-        return
-    job_name = results[0].job_name
-    position = JOB_NAMES.index(job_name)
-    next_job = (JOB_NAMES[position + 1]
-                if position + 1 < len(JOB_NAMES) else None)
-
-    print(f"\nsabsim run: job '{job_name}' complete")
-    for result in results:
-        print(f"  member '{result.member_name}': wrote "
-              f"{result.artifact_written}")
-    if next_job is not None:
-        print(f"  check the result, then submit the '{next_job}' job "
-              f"(sabsim run --{next_job}).")
+    print(f"\nsabsim run: job '{result.job_name}' complete")
+    print(f"  pair '{result.pair_label}': wrote "
+          f"{result.artifact_written} in {result.deliverable_directory}")
+    followers = jobs_depending_on(result.job_name)
+    if followers:
+        names = ", ".join(f"'{job.name}' (sabsim run {job.flag})"
+                          for job in followers)
+        print(f"  check the result; once every job it waits on has "
+              f"finished, submit: {names}.")
     else:
         print("  this was the last job in the chain; the measure vector "
               "is written.")
@@ -360,8 +350,8 @@ def _prepare(args: argparse.Namespace) -> int:
     from sabsim.deploy.prepare import GUIDE_FILENAME, prepare
 
     if not os.path.isfile(args.spec):
-        print(f"sabsim: no study spec at '{args.spec}' — give a path, or "
-              f"put a sabsim.toml in this directory", file=sys.stderr)
+        print(f"sabsim: no project file at '{args.spec}' — give a path, "
+              f"or put a sabsim.toml in this directory", file=sys.stderr)
         return 2
     if not os.path.isfile(args.rc):
         print(f"sabsim: no deployment rc at '{args.rc}' — give one with "
@@ -369,9 +359,11 @@ def _prepare(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
-    job_directory = os.getcwd()
+    # The scripts land in the PROJECT FOLDER — where the project file is
+    # — beside the four stage folders they fill (ARCHITECTURE.md §1).
+    project_directory = os.path.dirname(os.path.abspath(args.spec))
     try:
-        entries = prepare(args.spec, args.rc, job_directory,
+        entries = prepare(args.spec, args.rc, project_directory,
                           dump_visuals=args.dump_visuals)
     except Exception as failure:                       # noqa: BLE001
         # A gate failure (unset root, walltime over ceiling, bad rc) reports
@@ -380,7 +372,7 @@ def _prepare(args: argparse.Namespace) -> int:
         return 1
 
     print(f"\nsabsim prepare: wrote {len(entries)} script(s) to "
-          f"{job_directory}")
+          f"{project_directory}")
     for entry in entries:
         print(f"  {entry.script_name}")
     print(f"  submit in the order in {GUIDE_FILENAME}.")

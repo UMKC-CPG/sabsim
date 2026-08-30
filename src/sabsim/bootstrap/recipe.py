@@ -1,10 +1,10 @@
 """The force-model RECIPE: records + loader (DESIGN.md §4.8, PSEUDOCODE §11.1).
 
-A recipe is the third input file of the project, beside the study
+A recipe is the third input file of a project, beside the project
 specification and the deployment rc, and it lives on a third clock: a
 potential is manufactured ONCE from it and then consumed unchanged by
 many studies. This module is the in-memory shape of that file and the
-loader that reads it with the study file's own discipline — every key
+loader that reads it with the project file's own discipline — every key
 required (no hidden defaults, DESIGN.md §1.4), units carried, and the
 location roots expanded so every later consumer sees plain paths.
 
@@ -131,15 +131,15 @@ class StartingCollection:
 class GenerationPlan:
     """Collection 2 — how the hard configurations are harvested (part 5).
 
-    Nothing here runs new MD: the plan names an ordinary member run,
+    Nothing here runs new MD: the plan names an ordinary PROJECT run,
     recorded with ``--dump-visuals`` under the universal model, whose
     trajectories the harvester reads (PSEUDOCODE §11.3, "generate mode
-    is a consumer difference").
+    is a consumer difference"). The project's folder — the one its file
+    sits in — holds the stage folders whose deliverables say which
+    ``run-<id>`` under ``intermediate/`` carries the dumps.
     """
-    study: str                  # the study spec that member belongs to
-    member: str                 # which member's dumps to harvest
-    job_directory: str          # that run's home (scratch mirror holds
-                                # the dumps)
+    project: str                # the project file (sabsim.toml) whose
+                                # one pair's dumps are harvested
     frames_per_stage: dict      # stage -> frames kept
     subcell_crystalline_layers: int   # layers kept under each skin
     subcell_vacuum: Quantity    # vacuum closing the cut sub-cell
@@ -338,9 +338,7 @@ def _plan_from_table(table: dict, context: str) -> GenerationPlan:
             raise SpecificationError(
                 f"{context} -> frames_per_stage: missing '{stage}'")
     return GenerationPlan(
-        study=str(_require(table, "study", context)),
-        member=str(_require(table, "member", context)),
-        job_directory=str(_require(table, "job_directory", context)),
+        project=str(_require(table, "project", context)),
         frames_per_stage={key: int(value) for key, value in frames.items()},
         subcell_crystalline_layers=_require_int(
             table, "subcell_crystalline_layers", context),
@@ -378,7 +376,7 @@ def _settings_from_table(table: dict, context: str) -> ReferenceSettings:
 
 
 # ---------------------------------------------------------------------
-# The loader, and the validation mirroring the study's three phases.
+# The loader, and the validation mirroring the project file's three phases.
 # ---------------------------------------------------------------------
 
 def _reject_if_inconsistent(recipe: ForceModelRecipe) -> None:
@@ -484,7 +482,7 @@ def load_recipe(recipe_path: str | Path) -> ForceModelRecipe:
 
     Phase three — do the referenced files exist — is
     :func:`check_recipe_references`, called by the commands that are
-    about to spend on them, exactly as the study loader splits its own
+    about to spend on them, exactly as the project loader splits its own
     checks.
     """
     with Path(recipe_path).open("rb") as recipe_file:

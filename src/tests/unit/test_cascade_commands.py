@@ -12,6 +12,8 @@ against the true records.
 
 import os
 
+from tests.unit.support import template_pair
+
 import pytest
 
 from sabsim.driver.cascade_potential import resolve_cascade_generator
@@ -27,16 +29,12 @@ from sabsim.driver.commands import (
     cascade_setup_commands,
     insert_projectile_commands,
 )
-from sabsim.spec.loader import load_and_validate_study
 
-_TEMPLATE_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "study_spec.toml"))
 
 
 def _template_member():
-    """The first template member — a real MemberSpecification."""
-    return load_and_validate_study(_TEMPLATE_PATH).members[0]
+    """The first template pair — a real PairSpecification."""
+    return template_pair()
 
 
 # ---------------------------------------------------------------------
@@ -94,8 +92,8 @@ def test_cascade_integrator_is_nve_all_plus_frozen_base_plus_border():
 
 def test_adaptive_timestep_caps_move_and_uses_cascade_step_as_ceiling():
     """dt/reset caps the per-step move; the ceiling is cascade_timestep."""
-    member = _template_member()
-    commands = cascade_adaptive_timestep_commands(member)
+    pair = _template_member()
+    commands = cascade_adaptive_timestep_commands(pair)
     line = commands[0]
     assert line.startswith("fix cascade_dt all dt/reset 1 ")
     # The documented max-move stand-in (0.1 A) is the final argument.
@@ -119,10 +117,10 @@ def test_relaxation_runs_at_the_md_step_not_the_cascade_step():
     at 49% of a single-impact run).
     """
     from sabsim.driver.commands import to_metal
-    member = _template_member()
-    commands = cascade_fixed_timestep_commands(member)
-    md_step = to_metal(member.numerical.md_timestep, "time")
-    cascade_step = to_metal(member.numerical.cascade_timestep, "time")
+    pair = _template_member()
+    commands = cascade_fixed_timestep_commands(pair)
+    md_step = to_metal(pair.numerical.md_timestep, "time")
+    cascade_step = to_metal(pair.numerical.cascade_timestep, "time")
     # The two must differ, or the test proves nothing.
     assert md_step != cascade_step
     assert commands[1] == f"timestep {_lammps_number(md_step)}"
@@ -162,12 +160,12 @@ def test_cascade_halt_watches_elapsed_simulation_time():
 
 def test_cascade_setup_opens_the_top_and_defines_elapsed_time():
     """Setup uses the open p p f box and defines the halt's time variable."""
-    member = _template_member()
+    pair = _template_member()
     force_model = resolve_cascade_generator(
         {"Si": 1, "Ar": 2}, projectile_species={"Ar"},
         weights_path="/models/dpa3.pth", allow_unvalidated=True)
     commands = cascade_setup_commands(
-        member, force_model, data_file="slab.data",
+        pair, force_model, data_file="slab.data",
         base_low=10.0, surface_high=40.0, seed=7)
     # The open top so sputtered atoms leave rather than wrap (§3.3).
     assert "boundary p p f" in commands

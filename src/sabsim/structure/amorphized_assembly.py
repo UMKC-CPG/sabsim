@@ -1,6 +1,6 @@
 """Assemble two independently amorphized halves into a facing pair (§2.6).
 
-This is the BARRIER stage of the member chain (`ARCHITECTURE.md` §4.3):
+This is the BARRIER stage of the pair chain (`ARCHITECTURE.md` §4.3):
 the first stage to see BOTH wafers. Each half was activated ALONE in its
 own vacuum cell, on its own engine, and its amorphized final state was
 written to a LAMMPS data file (the §4.3 file handoff, which is also the
@@ -32,7 +32,7 @@ Four §2.6 decisions live here, each answering a specific prior-art error:
   the slab).
 * **The clash is relieved, not fatal.** After placement the minimum
   cross-slab distance is checked; if it violates the floor the gap is
-  backed off and the adjustment RECORDED, rather than aborting the member.
+  backed off and the adjustment RECORDED, rather than aborting the pair.
 """
 
 from __future__ import annotations

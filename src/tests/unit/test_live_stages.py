@@ -29,7 +29,6 @@ from sabsim.pipeline.live_stages import (
     _resolve_cif,
     build_halves,
 )
-from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import Quantity
 from sabsim.structure.slab_builder import (
     WAFER_A_TAG,
@@ -38,29 +37,25 @@ from sabsim.structure.slab_builder import (
     read_standalone_half,
 )
 
-_TEMPLATE = "share/templates/study_spec.toml"
+from tests.unit.support import si_si_pair, template_pair
 
 
 def _si_si_member():
-    """The Si/Si reference member — both wafers silicon (identity case)."""
-    study = load_and_validate_study(_TEMPLATE)
-    for member in study.members:
-        if member.name == "si-si-reference":
-            return member
-    raise AssertionError("si-si-reference member not found in template")
+    """The Si/Si pair — both wafers silicon (the identity case)."""
+    return si_si_pair()
 
 
-def _derived_lattices(member):
+def _derived_lattices(pair):
     """Model-derived cells for the login-node build test.
 
     ``derive_lattices_live`` (the engine step) produces these upstream; the
     build only rescales to them, so the login-node build test supplies them
     directly. It uses each material's OWN CIF conventional cell — an
     identity rescale — so the cut geometry is unchanged and every material
-    in the member (Si, or Si and silica) is covered.
+    in the pair (Si, or Si and silica) is covered.
     """
     cells = {}
-    for wafer in (member.material.wafer_a, member.material.wafer_b):
+    for wafer in (pair.material.wafer_a, pair.material.wafer_b):
         if wafer.identity in cells:
             continue
         crystal = load_crystal(_resolve_cif(wafer.cif_source))
@@ -168,9 +163,9 @@ def test_pull_note_declares_a_resumed_rung():
 
 def test_build_halves_writes_two_handles(tmp_path):
     """Both wafers become standalone data files with real handles."""
-    member = _si_si_member()
+    pair = _si_si_member()
     handle_a, handle_b, shared = build_halves(
-        member,         derived_lattices=_derived_lattices(member),
+        pair,         derived_lattices=_derived_lattices(pair),
         scratch_directory=str(tmp_path))
 
     # Two handles, tagged bottom A / top B, each naming a written file.
@@ -204,26 +199,26 @@ def test_footprint_repeat_sizes_the_dose_and_floors_at_one():
 
 def test_effective_slab_thickness_is_a_floor_over_the_criterion():
     """Thickness holds the chosen value but never dips below §2.5's sum."""
-    member = _si_si_member()
+    pair = _si_si_member()
     # Silicon default: 55 chosen vs 7 + 30 = 37 required, so 55 wins and the
     # §3.6-anchored cell is preserved.
-    assert _effective_slab_thickness(member) == pytest.approx(55.0)
+    assert _effective_slab_thickness(pair) == pytest.approx(55.0)
     # A study that REQUIRES a deeper skin forces a thicker slab: 60 + 30 =
     # 90 now exceeds the chosen 55, so the criterion lifts it (the depth
     # term is the study's required_activated_depth, DESIGN §2.5/§3.5).
-    deep = replace(member, protocol=replace(
-        member.protocol,
+    deep = replace(pair, protocol=replace(
+        pair.protocol,
         required_activated_depth=Quantity(value=60.0, unit="angstrom")))
     assert _effective_slab_thickness(deep) == pytest.approx(90.0)
 
 
 def _member_with_footprint(area):
-    """The Si/Si member with its dose footprint retargeted (frozen copy)."""
-    member = _si_si_member()
+    """The Si/Si pair with its dose footprint retargeted (frozen copy)."""
+    pair = _si_si_member()
     numerical = replace(
-        member.numerical,
+        pair.numerical,
         target_footprint_area=Quantity(value=area, unit="angstrom^2"))
-    return replace(member, numerical=numerical)
+    return replace(pair, numerical=numerical)
 
 
 def test_target_footprint_area_scales_the_built_cell(tmp_path):
@@ -255,9 +250,9 @@ def test_target_footprint_area_scales_the_built_cell(tmp_path):
 
 def test_built_half_declares_the_beam_and_is_orthogonal(tmp_path):
     """The written half declares the Ar type and has a tilt-free cell."""
-    member = _si_si_member()
+    pair = _si_si_member()
     handle_a, _, _ = build_halves(
-        member,         derived_lattices=_derived_lattices(member),
+        pair,         derived_lattices=_derived_lattices(pair),
         scratch_directory=str(tmp_path))
 
     text = (tmp_path / handle_a.data_file.split("/")[-1]).read_text()
@@ -278,9 +273,9 @@ def test_built_half_declares_the_beam_and_is_orthogonal(tmp_path):
 
 def test_read_standalone_half_round_trips_species(tmp_path):
     """read_standalone_half recovers positions and species from disk."""
-    member = _si_si_member()
+    pair = _si_si_member()
     handle_a, _, _ = build_halves(
-        member,         derived_lattices=_derived_lattices(member),
+        pair,         derived_lattices=_derived_lattices(pair),
         scratch_directory=str(tmp_path))
 
     half = read_standalone_half(
@@ -323,7 +318,7 @@ def _structure_with_area():
 
 def test_analyzer_reports_the_slowest_separated_rung():
     """M1 is the slowest rate's work per area; the bond verdict rides along."""
-    member = _si_si_member()
+    pair = _si_si_member()
     # Two rungs; the SLOW one (rate 1) is the quasi-static estimate.
     fast = PullOutcome(
         rate_value=10.0, rate_unit="m/s", note="", complete=True,
@@ -337,7 +332,7 @@ def test_analyzer_reports_the_slowest_separated_rung():
         press=PressOutcome(bonded=True, note=""), reference_ok=True,
         pulls=(fast, slow))
 
-    measures = run_analyzer_live(_structure_with_area(), bond, member)
+    measures = run_analyzer_live(_structure_with_area(), bond, pair)
     mechanical = measures.by_name("mechanical_work_of_separation")
     # Slow rung: trapezoid([0,1,0] over [0,1,2]) = 1.0 eV; /area 100 = 0.01.
     assert mechanical.status is MeasureStatus.OK
@@ -347,14 +342,14 @@ def test_analyzer_reports_the_slowest_separated_rung():
 
 def test_analyzer_unresolved_when_no_rung_separates():
     """No complete separation -> the mechanical measure is unresolved."""
-    member = _si_si_member()
+    pair = _si_si_member()
     incomplete = PullOutcome(
         rate_value=1.0, rate_unit="m/s", note="", complete=False)
     bond = BondDebondResult(
         press=PressOutcome(bonded=False, note="no contact"),
         reference_ok=False, pulls=(incomplete,))
 
-    measures = run_analyzer_live(_structure_with_area(), bond, member)
+    measures = run_analyzer_live(_structure_with_area(), bond, pair)
     mechanical = measures.by_name("mechanical_work_of_separation")
     assert mechanical.status is MeasureStatus.UNRESOLVED
     assert mechanical.value is None
@@ -381,7 +376,7 @@ def test_analyzer_surfaces_the_per_surface_activation_gate():
     gate's summary as the method.
     """
     from dataclasses import replace
-    member = _si_si_member()
+    pair = _si_si_member()
     pull = PullOutcome(
         rate_value=1.0, rate_unit="m/s", note="", complete=True,
         separation_index=2, grip_displacement=(0.0, 1.0, 2.0),
@@ -393,7 +388,7 @@ def test_analyzer_surfaces_the_per_surface_activation_gate():
         _structure_with_area(),
         activation_a=_passing_gate(8.5), activation_b=_passing_gate(7.2))
 
-    measures = run_analyzer_live(structure, bond, member)
+    measures = run_analyzer_live(structure, bond, pair)
 
     depth_a = measures.by_name("activated_depth_a")
     assert depth_a.value == pytest.approx(8.5)
@@ -406,14 +401,14 @@ def test_analyzer_surfaces_the_per_surface_activation_gate():
 
 def test_analyzer_omits_activation_when_the_pair_carries_no_verdict():
     """No activation verdict on the pair (a skeleton) -> no such measure."""
-    member = _si_si_member()
+    pair = _si_si_member()
     incomplete = PullOutcome(
         rate_value=1.0, rate_unit="m/s", note="", complete=False)
     bond = BondDebondResult(
         press=PressOutcome(bonded=False, note=""), reference_ok=False,
         pulls=(incomplete,))          # the Structure's verdicts default None
 
-    measures = run_analyzer_live(_structure_with_area(), bond, member)
+    measures = run_analyzer_live(_structure_with_area(), bond, pair)
     names = {measure.name for measure in measures.measures}
     assert "activated_depth_a" not in names
     assert "activated_depth_b" not in names
@@ -470,7 +465,7 @@ def test_serial_run_writes_without_a_communicator():
 
 
 # ---------------------------------------------------------------------
-# Locating a member's crystal file (the CLI runs from the JOB dir).
+# Locating a pair's crystal file (the CLI runs from the JOB dir).
 # ---------------------------------------------------------------------
 
 def test_shipped_cif_resolves_from_an_unrelated_directory(
@@ -511,9 +506,9 @@ def test_missing_cif_names_every_place_it_looked(monkeypatch, tmp_path):
 
 
 def _dissimilar_member():
-    """A Si/silica member built from CIFs that actually ship.
+    """A Si/silica pair built from CIFs that actually ship.
 
-    The template's si-sio2 member names a beta-cristobalite CIF that is
+    The template's si-sio2 pair names a beta-cristobalite CIF that is
     not created until the compound build lands, so this swaps the second
     wafer for the alpha-quartz file already in the tree. What it exists
     to exercise is the type map, not the lattice match: two wafers whose
@@ -533,17 +528,17 @@ def _dissimilar_member():
 
 
 def test_both_halves_declare_the_member_species_union(tmp_path):
-    """A silicon half in a Si/silica member still declares oxygen (§4.3).
+    """A silicon half in a Si/silica pair still declares oxygen (§4.3).
 
     STRUCTURAL 1a puts one potential over the union of the pair's
     species, and §4.3 makes that a single global type map so a type id
     means the same element everywhere. Without it the silicon half would
     declare no oxygen type, and the (species, domain) force-model lookup
-    of §4.8 could not resolve the member's declared domain for that half.
+    of §4.8 could not resolve the pair's declared domain for that half.
     """
-    member = _dissimilar_member()
+    pair = _dissimilar_member()
     handle_a, handle_b, _ = build_halves(
-        member,         derived_lattices=_derived_lattices(member),
+        pair,         derived_lattices=_derived_lattices(pair),
         scratch_directory=str(tmp_path))
 
     # Identical maps on both sides — same elements, same id for each.
@@ -581,9 +576,9 @@ def test_dissimilar_halves_emerge_commensurate(tmp_path):
     cells, and confirm the match is a real, non-identity one carrying a
     small residual strain.
     """
-    member = _dissimilar_member()
+    pair = _dissimilar_member()
     handle_a, handle_b, shared = build_halves(
-        member,         derived_lattices=_derived_lattices(member),
+        pair,         derived_lattices=_derived_lattices(pair),
         scratch_directory=str(tmp_path))
 
     # A genuine mismatch, not the identity null case, with real strain.

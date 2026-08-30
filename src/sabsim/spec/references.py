@@ -14,7 +14,7 @@ after the node-hours that reached them were already spent.
 This module is that third phase. It differs from the loader's static
 pass in ONE way that decides where it lives: it needs the ENVIRONMENT —
 a filesystem, the potential registry — and not merely the file's text.
-Keeping it out of :func:`~sabsim.spec.loader.load_and_validate_study`
+Keeping it out of :func:`~sabsim.spec.loader.load_and_validate_project`
 keeps parsing pure and testable from anywhere, and puts the
 environment-dependent question where the environment actually exists:
 the run path, before any engine opens.
@@ -37,7 +37,7 @@ import os
 from pathlib import Path
 
 from sabsim.spec.loader import SpecificationError
-from sabsim.spec.records import MemberSpecification, Study
+from sabsim.spec.records import PairSpecification, Project
 
 
 def resolve_crystal_file(cif_source: str) -> str:
@@ -98,20 +98,19 @@ def resolve_crystal_file(cif_source: str) -> str:
         f"directory the run was launched from.")
 
 
-def _crystal_problems(member: MemberSpecification) -> list:
+def _crystal_problems(pair: PairSpecification) -> list:
     """Report any wafer whose crystal file cannot be resolved."""
     problems = []
-    for role, wafer in (("wafer_a", member.material.wafer_a),
-                        ("wafer_b", member.material.wafer_b)):
+    for role, wafer in (("wafer_a", pair.material.wafer_a),
+                        ("wafer_b", pair.material.wafer_b)):
         try:
             resolve_crystal_file(wafer.cif_source)
         except FileNotFoundError as missing:
-            problems.append(
-                f"member '{member.name}' -> {role}: {missing}")
+            problems.append(f"[{role}]: {missing}")
     return problems
 
 
-def _species_union_or_none(member: MemberSpecification):
+def _species_union_or_none(pair: PairSpecification):
     """The elements both wafers contribute, or None if unreadable.
 
     Returns None rather than raising when a crystal file is missing or
@@ -122,7 +121,7 @@ def _species_union_or_none(member: MemberSpecification):
     from sabsim.structure.slab_builder import load_crystal
 
     symbols = set()
-    for wafer in (member.material.wafer_a, member.material.wafer_b):
+    for wafer in (pair.material.wafer_a, pair.material.wafer_b):
         try:
             crystal = load_crystal(resolve_crystal_file(wafer.cif_source))
         except Exception:
@@ -134,20 +133,18 @@ def _species_union_or_none(member: MemberSpecification):
     return frozenset(symbols)
 
 
-def _potential_problems(study: Study) -> list:
+def _potential_problems(pair: PairSpecification) -> list:
     """Report a ``[potential]`` block the run could not execute (§4.7).
 
     The universal model's NAME must be one SABSIM knows how to run — a
     row of the supported-models table (DESIGN §4.7, revised 2026-08-28) —
-    so a study never silently runs under a model the code has no record
-    of; and both weights files must exist, because a missing model file
-    would otherwise surface an hour into a GPU job as a LAMMPS error
-    rather than on the login node now.
+    so a project never silently runs under a model the code has no
+    record of; and both weights files must exist, because a missing
+    model file would otherwise surface an hour into a GPU job as a
+    LAMMPS error rather than on the login node now.
     """
     from sabsim.driver.cascade_potential import supported_universal_model
-    spec = study.members[0].potential if study.members else None
-    if spec is None:
-        return []
+    spec = pair.potential
     problems = []
     try:
         supported_universal_model(spec.universal_model)
@@ -162,46 +159,44 @@ def _potential_problems(study: Study) -> list:
     return problems
 
 
-def _library_problems(member: MemberSpecification) -> list:
-    """Report an environment library the activate job could not use.
+def _library_problems(pair: PairSpecification) -> list:
+    """Report an environment library a prep job could not use.
 
     The §3.5 gate judges "crystalline" against a bootstrap-made library
-    found PER WAFER in the study folder, in the subfolder named by the
-    wafer's ``material`` label (DESIGN §1.2/§3.5; Paul, 2026-08-29 after
-    LEDGER T-39). Every check here needs to READ a library file —
-    exactly the environment-dependence that defines phase three. For
-    each of the member's two wafers the file must exist, and if it does
-    the same rules the activate job applies (:func:`~sabsim.driver.
-    environment_library.check_library_against_study`: model, engine,
-    that wafer's face, the temperature warn/refuse band) run now, so a
-    mismatch costs no node-hour. Only the members being run are checked
-    (see :func:`check_study_references`), so the silicon member of a
-    study is never refused on the silica members' account.
+    found PER SURFACE in the project: ``prep_surf1_<a>/`` for wafer A
+    and ``prep_surf2_<b>/`` for wafer B (DESIGN §1.2/§3.5; Paul,
+    2026-08-30). Every check here needs to READ a library file — exactly
+    the environment-dependence that defines phase three. For each of
+    the two surfaces the file must exist, and if it does the same rules
+    the prep job applies (:func:`~sabsim.driver.environment_library.
+    check_library_against_project`: model, engine, that wafer's face, the
+    temperature warn/refuse band) run now, so a mismatch costs no
+    node-hour. A same-material pair has two prep folders and both are
+    checked — the second is usually a copy of the first, and a copy
+    that was never made is exactly what this catches.
     """
     from sabsim.driver.environment_library import (
-        check_library_against_study,
+        check_library_against_project,
         library_manifest_path,
         read_environment_library,
     )
     problems = []
-    seen = set()
-    for wafer in (member.material.wafer_a, member.material.wafer_b):
-        if wafer.identity in seen:       # A/A pairs share one library
-            continue
-        seen.add(wafer.identity)
+    for role, wafer in (("wafer_a", pair.material.wafer_a),
+                        ("wafer_b", pair.material.wafer_b)):
         path = library_manifest_path(wafer)
-        context = (f"member '{member.name}' -> wafer '{wafer.identity}' "
-                   f"environment library")
+        prep_folder = os.path.basename(wafer.preparation_directory)
+        context = (f"[{role}] '{wafer.identity}' environment library "
+                   f"in {prep_folder}/")
         if not os.path.isfile(path):
             problems.append(
                 f"{context} is not there: {path} (run `sabsim bootstrap "
-                f"generate` in that folder, or copy a prepared "
-                f"'{wafer.identity}/' folder into the study — "
-                f"ARCHITECTURE §1, DESIGN §4.8 part 2)")
+                f"generate` inside '{prep_folder}/', or copy a prepared "
+                f"prep_surf*_{wafer.identity.lower()}/ folder there under "
+                f"this name — ARCHITECTURE §1, DESIGN §4.8 part 2)")
             continue
         try:
             library = read_environment_library(path)
-            check_library_against_study(library, member, wafer)
+            check_library_against_project(library, pair, wafer)
         except SpecificationError as refused:
             problems.append(str(refused))
         except Exception as unreadable:  # a corrupt or half-written pair
@@ -209,19 +204,19 @@ def _library_problems(member: MemberSpecification) -> list:
     return problems
 
 
-def check_study_references(
-        study: Study, activation_gate_will_run: bool = True) -> None:
-    """Phase three: every artifact a study POINTS AT must be there.
+def check_project_references(
+        project: Project, activation_gate_will_run: bool = True) -> None:
+    """Phase three: every artifact a project POINTS AT must be there.
 
     Raises :class:`~sabsim.spec.loader.SpecificationError` listing EVERY
-    problem found across every member, so one pass over the spec fixes
-    all of them. Returns quietly when the study is fully resolvable.
+    problem found, so one pass over the file fixes all of them. Returns
+    quietly when the project is fully resolvable.
 
     ``activation_gate_will_run`` says whether this run opens the §3.5
     gate at all. The walking skeleton (a ``--dry-run``) never does — its
     activation stage is a stand-in — so it has no use for the
     environment library and is not refused for lacking one; a live run
-    always checks it, because its activate job WILL open the gate.
+    always checks it, because its prep jobs WILL open the gate.
 
     What is deliberately NOT checked, and why it is named rather than
     skipped: ``potential_ref`` points at a manufactured force model, and
@@ -229,16 +224,15 @@ def check_study_references(
     so there is no store to resolve it against. When that store exists
     this is where its lookup belongs.
     """
-    problems = []
-    for member in study.members:
-        problems.extend(_crystal_problems(member))
-        if activation_gate_will_run:
-            problems.extend(_library_problems(member))
-    problems.extend(_potential_problems(study))
+    pair = project.pair
+    problems = list(_crystal_problems(pair))
+    if activation_gate_will_run:
+        problems.extend(_library_problems(pair))
+    problems.extend(_potential_problems(pair))
 
     if problems:
         listed = "\n  - ".join(problems)
         raise SpecificationError(
-            f"the study references {len(problems)} artifact(s) that "
+            f"the project references {len(problems)} artifact(s) that "
             f"could not be resolved (DESIGN §1.5, phase three):\n"
             f"  - {listed}")

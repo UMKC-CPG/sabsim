@@ -1,13 +1,16 @@
-"""Collection 2 — harvest the hard configurations from a member run.
+"""Collection 2 — harvest the hard configurations from a project run.
 
 The bootstrap runs NO cascade and NO press of its own (PSEUDOCODE §11.3):
-it reads the trajectories an ordinary member job recorded when run with
-trajectories on under the universal model, and takes from them the five
-families the protocol visits (DESIGN §4.8 part 5, revised 2026-08-28):
+it reads the trajectories an ordinary project's jobs recorded when run
+with trajectories on under the universal model, and takes from them the
+five families the protocol visits (DESIGN §4.8 part 5, revised
+2026-08-28). Where the files are (revised 2026-08-30): each stage's
+DELIVERABLE in its project stage folder names the ``run-<id>`` folder
+under ``intermediate/<stage folder>/`` that holds its dumps.
 
 * family 7, the HEALED activated surface — the tail of each half's
   activate movie, from the step its heal began (the ``heal_start_step``
-  marker the session wrote, carried on the assembled-pair manifest);
+  marker the session wrote, carried on the activated-half manifest);
 * family 8, the pair at press start — the press-movie frame AT the
   ledger's ``press_start``;
 * family 9, the settled zero-load reference — the frames between the
@@ -41,10 +44,15 @@ from sabsim.bootstrap.subcell import (
     atomic_layer_spacing,
     cut_interface_subcell,
 )
-from sabsim.deploy.scratch import member_scratch
+from sabsim.deploy.scratch import deliverable_directory, stage_scratch
 from sabsim.driver.commands import stage_dump_file, to_metal
-from sabsim.pipeline.handoff import read_assembled_pair, read_pull_results
-from sabsim.spec.loader import load_and_validate_study
+from sabsim.pipeline.handoff import (
+    read_activated_half,
+    read_assembled_pair,
+    read_pull_results,
+)
+from sabsim.spec.loader import load_and_validate_project
+from sabsim.spec.records import stage_folders
 
 
 def _evenly(frames: list, count: int) -> list:
@@ -127,27 +135,36 @@ def _without_species(atoms: Atoms, species: set) -> Atoms:
     return atoms[keep]
 
 
+def _run_directory(project_directory, stage_folder: str,
+                   run_id: str, what: str):
+    """The ``run-<id>`` scratch folder a deliverable says it came from."""
+    if not run_id:
+        raise KeyError(
+            f"the {what} deliverable in {stage_folder}/ records no run "
+            f"id, so its dumps cannot be found under intermediate/; it "
+            f"predates the run-folder convention (2026-08-30)")
+    return stage_scratch(project_directory, stage_folder) / run_id
+
+
 def harvest_collection2(recipe: ForceModelRecipe) -> list:
-    """Read the member run named by the plan; return ``(family, source,
+    """Read the project run named by the plan; return ``(family, source,
     Atoms)`` triples for families 7–11.
 
     Raises :class:`FileNotFoundError` naming the missing dump when the
-    member was not run with ``--dump-visuals``: a silent empty harvest
+    project was not run with ``--dump-visuals``: a silent empty harvest
     would look like a labelled-but-empty collection.
     """
     plan = recipe.generation_plan
-    study = load_and_validate_study(plan.study)
-    member = next(
-        (m for m in study.members if m.name == plan.member), None)
-    if member is None:
-        raise KeyError(
-            f"[generation_plan] member '{plan.member}' is not in "
-            f"{plan.study}")
-    scratch = member_scratch(plan.job_directory, study.name, member.name)
-    structure = read_assembled_pair(scratch)
+    project = load_and_validate_project(plan.project)
+    pair = project.pair
+    home = project.project_directory
+    folders = stage_folders(pair)
+    label = pair.pair_label
+    bond_folder = deliverable_directory(home, folders.bond)
+    structure = read_assembled_pair(bond_folder)
     built = structure.built
     type_map = dict(built.type_map)
-    projectile = {member.protocol.activation_species}
+    projectile = {pair.protocol.activation_species}
     tags = np.asarray(built.atoms.get_tags())
     # The working lattice constant: the assembled cell's x edge is a whole
     # number of conventional cells, and the CIF's published constant says
@@ -156,13 +173,13 @@ def harvest_collection2(recipe: ForceModelRecipe) -> list:
     from sabsim.spec.references import resolve_crystal_file
     from sabsim.structure.slab_builder import load_crystal
     published = float(load_crystal(resolve_crystal_file(
-        member.material.wafer_a.cif_source)).lattice.a)
+        pair.material.wafer_a.cif_source)).lattice.a)
     edge = float(np.linalg.norm(np.asarray(built.atoms.get_cell())[0]))
     lattice_constant = edge / max(1.0, round(edge / published))
-    skin_depth = to_metal(member.protocol.required_activated_depth,
+    skin_depth = to_metal(pair.protocol.required_activated_depth,
                           "distance")
     layer = atomic_layer_spacing(
-        lattice_constant, member.material.wafer_a.surface_face)
+        lattice_constant, pair.material.wafer_a.surface_face)
     vacuum = to_metal(plan.subcell_vacuum, "distance")
 
     def subcell(frame: Atoms) -> Atoms:
@@ -172,38 +189,45 @@ def harvest_collection2(recipe: ForceModelRecipe) -> list:
 
     structures = []
     # Family 7 — the HEALED activated surfaces: each half's movie from
-    # the step its heal began (the session's marker, on the manifest).
-    heal_steps = {"a": structure.heal_start_step_a,
-                  "b": structure.heal_start_step_b}
-    for role in ("a", "b"):
-        dump = stage_dump_file(str(scratch), member.name, f"activate_{role}")
+    # the step its heal began (the session's marker, on the activated-
+    # half manifest in its prep folder), found in that prep's run folder.
+    for role, prep_folder in (("a", folders.prep_surf1),
+                              ("b", folders.prep_surf2)):
+        half = read_activated_half(deliverable_directory(home, prep_folder))
+        run_dir = _run_directory(home, prep_folder, half.run_id,
+                                 "activated-half")
+        dump = stage_dump_file(str(run_dir), label, f"activate_{role}")
         frames = _read_dump(dump, type_map)
         if not frames:
             raise FileNotFoundError(
                 f"no activate dump for half {role} at {dump}: run the "
-                f"member with trajectories on first")
-        if heal_steps[role] is None:
+                f"prep job with trajectories on first")
+        if half.slab.heal_start_step is None:
             raise KeyError(
-                f"the assembled-pair manifest under {scratch} records no "
-                f"heal_start_step for half {role}: the activate stage "
-                f"that wrote it predates the heal marker (2026-08-28)")
-        healed = frames_between(frames, heal_steps[role], None)
+                f"the activated-half manifest in {prep_folder}/ records "
+                f"no heal_start_step: the prep stage that wrote it "
+                f"predates the heal marker (2026-08-28)")
+        healed = frames_between(frames, half.slab.heal_start_step, None)
         for index, frame in enumerate(
                 _evenly(healed, plan.frames_per_stage["activate"])):
             structures.append((
-                "activated_surface", f"{member.name}:activate_{role}:{index}",
+                "activated_surface", f"{label}:activate_{role}:{index}",
                 _without_species(frame, projectile)))
-    # Families 8–10 — the press movie, keyed on the bond job's ledger.
+    # Families 8–10 — the press movie, keyed on the bond job's ledger;
+    # the bond deliverable names the run folder that holds the movie.
+    bond_result = read_pull_results(bond_folder)
+    scratch = _run_directory(home, folders.bond, bond_result.run_id,
+                             "pull-results")
     press_frames = _read_dump(
-        stage_dump_file(str(scratch), member.name, "press"), type_map)
+        stage_dump_file(str(scratch), label, "press"), type_map)
     if not press_frames:
         raise FileNotFoundError(
             f"no press dump under {scratch}: run the bond job with "
             f"trajectories on first")
-    ledger = read_pull_results(scratch).press.stage_steps
+    ledger = bond_result.press.stage_steps
     if ledger is None or ledger.press_start is None:
         raise KeyError(
-            f"the bond result under {scratch} carries no stage ledger: "
+            f"the bond result in {folders.bond}/ carries no stage ledger: "
             f"the bond job that wrote it predates the ledger (2026-08-28)")
     press_budget = max(1, plan.frames_per_stage["press"])
     for family, chosen in (
@@ -216,16 +240,16 @@ def harvest_collection2(recipe: ForceModelRecipe) -> list:
                                ledger.hold_end), press_budget))):
         for index, frame in enumerate(chosen):
             structures.append((
-                family, f"{member.name}:press:{family}:{index}",
+                family, f"{label}:press:{family}:{index}",
                 subcell(frame)))
     # Family 11 — every pull rung's record, through separation.
     pull_dumps = sorted(glob.glob(
-        os.path.join(str(scratch), "pull_*", f"{member.name}_pull.dump")))
+        os.path.join(str(scratch), "pull_*", f"{label}_pull.dump")))
     for dump in pull_dumps:
         rung = Path(dump).parent.name
         frames = _read_dump(dump, type_map)
         for index, frame in enumerate(
                 _evenly(frames, plan.frames_per_stage["pull"])):
             structures.append((
-                "pulled", f"{member.name}:{rung}:{index}", subcell(frame)))
+                "pulled", f"{label}:{rung}:{index}", subcell(frame)))
     return structures

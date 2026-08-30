@@ -1,21 +1,25 @@
 """Mid-chain handoff artifacts on disk (PSEUDOCODE.md §14.6).
 
-A member's three deployment jobs (activate → bond → analyze, DESIGN.md
-§10.2) are submitted separately, so each starts in a FRESH process that
-did not inherit the warm in-memory object the whole-chain run passes
-stage to stage. This module is the ``write_artifact`` / ``read_artifact``
-seam §14.3 delegated: it turns the two mid-chain records — the assembled
-:class:`~sabsim.pipeline.exec_artifacts.Structure` the activate job hands
-bond, and the :class:`~sabsim.pipeline.exec_artifacts.BondDebondResult`
-the bond job hands analyze — into COMPLETE on-disk artifacts a later job
-reconstructs from files alone.
+A pair's four deployment jobs (prep_surf1 and prep_surf2 → bond →
+analysis, DESIGN.md §10.2, revised 2026-08-30) are submitted separately,
+so each starts in a FRESH process that did not inherit the warm
+in-memory object the whole-chain run passes stage to stage. This module
+is the ``write_artifact`` / ``read_artifact`` seam §14.3 delegated: it
+turns the mid-chain records — the :class:`~sabsim.pipeline.
+exec_artifacts.ActivatedHalf` each prep job hands bond, the assembled
+:class:`~sabsim.pipeline.exec_artifacts.Structure` bond keeps for
+analysis, and the :class:`~sabsim.pipeline.exec_artifacts.
+BondDebondResult` the bond job hands analysis — into COMPLETE on-disk
+artifacts a later job reconstructs from files alone. Each lands in the
+DELIVERABLES folder of the stage that made it (``<project>/<stage
+folder>/``, ARCHITECTURE.md §1), never on scratch.
 
 Each artifact takes the §14.6 shape — small things INLINE, large things
 BY REFERENCE, the same split §3's trajectory uses:
 
 * a **readable manifest** (TOML) carrying the scalars, geometry, and
   per-rate fields, plus the NAMES of any bulky payloads. TOML keeps the
-  manifest consistent with the study-spec and rc files a human reads and
+  manifest consistent with the project and rc files a human reads and
   edits (§14.6). The standard library reads it with ``tomllib``; since
   ``tomllib`` cannot WRITE, this module emits the few value types a
   manifest uses through a small hand-rolled writer (:func:`_dump_toml`).
@@ -43,6 +47,8 @@ from __future__ import annotations
 import json
 import os
 import tomllib
+
+import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 
@@ -50,14 +56,18 @@ from ase.io import read as ase_read
 from ase.io import write as ase_write
 
 from sabsim.deploy.registry import (
+    ACTIVATED_HALF,
     ASSEMBLED_PAIR,
     MEASURE_VECTOR,
     PULL_RESULTS,
 )
 from sabsim.pipeline.exec_artifacts import (
+    ActivatedHalf,
     BondDebondResult,
     PressOutcome,
     PullOutcome,
+    SharedCell,
+    Slab,
     Structure,
     StageLedger,
 )
@@ -73,15 +83,17 @@ class HandoffError(Exception):
 
     Raised when a job is asked to start from an artifact that was never
     written or has lost a part it needs — a loud stop that names the
-    artifact and the member scratch, so a broken hand-off between two
-    submissions fails readably rather than deep inside a stage.
+    artifact and the folder, so a broken hand-off between two submissions
+    fails readably rather than deep inside a stage.
     """
 
 
-# The on-disk names each artifact owns inside a member's scratch. The
+# The on-disk names each artifact owns inside its stage folder. The
 # artifact's LOGICAL name (from the registry) maps to one manifest plus
 # any payloads; keeping the filenames here, in one place, is what lets a
-# reader open a member scratch and recognise each hand-off by sight.
+# reader open a stage folder and recognise each hand-off by sight.
+_ACTIVATED_HALF_MANIFEST = "activated_half.manifest.toml"
+_ACTIVATED_HALF_ATOMS = "activated_half.extxyz"
 _ASSEMBLED_PAIR_MANIFEST = "assembled_pair.manifest.toml"
 _ASSEMBLED_PAIR_ATOMS = "assembled_pair.atoms.extxyz"
 _ASSEMBLED_PAIR_DATA = "assembled_pair.data"
@@ -90,15 +102,158 @@ _MEASURE_VECTOR_FILE = "measure_vector.toml"
 
 
 # ---------------------------------------------------------------------
-# ASSEMBLED_PAIR — the activate job writes it, the bond and analyze jobs
-# read it (§14.2, §14.6). The atoms travel as an extended-XYZ payload
-# (tags preserved); the geometry the driver needs travels in the manifest.
+# ACTIVATED_HALF — each prep job writes ONE into its own prep folder; the
+# bond job reads BOTH (§14.2, §14.6, revised 2026-08-30). The healed
+# atoms travel as an extended-XYZ payload (species, cell, and the wafer
+# tag round-trip); the verdict, the heal step, and the shared cell the
+# half was cut on travel in the manifest, because the bond job cannot
+# re-derive any of them from the atoms.
+# ---------------------------------------------------------------------
+
+def write_activated_half(directory, half: ActivatedHalf) -> None:
+    """Write one healed, gated half as a complete artifact (§14.6).
+
+    Copies the healed half's atoms file into ``directory`` under the
+    artifact's own payload name (the live activation writes it into the
+    run's working folder on scratch; the deliverable must not point
+    there) and writes the manifest beside it. A W0 placeholder half has
+    no atoms file (``slab.data_file`` is None): then only the manifest
+    is written, and the read side returns a slab with no file, which is
+    exactly what the placeholder assembly expects.
+    """
+    import shutil
+    home = Path(directory)
+    manifest = {
+        "identity": half.slab.identity,
+        "note": half.slab.note,
+        "wafer_tag": int(half.wafer_tag),
+        "species": sorted(half.slab.species),
+        "heal_start_step": half.slab.heal_start_step,
+        "run_id": half.run_id,
+        "shared": {
+            "note": half.shared.note,
+            "residual_strain": float(half.shared.residual_strain),
+            "match_area": float(half.shared.match_area),
+            "is_identity": bool(half.shared.is_identity),
+        },
+    }
+    if half.slab.data_file is not None:
+        source = Path(half.slab.data_file)
+        target = home / _ACTIVATED_HALF_ATOMS
+        if source.resolve() != target.resolve():
+            shutil.copy2(source, target)
+        manifest["atoms_file"] = _ACTIVATED_HALF_ATOMS
+    if half.verdict is not None:
+        manifest["verdict"] = _activation_to_dict(half.verdict)
+    _write_toml(home / _ACTIVATED_HALF_MANIFEST, manifest)
+
+
+def read_activated_half(directory) -> ActivatedHalf:
+    """Reconstruct one prep job's deliverable from its folder (§14.6).
+
+    The inverse of :func:`write_activated_half`. A manifest that names
+    an atoms payload which is not there is an incomplete artifact and a
+    loud stop; a manifest with no payload at all is the W0 placeholder.
+    """
+    home = Path(directory)
+    manifest = _read_manifest(home / _ACTIVATED_HALF_MANIFEST,
+                              ACTIVATED_HALF, home)
+    data_file = None
+    if "atoms_file" in manifest:
+        atoms_path = home / manifest["atoms_file"]
+        if not atoms_path.is_file():
+            raise HandoffError(
+                f"{ACTIVATED_HALF} in {home} is missing its payload "
+                f"'{atoms_path.name}' — the artifact is incomplete")
+        data_file = str(atoms_path)
+    shared = manifest["shared"]
+    heal_step = manifest.get("heal_start_step")
+    slab = Slab(
+        identity=manifest["identity"], note=manifest["note"],
+        data_file=data_file,
+        species=frozenset(manifest.get("species", [])),
+        heal_start_step=(int(heal_step) if heal_step is not None
+                         else None))
+    return ActivatedHalf(
+        slab=slab,
+        verdict=_activation_from_dict(manifest.get("verdict")),
+        wafer_tag=int(manifest["wafer_tag"]),
+        shared=SharedCell(
+            note=shared["note"],
+            residual_strain=float(shared["residual_strain"]),
+            match_area=float(shared["match_area"]),
+            is_identity=bool(shared["is_identity"])),
+        run_id=str(manifest.get("run_id", "")))
+
+
+# How closely two halves' lateral cells must agree, in Å, to count as
+# having been built for each other. The build is deterministic, so two
+# preps of the same project agree to round-off; anything larger means a
+# different cell (a different project, a re-tuned knob, another seed of
+# the matcher) and the assembly must refuse.
+_CELL_AGREEMENT_TOLERANCE = 1.0e-6
+
+
+def check_shared_cells_agree(half_a: ActivatedHalf,
+                             half_b: ActivatedHalf) -> None:
+    """Refuse two halves that were not built in the same shared cell.
+
+    The bond job's first duty (DESIGN.md §10.2, revised 2026-08-30):
+    the two prep jobs each solved the coincidence cell for themselves,
+    so before stacking the halves the bond job checks that they agree —
+    the match provenance on both manifests, and, when both carry atoms,
+    the in-plane cell vectors of the two healed halves. A disagreement is
+    a loud :class:`HandoffError` naming what differs, never a silently
+    incommensurate interface.
+    """
+    if half_a.wafer_tag == half_b.wafer_tag:
+        raise HandoffError(
+            f"both activated halves carry wafer tag "
+            f"{half_a.wafer_tag}; bond needs one bottom (A) and one "
+            f"top (B) half")
+    cell_a, cell_b = half_a.shared, half_b.shared
+    for field_name in ("residual_strain", "match_area", "is_identity"):
+        value_a = getattr(cell_a, field_name)
+        value_b = getattr(cell_b, field_name)
+        if isinstance(value_a, float):
+            same = abs(value_a - value_b) <= _CELL_AGREEMENT_TOLERANCE
+        else:
+            same = value_a == value_b
+        if not same:
+            raise HandoffError(
+                f"the two activated halves were not built in the same "
+                f"shared cell: {field_name} is {value_a!r} for half A "
+                f"and {value_b!r} for half B. Prepare both surfaces "
+                f"from the same project file before bonding.")
+    if half_a.slab.data_file is None or half_b.slab.data_file is None:
+        return                           # placeholders carry no atoms
+    atoms_a = ase_read(half_a.slab.data_file, format="extxyz",
+                       parallel=False)
+    atoms_b = ase_read(half_b.slab.data_file, format="extxyz",
+                       parallel=False)
+    lateral_a = np.asarray(atoms_a.get_cell())[:2, :2]
+    lateral_b = np.asarray(atoms_b.get_cell())[:2, :2]
+    if not np.allclose(lateral_a, lateral_b,
+                       atol=_CELL_AGREEMENT_TOLERANCE):
+        raise HandoffError(
+            f"the two activated halves have different in-plane cells:\n"
+            f"  half A: {lateral_a.tolist()}\n"
+            f"  half B: {lateral_b.tolist()}\n"
+            f"Prepare both surfaces from the same project file before "
+            f"bonding.")
+
+
+# ---------------------------------------------------------------------
+# ASSEMBLED_PAIR — the bond job writes it after assembling the two
+# halves, and analysis reads it back (§14.2, §14.6). The atoms travel
+# as an extended-XYZ payload (tags preserved); the geometry the driver
+# needs travels in the manifest.
 # ---------------------------------------------------------------------
 
 def write_assembled_pair(scratch_directory, structure: Structure) -> None:
     """Write the assembled pair as a complete on-disk artifact (§14.6).
 
-    Writes three files under the member scratch: the atoms as an
+    Writes three files under ``scratch_directory``: the atoms as an
     extended-XYZ payload (species, cell, and the per-wafer tags all
     round-trip), the LAMMPS data file the bond engine will load, and a
     JSON manifest of the labeled-group geometry the bond job cannot
@@ -174,7 +329,7 @@ def read_assembled_pair(scratch_directory) -> Structure:
     The inverse of :func:`write_assembled_pair`: reads the atoms back from
     the extended-XYZ payload (tags and species intact), rebuilds the
     :class:`BuiltPair` from the manifest's geometry, and returns the
-    :class:`Structure` the bond and analyze jobs run on — identical in
+    :class:`Structure` the bond and analysis jobs run on — identical in
     shape to the one the whole-chain run passes in memory, so the stages
     consume it without knowing it crossed a job boundary. This is the
     Approach-C re-read the ``Structure.built`` comment forecast
@@ -225,7 +380,7 @@ def read_assembled_pair(scratch_directory) -> Structure:
 
 
 # ---------------------------------------------------------------------
-# PULL_RESULTS — the bond job writes it, the analyze job reads it (§14.2,
+# PULL_RESULTS — the bond job writes it, the analysis job reads it (§14.2,
 # §14.6). All fields are primitives and float sequences, so the whole
 # result rides in the readable manifest; the per-atom trajectories are a
 # SEPARATE §3 FrameSetRef payload on scratch and are not duplicated here.
@@ -259,6 +414,7 @@ def write_pull_results(
         if stage_steps:
             press_table["stage_steps"] = stage_steps
     manifest = {
+        "run_id": bond_debond.run_id,
         "press": press_table,
         "reference_ok": bool(bond_debond.reference_ok),
         "pulls": [_pull_to_dict(pull) for pull in bond_debond.pulls],
@@ -271,7 +427,7 @@ def read_pull_results(scratch_directory) -> BondDebondResult:
 
     The inverse of :func:`write_pull_results`: rebuilds the press outcome,
     the reference flag, and every pull rung — including the reduced curves
-    the analyzer integrates — so the analyze job reads exactly the result
+    the analyzer integrates — so the analysis job reads exactly the result
     the bond job produced.
     """
     scratch = Path(scratch_directory)
@@ -288,6 +444,7 @@ def read_pull_results(scratch_directory) -> BondDebondResult:
             stage_steps=ledger),
         reference_ok=bool(manifest["reference_ok"]),
         pulls=tuple(_pull_from_dict(pull) for pull in manifest["pulls"]),
+        run_id=str(manifest.get("run_id", "")),
     )
 
 
@@ -373,25 +530,24 @@ def _pull_from_dict(data: dict) -> PullOutcome:
 
 
 # ---------------------------------------------------------------------
-# MEASURE_VECTOR — the analyze job writes it (§14.2). It is the LAST
+# MEASURE_VECTOR — the analysis job writes it (§14.2). It is the LAST
 # artifact in the chain, so no later job reads it back; only a write side
 # is needed. The shape is the §6.6 machine-readable record.
 # ---------------------------------------------------------------------
 
-def write_measure_vector(scratch_directory, member_result) -> None:
-    """Write the analyze job's measure vector as the §4 record (§6.6).
+def write_measure_vector(directory, pair_result) -> None:
+    """Write the analysis job's measure vector as the §4 record (§6.6).
 
-    Serializes the member's measures, press verdicts, provenance, and gate
-    verdict to a JSON document under the member scratch — the terminal
-    artifact of the member chain (DESIGN.md §6.6). Reuses the sequencer's
-    own record builder so the on-disk shape matches the one the study
+    Serializes the pair's measures, press verdicts, provenance, and gate
+    verdict to a TOML document in the analysis folder — the terminal
+    artifact of the pair chain (DESIGN.md §6.6). Reuses the sequencer's
+    own record builder so the on-disk shape matches the one the project
     report emits.
     """
-    from sabsim.pipeline.sequencer import _member_to_record
+    from sabsim.pipeline.sequencer import _pair_to_record
 
-    scratch = Path(scratch_directory)
-    _write_toml(scratch / _MEASURE_VECTOR_FILE,
-                _member_to_record(member_result))
+    _write_toml(Path(directory) / _MEASURE_VECTOR_FILE,
+                _pair_to_record(pair_result))
 
 
 # ---------------------------------------------------------------------
@@ -406,32 +562,38 @@ def write_artifact(scratch_directory, name: str, record) -> None:
     Dispatches on the registry artifact name so the caller states WHICH
     hand-off it is writing, not HOW. An unknown name is a loud stop.
     """
-    if name == ASSEMBLED_PAIR:
+    if name == ACTIVATED_HALF:
+        write_activated_half(scratch_directory, record)
+    elif name == ASSEMBLED_PAIR:
         write_assembled_pair(scratch_directory, record)
     elif name == PULL_RESULTS:
         write_pull_results(scratch_directory, record)
     elif name == MEASURE_VECTOR:
         write_measure_vector(scratch_directory, record)
     else:
+        writable = [ACTIVATED_HALF, ASSEMBLED_PAIR, PULL_RESULTS,
+                    MEASURE_VECTOR]
         raise HandoffError(
             f"no writer for artifact '{name}'; the mid-chain artifacts "
-            f"are {[ASSEMBLED_PAIR, PULL_RESULTS, MEASURE_VECTOR]}")
+            f"are {writable}")
 
 
 def read_artifact(scratch_directory, name: str):
     """Reconstruct the artifact called ``name`` from disk (§14.6, §14.3).
 
-    Dispatches on the registry artifact name. Only the two mid-chain
+    Dispatches on the registry artifact name. Only the three mid-chain
     hand-offs are readable; the terminal MEASURE_VECTOR is write-only in
     v1 (no later job reads it), so asking to read it is a loud stop.
     """
+    if name == ACTIVATED_HALF:
+        return read_activated_half(scratch_directory)
     if name == ASSEMBLED_PAIR:
         return read_assembled_pair(scratch_directory)
     if name == PULL_RESULTS:
         return read_pull_results(scratch_directory)
     raise HandoffError(
         f"no reader for artifact '{name}'; the readable mid-chain "
-        f"artifacts are {[ASSEMBLED_PAIR, PULL_RESULTS]}")
+        f"artifacts are {[ACTIVATED_HALF, ASSEMBLED_PAIR, PULL_RESULTS]}")
 
 
 # ---------------------------------------------------------------------
@@ -439,7 +601,7 @@ def read_artifact(scratch_directory, name: str):
 # emitter. tomllib reads TOML but cannot write it, so this module emits
 # by hand the few value types a manifest uses (scalars, scalar arrays,
 # nested tables, and arrays of tables). Staying with TOML keeps a manifest
-# consistent with the study-spec and rc files a human reads (§14.6).
+# consistent with the project and rc files a human reads (§14.6).
 # ---------------------------------------------------------------------
 
 def _write_toml(path: Path, document: dict) -> None:

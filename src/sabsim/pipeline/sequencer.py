@@ -1,16 +1,28 @@
 """The Tier-A sequencer: the top-level control flow (PSEUDOCODE.md §1).
 
-This is ``exec_full_study`` and ``exec_one_member`` made real. The
+This is ``exec_full_project`` and ``exec_one_pair`` made real. The
 sequencer owns the eight pipeline steps and the (v1-open) quality-gate
-loop, running each member to a self-standing report and then grading
-whatever relations the study declared. Every stage is routed through
-the ``run_to_contract`` guard, so the pipeline advances only while each
-stage produces a contract-valid artifact and HALTS loudly otherwise
-(ARCHITECTURE.md §4.1, §5.1).
+loop, running the project's ONE pair to a self-standing report. Every
+stage is routed through the ``run_to_contract`` guard, so the pipeline
+advances only while each stage produces a contract-valid artifact and
+HALTS loudly otherwise (ARCHITECTURE.md §4.1, §5.1).
+
+Revised 2026-08-30 (Paul): a project holds exactly one wafer pair and
+its work falls into FOUR stage folders — ``prep_surf1_<a>/``,
+``prep_surf2_<b>/``, ``bond_<a>_<b>/``, ``analysis_<a>_<b>/`` — each
+mirrored under ``intermediate/`` for the bulky files (ARCHITECTURE.md
+§1). The whole-chain run below walks those same four stages in ONE
+process; the per-job run selector (:mod:`sabsim.pipeline.pair_jobs`)
+runs any one of them in a fresh process, reading the earlier stages'
+deliverables from their folders. Both call the SAME stage functions
+here (:func:`prep_stage`, :func:`bond_stage`, :func:`analysis_stage`),
+so the two entry points cannot drift apart. There is no relation
+layer: a comparison between two pairs is the person's, made from two
+projects' summaries (DESIGN.md §1.1).
 
 In the walking skeleton (ARCHITECTURE.md §5, wave 0) the stage bodies
 are stand-ins (:mod:`sabsim.pipeline.skeleton_stages`), so the number a
-member produces is plumbing, not physics — every ``MemberResult`` is
+pair produces is plumbing, not physics — every ``PairResult`` is
 stamped ``trusted=False``. What is REAL here is the control flow, the
 contract guarding, the provenance stamp, and the machine-readable
 emission; later waves deepen the stages behind these same seams.
@@ -20,8 +32,19 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from sabsim.deploy.registry import (
+    ACTIVATED_HALF,
+    ASSEMBLED_PAIR,
+    MEASURE_VECTOR,
+    PULL_RESULTS,
+)
+from sabsim.deploy.scratch import (
+    deliverable_directory,
+    run_subfolder,
+    stage_scratch,
+)
 from sabsim.pipeline.contracts import (
-    ACTIVATED_SLABS_CONTRACT,
+    ACTIVATED_HALF_CONTRACT,
     BOND_DEBOND_CONTRACT,
     DERIVED_LATTICES_CONTRACT,
     MEASURE_VECTOR_CONTRACT,
@@ -30,198 +53,297 @@ from sabsim.pipeline.contracts import (
     run_to_contract,
 )
 from sabsim.pipeline.exec_artifacts import (
+    ActivatedSlabs,
     GateReport,
-    MemberResult,
+    PairResult,
+    ProjectReport,
     Provenance,
-    RelationOutcome,
-    StudyReport,
     build_provenance,
 )
-from sabsim.pipeline.measures import (
-    MeasureStatus,
-    MeasureVector,
-    merge_measures,
+from sabsim.pipeline.handoff import (
+    check_shared_cells_agree,
+    read_artifact,
+    write_artifact,
 )
+from sabsim.pipeline.measures import MeasureVector, merge_measures
 from sabsim.pipeline.skeleton_stages import W0_STAGES
-from sabsim.deploy.scratch import member_scratch
-from sabsim.spec.loader import load_and_validate_study
-from sabsim.spec.references import check_study_references
-from sabsim.spec.records import MemberSpecification, Relation
+from sabsim.spec.loader import load_and_validate_project
+from sabsim.spec.records import (
+    PairSpecification,
+    StageFolders,
+    stage_folders,
+)
+from sabsim.spec.references import check_project_references
+
+# The wafer tags, inlined so this module stays free of the slab builder's
+# pymatgen import (the authoritative constants are WAFER_A_TAG /
+# WAFER_B_TAG in :mod:`sabsim.structure.slab_builder`).
+_WAFER_A_TAG = 1
+_WAFER_B_TAG = 2
 
 
-def exec_full_study(
-        study_specification, job_directory,
-        stage_set=W0_STAGES, comm=None, only=None) -> StudyReport:
-    """Run a whole study: every member, then the declared relations (§1).
+def exec_full_project(
+        project_specification, project_directory=None,
+        stage_set=W0_STAGES, comm=None) -> ProjectReport:
+    """Run a whole project: its one pair, end to end (§1).
 
-    Loads and validates the spec, executes each member independently to
-    a self-standing report, then grades the optional relations at the
-    study level (there may be none). Returns the :class:`StudyReport`;
-    also emits the machine-readable record (DESIGN.md §6.6).
+    Loads and validates the project file, then walks the four stages in
+    this one process. Returns the :class:`ProjectReport`; also emits the
+    machine-readable record (DESIGN.md §6.6).
 
-    ``job_directory`` is the run's home on the shared filesystem
-    (ARCHITECTURE.md §4.1); each member's bulky intermediates go in its
-    scratch subtree, keyed by study + member identity (§4.2 mirror) and
-    threaded EXPLICITLY into the stages that write files, so every written
-    byte stays traceable to its inputs (VISION.md goal 3). It is a required
-    argument — there is no default run home (DESIGN.md §1.4, no hidden
-    defaults).
+    ``project_directory`` is the project folder — normally left None so
+    the folder the project file was read from is used (that is where
+    the stage folders and both prep folders live, ARCHITECTURE.md §1);
+    a test may point it elsewhere. Each stage's bulky intermediates go
+    under ``intermediate/<stage folder>/run-<id>/`` and its deliverables
+    into ``<project>/<stage folder>/``, both threaded EXPLICITLY into the
+    stages that write files, so every written byte stays traceable to
+    its inputs (VISION.md goal 3).
 
     ``stage_set`` chooses WHICH bodies run at each seam (ARCHITECTURE.md
-    §5.1): the default ``W0_STAGES`` is the login-node walking skeleton (no
-    LAMMPS); a real run passes ``LIVE_STAGES`` (from
+    §5.1): the default ``W0_STAGES`` is the login-node walking skeleton
+    (no LAMMPS); a real run passes ``LIVE_STAGES`` (from
     :mod:`sabsim.pipeline.live_stages`) and the MPI ``comm`` its engines
     use. The control flow and the contracts are identical either way.
-
-    ``only`` restricts the run to a subset of members BY NAME (an iterable
-    of member names, or None for all) — the ``sabsim run --only`` case,
-    for testing or re-running a single member. A name not in the study is
-    an error, never a silent no-op. Relations are still graded over
-    whatever members ran (an unresolved relation is reported, not fatal).
     """
-    study = load_and_validate_study(study_specification)
-    # Phase three (DESIGN.md §1.5): the spec parsed and is executable in
+    project = load_and_validate_project(project_specification)
+    if project_directory is None:
+        project_directory = project.project_directory
+    # Phase three (DESIGN.md §1.5): the file parsed and is executable in
     # principle — but does everything it POINTS AT actually exist? This
-    # needs the filesystem and the registry rather than the file's text,
-    # which is why it is separate from the loader, and it runs HERE
-    # because here is the last moment before node-hours are spent. The
-    # skeleton never opens the §3.5 gate, so only a live stage set is
-    # held to the environment library (DESIGN §3.5, 2026-08-29).
-    members = study.members
-    if only is not None:
-        wanted = set(only)
-        present = {member.name for member in members}
-        missing = wanted - present
-        if missing:
-            raise ValueError(
-                f"--only names members not in the study: "
-                f"{sorted(missing)}; the study has {sorted(present)}")
-        members = tuple(m for m in members if m.name in wanted)
-    # Checked on the members that will actually RUN (PSEUDOCODE §2;
-    # LEDGER T-39), so an unprepared member never blocks a prepared one.
-    check_study_references(
-        replace(study, members=members),
-        activation_gate_will_run=stage_set is not W0_STAGES)
+    # needs the filesystem rather than the file's text, which is why it
+    # is separate from the loader, and it runs HERE because here is the
+    # last moment before node-hours are spent. The skeleton never opens
+    # the §3.5 gate, so only a live stage set is held to the environment
+    # libraries (DESIGN §3.5).
+    check_project_references(
+        project, activation_gate_will_run=stage_set is not W0_STAGES)
 
-    member_results = tuple(
-        exec_one_member(
-            member,
-            member_scratch(job_directory, study.name, member.name),
-            stage_set, comm)
-        for member in members)
-
-    # Relations are an OPTIONAL comparison layer graded only after every
-    # member has produced its measure vector (DESIGN.md §1.1).
-    relation_outcomes = evaluate_relations(
-        study.relations, member_results)
-
-    report = StudyReport(
-        study_name=study.name,
-        member_results=member_results,
-        relation_outcomes=relation_outcomes)
-    emit_study(report)
+    result = exec_one_pair(
+        project.pair, project_directory, stage_folders(project.pair),
+        stage_set, comm)
+    report = ProjectReport(
+        description=project.description,
+        pair_label=project.pair.pair_label,
+        result=result)
+    emit_project(report)
     return report
 
 
-def exec_one_member(
-        member: MemberSpecification,
-        scratch_directory,
+def exec_one_pair(
+        pair: PairSpecification,
+        project_directory,
+        folders: StageFolders,
         stage_set=W0_STAGES,
-        comm=None) -> MemberResult:
-    """Run the eight-step pipeline for ONE member (PSEUDOCODE.md §1).
+        comm=None) -> PairResult:
+    """Run the four stages for ONE pair, in this process (PSEUDOCODE §1).
 
-    Each stage is wrapped in ``run_to_contract``: the stage runs, then
-    the pipeline advances only if its output satisfies the contract the
-    NEXT stage depends on. In v1 the quality-gate loop executes its body
-    ONCE and reports (VISION principle 5); the closed loop is a future
-    target, so it is not iterated here.
-
-    ``scratch_directory`` is this member's own scratch subtree (threaded in
-    by :func:`exec_full_study`); the file-writing stages — ``build`` first —
-    receive it explicitly rather than rebuild it from identity
-    (ARCHITECTURE.md §4.3). ``stage_set`` selects the stub or live body at
-    each seam, and ``comm`` is the MPI communicator its engines use (unused
-    by the stubs). The control flow below is identical for either set.
+    Prepare surface 1, prepare surface 2, bond, analyse — the same four
+    functions the per-job selector runs one at a time, here in order.
+    Each hands the next its deliverable THROUGH ITS FOLDER, exactly as
+    separately submitted jobs would, so a chain that completes here has
+    exercised every file hand-off (ARCHITECTURE.md §4.3). In v1 the
+    quality-gate loop executes its body ONCE and reports (VISION
+    principle 5); the closed loop is a future target, so it is not
+    iterated here.
     """
-    # Which force models this member runs under is written in its study
-    # file (the [potential] block, DESIGN.md §1.6); each stage reads
-    # member.potential itself, so nothing is looked up and passed along.
+    prep_stage(pair, _WAFER_A_TAG, project_directory, folders,
+               stage_set, comm)
+    prep_stage(pair, _WAFER_B_TAG, project_directory, folders,
+               stage_set, comm)
+    bond_stage(pair, project_directory, folders, stage_set, comm)
+    result = analysis_stage(
+        pair, project_directory, folders, stage_set, comm)
+    emit_pair(result)
+    return result
+
+
+# ---------------------------------------------------------------------
+# The four stages. Each takes the pair, the project folder, and the four
+# folder names; works in a FRESH run subfolder of its stage's scratch
+# mirror; and leaves its deliverable in its stage folder in the project
+# (ARCHITECTURE.md §1, DESIGN.md §10.8). A stage reads what it needs
+# from the EARLIER stages' deliverable folders, never from memory.
+# ---------------------------------------------------------------------
+
+def _stage_directories(project_directory, stage_folder: str) -> tuple:
+    """The (working, deliverables) directories for one stage's run."""
+    working = run_subfolder(stage_scratch(project_directory, stage_folder))
+    deliverables = deliverable_directory(project_directory, stage_folder)
+    return str(working), str(deliverables), working.name
+
+
+def prep_stage(
+        pair: PairSpecification,
+        wafer_tag: int,
+        project_directory,
+        folders: StageFolders,
+        stage_set=W0_STAGES,
+        comm=None) -> str:
+    """Prepare ONE surface: build its half, activate, heal, gate (§10.2).
+
+    Derives the working lattices for BOTH materials (the shared cell
+    needs both, §2.2), builds both halves' geometry in that shared cell
+    (cheap, deterministic — the other half's file is simply not used),
+    then activates ONLY this surface's half and writes it as the
+    ACTIVATED_HALF deliverable into its prep folder. Returns the
+    deliverable folder's path. ``wafer_tag`` says which surface: bottom
+    A (surface 1) or top B (surface 2).
+    """
+    stage_folder = (folders.prep_surf1 if wafer_tag == _WAFER_A_TAG
+                    else folders.prep_surf2)
+    working, deliverables, run_id = _stage_directories(
+        project_directory, stage_folder)
+
+    # Step 2b: the model-relaxed working lattice per material (§2.2).
+    # The whole chain and every per-job path MUST run it before build,
+    # or build receives a directory in the DerivedLattices slot (the
+    # regression when step 2b was wired, commit cf92d30).
     derived_lattices = run_to_contract(
-        lambda: stage_set.derive_lattices(
-            member, scratch_directory, comm),
+        lambda: stage_set.derive_lattices(pair, working, comm),
         DERIVED_LATTICES_CONTRACT)
-
-    # Steps 3-4-5. Their order is a setting (the builder and activator
-    # are order-agnostic behind their contracts, DESIGN.md §5.3); v1
-    # uses the only physically sensible order, build -> activate ->
-    # assemble. build rescales each crystal to its derived lattice, writes
-    # each standalone half under the member's scratch, and returns the two
-    # HANDLES (§7.1, the build->amorphize seam).
     handle_a, handle_b, shared = run_to_contract(
-        lambda: stage_set.build(
-            member, derived_lattices, scratch_directory, comm),
+        lambda: stage_set.build(pair, derived_lattices, working, comm),
         SLABS_CONTRACT)
+    handle = handle_a if wafer_tag == _WAFER_A_TAG else handle_b
 
-    # Cascade-only (§3.4, revised 2026-08-08): activation just amorphizes
-    # each half, and the ACTIVATED_SLABS_CONTRACT checks only that both
-    # amorphized slabs are present (§10.1). The §3.5 gate moved to the bond
-    # flow, so the pass/fail activation HALT now falls there, not here. Each
-    # call re-reads its half from the handle's data file, amorphizes it, and
-    # writes the amorphized half back for assembly to read.
-    activated = run_to_contract(
-        lambda: stage_set.activate(
-            handle_a, handle_b, member, scratch_directory, comm),
-        ACTIVATED_SLABS_CONTRACT)
+    # The verdict is printed BEFORE the contract judges it, so a halted
+    # job's log still shows every metric, not only the one the halt
+    # message names (2026-08-28, job 16843986).
+    def _activate_and_report():
+        half = stage_set.activate_surface(
+            handle, shared, pair, working, comm)
+        half = replace(half, run_id=run_id)
+        if comm is None or comm.Get_rank() == 0:
+            _report_activation(pair.pair_label, half)
+        return half
+    half = run_to_contract(_activate_and_report, ACTIVATED_HALF_CONTRACT)
+    _publish(comm, lambda: write_artifact(deliverables, ACTIVATED_HALF,
+                                          half))
+    return deliverables
 
-    # Assembly reads both amorphized halves back and stacks them; it
-    # consumes the ActivatedSlabs (both amorphized slabs) directly.
+
+def bond_stage(
+        pair: PairSpecification,
+        project_directory,
+        folders: StageFolders,
+        stage_set=W0_STAGES,
+        comm=None) -> str:
+    """Read both halves, check they match, assemble, press, pull (§10.2).
+
+    Reads the two ACTIVATED_HALF deliverables from the prep folders,
+    REFUSES them if they were not built in the same shared cell, stacks
+    them at the press-start opening, and runs the press, settle, and
+    pull ladder. Leaves the assembled pair and the PULL_RESULTS in the
+    bond folder for analysis; the dumps and logs stay under the run's
+    scratch subfolder. Returns the deliverable folder's path.
+    """
+    working, deliverables, run_id = _stage_directories(
+        project_directory, folders.bond)
+    half_a = read_artifact(
+        deliverable_directory(project_directory, folders.prep_surf1),
+        ACTIVATED_HALF)
+    half_b = read_artifact(
+        deliverable_directory(project_directory, folders.prep_surf2),
+        ACTIVATED_HALF)
+    check_shared_cells_agree(half_a, half_b)
+    activated = ActivatedSlabs(
+        slab_a=half_a.slab, slab_b=half_b.slab,
+        verdict_a=half_a.verdict, verdict_b=half_b.verdict)
+
+    # Assembly reads both healed halves back and stacks them (§2.6).
     structure = run_to_contract(
         lambda: stage_set.assemble(
-            activated, shared, member, scratch_directory, comm),
+            activated, half_a.shared, pair, working, comm),
         STRUCTURE_CONTRACT)
+    if structure.built is not None:
+        # A real pair is handed on through its folder; the W0 placeholder
+        # has no geometry to write, and analysis re-reads nothing then.
+        _publish(comm, lambda: write_artifact(
+            deliverables, ASSEMBLED_PAIR, structure))
 
-    # Steps 6-7: press then pull, over the rate ladder. The result is a
-    # BondDebondResult (§9.1), not a bare trajectory.
+    # Steps 6-7: press then pull, over the rate ladder (§9.1).
     bond_debond = run_to_contract(
-        lambda: stage_set.bond_debond(
-            structure, member, scratch_directory, comm),
+        lambda: stage_set.bond_debond(structure, pair, working, comm),
         BOND_DEBOND_CONTRACT)
+    bond_debond = replace(bond_debond, run_id=run_id)
+    _publish(comm, lambda: write_artifact(
+        deliverables, PULL_RESULTS, bond_debond))
+    if comm is None or comm.Get_rank() == 0:
+        _report_bond(pair.pair_label, bond_debond)
+    return deliverables
 
-    # The analyzer turns that into a measure vector (DESIGN.md §6); in
-    # the skeleton only the mechanical measure is present, the rest
-    # report `unresolved`.
+
+def analysis_stage(
+        pair: PairSpecification,
+        project_directory,
+        folders: StageFolders,
+        stage_set=W0_STAGES,
+        comm=None) -> PairResult:
+    """Reduce the bond result to the measure vector (§6, §8).
+
+    Reads the bond folder's deliverables — the pull results and, when
+    the bond wrote one, the assembled pair (the measure needs the
+    interface geometry the pull result does not carry) — runs the
+    analyzer and the (mocked) characterization, and writes the
+    MEASURE_VECTOR into the analysis folder: the terminal artifact of
+    the chain. Returns the :class:`PairResult`.
+    """
+    _working, deliverables, _run_id = _stage_directories(
+        project_directory, folders.analysis)
+    bond_folder = deliverable_directory(project_directory, folders.bond)
+    bond_debond = read_artifact(bond_folder, PULL_RESULTS)
+    structure = _read_assembled_pair_if_present(bond_folder)
+
     measures = run_to_contract(
-        lambda: stage_set.analyze(structure, bond_debond, member),
+        lambda: stage_set.analyze(structure, bond_debond, pair),
         MEASURE_VECTOR_CONTRACT)
-
-    # Step 8 characterization (DESIGN.md §8), MOCKED in the skeleton.
     characterization = run_to_contract(
-        lambda: stage_set.characterize(structure, bond_debond, member),
+        lambda: stage_set.characterize(structure, bond_debond, pair),
         MEASURE_VECTOR_CONTRACT)
     measures = merge_measures(measures, characterization)
 
     # The gate READS the measure vector and REPORTS; in v1 it never acts
     # and never edits a measure (DESIGN.md §7).
-    gate = evaluate_member_gates(measures, member)
-
-    result = MemberResult(
-        specification=member,
-        potential=build_provenance(member),
+    gate = evaluate_pair_gates(measures, pair)
+    result = PairResult(
+        specification=pair,
+        potential=build_provenance(pair),
         measures=measures,
         gate=gate,
         trusted=False)              # walking-skeleton plumbing (§5.3)
-    emit_member(result)
+    _publish(comm, lambda: write_artifact(
+        deliverables, MEASURE_VECTOR, result))
     return result
 
 
-def evaluate_member_gates(
+def _read_assembled_pair_if_present(bond_folder):
+    """The assembled pair from the bond folder, or a placeholder.
+
+    A real bond leaves the pair's artifact behind (its geometry is what
+    the measure divides by); a W0 run writes none, so the analyzer stub
+    gets a placeholder :class:`Structure` and ignores it.
+    """
+    from sabsim.pipeline.exec_artifacts import Structure
+    from sabsim.pipeline.handoff import HandoffError
+    try:
+        return read_artifact(bond_folder, ASSEMBLED_PAIR)
+    except HandoffError:
+        return Structure(
+            note="no assembled pair on disk (placeholder)",
+            labeled_groups=("interface_z",))
+
+
+def evaluate_pair_gates(
         measures: MeasureVector,
-        member: MemberSpecification) -> GateReport:
+        pair: PairSpecification) -> GateReport:
     """Read the measure vector and report a verdict (DESIGN.md §7).
 
     In wave 0 the live gate and its five-way diagnosis (§7.7) are not
     built yet, so this collects the measure names it saw and states
-    plainly that the result is untrusted skeleton plumbing.
+    plainly that the result is untrusted skeleton plumbing. The gate
+    judges ONE pair; forming the ratio against a reference pair is the
+    person's, from two projects (DESIGN.md §7.4, revised 2026-08-30).
     """
     measures_seen = tuple(
         measure.name for measure in measures.measures)
@@ -233,79 +355,72 @@ def evaluate_member_gates(
         measures_seen=measures_seen)
 
 
-def evaluate_relations(
-        relations: tuple[Relation, ...],
-        member_results: tuple[MemberResult, ...]) -> tuple:
-    """Grade each declared relation across the member results (§7.4).
+# ---------------------------------------------------------------------
+# What a job log states. Printed on one rank, before the contract judges
+# the artifact, so a halted job still shows every number.
+# ---------------------------------------------------------------------
 
-    A relation is REPORTED, never used to restrict (DESIGN.md §1.1): an
-    unresolved or untrusted outcome is still returned, with the reason.
-    Returns an empty tuple when the study declared no relations.
+def _report_activation(pair_label: str, half) -> None:
+    """Print a prep job's gate verdict so the job log states it.
+
+    The §3.5 gate verdict for the healed surface, with its measured skin
+    depth and every metric's number against its threshold — where a
+    reader of a prep job's output looks first.
     """
-    results_by_name = {
-        result.specification.name: result
-        for result in member_results}
-    return tuple(
-        _evaluate_one_relation(relation, results_by_name)
-        for relation in relations)
+    role = "A (surface 1)" if half.wafer_tag == _WAFER_A_TAG else (
+        "B (surface 2)")
+    print(f"\nactivation verdict for pair '{pair_label}', "
+          f"surface {role}:")
+    verdict = half.verdict
+    if verdict is None:
+        print("  not gated")
+        return
+    state = "PASSED" if verdict.passed else "FAILED"
+    print(f"  gate {state}, activated depth "
+          f"{verdict.activated_depth:.1f} A"
+          + (f" — {verdict.reason}" if verdict.reason else ""))
+    for name, metric in verdict.per_metric.items():
+        print(f"    {name:22s} measured={metric.measured} "
+              f"threshold={metric.threshold} "
+              f"{'ok' if metric.passed else 'FAIL'}")
 
 
-def _evaluate_one_relation(
-        relation: Relation,
-        results_by_name: dict) -> RelationOutcome:
-    """Grade one relation; v1 knows the `ratio` kind (DESIGN.md §7.4).
+def _report_bond(pair_label: str, bond_debond) -> None:
+    """Print the bond job's outcome so the job log states it plainly.
 
-    The ratio divides the first related member's measure by the second's
-    (e.g. Si/SiO2 over Si/Si). If either measure is missing or
-    unresolved, or the kind is one v1 does not evaluate, the outcome is
-    unresolved with a note — never an exception.
+    The press outcome, its stage ledger (the step each phase began at,
+    §9.3), and each pull rung's note — the facts a reader wants from the
+    job output without opening the manifest.
     """
-    measure_name = relation.measures[0]
-    values = []
-    trusted = True
-    missing = []
-    for member_name in relation.members:
-        result = results_by_name.get(member_name)
-        if result is None:
-            # A related member did not run — e.g. `--only` excluded it, or
-            # a subset run. The relation is UNRESOLVED and reported, never
-            # an exception (DESIGN.md §1.1, report never restrict).
-            missing.append(member_name)
-            values.append(None)
-            trusted = False
-            continue
-        trusted = trusted and result.trusted
-        measure = result.measures.by_name(measure_name)
-        if (measure is None or measure.status != MeasureStatus.OK
-                or measure.value is None):
-            values.append(None)
-        else:
-            values.append(measure.value)
+    print(f"\nbond verdicts for pair '{pair_label}':")
+    print(f"  press: bonded={bond_debond.press.bonded} — "
+          f"{bond_debond.press.note}")
+    ledger = bond_debond.press.stage_steps
+    if ledger is not None:
+        print(f"  stage ledger (MD steps): press_start="
+              f"{ledger.press_start} contact={ledger.contact} "
+              f"hold_end={ledger.hold_end} settle_start="
+              f"{ledger.settle_start} settle_end={ledger.settle_end}")
+    for pull in bond_debond.pulls:
+        print(f"  pull {pull.rate_value:g} {pull.rate_unit}: {pull.note}")
 
-    if relation.kind != "ratio" or len(values) != 2:
-        return RelationOutcome(
-            kind=relation.kind, members=relation.members,
-            value=None, unit="dimensionless", trusted=trusted,
-            note=f"kind '{relation.kind}' not evaluated in v1")
 
-    if missing:
-        return RelationOutcome(
-            kind=relation.kind, members=relation.members,
-            value=None, unit="dimensionless", trusted=False,
-            note=f"unresolved: related member(s) did not run: {missing}")
+def _publish(comm, write_action) -> None:
+    """Run a WRITE on the primary rank, then publish it with a barrier.
 
-    numerator, denominator = values
-    if numerator is None or denominator is None or denominator == 0.0:
-        return RelationOutcome(
-            kind=relation.kind, members=relation.members,
-            value=None, unit="dimensionless", trusted=trusted,
-            note=f"unresolved: measure '{measure_name}' missing or zero")
-
-    return RelationOutcome(
-        kind=relation.kind, members=relation.members,
-        value=numerator / denominator, unit="dimensionless",
-        trusted=trusted,
-        note=f"ratio of '{measure_name}' over {relation.members}")
+    A hand-off artifact must be written by exactly ONE rank and be
+    visible to every rank before any of them proceeds (the §4.1
+    serial-IO discipline the live stages already follow). With no
+    communicator (a W0 or single-process run) the write is plain. The
+    read side needs no such guard — every rank reads the finished file
+    for itself.
+    """
+    if comm is None:
+        write_action()
+        return
+    if comm.Get_rank() == 0:
+        write_action()
+    comm.Barrier()
 
 
 # ---------------------------------------------------------------------
@@ -356,10 +471,10 @@ def _verdicts_to_record(measures: MeasureVector) -> dict | None:
     }
 
 
-def _member_to_record(result: MemberResult) -> dict:
-    """Serialize one member's result to a plain dict."""
+def _pair_to_record(result: PairResult) -> dict:
+    """Serialize one pair's result to a plain dict."""
     return {
-        "member": result.specification.name,
+        "pair": result.specification.pair_label,
         "trusted": result.trusted,
         "potential": _provenance_to_record(result.potential),
         "measures": [
@@ -374,33 +489,22 @@ def _member_to_record(result: MemberResult) -> dict:
     }
 
 
-def to_record(report: StudyReport) -> dict:
-    """Build the whole study's machine-readable record (DESIGN.md §6.6)."""
+def to_record(report: ProjectReport) -> dict:
+    """Build the project's machine-readable record (DESIGN.md §6.6)."""
     return {
-        "study": report.study_name,
-        "members": [
-            _member_to_record(result)
-            for result in report.member_results],
-        "relations": [
-            {
-                "kind": outcome.kind,
-                "members": list(outcome.members),
-                "value": outcome.value,
-                "unit": outcome.unit,
-                "trusted": outcome.trusted,
-                "note": outcome.note,
-            }
-            for outcome in report.relation_outcomes],
+        "project": report.description,
+        "pair": report.pair_label,
+        "result": _pair_to_record(report.result),
     }
 
 
-def emit_member(result: MemberResult) -> dict:
-    """Emit one member's machine-readable record (the emission seam)."""
-    return _member_to_record(result)
+def emit_pair(result: PairResult) -> dict:
+    """Emit one pair's machine-readable record (the emission seam)."""
+    return _pair_to_record(result)
 
 
-def emit_study(report: StudyReport) -> dict:
-    """Emit the study's machine-readable record (the emission seam).
+def emit_project(report: ProjectReport) -> dict:
+    """Emit the project's machine-readable record (the emission seam).
 
     Wave 0 returns the record; writing it to the §4.1 file contract on
     the shared filesystem is a later slice.

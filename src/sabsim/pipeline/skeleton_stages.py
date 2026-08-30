@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from sabsim.pipeline.exec_artifacts import (
+    ActivatedHalf,
     ActivatedSlabs,
     BondDebondResult,
     DerivedLattices,
@@ -39,14 +40,14 @@ from sabsim.pipeline.measures import (
     MeasureVector,
     Verdicts,
 )
-from sabsim.spec.records import MemberSpecification
+from sabsim.spec.records import PairSpecification
 
 # What the structure builder contributes to region definition, crossing
 # the build->press->pull seam. Under option C (labeled-group ownership,
 # 2026-07-15) the builder records only the zone GEOMETRY — the per-wafer
 # z-ranges each stage's driver carves its depth zones from (DESIGN.md
 # §2.6) — plus the ONE measured set the driver cannot re-carve, the
-# activated_skin. Placeholder membership in W0; the real z-ranges live on
+# activated_skin. Placeholder pairship in W0; the real z-ranges live on
 # slab_builder.BuiltPair, wired into the pipeline at slice 1b. Wafer A is
 # the bottom slab and wafer B the top by construction (see BuiltPair).
 _LABELED_GROUPS = (
@@ -73,7 +74,7 @@ def _placeholder_handle(
 
 
 def derive_lattices(
-        member: MemberSpecification,
+        pair: PairSpecification,
         scratch_directory: str | None = None,
         comm=None) -> DerivedLattices:
     """Derive each material's working lattice (DESIGN.md §2.2 — W0 stub).
@@ -89,14 +90,14 @@ def derive_lattices(
     placeholder = (
         (5.43, 0.0, 0.0), (0.0, 5.43, 0.0), (0.0, 0.0, 5.43))
     identities = {
-        member.material.wafer_a.identity, member.material.wafer_b.identity}
+        pair.material.wafer_a.identity, pair.material.wafer_b.identity}
     return DerivedLattices(
         cells={identity: placeholder for identity in identities},
         provenance="walking-skeleton stand-in (no relaxation)")
 
 
 def build_slabs(
-        member: MemberSpecification,
+        pair: PairSpecification,
         derived_lattices: DerivedLattices,
         scratch_directory: str,
         comm=None) -> tuple[HalfHandle, HalfHandle, SharedCell]:
@@ -111,19 +112,51 @@ def build_slabs(
     standalone slab files under ``scratch_directory`` and returns real
     handles through this same contract.
     """
-    beam = member.protocol.activation_species
+    beam = pair.protocol.activation_species
     handle_a = _placeholder_handle(
-        member.material.wafer_a, beam, scratch_directory, _WAFER_A_TAG)
+        pair.material.wafer_a, beam, scratch_directory, _WAFER_A_TAG)
     handle_b = _placeholder_handle(
-        member.material.wafer_b, beam, scratch_directory, _WAFER_B_TAG)
+        pair.material.wafer_b, beam, scratch_directory, _WAFER_B_TAG)
     shared = SharedCell(note="trivial shared cell (Si/Si, no mismatch)")
     return handle_a, handle_b, shared
+
+
+def _placeholder_verdict():
+    """A PASSING placeholder verdict, so the W0 contracts flow."""
+    from sabsim.driver.activation_gate import ActivationVerdict
+    return ActivationVerdict(
+        passed=True, activated_depth=0.0, per_metric={},
+        reason="placeholder verdict (wave 0): nothing was gated")
+
+
+def activate_surface(
+        handle: HalfHandle,
+        shared: SharedCell,
+        pair: PairSpecification,
+        scratch_directory: str | None = None,
+        comm=None) -> ActivatedHalf:
+    """Amorphize and gate ONE half — a prep job's stage (§10.1, §14.3).
+
+    Revised 2026-08-30 (Paul): each surface is prepared by its own prep
+    job, so this is the per-surface form the sequencer and the prep job
+    both call. W0 writes nothing and opens no engine: it returns a
+    placeholder slab with a PASSING placeholder verdict, carrying the
+    handle's wafer tag and the shared cell it was (notionally) cut on,
+    so the ACTIVATED_HALF_CONTRACT is met and the pipeline flows. The
+    REAL body is :func:`sabsim.pipeline.live_stages.activate_one_surface_
+    live`, which runs the cascade + heal out-of-process and gates the
+    healed half (§3.5).
+    """
+    slab = Slab(identity=handle.identity, note="placeholder (wave 0)")
+    return ActivatedHalf(
+        slab=slab, verdict=_placeholder_verdict(),
+        wafer_tag=handle.wafer_tag, shared=shared)
 
 
 def activate_surfaces(
         handle_a: HalfHandle,
         handle_b: HalfHandle,
-        member: MemberSpecification,
+        pair: PairSpecification,
         scratch_directory: str | None = None,
         comm=None) -> ActivatedSlabs:
     """Amorphize each half's surface and gate it (DESIGN.md §3, §10.1).
@@ -144,12 +177,9 @@ def activate_surfaces(
     node the W0 login-node skeleton has no access to. The seam does not
     change: the sequencer carries the :class:`ActivatedSlabs` forward.
     """
-    from sabsim.driver.activation_gate import ActivationVerdict
     slab_a = Slab(identity=handle_a.identity, note="placeholder (wave 0)")
     slab_b = Slab(identity=handle_b.identity, note="placeholder (wave 0)")
-    placeholder = ActivationVerdict(
-        passed=True, activated_depth=0.0, per_metric={},
-        reason="placeholder verdict (wave 0): nothing was gated")
+    placeholder = _placeholder_verdict()
     return ActivatedSlabs(slab_a=slab_a, slab_b=slab_b,
                           verdict_a=placeholder, verdict_b=placeholder)
 
@@ -157,7 +187,7 @@ def activate_surfaces(
 def assemble_pair(
         activated: ActivatedSlabs,
         shared: SharedCell,
-        member: MemberSpecification,
+        pair: PairSpecification,
         scratch_directory: str | None = None,
         comm=None) -> Structure:
     """Assemble the facing pair from the activated slabs (DESIGN.md §7).
@@ -174,7 +204,7 @@ def assemble_pair(
 
 def run_bond_debond_md(
         structure: Structure,
-        member: MemberSpecification,
+        pair: PairSpecification,
         scratch_directory: str | None = None,
         comm=None) -> BondDebondResult:
     """Press then pull, over the rate ladder (DESIGN.md §5, §9.1).
@@ -192,7 +222,7 @@ def run_bond_debond_md(
             rate_value=rung.value,
             rate_unit=rung.unit,
             note="placeholder pull (wave 0)")
-        for rung in member.numerical.pull_rate_ladder
+        for rung in pair.numerical.pull_rate_ladder
     )
     return BondDebondResult(
         press=PressOutcome(bonded=True, note="stubbed press (wave 0)"),
@@ -203,14 +233,14 @@ def run_bond_debond_md(
 def run_analyzer(
         structure: Structure,
         result: BondDebondResult,
-        member: MemberSpecification) -> MeasureVector:
+        pair: PairSpecification) -> MeasureVector:
     """Turn the bond/debond result into a measure vector (DESIGN.md §6).
 
     W0 emits ONE well-formed mechanical measure — the single untrusted
     number that proves the pipeline is wired end to end — and marks the
     higher-fidelity measures ``unresolved``, exactly as PSEUDOCODE.md §1
     describes for the skeleton. The value is a stand-in, not physics;
-    the member it belongs to is flagged untrusted.
+    the pair it belongs to is flagged untrusted.
 
     The press outcome is read ONCE here into the vector's
     :class:`Verdicts` (PSEUDOCODE.md §4): the bond decision is a fact
@@ -221,7 +251,7 @@ def run_analyzer(
     verdicts = Verdicts(
         bonded=result.press.bonded,
         contact_quality=None)      # §5.2 fraction not computed in W0
-    seeds = member.ensemble.amorphization_count
+    seeds = pair.ensemble.amorphization_count
     mechanical = Measure(
         name="mechanical_work_of_separation",
         value=1.0,                 # placeholder stand-in, not physics
@@ -250,14 +280,14 @@ def run_analyzer(
 def run_characterization(
         structure: Structure,
         result: BondDebondResult,
-        member: MemberSpecification) -> MeasureVector:
+        pair: PairSpecification) -> MeasureVector:
     """Step-8 characterization (DESIGN.md §8), MOCKED in the skeleton.
 
     Returns schema-valid ``unresolved`` records for the all-electron and
     descriptor measures, so the MEASURE_VECTOR_CONTRACT holds while the
     real Imago/VASP seam waits on wave 4.
     """
-    seeds = member.ensemble.amorphization_count
+    seeds = pair.ensemble.amorphization_count
     all_electron = Measure(
         name="work_of_adhesion_allelectron",
         value=None, uncertainty=None, realization_count=seeds,
@@ -275,7 +305,7 @@ def run_characterization(
 
 # ---------------------------------------------------------------------
 # The stage set — which body runs at each seam. The sequencer takes a
-# StageSet and calls its members, so the SAME control flow runs either the
+# StageSet and calls its stages, so the SAME control flow runs either the
 # W0 stubs (login node, no LAMMPS) or the real live_stages (compute node)
 # behind the same contracts (ARCHITECTURE.md §5.1). This is the switch:
 # W0_STAGES here; LIVE_STAGES in sabsim.pipeline.live_stages.
@@ -286,21 +316,25 @@ class StageSet:
     """The eight stage bodies the sequencer calls, as one swappable set.
 
     Every stage in a set shares a uniform signature so the sequencer's call
-    sites do not change between the stub and the live set: ``build`` and
-    ``activate`` and ``assemble`` and ``bond_debond`` take the member's
-    scratch directory (and, where an engine runs, the MPI communicator); a
-    stub simply ignores what it does not use. Swapping the set is the ONLY
-    difference between a login-node control-flow run and a real compute-node
-    run.
+    sites do not change between the stub and the live set: ``build``,
+    ``activate_surface``, ``assemble`` and ``bond_debond`` take the
+    stage's working directory (and, where an engine runs, the MPI
+    communicator); a stub simply ignores what it does not use. Swapping
+    the set is the ONLY difference between a login-node control-flow run
+    and a real compute-node run.
+
+    ``activate_surface`` is the per-surface form (revised 2026-08-30):
+    the prep job for surface N calls it once, for its own half; the
+    whole-chain run calls it twice, once per half.
     """
 
-    derive_lattices: Callable      # (member, scratch, comm)
-    build: Callable                # (member, lattices, scratch, comm)
-    activate: Callable             # (h_a, h_b, member, scratch, comm)
-    assemble: Callable             # (activated, shared, member, scratch)
-    bond_debond: Callable          # (structure, member, scratch, comm)
-    analyze: Callable              # (structure, bond_debond, member)
-    characterize: Callable         # (structure, bond_debond, member)
+    derive_lattices: Callable      # (pair, scratch, comm)
+    build: Callable                # (pair, lattices, scratch, comm)
+    activate_surface: Callable     # (handle, shared, pair, scratch, comm)
+    assemble: Callable             # (activated, shared, pair, scratch)
+    bond_debond: Callable          # (structure, pair, scratch, comm)
+    analyze: Callable              # (structure, bond_debond, pair)
+    characterize: Callable         # (structure, bond_debond, pair)
 
 
 # The walking-skeleton set: every stage a login-node stub (no LAMMPS), the
@@ -308,7 +342,7 @@ class StageSet:
 W0_STAGES = StageSet(
     derive_lattices=derive_lattices,
     build=build_slabs,
-    activate=activate_surfaces,
+    activate_surface=activate_surface,
     assemble=assemble_pair,
     bond_debond=run_bond_debond_md,
     analyze=run_analyzer,

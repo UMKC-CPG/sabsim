@@ -101,7 +101,7 @@ def derive_phase_lattices(
 
     Returns ``phase name -> (rescaled crystal, lattice constant)``; the
     rescaled crystal is what every family is built from. Runs one
-    out-of-process box relax per phase, exactly as the study pipeline's
+    out-of-process box relax per phase, exactly as the project pipeline's
     lattice derivation does.
     """
     cells = recipe.starting_collection.bulk.cells_per_axis

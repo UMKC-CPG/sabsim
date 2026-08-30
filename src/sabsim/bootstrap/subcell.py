@@ -41,7 +41,7 @@ def cut_interface_subcell(
 
     ``tags`` mark each atom as wafer A (bottom) or B (top), ``interface_z``
     is the plane between them, ``skin_depth`` how far the activated
-    disorder reaches into each wafer (the study's build-time estimate, or
+    disorder reaches into each wafer (the project's build-time estimate, or
     the gate's measured depth once it exists), and ``layer_spacing`` the
     crystal's plane spacing along z for this face. Wafer A keeps
     everything above ``interface_z - skin_depth - n*d`` and wafer B

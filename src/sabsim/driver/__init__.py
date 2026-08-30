@@ -5,7 +5,7 @@ rather than a fresh process per phase with a disk round-trip
 (ARCHITECTURE.md §4.1). This package is built in slices:
 
 * :mod:`sabsim.driver.commands` — slice 2. The PURE, deterministic
-  mapping from the study's ``{value, unit}`` knobs to the LAMMPS command
+  mapping from the project's ``{value, unit}`` knobs to the LAMMPS command
   strings that set up and drive the press and pull. It touches no
   simulator, so it is unit-testable on a login node with no LAMMPS
   present (PSEUDOCODE.md §9.8, "the exact LAMMPS fix syntax" — the code

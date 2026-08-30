@@ -10,7 +10,7 @@ tests, this set on a compute node for a real run).
 The build->amorphize->assemble chain here is exactly ARCHITECTURE.md §4.3:
 
 * :func:`build_halves` (step 3) cuts each wafer ALONE, writes it to a
-  LAMMPS data file under the member's scratch, and returns a
+  LAMMPS data file under the pair's scratch, and returns a
   :class:`~sabsim.pipeline.exec_artifacts.HalfHandle` per half — the
   build->amorphize file handoff. Login-node work (no LAMMPS).
 * the activation stage (step 4) re-reads each pristine half from its
@@ -25,10 +25,10 @@ imports the binding lazily inside its constructor — so the login node can
 build halves and review the whole chain; only the stages that open an
 engine or spawn the bundle need a compute node.
 
-SIZING is carried by the study's ``[numerical]`` spec block, not pinned in
+SIZING is carried by the project's ``[numerical]`` block, not pinned in
 this module. Slab thickness is the §2.5 CRITERION — enough undamaged
 crystal beneath the amorphized skin — enforced as a floor over the chosen
-``slab_thickness``, the study's ``required_activated_depth``,
+``slab_thickness``, the project's ``required_activated_depth``,
 and the ``minimum_bulk_thickness`` cushion (:func:`_effective_slab_thickness`).
 The lateral dose footprint (``target_footprint_area``), the ``slab_vacuum``,
 and the §2.2 ``bulk_cells_per_axis`` are likewise spec inputs. The template
@@ -87,6 +87,7 @@ from sabsim.pipeline.activation_adapter import (
     verdict_from_activation,
 )
 from sabsim.pipeline.exec_artifacts import (
+    ActivatedHalf,
     DerivedLattices,
     HalfHandle,
     SharedCell,
@@ -95,7 +96,7 @@ from sabsim.pipeline.exec_artifacts import (
 )
 from sabsim.pipeline.run_options import trajectory_options
 from sabsim.spec.references import resolve_crystal_file
-from sabsim.spec.records import MemberSpecification
+from sabsim.spec.records import PairSpecification
 from sabsim.structure.amorphized_assembly import (
     amorphized_half_from_arrays,
     assemble_amorphized_pair,
@@ -129,7 +130,7 @@ _BOND_CUTOFF = 2.8   # Å: Si first-g(r)-minimum stand-in (§6.3, TODO)
 # (:func:`_effective_slab_thickness`), the ``slab_vacuum`` above the face
 # for the beam spawn, and the §2.2 ``bulk_cells_per_axis`` relax-block
 # size. The width that once "bit us" — a narrow cell over-deepening the
-# skin — is likewise the study's ``target_footprint_area``
+# skin — is likewise the project's ``target_footprint_area``
 # (:func:`_footprint_repeat`). The defaults reproduce the §3.6-pinned Si
 # cell (55 Å thick, ~38 Å wide), so the measured 7 Å depth threshold that
 # cell anchors is preserved.
@@ -173,17 +174,17 @@ def _resolve_cif(cif_source: str) -> str:
     return resolve_crystal_file(cif_source)
 
 
-def _member_species_union(member: MemberSpecification) -> frozenset:
+def _pair_species_union(pair: PairSpecification) -> frozenset:
     """Every element either wafer contributes, read from the crystals.
 
     STRUCTURAL 1a puts ONE potential over the union of the pair's species,
     and DESIGN.md §4.3 makes that concrete as a single global type map
-    shared by every member "so type index k means the same element
+    shared by every pair "so type index k means the same element
     everywhere". A half cut ALONE would otherwise declare only its own
-    elements — a silicon half in a Si/SiO2 member would carry no oxygen
+    elements — a silicon half in a Si/SiO2 pair would carry no oxygen
     type — and two consequences follow that this function exists to
     prevent. The force-model lookup is keyed on (species, domain)
-    (§4.8), so a silicon-only half could not resolve the member's
+    (§4.8), so a silicon-only half could not resolve the pair's
     declared silicon-and-silica domain at all. And the assembly would
     have to reconcile two different type maps rather than one.
 
@@ -193,7 +194,7 @@ def _member_species_union(member: MemberSpecification) -> frozenset:
     to treat as a source of truth.
     """
     symbols = set()
-    for wafer in (member.material.wafer_a, member.material.wafer_b):
+    for wafer in (pair.material.wafer_a, pair.material.wafer_b):
         crystal = load_crystal(_resolve_cif(wafer.cif_source))
         # A pymatgen Structure, so the elements come off its composition
         # rather than an ASE-style symbol list. ``load_crystal`` already
@@ -224,7 +225,7 @@ def _coupling_for(crystal) -> str:
 
 
 def derive_lattices_live(
-        member: MemberSpecification,
+        pair: PairSpecification,
         scratch_directory: str,
         comm=None) -> DerivedLattices:
     """Derive each material's working lattice under the model (§2.2, step 2b).
@@ -250,11 +251,11 @@ def derive_lattices_live(
     """
     cells: dict = {}
     provenance: list = []
-    allow_unvalidated = member.potential.allow_unvalidated
+    allow_unvalidated = pair.potential.allow_unvalidated
     rank = comm.Get_rank() if comm is not None else 0
     # The §2.2 bulk-relax block size is a spec knob (numerical), not pinned.
-    bulk_cells = member.numerical.bulk_cells_per_axis
-    for wafer in (member.material.wafer_a, member.material.wafer_b):
+    bulk_cells = pair.numerical.bulk_cells_per_axis
+    for wafer in (pair.material.wafer_a, pair.material.wafer_b):
         if wafer.identity in cells:
             continue                     # same material: derive once
         crystal = load_crystal(_resolve_cif(wafer.cif_source))
@@ -268,9 +269,9 @@ def derive_lattices_live(
         # Relax under the foundation MLIP out-of-process in its bundle
         # (§4.7), then read the relaxed cell back.
         model = universal_force_model(
-            type_map, member.potential.universal_weights,
+            type_map, pair.potential.universal_weights,
             allow_unvalidated=allow_unvalidated,
-            model_name=member.potential.universal_model)
+            model_name=pair.potential.universal_model)
         relaxed_file = os.path.join(
             str(scratch_directory), f"relaxed_bulk_{wafer.identity}.data")
         script = bulk_relax_subprocess_script(
@@ -295,14 +296,14 @@ def derive_lattices_live(
     return DerivedLattices(cells=cells, provenance="; ".join(provenance))
 
 
-def _effective_slab_thickness(member) -> float:
+def _effective_slab_thickness(pair) -> float:
     """The §2.5 thickness FLOOR: enough bulk beneath the damaged skin.
 
     A cut slab must keep enough undamaged crystal under the amorphized skin
     to behave like a real substrate, which §2.5 states as the criterion
     ``thickness >= required_activated_depth + minimum_bulk_thickness``.
     The skin depth is only MEASURED after bombardment (§3.5), but the slab
-    is cut before that, so the depth term is the depth the study REQUIRES
+    is cut before that, so the depth term is the depth the project REQUIRES
     the activation to reach (``[protocol.activation]
     required_activated_depth``, the same number the §3.5 gate demands;
     revised 2026-08-28).
@@ -316,10 +317,10 @@ def _effective_slab_thickness(member) -> float:
     the chosen thickness allows automatically gets a thicker slab. The
     caller records the resulting margin (:func:`build_halves`).
     """
-    chosen = to_metal(member.numerical.slab_thickness, "distance")
+    chosen = to_metal(pair.numerical.slab_thickness, "distance")
     required = (
-        to_metal(member.protocol.required_activated_depth, "distance")
-        + to_metal(member.numerical.minimum_bulk_thickness, "distance"))
+        to_metal(pair.protocol.required_activated_depth, "distance")
+        + to_metal(pair.numerical.minimum_bulk_thickness, "distance"))
     return max(chosen, required)
 
 
@@ -329,7 +330,7 @@ def _footprint_repeat(base_area: float, target_area: float) -> int:
     The coincidence match fixes the SHAPE of the shared cell but not its
     SIZE for the beam: a single matched cell is far too small to spread an
     areal dose without one impact dominating (§3.6). So the matched cell is
-    tiled ``n x n`` up to a target in-plane area the study chooses
+    tiled ``n x n`` up to a target in-plane area the project chooses
     (``target_footprint_area``), the dose-spreading footprint. This returns
     that ``n``.
 
@@ -349,7 +350,7 @@ def _footprint_repeat(base_area: float, target_area: float) -> int:
 
 
 def _standalone_half(
-        wafer, member, derived_lattices, declared_species,
+        wafer, pair, derived_lattices, declared_species,
         lateral_repeat=1,
         matched_cell=None, shared_cell=None):
     """Cut ONE wafer's standalone half in memory (no file yet, §2.2/§7.1).
@@ -363,7 +364,7 @@ def _standalone_half(
     ``lateral_repeat`` defaults to 1 — the PRIMITIVE surface cell the
     coincidence match (§2.3) operates on, since that runs on primitive
     lattices, not the tiled dose footprint. :func:`build_halves` passes the
-    dose-spreading footprint tiling explicitly, sized from the study's
+    dose-spreading footprint tiling explicitly, sized from the project's
     ``target_footprint_area`` (:func:`_footprint_repeat`, §3.6).
     ``matched_cell`` and ``shared_cell`` carry the §2.4 strained-tiling
     geometry for a real mismatch (this wafer's own matched supercell vectors
@@ -371,7 +372,7 @@ def _standalone_half(
     for the identity case, which needs neither. ``declared_species`` are the
     elements this half must DECLARE whether or not it contains any — the
     beam, plus every element the other wafer contributes
-    (:func:`_member_species_union`) — the mechanism already used for the
+    (:func:`_pair_species_union`) — the mechanism already used for the
     beam, which the half also never contains at build.
     """
     crystal = load_crystal(_resolve_cif(wafer.cif_source))
@@ -380,8 +381,8 @@ def _standalone_half(
     return build_standalone_half(
         crystal, wafer.surface_face, wafer.identity,
         declared_species,
-        min_slab_thickness=_effective_slab_thickness(member),
-        min_vacuum=to_metal(member.numerical.slab_vacuum, "distance"),
+        min_slab_thickness=_effective_slab_thickness(pair),
+        min_vacuum=to_metal(pair.numerical.slab_vacuum, "distance"),
         lateral_repeat=lateral_repeat,
         matched_cell=matched_cell, shared_cell=shared_cell)
 
@@ -400,7 +401,7 @@ def _write_half(half, wafer, scratch_directory, wafer_tag, comm):
 
 
 def build_halves(
-        member: MemberSpecification,
+        pair: PairSpecification,
         derived_lattices: DerivedLattices,
         scratch_directory: str,
         comm=None) -> tuple[HalfHandle, HalfHandle, SharedCell]:
@@ -408,7 +409,7 @@ def build_halves(
 
     The real build stage: each wafer is cut ALONE in vacuum — on the
     model-derived lattice ``derive_lattices_live`` produced (§2.2), not the
-    CIF's scale — and written to its own data file under the member's
+    CIF's scale — and written to its own data file under the pair's
     scratch, returned as a :class:`HalfHandle` the activation stage loads
     on its own engine (the build->amorphize file handoff). Wafer A is the
     bottom half, B the top (the assembly invariant, DESIGN.md §2.6). This
@@ -430,21 +431,21 @@ def build_halves(
     # own crystal lacks one of them still declares it, with no atoms of
     # that type — exactly how the beam is already carried.
     declared_species = frozenset(
-        _projectile_species(member)) | _member_species_union(member)
+        _projectile_species(pair)) | _pair_species_union(pair)
     # The coincidence match runs FIRST, on the PRIMITIVE surface cells
     # (lateral repeat 1), because the matcher's area budget
     # (max_coincidence_area) is for the primitive cell and — for a mismatch
     # — the footprint halves cannot be cut until the tiling is known.
     primitive_a = _standalone_half(
-        member.material.wafer_a, member, derived_lattices, declared_species,
+        pair.material.wafer_a, pair, derived_lattices, declared_species,
         lateral_repeat=1)
     primitive_b = _standalone_half(
-        member.material.wafer_b, member, derived_lattices, declared_species,
+        pair.material.wafer_b, pair, derived_lattices, declared_species,
         lateral_repeat=1)
     match = match_surfaces(
         primitive_a.atoms, primitive_b.atoms,
-        max_area=to_metal(member.numerical.max_coincidence_area, "area"),
-        misfit_tolerance=member.numerical.misfit_tolerance)
+        max_area=to_metal(pair.numerical.max_coincidence_area, "area"),
+        misfit_tolerance=pair.numerical.misfit_tolerance)
     # For a real mismatch, derive the shared cell and each wafer's tiling
     # so the footprint halves are cut strained onto ONE commensurate cell
     # (§2.4). Slab A is the matcher's 'film', slab B its 'substrate', so
@@ -466,35 +467,35 @@ def build_halves(
         # Mismatch: both halves are first strained onto the shared cell, so
         # one dose tile IS the shared cell — its area is the footprint base.
         base_cell = np.asarray(shared_cell)[:, :2]
-    # Size the dose-spreading footprint from the study's target area (§3.6),
+    # Size the dose-spreading footprint from the project's target area (§3.6),
     # retiring the hardcoded 10x10. BOTH halves take the SAME tiling so they
     # stay commensurate; the tiling is strain-neutral (identical copies), so
     # growing the footprint for statistics never touches the match strain.
     base_area = abs(float(np.linalg.det(base_cell)))
     footprint_repeat = _footprint_repeat(
-        base_area, to_metal(member.numerical.target_footprint_area, "area"))
+        base_area, to_metal(pair.numerical.target_footprint_area, "area"))
     # Now build BOTH footprint halves (the dose tiling), on the shared cell
     # for a mismatch; neither is written until both exist.
     half_a = _standalone_half(
-        member.material.wafer_a, member, derived_lattices, declared_species,
+        pair.material.wafer_a, pair, derived_lattices, declared_species,
         lateral_repeat=footprint_repeat,
         matched_cell=matched_cell_a, shared_cell=shared_cell)
     half_b = _standalone_half(
-        member.material.wafer_b, member, derived_lattices, declared_species,
+        pair.material.wafer_b, pair, derived_lattices, declared_species,
         lateral_repeat=footprint_repeat,
         matched_cell=matched_cell_b, shared_cell=shared_cell)
     handle_a = _write_half(
-        half_a, member.material.wafer_a, scratch_directory, WAFER_A_TAG,
+        half_a, pair.material.wafer_a, scratch_directory, WAFER_A_TAG,
         comm)
     handle_b = _write_half(
-        half_b, member.material.wafer_b, scratch_directory, WAFER_B_TAG,
+        half_b, pair.material.wafer_b, scratch_directory, WAFER_B_TAG,
         comm)
     # Record the §2.5 thickness margin actually achieved: how much undamaged
     # crystal sits beneath the estimated skin, above the required cushion.
-    thickness = _effective_slab_thickness(member)
+    thickness = _effective_slab_thickness(pair)
     required = (
-        to_metal(member.protocol.required_activated_depth, "distance")
-        + to_metal(member.numerical.minimum_bulk_thickness, "distance"))
+        to_metal(pair.protocol.required_activated_depth, "distance")
+        + to_metal(pair.numerical.minimum_bulk_thickness, "distance"))
     shared = SharedCell(
         note=(f"{half_a.identity}/{half_b.identity} coincidence match "
               f"(strain {match.residual_strain:.4f}, "
@@ -515,7 +516,7 @@ def build_halves(
 
 def _stage_trajectory(
         output_directory: str,
-        member: MemberSpecification,
+        pair: PairSpecification,
         stage: str) -> tuple:
     """Where this stage records frames, and how densely — or nowhere.
 
@@ -526,10 +527,10 @@ def _stage_trajectory(
     and honours the one switch (:mod:`sabsim.pipeline.run_options`).
     """
     options = trajectory_options()
-    stride = options.stride_or(member.numerical.frame_stride)
+    stride = options.stride_or(pair.numerical.frame_stride)
     if not options.enabled:
         return None, stride
-    return stage_dump_file(output_directory, member.name, stage), stride
+    return stage_dump_file(output_directory, pair.pair_label, stage), stride
 
 
 class _PullRungPaths(NamedTuple):
@@ -544,7 +545,7 @@ class _PullRungPaths(NamedTuple):
 
 def _pull_rung_paths(
         scratch_directory: str,
-        member: MemberSpecification,
+        pair: PairSpecification,
         rate) -> _PullRungPaths:
     """Lay out one pull rung's OWN directory and return its paths (§11.3).
 
@@ -559,7 +560,7 @@ def _pull_rung_paths(
     directory = os.path.join(
         scratch_directory, f"pull_{_rate_slug(rate)}")
     os.makedirs(directory, exist_ok=True)
-    trajectory_file, stride = _stage_trajectory(directory, member, "pull")
+    trajectory_file, stride = _stage_trajectory(directory, pair, "pull")
     return _PullRungPaths(
         directory=directory,
         checkpoint_directory=os.path.join(directory, "checkpoints"),
@@ -590,27 +591,27 @@ def _pull_note(result) -> str:
     return note
 
 
-def _wafer_of(member: MemberSpecification, handle: HalfHandle):
+def _wafer_of(pair: PairSpecification, handle: HalfHandle):
     """The wafer a half handle stands for, by its A/B tag (§2.6)."""
     if str(handle.wafer_tag).upper().endswith("B"):
-        return member.material.wafer_b
-    return member.material.wafer_a
+        return pair.material.wafer_b
+    return pair.material.wafer_a
 
 
 def activate_one_half(
         handle: HalfHandle,
-        member: MemberSpecification,
+        pair: PairSpecification,
         seed: int,
         output_directory: str,
         comm=None,
         library=None) -> tuple:
     """Cascade, heal and GATE one half, out-of-process (§10.1, §3.4).
 
-    ``library`` is THIS wafer's environment library (each wafer has its
-    own, in its preparation subfolder of the study — DESIGN §1.2; loaded
-    per wafer by :func:`activate_surfaces_live`); when a caller passes
-    none it is loaded here for the wafer the handle's tag names, so a
-    single-half invocation still works.
+    ``library`` is THIS wafer's environment library (each surface has
+    its own, in its ``prep_surfN_<label>/`` folder of the project —
+    DESIGN §1.2/§3.5); when a caller passes none it is loaded here for
+    the wafer the handle's tag names, so a single-half invocation still
+    works.
 
     The cascade runs on the universal foundation MLIP, which lives in
     deepmd's own self-contained bundle and cannot load into this process
@@ -628,19 +629,19 @@ def activate_one_half(
         handle.data_file, handle.type_map, handle.identity)
     if library is None:
         library, _warnings = load_environment_library(
-            member, _wafer_of(member, handle))
+            pair, _wafer_of(pair, handle))
     # The universal cascade force model (deepmd + ZBL); it refuses unless the
     # run opted into the not-yet-gate-cleared model (§4.7).
     cascade_force_model = resolve_cascade_generator(
-        built.type_map, _projectile_species(member),
-        weights_path=member.potential.universal_weights,
-        allow_unvalidated=member.potential.allow_unvalidated,
-        model_name=member.potential.universal_model)
+        built.type_map, _projectile_species(pair),
+        weights_path=pair.potential.universal_weights,
+        allow_unvalidated=pair.potential.allow_unvalidated,
+        model_name=pair.potential.universal_model)
 
-    spec = derive_bombardment_spec(built, member)
+    spec = derive_bombardment_spec(built, pair)
     projectile_types = [
         built.type_map[species]
-        for species in _projectile_species(member)
+        for species in _projectile_species(pair)
         if species in built.type_map]
 
     role = "a" if handle.wafer_tag == WAFER_A_TAG else "b"
@@ -651,9 +652,9 @@ def activate_one_half(
     # on, the out-of-process cascade records the WHOLE bombardment as a
     # movie, the same as the in-process press and pull stages.
     trajectory_file, trajectory_stride = _stage_trajectory(
-        output_directory, member, f"activate_{role}")
+        output_directory, pair, f"activate_{role}")
     script = build_activate_script(
-        built, member, cascade_force_model, handle.data_file, spec,
+        built, pair, cascade_force_model, handle.data_file, spec,
         seed, projectile_types, dump_path, marker_path, _GEOMETRY,
         _CONTROL, trajectory_file=trajectory_file,
         trajectory_stride=trajectory_stride)
@@ -683,10 +684,10 @@ def activate_one_half(
     # dump is substrate-only (the projectile was stripped before the
     # heal) with its free surface on top, exactly as the gate's metrics
     # assume; the reference is keyed by THIS wafer's declared species,
-    # and "crystalline" is judged against the study's environment
+    # and "crystalline" is judged against the surface's environment
     # library (revised 2026-08-29): the descriptor engine runs its own
     # out-of-process bundle call on rank 0 and every rank reads back.
-    species = frozenset(handle.type_map) - _projectile_species(member)
+    species = frozenset(handle.type_map) - _projectile_species(pair)
     symbol_of_type = {type_id: symbol
                       for symbol, type_id in handle.type_map.items()}
     symbols = [symbol_of_type[int(type_id)] for type_id in type_ids]
@@ -698,9 +699,9 @@ def activate_one_half(
     verdict = activation_gate(
         positions, np.asarray(cell, dtype=float), symbols,
         load_activation_references(species),
-        to_metal(member.protocol.required_activated_depth, "distance"),
-        library, member.numerical.disorder_scatter_multiple,
-        to_metal(member.numerical.depth_bin_width, "distance"),
+        to_metal(pair.protocol.required_activated_depth, "distance"),
+        library, pair.numerical.disorder_scatter_multiple,
+        to_metal(pair.numerical.depth_bin_width, "distance"),
         work_directory=gate_directory,
         descriptor_vectors=_describe_on_one_rank(
             positions, cell, symbols, library, gate_directory, comm))
@@ -746,45 +747,87 @@ def _read_heal_marker(marker_path: str) -> int | None:
         return None
 
 
+def activate_one_surface_live(
+        handle: HalfHandle,
+        shared: SharedCell,
+        pair: PairSpecification,
+        scratch_directory: str,
+        comm=None) -> ActivatedHalf:
+    """Activate, heal and gate ONE surface — a prep job's stage (§10.1).
+
+    Revised 2026-08-30 (Paul): each surface is prepared by its own prep
+    job in its own folder, so the live activation stage works one half
+    at a time. The half's seed is derived from the pair's one master
+    seed by its wafer tag (surface 1 takes the first of the two seeds,
+    surface 2 the second), so the two surfaces of a same-material pair
+    are DIFFERENT realizations, and either prep job reproduces its half
+    alone. The surface's environment library is loaded from its prep
+    folder and checked before any cascade; a temperature warning, if
+    any, is said out loud. Returns the :class:`ActivatedHalf` the prep
+    job hands bond, carrying the shared cell the half was cut on.
+    """
+    wafer = _wafer_of(pair, handle)
+    half_seeds = derive_seeds(pair.ensemble.master_seed, 2)
+    seed = half_seeds[0 if handle.wafer_tag == WAFER_A_TAG else 1]
+    library, warnings = load_environment_library(pair, wafer)
+    rank = comm.Get_rank() if comm is not None else 0
+    if rank == 0:
+        for warning in warnings:
+            print(f"sabsim: WARNING — {warning}", flush=True)
+    _outcome, amorphized_file, verdict, heal_step = activate_one_half(
+        handle, pair, seed, scratch_directory, comm, library)
+    role = "A (bottom)" if handle.wafer_tag == WAFER_A_TAG else "B (top)"
+    species = frozenset(handle.type_map) - _projectile_species(pair)
+    slab = Slab(
+        identity=handle.identity, note=f"healed activated half {role}",
+        data_file=amorphized_file, species=species,
+        heal_start_step=heal_step)
+    return ActivatedHalf(
+        slab=slab, verdict=verdict, wafer_tag=handle.wafer_tag,
+        shared=shared)
+
+
 def activate_surfaces_live(
         handle_a: HalfHandle,
         handle_b: HalfHandle,
-        member: MemberSpecification,
+        pair: PairSpecification,
         scratch_directory: str,
         comm=None):
     """Amorphize BOTH halves independently (step 4, §10.1).
 
-    Each half is activated in its OWN session, SERIALLY (ARCHITECTURE.md
-    §4.3 — serial slabs), from a reproducible per-half seed derived from
-    the member's one master seed. Each yields a HEALED slab and its §3.5
-    verdict (revised 2026-08-28); the healed-half file paths ride on the
-    returned slabs' ``data_file`` for the assembly to read, and the
+    The whole-chain convenience: both halves in ONE process, one after
+    the other, each from the same per-half seed the per-surface stage
+    (:func:`activate_one_surface_live`) would use — so a chain run and
+    two separate prep jobs produce the identical surfaces. Each yields a
+    HEALED slab and its §3.5 verdict (revised 2026-08-28); the
+    healed-half file paths ride on the returned slabs' ``data_file`` for
+    the assembly to read, and the
     verdicts ride the ``ActivatedSlabs`` so the contract halts a failed
     activation before anything is assembled.
     """
-    half_seeds = derive_seeds(member.ensemble.master_seed, 2)
+    half_seeds = derive_seeds(pair.ensemble.master_seed, 2)
     # The environment libraries the §3.5 gate judges against — ONE PER
-    # WAFER, each from its own preparation subfolder of the study
+    # WAFER, each from its own prep folder of the project
     # (DESIGN §1.2/§3.5, revised 2026-08-29) — loaded and checked before
     # any cascade; a temperature warning, if any, is said out loud.
     library_a, warnings_a = load_environment_library(
-        member, member.material.wafer_a)
+        pair, pair.material.wafer_a)
     library_b, warnings_b = load_environment_library(
-        member, member.material.wafer_b)
+        pair, pair.material.wafer_b)
     rank = comm.Get_rank() if comm is not None else 0
     if rank == 0:
         for warning in warnings_a + warnings_b:
             print(f"sabsim: WARNING — {warning}", flush=True)
     _outcome_a, amorphized_a, verdict_a, heal_a = activate_one_half(
-        handle_a, member, half_seeds[0], scratch_directory, comm, library_a)
+        handle_a, pair, half_seeds[0], scratch_directory, comm, library_a)
     _outcome_b, amorphized_b, verdict_b, heal_b = activate_one_half(
-        handle_b, member, half_seeds[1], scratch_directory, comm, library_b)
+        handle_b, pair, half_seeds[1], scratch_directory, comm, library_b)
 
     # Each wafer's DECLARED material species: the half's pre-cascade type
     # map minus the projectile beam. This is what the §3.5 gate keys the
     # wafer's activation reference by (DESIGN.md §3.5), so it is recorded
     # here from the declared map rather than inferred from the survivors.
-    projectile = _projectile_species(member)
+    projectile = _projectile_species(pair)
     species_a = frozenset(handle_a.type_map) - projectile
     species_b = frozenset(handle_b.type_map) - projectile
     slab_a = Slab(
@@ -804,7 +847,7 @@ def activate_surfaces_live(
 def assemble_pair_live(
         activated,
         shared: SharedCell,
-        member: MemberSpecification,
+        pair: PairSpecification,
         scratch_directory: str,
         comm=None) -> Structure:
     """Assemble the two amorphized halves into a facing pair (step 5, §2.6).
@@ -833,7 +876,7 @@ def assemble_pair_live(
     """
     rank = comm.Get_rank() if comm is not None else 0
     structure = (
-        _assemble_on_one_rank(activated, shared, member, scratch_directory)
+        _assemble_on_one_rank(activated, shared, pair, scratch_directory)
         if rank == 0 else None)
     if comm is not None:
         structure = comm.bcast(structure, root=0)
@@ -843,7 +886,7 @@ def assemble_pair_live(
 def _assemble_on_one_rank(
         activated,
         shared: SharedCell,
-        member: MemberSpecification,
+        pair: PairSpecification,
         scratch_directory: str) -> Structure:
     """The assembly itself, executed by a single rank (see above)."""
     # parallel=False on both: this rank reads the halves itself rather
@@ -866,8 +909,8 @@ def _assemble_on_one_rank(
     built = assemble_amorphized_pair(
         half_a, half_b, match,
         bond_cutoff=_BOND_CUTOFF,
-        initial_gap=to_metal(member.protocol.initial_gap, "distance"),
-        clash_floor=to_metal(member.numerical.clash_floor, "distance"),
+        initial_gap=to_metal(pair.protocol.initial_gap, "distance"),
+        clash_floor=to_metal(pair.numerical.clash_floor, "distance"),
         wafer_a_species=activated.slab_a.species,
         wafer_b_species=activated.slab_b.species)
 
@@ -899,9 +942,9 @@ def _assemble_on_one_rank(
 def _bonded_force_model(potential, type_map: dict) -> ForceModel:
     """The potential the bonded pair heals, presses and pulls under (§4.5).
 
-    ``potential`` is the study's ``[potential]`` block; the pair runs under
+    ``potential`` is the project's ``[potential]`` block; the pair runs under
     its ``production_weights`` — today a single frozen DeePMD file (a
-    committee of one), later the ALF-trained committee the member's
+    committee of one), later the ALF-trained committee the pair's
     ``potential_ref`` resolves to — behind the ``pair_style`` seam. The
     file's existence was checked at load time (phase three), so a missing
     model stops on the login node, never here. ``type_map`` is the
@@ -913,7 +956,7 @@ def _bonded_force_model(potential, type_map: dict) -> ForceModel:
 
 def run_bond_debond_md_live(
         structure: Structure,
-        member: MemberSpecification,
+        pair: PairSpecification,
         scratch_directory: str,
         comm=None):
     """Press the pair, settle a reference, pull it apart per rate (§9.1).
@@ -942,8 +985,8 @@ def run_bond_debond_md_live(
     )
 
     built = structure.built
-    force_model = _bonded_force_model(member.potential, built.type_map)
-    seed = member.ensemble.master_seed
+    force_model = _bonded_force_model(pair.potential, built.type_map)
+    seed = pair.ensemble.master_seed
     reference_file = os.path.join(scratch_directory, "settled_reference.data")
 
     # Press + settle on one shared engine.
@@ -955,9 +998,9 @@ def run_bond_debond_md_live(
     # The press dump stays open through the settle on this same engine,
     # so the two record as one movie of contact and relaxation.
     press_trajectory, press_stride = _stage_trajectory(
-        scratch_directory, member, "press")
+        scratch_directory, pair, "press")
     press = press_and_bond(
-        press_engine, built, member, force_model, structure.data_file, seed,
+        press_engine, built, pair, force_model, structure.data_file, seed,
         trajectory_file=press_trajectory,
         trajectory_stride=press_stride)
     # The §5.6 conservation baseline is the ASSEMBLED pair, checked at every
@@ -968,7 +1011,7 @@ def run_bond_debond_md_live(
     reference = None
     if press.contact_reached and press.atoms_conserved:
         reference = settle_reference(
-            press_engine, member, reference_data_file=reference_file,
+            press_engine, pair, reference_data_file=reference_file,
             expected_atom_count=assembled_atom_count)
     press_engine.close()
 
@@ -983,7 +1026,7 @@ def run_bond_debond_md_live(
         settle_end=(reference.settle_end_step
                     if reference is not None else None))
 
-    ladder = member.numerical.pull_rate_ladder
+    ladder = pair.numerical.pull_rate_ladder
     void = (not press.atoms_conserved
             or (reference is not None and not reference.atoms_conserved))
     if void or not press.contact_reached or reference is None:
@@ -1008,12 +1051,12 @@ def run_bond_debond_md_live(
     # continues from it rather than starting over (§13.3).
     pulls = []
     for rate in ladder:
-        rung = _pull_rung_paths(scratch_directory, member, rate)
+        rung = _pull_rung_paths(scratch_directory, pair, rate)
         pull_engine = LammpsEngine(
             command_line_args=["-screen", "none", "-log", rung.log_file],
             comm=comm)
         result = pull_at_rate(
-            pull_engine, built, member, force_model, reference_file, rate,
+            pull_engine, built, pair, force_model, reference_file, rate,
             seed, output_directory=rung.directory,
             trajectory_file=rung.trajectory_file,
             trajectory_stride=rung.trajectory_stride,
@@ -1049,7 +1092,7 @@ def run_bond_debond_md_live(
 def run_analyzer_live(
         structure: Structure,
         bond_debond,
-        member: MemberSpecification):
+        pair: PairSpecification):
     """Reduce the bond-debond result to a measure vector (§6, §8.4).
 
     Computes the mechanical work of separation (M1) — the area under each
@@ -1071,7 +1114,7 @@ def run_analyzer_live(
 
     cell = np.asarray(structure.built.atoms.get_cell())
     interface_area = float(np.linalg.norm(np.cross(cell[0], cell[1])))
-    seeds = member.ensemble.amorphization_count
+    seeds = pair.ensemble.amorphization_count
 
     # Slowest-rate rung that fully separated (rungs are in ladder order;
     # the smallest rate is the most quasi-static, §5.4).
@@ -1114,7 +1157,7 @@ def run_analyzer_live(
     # Surface the §3.5 activation gate result for each HEALED surface. The
     # verdicts ride the assembled pair (§10.1, revised 2026-08-28: the gate
     # runs in the activation stage and the pair carries what it was built
-    # from). Only a PASS reaches here — a failed gate halted the member
+    # from). Only a PASS reaches here — a failed gate halted the pair
     # before assembly — so this reports the MEASURED skin depth (closing
     # the §2.5 estimate) with the gate's own summary as the method. Absent
     # on a skeleton stub, in which case nothing is emitted.
@@ -1157,7 +1200,7 @@ from sabsim.pipeline.skeleton_stages import (        # noqa: E402
 LIVE_STAGES = StageSet(
     derive_lattices=derive_lattices_live,
     build=build_halves,
-    activate=activate_surfaces_live,
+    activate_surface=activate_one_surface_live,
     assemble=assemble_pair_live,
     bond_debond=run_bond_debond_md_live,
     analyze=run_analyzer_live,

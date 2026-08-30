@@ -1,7 +1,7 @@
 """Generate the press/pull LAMMPS command stream (PSEUDOCODE.md §9).
 
 This is slice 2 of the driver: the PURE, deterministic translation from
-the study's ``{value, unit}`` knobs into the ordered LAMMPS commands that
+the project's ``{value, unit}`` knobs into the ordered LAMMPS commands that
 set up and drive the press (§9.3) and the pull (§9.5). It runs no
 simulator — it only produces strings — so the whole module is unit-
 testable on a login node with no LAMMPS present. Two things it does NOT
@@ -22,7 +22,7 @@ Three design commitments show up directly here:
 * **Units travel as data, land as bare numbers.** Every physical knob is
   a :class:`~sabsim.spec.records.Quantity`; it is converted to LAMMPS
   ``metal`` units HERE (§1.5), so no bare, unit-ambiguous number ever
-  appears in the study spec, only in the generated command.
+  appears in the project file, only in the generated command.
 """
 
 from __future__ import annotations
@@ -32,13 +32,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from sabsim.spec.records import MemberSpecification, Quantity
+from sabsim.spec.records import PairSpecification, Quantity
 
 # ---------------------------------------------------------------------
 # LAMMPS `metal` unit system. The v1 driver runs in metal units: length
 # in Å, time in ps, energy in eV, velocity in Å/ps, temperature in K,
 # pressure in bars. Each spec Quantity is converted to its metal unit
-# before it enters a command, so the {value, unit} the study carries
+# before it enters a command, so the {value, unit} the project file carries
 # lands as a bare number in exactly the units LAMMPS expects.
 # ---------------------------------------------------------------------
 
@@ -269,7 +269,7 @@ def timestep_command(timestep: Quantity) -> list:
 
     A separate builder because a resumed pull sets the timestep AFTER its
     ``read_restart`` — the restart carries a saved timestep, and this
-    re-asserts the member's value over it (§13.3) — whereas a fresh run
+    re-asserts the pair's value over it (§13.3) — whereas a fresh run
     folds it into :func:`preamble_commands`.
     """
     return [f"timestep {_lammps_number(to_metal(timestep, 'time'))}"]
@@ -346,7 +346,7 @@ def region_group_commands(built, geometry: RegionGeometry) -> list:
     ]
 
 
-def integrator_commands(member: MemberSpecification, seed: int) -> list:
+def integrator_commands(pair: PairSpecification, seed: int) -> list:
     """Integrate interior AND border; thermostat the border, bias-removed.
 
     Both the interior and the border are advanced in time by their own
@@ -370,8 +370,8 @@ def integrator_commands(member: MemberSpecification, seed: int) -> list:
     NOT integrated here — whether they SHOULD be is a separate open
     question (PSEUDOCODE.md §9.2 / §9.4), untouched by this border fix.
     """
-    temperature = to_metal(member.protocol.press_temperature, "temperature")
-    damping = to_metal(member.numerical.langevin_damping, "time")
+    temperature = to_metal(pair.protocol.press_temperature, "temperature")
+    damping = to_metal(pair.numerical.langevin_damping, "time")
     return [
         "fix nve_interior interior nve",
         "fix nve_border border nve",
@@ -422,7 +422,7 @@ def combined_cell_relax_commands() -> list:
 _LOAD_RISE_TIME_STANDIN = Quantity(10.0, "ps")
 
 
-def press_drive_commands(built, member: MemberSpecification) -> list:
+def press_drive_commands(built, pair: PairSpecification) -> list:
     """The press drive — load OR displacement, one command apart (§9.3).
 
     Load control applies a target normal FORCE (pressure times the cell
@@ -434,13 +434,13 @@ def press_drive_commands(built, member: MemberSpecification) -> list:
     PSEUDOCODE.md §9.3); under displacement it is driven kinematically. The
     load rise time is a §5.9 follow-on (:data:`_LOAD_RISE_TIME_STANDIN`).
     """
-    protocol = member.protocol
+    protocol = pair.protocol
     if protocol.press_control == "load":
         area = _cell_cross_section_area(built)
         force = normal_force_from_pressure(protocol.press_load, area)
         rise_steps = max(1, round(
             to_metal(_LOAD_RISE_TIME_STANDIN, "time")
-            / to_metal(member.numerical.md_timestep, "time")))
+            / to_metal(pair.numerical.md_timestep, "time")))
         # THREE things this drive gets right, each learned on a compute
         # node. (1) RAMP SHAPE. The load climbs from zero to the target
         # over the rise time and then HOLDS, driven off the ABSOLUTE step
@@ -504,7 +504,7 @@ def grip_hold_and_readback_commands() -> list:
 
 
 def heal_surface_commands(
-        member: MemberSpecification, seed: int, marker_file: str) -> list:
+        pair: PairSpecification, seed: int, marker_file: str) -> list:
     """Heal ONE activated half at the end of its cascade session (§3.4).
 
     The cascade leaves the surface hot and littered with loosely bound
@@ -513,7 +513,7 @@ def heal_surface_commands(
     press, 2026-08-26). So, after the projectile strip, the half is
     RE-EQUILIBRATED under the same universal model that bombarded it —
     per half, in vacuum, on the same engine (revised 2026-08-28, Paul):
-    the study's ``[protocol.reanneal]`` schedule holds every mobile atom
+    the project's ``[protocol.reanneal]`` schedule holds every mobile atom
     at ``hold_temperature`` for ``hold_duration``, cools it to the press
     temperature over the same span, and THEN a short minimisation drops
     the slab into a nearby 0 K minimum (PSEUDOCODE §9.7,
@@ -529,13 +529,13 @@ def heal_surface_commands(
     activate movie can tell the cascade-hot frames from the healed ones
     (the bootstrap harvest, PSEUDOCODE §11.3).
     """
-    schedule = member.protocol.reanneal_schedule
+    schedule = pair.protocol.reanneal_schedule
     hold_kelvin = to_metal(schedule.hold_temperature, "temperature")
-    press_kelvin = to_metal(member.protocol.press_temperature, "temperature")
-    timestep = to_metal(member.numerical.md_timestep, "time")
+    press_kelvin = to_metal(pair.protocol.press_temperature, "temperature")
+    timestep = to_metal(pair.numerical.md_timestep, "time")
     hold_steps = max(1, round(
         to_metal(schedule.hold_duration, "time") / timestep))
-    damping = to_metal(member.numerical.langevin_damping, "time")
+    damping = to_metal(pair.numerical.langevin_damping, "time")
     return [
         # Everything the cascade could move, minus the anchored base.
         "group heal_mobile subtract all frozen_base",
@@ -606,7 +606,7 @@ def pull_headroom_commands(
     ]
 
 
-def press_release_commands(member: MemberSpecification) -> list:
+def press_release_commands(pair: PairSpecification) -> list:
     """Release the press drive so the reference settles under NO load (§9.4).
 
     The settle's zero-load reference (§5.3) must be at rest under no
@@ -619,13 +619,13 @@ def press_release_commands(member: MemberSpecification) -> list:
     place — the settle reads them to check the reference is balanced.
     """
     releases = ["unfix drive_top"]
-    if member.protocol.press_control == "load":
+    if pair.protocol.press_control == "load":
         releases.append("unfix drive_top_nve")
     return releases
 
 
 def recording_commands(
-        member: MemberSpecification,
+        pair: PairSpecification,
         dump_file: str | None = None,
         stride: int | None = None) -> list:
     """Log the forces the analyzer reads, and optionally record frames.
@@ -647,7 +647,7 @@ def recording_commands(
     # The thermo cadence follows the SPEC, because the analyzer reads
     # those lines and its sampling is part of the measurement. Only the
     # DUMP honours an override, since frames are for looking at.
-    thermo_stride = member.numerical.frame_stride
+    thermo_stride = pair.numerical.frame_stride
     stride = stride or thermo_stride
     commands = [
         f"thermo {thermo_stride}",
@@ -674,17 +674,17 @@ def trajectory_dump_commands(dump_file: str, stride: int) -> list:
     ]
 
 
-def stage_dump_file(output_directory: str, member_name: str,
+def stage_dump_file(output_directory: str, pair_label: str,
                     stage: str) -> str:
     """Where one dynamic stage's trajectory lands.
 
-    Named for the member and the stage that produced it, so a directory
-    of trajectories reads as an account of the run — ``<member>_
-    activation_a.dump``, ``<member>_press.dump`` — rather than a pile of
+    Named for the pair and the stage that produced it, so a directory
+    of trajectories reads as an account of the run — ``<pair>_
+    activation_a.dump``, ``<pair>_press.dump`` — rather than a pile of
     files distinguishable only by timestamp. Run output belongs under the
     run's OWN directory, never the working directory (ARCHITECTURE §4.1).
     """
-    return os.path.join(output_directory, f"{member_name}_{stage}.dump")
+    return os.path.join(output_directory, f"{pair_label}_{stage}.dump")
 
 
 def _rate_slug(rate: Quantity) -> str:
@@ -696,7 +696,7 @@ def _rate_slug(rate: Quantity) -> str:
 
 def pull_dump_file(
         output_directory: str,
-        member: MemberSpecification,
+        pair: PairSpecification,
         rate: Quantity | None = None) -> str:
     """Where a pull's trajectory dump is written (ARCHITECTURE.md §4.1).
 
@@ -709,9 +709,9 @@ def pull_dump_file(
     name, so it is part of the contract rather than a caller's choice.
     """
     if rate is None:
-        return os.path.join(output_directory, f"{member.name}_pull.dump")
+        return os.path.join(output_directory, f"{pair.pair_label}_pull.dump")
     return os.path.join(
-        output_directory, f"{member.name}_pull_{_rate_slug(rate)}.dump")
+        output_directory, f"{pair.pair_label}_pull_{_rate_slug(rate)}.dump")
 
 
 # ---------------------------------------------------------------------
@@ -723,7 +723,7 @@ def pull_dump_file(
 
 def press_script(
         built,
-        member: MemberSpecification,
+        pair: PairSpecification,
         force_model: ForceModel,
         data_file: str,
         seed: int,
@@ -737,16 +737,16 @@ def press_script(
     the approach rate); slice 3 may stop it EARLY when the dual-contact
     criterion fires. The hold ``run`` is the full ``press_duration``.
     """
-    protocol = member.protocol
-    numerical = member.numerical
+    protocol = pair.protocol
+    numerical = pair.numerical
     timestep_ps = to_metal(numerical.md_timestep, "time")
 
     commands = []
     commands += preamble_commands(data_file, numerical.md_timestep)
     commands += force_model_commands(force_model)
     commands += region_group_commands(built, geometry)
-    commands += integrator_commands(member, seed)
-    commands += press_drive_commands(built, member)
+    commands += integrator_commands(pair, seed)
+    commands += press_drive_commands(built, pair)
     commands += grip_hold_and_readback_commands()
 
     # Approach span: the time to close the initial gap at the approach
@@ -764,7 +764,7 @@ def press_script(
 
 def pull_script(
         built,
-        member: MemberSpecification,
+        pair: PairSpecification,
         force_model: ForceModel,
         data_file: str,
         rate: Quantity,
@@ -784,18 +784,18 @@ def pull_script(
     the rate; slice 3 stops it EARLY at complete separation (opening past
     the cutoff with the force returned to the noise floor, §9.6).
     """
-    numerical = member.numerical
+    numerical = pair.numerical
     timestep_ps = to_metal(numerical.md_timestep, "time")
-    dump_file = pull_dump_file(output_directory, member)
+    dump_file = pull_dump_file(output_directory, pair)
 
     commands = []
     commands += preamble_commands(data_file, numerical.md_timestep)
     commands += force_model_commands(force_model)
     commands += region_group_commands(built, geometry)
-    commands += integrator_commands(member, seed)
+    commands += integrator_commands(pair, seed)
     commands += grip_hold_and_readback_commands()
     commands += pull_drive_commands(rate)
-    commands += recording_commands(member, dump_file)
+    commands += recording_commands(pair, dump_file)
 
     distance = to_metal(pull_distance, "distance")
     speed = to_metal(rate, "velocity")
@@ -899,7 +899,7 @@ def cascade_region_group_commands(
 
 
 def cascade_integrator_commands(
-        member: MemberSpecification, seed: int) -> list:
+        pair: PairSpecification, seed: int) -> list:
     """Integrate ALL atoms; freeze the base; thermostat the border (§10.2).
 
     Three fixes make the heat sink DESIGN.md §3.3 requires. (1) ``fix nve
@@ -921,8 +921,8 @@ def cascade_integrator_commands(
     setpoint the press hold also targets). A dedicated activation
     temperature knob is a possible spec follow-on (dev/TODO.md).
     """
-    temperature = to_metal(member.protocol.press_temperature, "temperature")
-    damping = to_metal(member.numerical.langevin_damping, "time")
+    temperature = to_metal(pair.protocol.press_temperature, "temperature")
+    damping = to_metal(pair.numerical.langevin_damping, "time")
     return [
         "fix nve_all all nve",
         "fix freeze_base frozen_base setforce 0.0 0.0 0.0",
@@ -934,7 +934,7 @@ def cascade_integrator_commands(
 
 
 def cascade_adaptive_timestep_commands(
-        member: MemberSpecification) -> list:
+        pair: PairSpecification) -> list:
     """Turn ON the adaptive timestep for the violent NVE cascade (§10.4).
 
     ``fix dt/reset`` recomputes the step so no atom moves more than
@@ -946,7 +946,7 @@ def cascade_adaptive_timestep_commands(
     relaxation, where an adaptive step would destabilise the thermostat.
     """
     min_step = to_metal(_ADAPTIVE_MIN_TIMESTEP_STANDIN, "time")
-    max_step = to_metal(member.numerical.cascade_timestep, "time")
+    max_step = to_metal(pair.numerical.cascade_timestep, "time")
     return [
         f"fix cascade_dt all dt/reset {_ADAPTIVE_TIMESTEP_CHECK_INTERVAL} "
         f"{_lammps_number(min_step)} {_lammps_number(max_step)} "
@@ -955,7 +955,7 @@ def cascade_adaptive_timestep_commands(
 
 
 def cascade_fixed_timestep_commands(
-        member: MemberSpecification) -> list:
+        pair: PairSpecification) -> list:
     """Restore the fixed step for the between-impact relaxation (§10.4).
 
     Removes the adaptive fix and pins the step to ``md_timestep`` — the
@@ -977,7 +977,7 @@ def cascade_fixed_timestep_commands(
     distinction (:func:`reanneal_commands` runs at ``md_timestep``);
     this brings the between-impact relaxation into line with it.
     """
-    fixed_step = to_metal(member.numerical.md_timestep, "time")
+    fixed_step = to_metal(pair.numerical.md_timestep, "time")
     return [
         "unfix cascade_dt",
         f"timestep {_lammps_number(fixed_step)}",
@@ -1042,7 +1042,7 @@ def cascade_halt_release_commands() -> list:
 
 
 def cascade_setup_commands(
-        member: MemberSpecification,
+        pair: PairSpecification,
         force_model: ForceModel,
         data_file: str,
         base_low: float,
@@ -1063,7 +1063,7 @@ def cascade_setup_commands(
     """
     commands = []
     commands += preamble_commands(
-        data_file, member.numerical.cascade_timestep, force_model)
+        data_file, pair.numerical.cascade_timestep, force_model)
     # Sputtered atoms LEAVE through the open `p p f` top (§10.4), so a
     # SHRINKING atom count is expected physics, not an error — warn on a
     # lost atom rather than aborting (LAMMPS aborts by default).
@@ -1076,7 +1076,7 @@ def cascade_setup_commands(
     commands.append("variable elapsed_cascade equal time-v_cascade_start")
     commands += force_model_commands(force_model)
     commands += cascade_region_group_commands(base_low, surface_high, geometry)
-    commands += cascade_integrator_commands(member, seed)
+    commands += cascade_integrator_commands(pair, seed)
     return commands
 
 

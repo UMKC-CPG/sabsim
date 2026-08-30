@@ -21,6 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from sabsim.pipeline.exec_artifacts import (
+    ActivatedHalf,
     ActivatedSlabs,
     BondDebondResult,
     DerivedLattices,
@@ -123,7 +124,7 @@ def _validate_activated(artifact: object) -> str | None:
 
     Revised 2026-08-28: the §3.5 gate judges each healed half in its own
     activation session (DESIGN §3.4/§3.5), so its verdict rides this seam
-    and a failure HALTS the member here — before the pair is assembled
+    and a failure HALTS the pair here — before the pair is assembled
     and long before the bond job's GPU is spent. Checked FIRST so the halt
     reason is the gate's own, not a downstream symptom.
     """
@@ -138,6 +139,29 @@ def _validate_activated(artifact: object) -> str | None:
         if not verdict.passed:
             return (f"surface {surface} failed the §3.5 activation gate: "
                     f"{verdict.reason}")
+    return None
+
+
+def _validate_activated_half(artifact: object) -> str | None:
+    """ONE half healed AND gated, with its shared cell (ACTIVATED_HALF).
+
+    The prep job's deliverable (revised 2026-08-30): the seam a surface
+    crosses on its way from its own prep folder to the bond job. The
+    half must exist, its §3.5 verdict must be present and PASSED, and
+    the shared cell it was cut on must travel with it — that is what the
+    bond job compares across the two halves before assembling them.
+    """
+    if not isinstance(artifact, ActivatedHalf):
+        return "expected an ActivatedHalf artifact"
+    if artifact.slab is None:
+        return "the activated slab is missing"
+    if artifact.verdict is None:
+        return "the surface was never gated (§3.5)"
+    if not artifact.verdict.passed:
+        return (f"the surface failed the §3.5 activation gate: "
+                f"{artifact.verdict.reason}")
+    if not isinstance(artifact.shared, SharedCell):
+        return "the half carries no shared coincidence cell"
     return None
 
 
@@ -176,6 +200,8 @@ DERIVED_LATTICES_CONTRACT = Contract(
 SLABS_CONTRACT = Contract("SLABS_CONTRACT", _validate_slabs)
 ACTIVATED_SLABS_CONTRACT = Contract(
     "ACTIVATED_SLABS_CONTRACT", _validate_activated)
+ACTIVATED_HALF_CONTRACT = Contract(
+    "ACTIVATED_HALF_CONTRACT", _validate_activated_half)
 STRUCTURE_CONTRACT = Contract("STRUCTURE_CONTRACT", _validate_structure)
 BOND_DEBOND_CONTRACT = Contract(
     "BOND_DEBOND_CONTRACT", _validate_bond_debond)

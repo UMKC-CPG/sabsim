@@ -3,8 +3,8 @@
 This module is ``load_deployment`` made real. It turns the machine-local
 deployment TOML — the ``share/templates/deployment_rc.toml`` an admin edits
 — into the typed records PSEUDOCODE.md §14.1 defines, and it holds the
-consumer to the SAME two disciplines the study-spec loader
-(:mod:`sabsim.spec.loader`) does, because the rc is the study spec's only
+consumer to the SAME two disciplines the project-file loader
+(:mod:`sabsim.spec.loader`) does, because the rc is the project file's only
 sibling input (DESIGN.md §1.2):
 
 * **No silent default (DESIGN.md §1.4, §14.1).** Every field the records
@@ -17,11 +17,11 @@ sibling input (DESIGN.md §1.2):
   usage block that routes to a resource class the hardware section never
   defines cannot be run, so it is rejected at load with a message that
   says which block and which class — the same dangling-reference refusal
-  the spec loader applies to a relation over a missing member.
+  the spec loader applies to a wafer whose prep folder is missing.
 
 The rc carries TWO concerns in one file (ARCHITECTURE.md §4.1): a
 ``[hardware]`` inventory (the per-cluster swap unit) and a ``[usage.*]``
-map keyed by KIND OF MEMBER JOB — ``activate`` / ``bond`` / ``analyze``
+map keyed by KIND OF PAIR JOB — ``prep`` / ``bond`` / ``analysis``
 (DESIGN.md §10.2). The seam between them is the word CLASS: a usage block
 names an abstract resource class (``"cpu"`` / ``"gpu"``) and the hardware
 section binds that class to this machine's real partition, so moving to a
@@ -71,7 +71,7 @@ class DeploymentError(Exception):
     Raised with a message that names WHAT is wrong and WHERE, so the
     person editing the rc can fix it without reading this loader. It is
     the single failure type both disciplines above raise, matching the
-    study-spec loader's one :class:`~sabsim.spec.loader.SpecificationError`.
+    project loader's one :class:`~sabsim.spec.loader.SpecificationError`.
     """
 
 
@@ -81,7 +81,7 @@ class Duration:
 
     The rc writes a walltime or a ceiling as a TOML inline table —
     ``{ value = 48.0, unit = "h" }`` — the same units-travel-with-values
-    idiom the study spec uses for physical knobs (DESIGN.md §1.5). Frozen
+    idiom the project file uses for physical knobs (DESIGN.md §1.5). Frozen
     and defaulted-free so it cannot be built with a hole in it.
     """
 
@@ -113,7 +113,7 @@ class Memory:
     ``{ value = 16.0, unit = "GB" }`` — the same units-travel-with-values
     idiom :class:`Duration` uses for a walltime (DESIGN.md §1.5, §10.6).
     It exists because a job with no ``#SBATCH --mem`` inherits the
-    partition's small per-job default, which OOM-killed the E5 activate
+    partition's small per-job default, which OOM-killed the E5 cascade
     cascade (LEDGER T-E5-ACTIVATE); stating a comfortable ceiling here
     stops that. Frozen and defaulted-free so it cannot be built with a
     hole in it.
@@ -165,9 +165,10 @@ class Partition:
 
 @dataclass(frozen=True)
 class UsageBlock:
-    """One ``[usage.*]`` block — how ONE kind of member job runs.
+    """One ``[usage.*]`` block — how ONE kind of pair job runs.
 
-    Keyed in the rc by member job (``activate`` / ``bond`` / ``analyze``,
+    Keyed in the rc by kind of pair job (``prep`` — shared by both
+    surface preparations — / ``bond`` / ``analysis``,
     DESIGN.md §10.2), a usage block names the abstract resource
     ``resource_class`` the hardware section resolves to a
     :class:`Partition`, the human-provided ``nodes``, ``tasks_per_node``
@@ -185,9 +186,9 @@ class UsageBlock:
 
     ``environment`` is per-kind environment the prepared job exports before
     the launch — the machine-specific knobs a job needs that are NOT science
-    settings: e.g. the universal-cascade activate job points
+    settings: e.g. the universal-cascade prep jobs point
     ``SABSIM_CASCADE_ENGINE_PREFIX`` at the deepmd bundle (ARCHITECTURE
-    §4.4). Which MODEL runs is a study-file decision (``[potential]``),
+    §4.4). Which MODEL runs is a project-file decision (``[potential]``),
     never an environment one (DESIGN §1.6). It is
     stored as a sorted tuple of ``(name, value)`` pairs so the emitted script
     is deterministic. Unlike the fields above it is OPTIONAL — plumbing, not
@@ -217,7 +218,7 @@ class DeploymentConfig:
     """The whole parsed rc (PSEUDOCODE.md §14.1, ARCHITECTURE.md §4.1).
 
     ``partitions`` is keyed by resource class (``"cpu"`` / ``"gpu"``) and
-    ``usage`` by member-job kind (``activate`` / ``bond`` / ``analyze``);
+    ``usage`` by pair-job kind (``prep`` / ``bond`` / ``analysis``);
     the two meet at :attr:`UsageBlock.resource_class`, which every usage
     block resolves against one of the partitions. ``module_paths`` are the
     extra ``module use`` roots the CPG modulefile tree needs before any
@@ -232,7 +233,7 @@ class DeploymentConfig:
     usage: dict[str, UsageBlock]
 
     def partition_for(self, job_kind: str) -> Partition:
-        """The real partition ONE member job's usage block resolves to.
+        """The real partition ONE usage block resolves to, by its key.
 
         Joins the two halves of the rc for a caller (the §14.4 writer, the
         §14.3 runner): look up the job's usage block, then resolve its
@@ -261,7 +262,7 @@ class DeploymentConfig:
 # Small helpers that pull required values and enforce completeness, one
 # per shape the records need. Every field is pulled through one of these,
 # so an omission surfaces as a clear DeploymentError, not a raw KeyError
-# — the same mechanism the study-spec loader uses (spec/loader.py).
+# — the same mechanism the project loader uses (spec/loader.py).
 # ---------------------------------------------------------------------
 
 def _require(table: dict, key: str, context: str) -> object:
@@ -319,7 +320,7 @@ def _require_memory(table: dict, key: str, context: str) -> Memory:
 def _require_str_list(table: dict, key: str, context: str) -> tuple:
     """Pull a required list of strings as a tuple (module lists, roots).
 
-    An empty list is allowed and meaningful — the analyze job loads no
+    An empty list is allowed and meaningful — the analysis job loads no
     science module in v1 (DESIGN.md §10.5) — but the KEY must be present,
     so "no modules" is stated as ``[]`` rather than left to a default.
     """
@@ -408,7 +409,7 @@ def _reject_if_usage_class_undefined(
     A usage block whose ``resource_class`` names no partition cannot be
     executed — there is no machine to send it to — so it is refused at
     load, naming the block and the dangling class. This is the deployment
-    twin of the study loader's dangling-relation refusal (§1.5): a
+    twin of the project loader's dangling-reference refusal (§1.5): a
     completeness check that needs the WHOLE file, so it runs after both
     halves are parsed rather than field by field.
     """

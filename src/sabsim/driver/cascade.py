@@ -1,7 +1,7 @@
 """The surface-activation cascade driver (PSEUDOCODE.md §10).
 
 This is the step-4 counterpart of the press/pull driver
-(:mod:`sabsim.driver.press_pull`): it turns a member's bombardment
+(:mod:`sabsim.driver.press_pull`): it turns a pair's bombardment
 protocol into the per-impact LAMMPS command stream DESIGN.md §3
 specifies — the impact plan derived from the fluence, the seeded impact
 positions and velocities, and the cleanup that strips the projectile.
@@ -46,7 +46,7 @@ from sabsim.driver.commands import (
     to_metal,
     trajectory_dump_commands,
 )
-from sabsim.spec.records import MemberSpecification, Quantity
+from sabsim.spec.records import PairSpecification, Quantity
 
 # The energy of a 1 amu mass moving at 1 Å/ps, expressed in eV — the
 # metal-unit bridge from an impact ENERGY to a projectile SPEED. Derivation:
@@ -76,7 +76,7 @@ class CascadeControl:
 class BombardmentSpec:
     """The concrete impact plan for one slab (PSEUDOCODE.md §10.3).
 
-    Everything the per-impact loop needs, derived from the member's
+    Everything the per-impact loop needs, derived from the pair's
     protocol and ensemble knobs: the projectile (its LAMMPS type id and
     mass), the per-impact energy and incidence angle, how many impacts the
     dose implies, the per-impact seeds derived from the one master seed,
@@ -170,24 +170,24 @@ def _speed_from_energy(energy_ev: float, mass_amu: float) -> float:
 
 
 def derive_bombardment_spec(
-        built, member: MemberSpecification) -> BombardmentSpec:
-    """Build the concrete impact plan from the member's knobs (§10.3).
+        built, pair: PairSpecification) -> BombardmentSpec:
+    """Build the concrete impact plan from the pair's knobs (§10.3).
 
     ``built`` is the cascade cell wrapper (its ``type_map`` MUST already
     include the projectile species, since the cascade creates those atoms);
-    ``member`` supplies the protocol (species, energy, angle, dose, per-
+    ``pair`` supplies the protocol (species, energy, angle, dose, per-
     impact durations) and ensemble (master seed). The projectile mass is
     taken from the species — nothing is hand-set per material — and the
     impact count follows from the dose (§10.3).
     """
-    protocol = member.protocol
+    protocol = pair.protocol
     symbol = protocol.activation_species
     projectile_mass = float(atomic_masses[atomic_numbers[symbol]])
 
     impact_energy = to_metal(protocol.activation_energy, "energy")
     impact_angle = _angle_in_radians(protocol.activation_angle)
     impact_count = _impact_count(protocol.activation_fluence, built)
-    impact_seeds = derive_seeds(member.ensemble.master_seed, impact_count)
+    impact_seeds = derive_seeds(pair.ensemble.master_seed, impact_count)
 
     return BombardmentSpec(
         projectile_symbol=symbol,
@@ -274,7 +274,7 @@ def cascade_cleanup_commands(projectile_types) -> list:
 
 def build_activate_script(
         built,
-        member: MemberSpecification,
+        pair: PairSpecification,
         cascade_force_model: ForceModel,
         data_file: str,
         spec: BombardmentSpec,
@@ -328,7 +328,7 @@ def build_activate_script(
 
     script = []
     script += cascade_setup_commands(
-        member, cascade_force_model, data_file, base_low, surface_high,
+        pair, cascade_force_model, data_file, base_low, surface_high,
         seed, geometry)
     # The §2.4 out-of-plane relax before the first impact (same as live).
     # skip_prerelax omits it — a DIAGNOSTIC to test whether this minimize,
@@ -354,7 +354,7 @@ def build_activate_script(
     # actually integrated with, or the requested duration is wrong.
     relax_steps = max(1, round(
         spec.between_impact_relaxation
-        / to_metal(member.numerical.md_timestep, "time")))
+        / to_metal(pair.numerical.md_timestep, "time")))
 
     # Every impact, precomputed from its seed — no live state is consulted,
     # so the whole bombardment is known before the run starts.
@@ -364,20 +364,20 @@ def build_activate_script(
         velocity = sample_impact_velocity(spec, impact_seed)
         script += insert_projectile_commands(
             spec.projectile_type, position, velocity)
-        script += cascade_adaptive_timestep_commands(member)
+        script += cascade_adaptive_timestep_commands(pair)
         script += cascade_halt_commands(spec.cascade_duration)
         script += [f"run {control.cascade_step_cap}"]
         script += cascade_halt_release_commands()
-        script += cascade_fixed_timestep_commands(member)
+        script += cascade_fixed_timestep_commands(pair)
         script += [f"run {relax_steps}"]
 
     # Cascade cleanup (§3.4): strip the projectile + renumber, so the heal
     # and the gate see a substrate-only, consecutively numbered slab.
     script += cascade_cleanup_commands(projectile_types)
 
-    # The heal (§3.4, PSEUDOCODE §10.5): anneal on the study's schedule,
+    # The heal (§3.4, PSEUDOCODE §10.5): anneal on the project's schedule,
     # then minimize — per half, here, under the same model.
-    script += heal_surface_commands(member, seed, heal_marker_file)
+    script += heal_surface_commands(pair, seed, heal_marker_file)
 
     # The handoff: write the HEALED structure for the sabsim process to
     # read back. A sorted custom dump carries id, type, and the coordinates
@@ -395,7 +395,7 @@ def build_activate_script(
 # The activation gate lives in `activation_gate` (PSEUDOCODE §10.6) — the
 # pluggable metric registry (g(r), coordination, ring statistics, depth).
 # It judges the HEALED half this script hands back, in the sabsim process
-# (`live_stages.activate_one_half`), and a failed verdict halts the member
+# (`live_stages.activate_one_half`), and a failed verdict halts the pair
 # before assembly (revised 2026-08-28, §3.4/§3.5).
 #
 # Each surface is activated INDEPENDENTLY — cascade to the dose, heal, then
@@ -403,9 +403,9 @@ def build_activate_script(
 # (activation runs before the two ever face each other, §3.1).
 # ---------------------------------------------------------------------
 
-def _projectile_species(member: MemberSpecification) -> set:
+def _projectile_species(pair: PairSpecification) -> set:
     """The projectile species set: the beam plus any co-species (§10.3)."""
-    protocol = member.protocol
+    protocol = pair.protocol
     species = {protocol.activation_species}
     cospecies = protocol.activation_cospecies
     if cospecies and cospecies.lower() != "none":

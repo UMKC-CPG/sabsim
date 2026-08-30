@@ -1,6 +1,6 @@
-"""Read and validate a SABSIM study spec (PSEUDOCODE.md §2, DESIGN §1.4).
+"""Read and validate a SABSIM project file (PSEUDOCODE.md §2, DESIGN §1.4).
 
-This module is ``load_and_validate_study`` made real. It turns the TOML
+This module is ``load_and_validate_project`` made real. It turns the TOML
 file the §1.4 generator emits into the typed records of
 :mod:`sabsim.spec.records`, and it enforces the two rules that make the
 spec a trustworthy contract between the human and the pipeline:
@@ -19,14 +19,18 @@ spec a trustworthy contract between the human and the pipeline:
 
 The mechanism chosen for the §1.8 schema follow-on is plain dataclasses
 plus this hand-written validator: transparent, dependency-free, and
-readable beside PSEUDOCODE.md §2, which is exactly what a study spec
+readable beside PSEUDOCODE.md §2, which is exactly what a project file
 built on "no hidden defaults" wants.
 
 The on-disk TOML layout (the ``[DEPTH-FIRST] deserialize`` of §2) is
-pinned HERE. v1 hoists the shared protocol, numerical, and ensemble
-blocks to study level and distributes them to every member, because a
-v1 study shares one protocol across its members (DESIGN.md §1.1); the
-per-member override is a later-wave extension of this reader.
+pinned HERE. A project file describes exactly ONE wafer pair (Paul,
+2026-08-30): ``[project]`` carries the description, ``[wafer_a]`` and
+``[wafer_b]`` the two surfaces, ``potential_ref`` and
+``material_domain`` sit beside the description in ``[project]`` (the
+two pointers that are not knobs, DESIGN §1.3), and ``[potential]``,
+``[protocol.*]``, ``[numerical]`` and ``[ensemble]`` hold the knob
+groups. There is no list of members and no relation layer; a reference
+pair is its own project folder (DESIGN.md §1.1).
 """
 
 from __future__ import annotations
@@ -39,14 +43,14 @@ from sabsim.spec.records import (
     AnnealSchedule,
     EnsembleKnobs,
     MaterialKnobs,
-    MemberSpecification,
     NumericalKnobs,
+    PairSpecification,
     PotentialSpec,
+    Project,
     ProtocolKnobs,
     Quantity,
-    Relation,
-    Study,
     WaferPair,
+    folder_label,
 )
 
 # The v1 potential's type map: the elements the {Si, O, Ar} MLIP knows
@@ -66,7 +70,7 @@ NO_COSPECIES = "none"
 
 
 class SpecificationError(Exception):
-    """A study spec is incomplete or cannot be executed.
+    """A project file is incomplete or cannot be executed.
 
     Raised with a message that names WHAT is wrong and WHERE, so the
     person editing the spec can fix it without reading the loader. This
@@ -83,7 +87,7 @@ class SpecificationError(Exception):
 def _require(table: dict, key: str, context: str) -> object:
     """Return ``table[key]`` or reject the spec if the key is absent.
 
-    ``context`` names the location (e.g. "member 'si-sio2' -> press") so
+    ``context`` names the location (e.g. "[wafer_a] -> face") so
     the error points the editor straight at the missing knob. This is
     the concrete face of "reject the incomplete spec" (DESIGN.md §1.4).
     """
@@ -133,8 +137,9 @@ def _require_face(table: dict, key: str, context: str) -> tuple:
 # ---------------------------------------------------------------------
 
 def _material_from_wafer(table: dict, context: str,
-                         study_directory: Path) -> MaterialKnobs:
-    """Build one wafer's MaterialKnobs from its ``[member.wafer_x]``.
+                         project_directory: Path,
+                         surface_number: int) -> MaterialKnobs:
+    """Build one wafer's MaterialKnobs from its ``[wafer_a]``/``[wafer_b]``.
 
     The ``cif`` key names the authoritative structure file (DESIGN.md
     §1.2). The loader keeps it as a string; whether the file EXISTS and
@@ -142,24 +147,27 @@ def _material_from_wafer(table: dict, context: str,
     way material composition against the type map is a later-wave check
     (§1.5) — not something this reader can know from the spec alone.
 
-    The ``material`` label also names the wafer's PREPARATION subfolder
-    of the study folder (``<study>/<label>/``, ARCHITECTURE §1; Paul,
-    2026-08-29), where its environment library is looked for. Whether
-    that folder and library exist is phase three's business
-    (:mod:`sabsim.spec.references`), not this reader's.
+    The ``material`` label, lower-cased, also names the surface's PREP
+    FOLDER of the project (``<project>/prep_surf<N>_<label>/``,
+    ARCHITECTURE §1; Paul, 2026-08-30), where its recipe, environment
+    library and amorphization live. ``surface_number`` is 1 for wafer A
+    and 2 for wafer B. Whether that folder and its library exist is
+    phase three's business (:mod:`sabsim.spec.references`), not this
+    reader's.
     """
     identity = str(_require(table, "material", context))
     if not identity or "/" in identity or identity in (".", ".."):
         raise SpecificationError(
-            f"{context} -> material: '{identity}' cannot name a "
-            f"preparation subfolder of the study (it is empty or holds "
-            f"a path separator)")
+            f"{context} -> material: '{identity}' cannot name a prep "
+            f"folder of the project (it is empty or holds a path "
+            f"separator)")
+    prep_folder = f"prep_surf{surface_number}_{folder_label(identity)}"
     return MaterialKnobs(
         identity=identity,
         cif_source=str(_require(table, "cif", context)),
         crystal_structure=str(_require(table, "structure", context)),
         surface_face=_require_face(table, "face", context),
-        preparation_directory=str(study_directory / identity),
+        preparation_directory=str(project_directory / prep_folder),
     )
 
 
@@ -309,8 +317,8 @@ def _ensemble_from_table(table: dict, context: str) -> EnsembleKnobs:
 def _expand_roots(path: str, context: str) -> str:
     """Expand ``$SABSIM_SHARE``-style roots in a weights path.
 
-    A study file may name a model file relative to one of the three
-    location roots (ARCHITECTURE.md §4.1) so the same study runs on any
+    A project file may name a model file relative to one of the three
+    location roots (ARCHITECTURE.md §4.1) so the same project runs on any
     machine that sources its ``sabsimrc``. A root that is referenced but
     not set in the environment is rejected here, because a path with a
     literal ``$SABSIM_SHARE`` left in it would fail much later, inside
@@ -325,7 +333,7 @@ def _expand_roots(path: str, context: str) -> str:
 
 
 def _potential_from_table(table: dict, context: str) -> PotentialSpec:
-    """Assemble the study-level PotentialSpec from the ``[potential]`` block.
+    """Assemble the PotentialSpec from the ``[potential]`` block.
 
     Every key is required (no hidden defaults, DESIGN.md §1.4): the
     universal model's pinned name and weights, the production model's
@@ -363,9 +371,8 @@ def _validate_press_mode(mode: str, context: str) -> str:
     return mode
 
 
-def _reject_if_not_executable(
-        member: MemberSpecification) -> None:
-    """Reject a member the pipeline could not actually run (§1.5).
+def _reject_if_not_executable(pair: PairSpecification) -> None:
+    """Reject a pair the pipeline could not actually run (§1.5).
 
     Checks the parts that would stop execution: the projectile species
     must live in the potential's type map, and any co-species too.
@@ -373,105 +380,56 @@ def _reject_if_not_executable(
     against the type map, box sizes) belong to later waves and are noted
     where they will land, not silently skipped.
     """
-    context = f"member '{member.name}'"
-    species = member.protocol.activation_species
+    context = f"pair '{pair.pair_label}'"
+    species = pair.protocol.activation_species
     if species not in KNOWN_SPECIES:
         raise SpecificationError(
             f"{context}: activation species '{species}' is outside the "
             f"potential type map {sorted(KNOWN_SPECIES)} (§1.5)")
 
-    cospecies = member.protocol.activation_cospecies
+    cospecies = pair.protocol.activation_cospecies
     if cospecies is not None and cospecies not in KNOWN_SPECIES:
         raise SpecificationError(
             f"{context}: co-species '{cospecies}' is outside the "
             f"potential type map {sorted(KNOWN_SPECIES)} (§1.5)")
 
-    if not member.potential_ref:
+    if not pair.potential_ref:
         raise SpecificationError(
-            f"{context}: potential_ref is empty — a member must point "
+            f"{context}: potential_ref is empty — a pair must point "
             f"at a potential generation (§1.3, §1.6)")
 
-    if not member.material_domain:
+    if not pair.material_domain:
         raise SpecificationError(
-            f"{context}: material_domain is empty — a member must name "
+            f"{context}: material_domain is empty — a pair must name "
             f"the structural/chemical regime its force model describes, "
             f"because the species alone cannot select one (§4.8)")
-
-
-# ---------------------------------------------------------------------
-# Relation validation — compute what the schema says the validator
-# attaches, without ever deleting the relation (report, never restrict).
-# ---------------------------------------------------------------------
-
-def _relation_from_table(table: dict, context: str) -> Relation:
-    """Build a Relation and attach the checks §2 says are computed here.
-
-    ``confounded`` is set now — a relation with more than one contrast
-    confuses its own signal (DESIGN.md §1.1). The full difference set
-    (entailed vs incidental) is ``sort_differences``, marked
-    ``[DEPTH-FIRST]`` in §2, so it lands with the relation-evaluation
-    module; it is left unset here rather than faked.
-    """
-    contrast = tuple(str(path) for path in _require(
-        table, "contrast", context))
-    return Relation(
-        kind=str(_require(table, "kind", context)),
-        members=tuple(str(name) for name in _require(
-            table, "members", context)),
-        measures=tuple(str(name) for name in _require(
-            table, "measures", context)),
-        contrast=contrast,
-        controls=tuple(str(path) for path in _require(
-            table, "controls", context)),
-        confounded=(len(contrast) > 1),
-    )
-
-
-def _reject_if_relation_dangling(
-        relation: Relation, member_names: set[str]) -> None:
-    """Reject a relation that names a member the study does not define.
-
-    A relation over a missing member cannot be computed at all, so this
-    is an executability failure (§1.5), distinct from a relation that is
-    merely confounded — which stays, and is reported (§1.1).
-    """
-    for name in relation.members:
-        if name not in member_names:
-            raise SpecificationError(
-                f"relation '{relation.kind}': names member '{name}', "
-                f"which the study does not define")
 
 
 # ---------------------------------------------------------------------
 # The public entry point.
 # ---------------------------------------------------------------------
 
-def load_and_validate_study(spec_path: str | Path) -> Study:
-    """Load a study spec from ``spec_path`` and validate it (§2).
+def load_and_validate_project(spec_path: str | Path) -> Project:
+    """Load a project file from ``spec_path`` and validate it (§2).
 
-    Reads the TOML file, builds the typed :class:`Study`, and applies
-    both rejection rules: incomplete specs fail while their keys are
-    pulled, and un-executable specs fail their executability checks.
-    Relations are validated but never deleted — even a confounded one is
-    computed and reported (DESIGN.md §1.1). Returns the validated Study,
+    Reads the TOML file, builds the typed :class:`Project` holding its
+    one :class:`PairSpecification`, and applies both rejection rules:
+    incomplete files fail while their keys are pulled, and un-executable
+    ones fail their executability checks. Returns the validated Project
     or raises :class:`SpecificationError` naming the first problem.
+
+    The project DIRECTORY is fixed by where the file actually is (its
+    resolved parent), never by a typed path: both prep folders and the
+    bond and analysis folders are found beneath it (ARCHITECTURE §1).
     """
     path = Path(spec_path)
     with path.open("rb") as spec_file:
         raw = tomllib.load(spec_file)
-    # The study FOLDER: every wafer's preparation subfolder is found
-    # beneath it (ARCHITECTURE §1), so it is fixed by where the study
-    # file actually is, never by a typed path.
-    study_directory = path.resolve().parent
+    project_directory = path.resolve().parent
 
-    study_table = _require(raw, "study", "top level")
-    name = str(_require(study_table, "name", "[study]"))
-    description = str(_require(study_table, "description", "[study]"))
+    project_table = _require(raw, "project", "top level")
+    description = str(_require(project_table, "description", "[project]"))
 
-    # v1 shares one protocol, numerical, and ensemble block across all
-    # members (DESIGN.md §1.1), so they are read once at study level and
-    # distributed, as is the [potential] block that names the force
-    # models. Material and potential_ref are per member.
     protocol = _protocol_from_tables(
         _require(raw, "protocol", "top level"), "protocol")
     numerical = _numerical_from_table(
@@ -481,45 +439,28 @@ def load_and_validate_study(spec_path: str | Path) -> Study:
     potential = _potential_from_table(
         _require(raw, "potential", "top level"), "[potential]")
 
-    member_tables = _require(raw, "member", "top level")
-    members = []
-    for member_table in member_tables:
-        member_name = str(_require(member_table, "name", "member"))
-        context = f"member '{member_name}'"
-        member = MemberSpecification(
-            name=member_name,
-            material=WaferPair(
-                wafer_a=_material_from_wafer(
-                    _require(member_table, "wafer_a", context),
-                    f"{context} -> wafer_a", study_directory),
-                wafer_b=_material_from_wafer(
-                    _require(member_table, "wafer_b", context),
-                    f"{context} -> wafer_b", study_directory),
-            ),
-            protocol=protocol,
-            numerical=numerical,
-            ensemble=ensemble,
-            potential_ref=str(_require(
-                member_table, "potential_ref", context)),
-            material_domain=str(_require(
-                member_table, "material_domain", context)),
-            potential=potential,
-        )
-        _reject_if_not_executable(member)
-        members.append(member)
+    pair = PairSpecification(
+        material=WaferPair(
+            wafer_a=_material_from_wafer(
+                _require(raw, "wafer_a", "top level"), "[wafer_a]",
+                project_directory, 1),
+            wafer_b=_material_from_wafer(
+                _require(raw, "wafer_b", "top level"), "[wafer_b]",
+                project_directory, 2),
+        ),
+        protocol=protocol,
+        numerical=numerical,
+        ensemble=ensemble,
+        potential_ref=str(_require(
+            project_table, "potential_ref", "[project]")),
+        material_domain=str(_require(
+            project_table, "material_domain", "[project]")),
+        potential=potential,
+    )
+    _reject_if_not_executable(pair)
 
-    member_names = {member.name for member in members}
-
-    # Relations are OPTIONAL (a study may declare none); read any given.
-    relations = []
-    for relation_table in raw.get("relation", []):
-        relation = _relation_from_table(relation_table, "[[relation]]")
-        _reject_if_relation_dangling(relation, member_names)
-        relations.append(relation)
-
-    return Study(
-        name=name,
+    return Project(
         description=description,
-        members=tuple(members),
-        relations=tuple(relations),
+        pair=pair,
+        project_directory=str(project_directory),
     )

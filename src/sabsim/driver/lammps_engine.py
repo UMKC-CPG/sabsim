@@ -56,7 +56,7 @@ class LammpsEngine(Engine):
     """An :class:`Engine` backed by a live LAMMPS instance (compute node).
 
     Construct one per MPI rank with the shared communicator; it holds a
-    persistent LAMMPS handle for the whole member run. Use it as a
+    persistent LAMMPS handle for the whole pair run. Use it as a
     context manager (``with LammpsEngine(...) as engine:``) so the handle
     is always closed, or call :meth:`close` explicitly.
     """

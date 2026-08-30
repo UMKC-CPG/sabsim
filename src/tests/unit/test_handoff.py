@@ -233,3 +233,104 @@ def test_pull_results_carry_the_stage_ledger(tmp_path):
     back = read_pull_results(tmp_path)
     assert back.press.stage_steps == ledger
     assert back == with_ledger
+
+
+# ---------------------------------------------------------------------
+# ACTIVATED_HALF — the prep job's deliverable (revised 2026-08-30): one
+# healed half, its verdict, its wafer tag and the shared cell it was
+# cut on round-trip through its prep folder, and bond refuses two
+# halves that were not built for each other.
+# ---------------------------------------------------------------------
+
+def _healed_half_file(directory, name, lateral=4.0):
+    """A tiny healed-half atoms file with the given in-plane cell."""
+    atoms = Atoms(
+        symbols=["Si", "Si"],
+        positions=[[0.0, 0.0, 1.0], [1.0, 1.0, 3.0]],
+        cell=[[lateral, 0.0, 0.0], [0.0, lateral, 0.0], [0.0, 0.0, 20.0]],
+        pbc=(True, True, False))
+    atoms.set_tags([WAFER_A_TAG, WAFER_A_TAG])
+    path = directory / name
+    from ase.io import write as ase_write
+    ase_write(str(path), atoms, format="extxyz")
+    return str(path)
+
+
+def _half(data_file, wafer_tag, shared=None, heal_step=1200):
+    from sabsim.driver.activation_gate import ActivationVerdict
+    from sabsim.pipeline.exec_artifacts import (
+        ActivatedHalf,
+        SharedCell,
+        Slab,
+    )
+    verdict = ActivationVerdict(
+        passed=True, activated_depth=7.5, per_metric={},
+        reason="all metrics passed")
+    return ActivatedHalf(
+        slab=Slab(identity="Si", note="healed", data_file=data_file,
+                  species=frozenset({"Si"}), heal_start_step=heal_step),
+        verdict=verdict, wafer_tag=wafer_tag,
+        shared=shared or SharedCell(note="identity"),
+        run_id="run-4242")
+
+
+def test_activated_half_round_trips_through_its_folder(tmp_path):
+    """Slab, verdict, tag, shared cell, heal step and run id all return."""
+    from sabsim.deploy.registry import ACTIVATED_HALF
+    from sabsim.pipeline.handoff import read_activated_half
+    work = tmp_path / "run"
+    work.mkdir()
+    prep = tmp_path / "prep_surf1_si"
+    prep.mkdir()
+    source = _healed_half_file(work, "amorphized_a.extxyz")
+    write_artifact(str(prep), ACTIVATED_HALF, _half(source, WAFER_A_TAG))
+
+    back = read_activated_half(str(prep))
+    assert back.wafer_tag == WAFER_A_TAG
+    assert back.slab.identity == "Si"
+    assert back.slab.species == frozenset({"Si"})
+    assert back.slab.heal_start_step == 1200
+    assert back.verdict.passed and back.verdict.activated_depth == 7.5
+    assert back.shared.is_identity is True
+    assert back.run_id == "run-4242"
+    # The payload was COPIED into the prep folder: the deliverable does
+    # not point back at the run's scratch folder.
+    assert back.slab.data_file == str(prep / "activated_half.extxyz")
+    assert read_artifact(str(prep), ACTIVATED_HALF).wafer_tag == (
+        WAFER_A_TAG)
+
+
+def test_a_placeholder_half_has_no_payload(tmp_path):
+    """A W0 half (no atoms file) writes only its manifest and reads back
+    with no file, which is what the placeholder assembly expects."""
+    from sabsim.pipeline.handoff import (
+        read_activated_half,
+        write_activated_half,
+    )
+    write_activated_half(str(tmp_path), _half(None, WAFER_B_TAG))
+    back = read_activated_half(str(tmp_path))
+    assert back.slab.data_file is None
+    assert back.wafer_tag == WAFER_B_TAG
+
+
+def test_bond_refuses_halves_from_different_cells(tmp_path):
+    """Two halves with different in-plane cells are refused by name."""
+    from sabsim.pipeline.exec_artifacts import SharedCell
+    from sabsim.pipeline.handoff import check_shared_cells_agree
+    file_a = _healed_half_file(tmp_path, "a.extxyz", lateral=4.0)
+    file_b = _healed_half_file(tmp_path, "b.extxyz", lateral=4.5)
+    half_a = _half(file_a, WAFER_A_TAG)
+    half_b = _half(file_b, WAFER_B_TAG)
+    with pytest.raises(HandoffError, match="in-plane cells"):
+        check_shared_cells_agree(half_a, half_b)
+    # Same atoms but a different match provenance is refused too.
+    strained = _half(file_a, WAFER_B_TAG, shared=SharedCell(
+        note="mismatch", residual_strain=0.02, match_area=40.0,
+        is_identity=False))
+    with pytest.raises(HandoffError, match="same shared cell"):
+        check_shared_cells_agree(half_a, strained)
+    # Two A halves can never be bonded: bond needs a bottom and a top.
+    with pytest.raises(HandoffError, match="wafer tag"):
+        check_shared_cells_agree(half_a, _half(file_a, WAFER_A_TAG))
+    # And two matching halves pass quietly.
+    check_shared_cells_agree(half_a, _half(file_a, WAFER_B_TAG))

@@ -22,13 +22,14 @@ holds the catalogue that question is asked of:
   ``environment_library.toml`` (everything a person reads).
 * :func:`disordered_atoms` and :func:`false_alarm_rate` — the two
   questions the gate asks of a library.
-* :func:`load_environment_library` — the study's entry point, with the
-  refusals and the temperature warn/refuse band of DESIGN §3.5.
+* :func:`load_environment_library` — the prep job's entry point, with
+  the refusals and the temperature warn/refuse band of DESIGN §3.5.
 
 The library is never written by hand: it is a product of ``sabsim
-bootstrap generate`` under the same universal model the study runs,
-copied under ``SABSIM_SHARE`` and named by the study file's
-``[protocol.activation] environment_library`` (ARCHITECTURE §2.3).
+bootstrap generate`` run inside a surface's prep folder, under the same
+universal model the project runs, and it is found THERE —
+``<project>/prep_surf<N>_<label>/environment_library.toml`` — never
+through a path in the project file (ARCHITECTURE §1, §2.3).
 """
 
 from __future__ import annotations
@@ -83,7 +84,7 @@ SELF_CHECK_MIN_MELT_DISORDERED = 0.50
 # scatter grows roughly with the square root of temperature, so 20 %
 # hotter is ~10 % more scatter, past what one scatter multiple absorbs —
 # REFUSE. A validation criterion of the loader, like a gate threshold
-# (DESIGN §7.5), not a study knob.
+# (DESIGN §7.5), not a project knob.
 LIBRARY_TEMPERATURE_REFUSE_FRACTION = 0.20
 
 # Query vectors are compared with the catalogue in chunks so the N x M
@@ -111,7 +112,7 @@ class EnvironmentLibrary:
     the unit the gate's tolerance is counted in; ``warm_distances`` keeps
     every warm-run atom's nearest-cold distance so the false-alarm rate
     — the depth profile's baseline — can be recomputed at whatever
-    scatter multiple a study names. ``warm_run_temperature`` (kelvin, the
+    scatter multiple a project names. ``warm_run_temperature`` (kelvin, the
     LOWEST warm run catalogued) is what the loader's temperature band is
     judged against, and ``provenance`` records the families, frame
     counts and clean surfaces (as ``{"phase", "face", "termination",
@@ -197,7 +198,7 @@ def false_alarm_rate(
 
     What the tolerance would flag in a slab that was never bombarded:
     the depth profile's baseline (DESIGN §3.5), recomputed at the
-    study's own multiple from the recorded warm-run distances.
+    project's own multiple from the recorded warm-run distances.
     """
     distances = np.asarray(library.warm_distances[species], dtype=float)
     if distances.size == 0:
@@ -445,7 +446,7 @@ def read_environment_library(path) -> EnvironmentLibrary:
 
 
 # ---------------------------------------------------------------------
-# The study's entry point: refusals and the temperature band (§10.6).
+# The prep job's entry point: refusals and the temperature band (§10.6).
 # ---------------------------------------------------------------------
 
 def _wafer_species(wafer) -> frozenset | None:
@@ -467,7 +468,7 @@ def _wafer_species(wafer) -> frozenset | None:
 def _surface_catalogued(library: EnvironmentLibrary, wafer) -> bool:
     """Does the library catalogue a clean surface of this wafer's face?
 
-    A study wafer names its face but no termination and no recipe phase
+    A project wafer names its face but no termination and no recipe phase
     (:class:`~sabsim.spec.records.MaterialKnobs`), so the match is on
     the face AND, where the wafer's crystal can be read, the species set
     of the catalogued phase — enough to tell a silicon (100) face from a
@@ -487,37 +488,40 @@ def _surface_catalogued(library: EnvironmentLibrary, wafer) -> bool:
 
 
 def library_manifest_path(wafer) -> str:
-    """Where one wafer's library lives: its preparation subfolder.
+    """Where one wafer's library lives: its prep folder.
 
-    ``<study>/<material label>/environment_library.toml`` (ARCHITECTURE
-    §1, DESIGN §1.2; Paul, 2026-08-29 after LEDGER T-39): each wafer
-    has a library of its own, found by its ``material`` label, and the
-    study file names no path.
+    ``<project>/prep_surf<N>_<label>/environment_library.toml``
+    (ARCHITECTURE §1, DESIGN §1.2; Paul, 2026-08-30): each surface has
+    a library of its own in the prep folder the loader assigned it, and
+    the project file names no path.
     """
     return os.path.join(wafer.preparation_directory, LIBRARY_MANIFEST_FILE)
 
 
-def check_library_against_study(
-        library: EnvironmentLibrary, member, wafer,
+def check_library_against_project(
+        library: EnvironmentLibrary, pair, wafer,
         bound_engine_name: str = DESCRIPTOR_ENGINE_NAME) -> list:
     """The three refusals and the temperature band (PSEUDOCODE §10.6).
 
-    Checks ONE wafer's library (the other wafer has its own). Refuses
-    (:class:`SpecificationError`) a library built under a model other
-    than the study's, computed by an engine other than the bound one,
+    Checks ONE wafer's library (the other wafer has its own). ``pair``
+    is the :class:`~sabsim.spec.records.PairSpecification` the wafer
+    belongs to, which supplies the model name and the press temperature.
+    Refuses (:class:`SpecificationError`) a library built under a model
+    other than the project's, computed by an engine other than the bound
+    one,
     or cataloguing no clean surface of THIS wafer's face — the slab's
     own faces would then read as damage. Then the warn/refuse band: the
     gate judges at the press temperature; above the library's warm-run
     temperature it WARNS, more than 20 % above it REFUSES (DESIGN §3.5).
     Returns the list of warning strings for the caller to print.
     """
-    context = (f"member '{member.name}' wafer '{wafer.identity}' "
-               f"environment library")
-    if library.model_name != member.potential.universal_model:
+    context = (f"wafer '{wafer.identity}' environment library in "
+               f"{os.path.basename(wafer.preparation_directory)}/")
+    if library.model_name != pair.potential.universal_model:
         raise SpecificationError(
             f"{context} was built under '{library.model_name}', the "
-            f"study runs '{member.potential.universal_model}' — rebuild "
-            f"the library under the study's model (DESIGN §3.5)")
+            f"project runs '{pair.potential.universal_model}' — rebuild "
+            f"the library under the project's model (DESIGN §3.5)")
     if library.engine != bound_engine_name:
         raise SpecificationError(
             f"{context} was computed with '{library.engine}', this "
@@ -531,18 +535,19 @@ def check_library_against_study(
             f"the face to the recipe's surfaces and rebuild (DESIGN §4.8)")
 
     warnings = []
-    judged_at = to_metal(member.protocol.press_temperature, "temperature")
+    judged_at = to_metal(pair.protocol.press_temperature, "temperature")
     warm_at = float(library.warm_run_temperature)
     if judged_at > warm_at:
         if judged_at > (1.0 + LIBRARY_TEMPERATURE_REFUSE_FRACTION) * warm_at:
             raise SpecificationError(
-                f"{context}: the study judges the gate at {judged_at:g} K, "
-                f"more than {100 * LIBRARY_TEMPERATURE_REFUSE_FRACTION:.0f} % "
-                f"above the library's warm runs at {warm_at:g} K; the "
-                f"tolerance no longer describes the slab — rebuild the "
-                f"library with a warm run at the study's temperature")
+                f"{context}: the project judges the gate at "
+                f"{judged_at:g} K, more than "
+                f"{100 * LIBRARY_TEMPERATURE_REFUSE_FRACTION:.0f} % above "
+                f"the library's warm runs at {warm_at:g} K; the tolerance "
+                f"no longer describes the slab — rebuild the library with "
+                f"a warm run at the project's temperature")
         warnings.append(
-            f"{context}: the study judges the gate at {judged_at:g} K, "
+            f"{context}: the project judges the gate at {judged_at:g} K, "
             f"above the library's warm runs at {warm_at:g} K — the "
             f"tolerance was measured a little tight, so some crystalline "
             f"atoms may read as disordered")
@@ -550,22 +555,23 @@ def check_library_against_study(
 
 
 def load_environment_library(
-        member, wafer,
+        pair, wafer,
         bound_engine_name: str = DESCRIPTOR_ENGINE_NAME) -> tuple:
     """Read ONE wafer's library and check it; ``(library, warnings)``.
 
-    The library is found in the wafer's preparation subfolder of the
-    study (:func:`library_manifest_path`); a wafer whose folder holds
-    none has not been prepared, and the message says how to prepare it.
+    The library is found in the surface's prep folder of the project
+    (:func:`library_manifest_path`); a surface whose folder holds none
+    has not been prepared, and the message says how to prepare it.
     """
     path = library_manifest_path(wafer)
     if not os.path.isfile(path):
+        prep_folder = os.path.basename(wafer.preparation_directory)
         raise SpecificationError(
-            f"member '{member.name}': wafer '{wafer.identity}' has no "
-            f"environment library at {path} — run `sabsim bootstrap "
-            f"generate` in that folder, or copy a prepared "
-            f"'{wafer.identity}/' folder there (ARCHITECTURE §1, DESIGN "
-            f"§4.8)")
+            f"wafer '{wafer.identity}' has no environment library at "
+            f"{path} — run `sabsim bootstrap generate` inside "
+            f"'{prep_folder}/', or copy a prepared "
+            f"prep_surf*_{wafer.identity.lower()}/ folder there under "
+            f"this name (ARCHITECTURE §1, DESIGN §4.8)")
     library = read_environment_library(path)
-    return library, check_library_against_study(
-        library, member, wafer, bound_engine_name)
+    return library, check_library_against_project(
+        library, pair, wafer, bound_engine_name)

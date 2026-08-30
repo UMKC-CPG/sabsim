@@ -4,16 +4,19 @@ The bootstrap manufactures a potential in phases that run on different
 machines and at different times — geometry on a login node, dynamics on
 a GPU, VASP on a CPU or GPU array, training on a GPU — so each phase is
 its own verb and each hands the next a plain file under ONE output
-directory, exactly as the three member jobs hand each other artifacts
-(ARCHITECTURE §4.3). The directory is the job home's scratch mirror
-under ``bootstrap/<recipe name>/`` (the same mirror discipline as a
-study run, :mod:`sabsim.deploy.scratch`).
+directory, exactly as the four pair jobs hand each other artifacts
+(ARCHITECTURE §4.3). The directory is the scratch mirror of the folder the
+command runs in, under ``bootstrap/<recipe name>/`` (the same mirror
+discipline as a project run, :mod:`sabsim.deploy.scratch`). Run
+``generate`` INSIDE the surface's prep folder (``<project>/prep_surfN_
+<label>/``): the environment library it manufactures is placed there,
+which is exactly where that surface's gate looks for it.
 
 * ``generate``  builds Collection 1 (runs the generator model's short
   dynamics out-of-process — a compute-node step), writes the
   ENVIRONMENT LIBRARY the §3.5 gate judges against beside it
   (``collection1/environment_library.{npz,toml}``, PSEUDOCODE §11.3),
-  and harvests Collection 2 from the member run the recipe names;
+  and harvests Collection 2 from the project run the recipe names;
   writes every structure to ``structures.extxyz``.
 * ``label``     selects the labelling subset, writes one VASP directory
   per structure and one SLURM job array; submits nothing.
@@ -62,8 +65,8 @@ def _read_structures(path: Path) -> list:
             for frame in frames]
 
 
-def _place_library_in_material_folder(manifest: Path, home: Path) -> Path:
-    """Copy the library pair (.toml + .npz) beside the recipe."""
+def _place_library_in_prep_folder(manifest: Path, home: Path) -> Path:
+    """Copy the library pair (.toml + .npz) into the prep folder."""
     import shutil
     from sabsim.driver.environment_library import (
         LIBRARY_ARRAYS_FILE, LIBRARY_MANIFEST_FILE)
@@ -91,12 +94,12 @@ def generate(recipe_path: str, job_directory: str,
         calm, library_manifest = build_collection1(
             recipe, out_dir / "collection1")
         structures += calm
-        # The library's HOME is the material folder this command runs
-        # in (`<study>/<material label>/`, ARCHITECTURE §1): exactly
-        # where the study's loader looks for that wafer's library, so
-        # nothing has to be copied by hand. The scratch copy stays too.
+        # The library's HOME is the prep folder this command runs in
+        # (`<project>/prep_surfN_<label>/`, ARCHITECTURE §1): exactly
+        # where that surface's gate looks for its library, so nothing
+        # has to be copied by hand. The scratch copy stays too.
         summary["environment_library"] = str(
-            _place_library_in_material_folder(
+            _place_library_in_prep_folder(
                 Path(library_manifest), Path(job_directory)))
     if collection2:
         structures += harvest_collection2(recipe)

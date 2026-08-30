@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from sabsim.driver.commands import RegionGeometry
-from tests.unit.support import stand_in_force_model
+from tests.unit.support import stand_in_force_model, template_pair
 from sabsim.driver.engine import MockEngine
 from sabsim.driver.press_pull import (
     RunControl,
@@ -31,14 +31,9 @@ from sabsim.driver.resume import (
     input_hash,
     write_checkpoint,
 )
-from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import Quantity
 from sabsim.structure.slab_builder import WAFER_A_TAG, WAFER_B_TAG
 
-
-_TEMPLATE_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "study_spec.toml"))
 
 _MODEL = stand_in_force_model({"Si": 1})
 _LOWER_Z = np.linspace(0.0, 10.0, 100)   # a wafer-A slab, top surface ~10
@@ -46,21 +41,21 @@ _LOWER_Z = np.linspace(0.0, 10.0, 100)   # a wafer-A slab, top surface ~10
 
 
 def _member():
-    """The first template member — a real MemberSpecification."""
-    return load_and_validate_study(_TEMPLATE_PATH).members[0]
+    """The template's pair — a real PairSpecification."""
+    return template_pair()
 
 
 def _tuned(**numerical_overrides):
-    """The template member with some ``[numerical]`` knobs replaced.
+    """The template pair with some ``[numerical]`` knobs replaced.
 
     The driver's chunking is the study's (DESIGN §5.2/§5.3): a test that
     wants a short press budget or settle span says so through the study
     knobs, exactly as a study file would.
     """
     from dataclasses import replace
-    member = _member()
-    return replace(member, numerical=replace(
-        member.numerical, **numerical_overrides))
+    pair = _member()
+    return replace(pair, numerical=replace(
+        pair.numerical, **numerical_overrides))
 
 
 def _fake_built():
@@ -277,7 +272,7 @@ _PULL_RATE = Quantity(3.2, "m/s")
 
 
 def _matching_hash() -> str:
-    """The trust hash the resume tests' inputs (member, ref, rate) yield."""
+    """The trust hash the resume tests' inputs (pair, ref, rate) yield."""
     return input_hash(_member(), "ref.data", _PULL_RATE)
 
 
@@ -434,7 +429,7 @@ def test_resume_override_lets_a_mismatch_through(tmp_path, monkeypatch):
 def test_input_hash_is_stable_but_rate_sensitive(tmp_path):
     """The same inputs hash the same; a different rate hashes differently.
 
-    The rate is the only thing that tells one rung of a member from
+    The rate is the only thing that tells one rung of a pair from
     another, so it MUST move the hash (§13.4).
     """
     reference = str(tmp_path / "ref.data")

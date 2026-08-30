@@ -1,6 +1,6 @@
-"""Typed records for a SABSIM study specification (PSEUDOCODE.md §2).
+"""Typed records for a SABSIM project specification (PSEUDOCODE.md §2).
 
-This module is the in-memory shape of the study spec that the loader
+This module is the in-memory shape of the project file that the loader
 (:mod:`sabsim.spec.loader`) produces once it has read and validated the
 TOML file the DESIGN.md §1.4 generator emits. Each record mirrors one
 knob group from PSEUDOCODE.md §2, and the field names follow that
@@ -10,12 +10,11 @@ side without a translation table.
 Two design commitments from DESIGN.md are encoded structurally here:
 
 * **No hidden defaults (§1.4).** No knob field carries a default value.
-  A study spec must state every value it uses, so a missing key becomes
-  an error the loader reports, never a blank the machinery fills in
-  silently. Frozen dataclasses with no defaults make that a property of
-  the type: you cannot construct a record with a hole in it. (The only
-  fields that DO default are the validator-computed outputs on a
-  :class:`Relation`, which are results, not settings.)
+  A project file must state every value it uses, so a missing key
+  becomes an error the loader reports, never a blank the machinery
+  fills in silently. Frozen dataclasses with no defaults make that a
+  property of the type: you cannot construct a record with a hole in
+  it.
 * **Units travel with values (§1.5).** A number that means something in
   the physical world is a :class:`Quantity`, never a bare float, so the
   loader can check dimensions instead of trusting a lone number. Pure
@@ -25,14 +24,14 @@ Two design commitments from DESIGN.md are encoded structurally here:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class Quantity:
     """A physical value paired with the unit it is measured in.
 
-    The study spec writes such a value as a TOML inline table —
+    The project file writes such a value as a TOML inline table —
     ``{ value = 500.0, unit = "eV" }`` (DESIGN.md §1.5) — so the loader
     can validate dimensions rather than trust a bare number. Counts and
     seeds are NOT quantities: they are dimensionless and stay bare.
@@ -46,7 +45,7 @@ class Quantity:
 class MaterialKnobs:
     """What one wafer IS: its crystal (a CIF), its cut face, its label.
 
-    One :class:`MaterialKnobs` describes a single wafer; a member pairs
+    One :class:`MaterialKnobs` describes a single wafer; a pair holds
     two of them (PSEUDOCODE.md §2). The crystal is supplied as a CIF —
     the authoritative structure that fixes symmetry, basis, and
     connectivity for ANY material (DESIGN.md §1.2), so one uniform input
@@ -63,22 +62,25 @@ class MaterialKnobs:
     cif_source: str                  # path to the authoritative CIF
     crystal_structure: str           # human label, e.g. "diamond"
     surface_face: tuple[int, int, int]   # Miller indices of the bond face
-    # Where this wafer's PREPARATORY work lives: the subfolder of the
-    # study folder named exactly by ``identity`` (``<study>/<label>/``,
-    # ARCHITECTURE §1; Paul, 2026-08-29). It holds the force-model
-    # recipe and what `sabsim bootstrap` manufactures from it — the
-    # environment library the §3.5 gate judges against. Set by the
-    # loader from the study file's own location, never typed by hand.
+    # Where this wafer's PREPARATORY work lives: the PREP FOLDER of
+    # the project, ``<project>/prep_surf1_<label>/`` for wafer A and
+    # ``prep_surf2_<label>/`` for wafer B, the label lower-cased
+    # (ARCHITECTURE §1; Paul, 2026-08-30). It holds the force-model
+    # recipe, the single-material calculations, the environment
+    # library the §3.5 gate judges against, and this surface's own
+    # amorphization. Set by the loader from the project file's own
+    # location, never typed by hand.
     preparation_directory: str
 
 
 @dataclass(frozen=True)
 class WaferPair:
-    """The two facing wafers that make up one member (PSEUDOCODE.md §2).
+    """The two facing wafers of the pair (PSEUDOCODE.md §2).
 
-    A member is a facing pair (DESIGN.md §2.1), so the material group is
-    two wafers, not one. ``wafer_a`` and ``wafer_b`` are the two sides
-    of the interface being bonded.
+    The material group is two wafers, not one (DESIGN.md §2.1).
+    ``wafer_a`` is surface 1 (the bottom half) and ``wafer_b`` is
+    surface 2 (the top half) of the interface being bonded; the order
+    is fixed so a same-material pair still has two distinct surfaces.
     """
 
     wafer_a: MaterialKnobs
@@ -121,13 +123,13 @@ class ProtocolKnobs:
     activation_fluence: Quantity     # the dose knob (DESIGN.md §3.6)
     # How deep the activated skin MUST reach: the §3.5 gate's depth
     # threshold and the depth the §2.5 thickness floor builds for — a
-    # study choice tied to the dose above, not a material property
+    # project choice tied to the dose above, not a material property
     # (DESIGN.md §3.5, revised 2026-08-28).
     required_activated_depth: Quantity
     # NO library path here (revised 2026-08-29 after LEDGER T-39): the
     # environment library the §3.5 gate judges against is found PER
-    # WAFER at ``MaterialKnobs.preparation_directory``, never named in
-    # the study file (DESIGN §1.2).
+    # SURFACE at ``MaterialKnobs.preparation_directory``, never named
+    # in the project file (DESIGN §1.2).
     cascade_duration: Quantity       # NVE cascade time per impact (§3.3)
     between_impact_relaxation: Quantity   # border-cool between impacts
     reanneal_schedule: AnnealSchedule     # the post-cascade re-anneal
@@ -143,7 +145,7 @@ class ProtocolKnobs:
 
     # --- Separation: the single-rate special case (§5.4) ---
     # The full v1 pull uses numerical.pull_rate_ladder; this names the
-    # one rate used when a member runs at a single speed (PSEUDOCODE §2).
+    # one rate used when a pair runs at a single speed (PSEUDOCODE §2).
     separation_speed: Quantity
 
 
@@ -183,7 +185,7 @@ class NumericalKnobs:
     # as the surfaces genuinely loading each other.
     contact_gap_window: int          # chunks in the opening's trailing mean
     contact_stress_floor: Quantity   # |mean normal stress| floor for contact
-    # The press/settle driver's chunking, all study knobs since 2026-08-28
+    # The press/settle driver's chunking, project knobs since 2026-08-28
     # (DESIGN §5.2/§5.3): the stress running-mean window (chunks), the time
     # the driver advances between read-backs, the time the press may
     # search for contact before reporting "no contact", and the time the
@@ -222,13 +224,12 @@ class EnsembleKnobs:
 
 @dataclass(frozen=True)
 class PotentialSpec:
-    """Which force models a study runs under (DESIGN.md §1.6, §4.7).
+    """Which force models the project runs under (DESIGN.md §1.6, §4.7).
 
-    A study-level block, shared by every member (DESIGN.md §1.1: the
-    members of one study share ONE potential), and the reason it lives in
-    the study file rather than in the environment: the study file is the
-    provenance record, so anything that changes the physics must be
-    written there, never picked up silently from a shell variable.
+    One block per project file, and the reason it lives there rather
+    than in the environment: the project file is the provenance record,
+    so anything that changes the physics must be written there, never
+    picked up silently from a shell variable.
 
     Two models are named, because the pipeline deliberately uses two:
 
@@ -236,14 +237,14 @@ class PotentialSpec:
       foundation model that derives the working lattice (§2.2) and runs
       the ion-beam cascade spliced with ZBL cores (§4.7). The name must
       be a row of the code's table of supported universal models
-      (``SUPPORTED_UNIVERSAL_MODELS``, DESIGN §4.7), so a study cannot
+      (``SUPPORTED_UNIVERSAL_MODELS``, DESIGN §4.7), so a project cannot
       silently run under a model the code has no record of, while the
-      study — not the code — chooses which supported model runs; the
+      project file — not the code — chooses which model runs; the
       weights path says where that model's file is on this machine
       (``$SABSIM_SHARE`` and the other roots are expanded by the loader).
     * ``production_weights`` — the model the gentle stages (heal, press,
       settle, pull) run under. The design target is the ALF-trained
-      DeePMD committee named by each member's ``potential_ref``; until
+      DeePMD committee named by the pair's ``potential_ref``; until
       the bootstrap that manufactures one exists, this names a single
       frozen DeePMD file (a committee of one) and is the ONLY place that
       choice is recorded.
@@ -259,36 +260,32 @@ class PotentialSpec:
 
 
 @dataclass(frozen=True)
-class MemberSpecification:
-    """One member: a facing pair run under one protocol (PSEUDOCODE §2).
+class PairSpecification:
+    """The wafer pair a project runs: two surfaces under one protocol.
 
-    A member is the unit that actually runs — it stands alone and
-    produces its own result. Studies are assembled from members after
-    the fact (DESIGN.md §1.1). ``potential_ref`` names WHICH potential
-    generation this member runs under: not a knob but a pointer to an
-    upstream artifact (DESIGN.md §1.3, §1.6).
+    This is the unit that runs and produces a result (PSEUDOCODE.md
+    §2). Since 2026-08-30 (Paul) a project holds exactly ONE pair, so
+    the pair carries no name of its own: everything derived from it
+    (folder names, script names, dump names) uses :attr:`pair_label`,
+    which is built from the two wafers' material labels. A reference
+    pair — the Si/Si that a Si/SiO2 question is compared against — is a
+    separate project folder the person makes and runs themselves
+    (DESIGN.md §1.1).
 
-    ``material_domain`` names the structural and chemical REGIME this
-    member's structures occupy (DESIGN.md §4.8). It exists because a
-    species set does not identify a material model on its own: carbon
-    spans diamond and graphite, silica runs from quartz to an amorphous
-    network, and a model trained on one regime is confidently wrong in
-    another. Today no code consumes it — it is RECORDED provenance that
-    the §4.8 force-model recipe will be keyed on once the bootstrap
-    exists. Like ``potential_ref`` it is a pointer rather than a knob.
-
-    A note on where this field will eventually live. §4.8 keys the
-    force-model RECIPE on (species union, domain) too, so once that
-    record exists the domain is properly a property of the artifact
-    ``potential_ref`` resolves to, and the two must agree. They agree by
-    CONTAINMENT rather than equality: a recipe whose domain is
-    ``silicon-and-silica`` legitimately covers a silica-only
-    member, because silica lies inside that regime. Checking that
-    containment is a follow-on (`TODO.md`), and until the recipe record
-    exists this member-level field is what carries the choice.
+    ``potential_ref`` names WHICH potential generation this pair runs
+    under: not a knob but a pointer to an upstream artifact (DESIGN.md
+    §1.3, §1.6). ``material_domain`` names the structural and chemical
+    REGIME the pair's structures occupy (DESIGN.md §4.8). It exists
+    because a species set does not identify a material model on its
+    own: carbon spans diamond and graphite, silica runs from quartz to
+    an amorphous network, and a model trained on one regime is
+    confidently wrong in another. Today no code consumes it — it is
+    RECORDED provenance that the §4.8 force-model recipe will be keyed
+    on. The recipe's domain and this one agree by CONTAINMENT rather
+    than equality: a ``silicon-and-silica`` recipe legitimately covers
+    a silica-only pair, because silica lies inside that regime.
     """
 
-    name: str                        # member id, referenced by relations
     material: WaferPair              # the two facing wafers
     protocol: ProtocolKnobs          # how it is activated, pressed, pulled
     numerical: NumericalKnobs        # how carefully it is computed
@@ -297,47 +294,79 @@ class MemberSpecification:
     material_domain: str             # the structural/chemical regime
     potential: PotentialSpec         # the force models it runs under
 
+    @property
+    def pair_label(self) -> str:
+        """``<a>_<b>``: both material labels lower-cased and joined.
 
-@dataclass(frozen=True)
-class Relation:
-    """An optional comparison across a subset of a study's members.
+        The one identity every derived name is built from. Lower-cased
+        because it becomes part of folder and file names, and a name
+        that differs only by case is a trap on a shell (Paul).
+        """
+        return (f"{folder_label(self.material.wafer_a.identity)}_"
+                f"{folder_label(self.material.wafer_b.identity)}")
 
-    A relation compares members on one or more named MEASURES (§6.6) —
-    not one privileged number. It declares what it deliberately varies
-    (``contrast``) and what it holds fixed (``controls``); the validator
-    fills the computed fields below. A relation is REPORTED, never used
-    to restrict (DESIGN.md §1.1): even a confounded one is still
-    computed, and only the gate's verdict is withheld.
 
-    The computed fields carry defaults because they are validator
-    OUTPUTS, not user settings — the no-defaults rule (DESIGN.md §1.4)
-    guards the settings, which are the four fields above them.
+def folder_label(material_label: str) -> str:
+    """A wafer's material label as it appears in a folder name.
+
+    Lower-cased and otherwise untouched: ``"SiO2"`` becomes ``sio2``.
+    The loader has already refused labels that could not name a folder
+    (empty, or holding a path separator).
     """
-
-    kind: str                        # e.g. "ratio", "sweep"
-    members: tuple[str, ...]         # which member ids it relates
-    measures: tuple[str, ...]        # which metrics it compares on
-    contrast: tuple[str, ...]        # field paths it deliberately varies
-    controls: tuple[str, ...]        # field paths it holds fixed
-    # --- Computed by the loader's relation validator (PSEUDOCODE §2) ---
-    confounded: bool | None = None   # True if more than one contrast
-    controls_disagree: bool | None = None   # a control that actually differs
-    # sort_differences (entailed vs incidental) is [DEPTH-FIRST] in §2;
-    # the full difference set lands with the relation-evaluation module.
-    difference_set: object | None = field(default=None)
+    return material_label.lower()
 
 
 @dataclass(frozen=True)
-class Study:
-    """A set of members, optionally tied together by relations (§2).
+class StageFolders:
+    """The four stage folder NAMES of a project (ARCHITECTURE.md §1).
 
-    The study is the top-level configured object because §7.4's headline
-    criterion is a RATIO, which belongs to a PAIR of members and not to
-    either one (DESIGN.md §1.1). ``name`` and ``description`` are
-    study-level provenance the spec carries for the report.
+    Names, not paths: each lives directly under the project folder and,
+    with the same name, under the project's ``intermediate`` scratch
+    mirror. The prefix says the stage and the suffix says which
+    material(s), so a directory listing reads like the physics: prepare
+    surface 1, prepare surface 2, bond the pair, analyse the pair.
     """
 
-    name: str
+    prep_surf1: str                  # e.g. "prep_surf1_si"
+    prep_surf2: str                  # e.g. "prep_surf2_sio2"
+    bond: str                        # e.g. "bond_si_sio2"
+    analysis: str                    # e.g. "analysis_si_sio2"
+
+
+def stage_folders(pair: PairSpecification) -> StageFolders:
+    """The ONE place the project layout is written down (PSEUDOCODE §2).
+
+    For a silicon/silica pair: ``prep_surf1_si``, ``prep_surf2_sio2``,
+    ``bond_si_sio2``, ``analysis_si_sio2``. For a same-material pair
+    the two prep folders still differ (``prep_surf1_si`` and
+    ``prep_surf2_si``), because each surface is amorphized on its own
+    with its own seed. Every module that needs a folder name asks here
+    rather than spelling the pattern out again.
+    """
+    label_a = folder_label(pair.material.wafer_a.identity)
+    label_b = folder_label(pair.material.wafer_b.identity)
+    return StageFolders(
+        prep_surf1=f"prep_surf1_{label_a}",
+        prep_surf2=f"prep_surf2_{label_b}",
+        bond=f"bond_{label_a}_{label_b}",
+        analysis=f"analysis_{label_a}_{label_b}",
+    )
+
+
+@dataclass(frozen=True)
+class Project:
+    """One project: a single wafer pair and where it lives on disk.
+
+    The project folder is the person's own label (``jobs/si_sio2/``)
+    and means nothing to the program; what the program keeps is the
+    RESOLVED directory the project file was read from, because every
+    stage folder and both prep folders are found beneath it
+    (ARCHITECTURE.md §1). ``description`` is free text carried into the
+    report as provenance. There is no list of members and no relation
+    layer: a comparison between two pairs is made by the person from
+    two projects' summaries (DESIGN.md §1.1, revised 2026-08-30).
+    """
+
     description: str
-    members: tuple[MemberSpecification, ...]
-    relations: tuple[Relation, ...]
+    pair: PairSpecification
+    project_directory: str

@@ -128,7 +128,7 @@ class BuiltPair:
     per-wafer z-ranges and the interface plane let the driver carve the
     grip, thermostat-border, and interior regions BY POSITION, so this
     builder need not know the MD protocol (option C, DESIGN.md §2.6).
-    ``match`` carries the coincidence provenance the member records
+    ``match`` carries the coincidence provenance the pair records
     (DESIGN.md §2.1).
 
     The A/B labels are the two bonding partners (the same A/B as the
@@ -147,7 +147,7 @@ class BuiltPair:
     type_map: dict                        # species symbol -> LAMMPS type
     match: SurfaceMatch                   # the coincidence provenance
     # How far the initial gap was BACKED OFF to relieve a cross-slab
-    # clash (Å), recorded rather than aborting the member (DESIGN §2.6).
+    # clash (Å), recorded rather than aborting the pair (DESIGN §2.6).
     # Zero for the crystalline stack (no amorphous roughness to clash);
     # the amorphized assembly (:mod:`sabsim.structure.amorphized_assembly`)
     # sets it to the lift it applied.
@@ -169,7 +169,7 @@ class BuiltPair:
 class StandaloneHalf:
     """One wafer cut ALONE in vacuum, ready to be bombarded (§4.3, §7.1).
 
-    The chain for a bonding member prepares each surface BY ITSELF before
+    The chain for a bonding pair prepares each surface BY ITSELF before
     the two ever meet (`ARCHITECTURE.md` §4.3): step 3 emits two standalone
     half-cells, each in its own vacuum box, and the activation stage loads
     one onto its own engine to amorphize it. This is that half — the single
@@ -315,7 +315,7 @@ def build_standalone_half(
     (:func:`write_standalone_half`).
 
     ``projectile_species`` is an iterable of chemical symbols; passing it
-    in (rather than reading the member here) keeps this builder decoupled
+    in (rather than reading the pair here) keeps this builder decoupled
     from the protocol record and directly testable. ``identity`` is the
     material label carried for provenance and the report.
 
@@ -741,7 +741,7 @@ def build_facing_pair(
     from its CIF, cleave each slab along its face, match the two surface
     lattices, and assemble the pair. This is what a later slice wires
     into the ``build_slabs`` / ``assemble_pair`` pipeline stages once the
-    live study runs on it; for now it is exercised directly on Si/Si.
+    live project runs on it; for now it is exercised directly on Si/Si.
     """
     slab_a = build_slab(
         load_crystal(cif_a), miller_face_a,

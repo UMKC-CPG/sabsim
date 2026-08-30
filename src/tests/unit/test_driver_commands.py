@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from tests.unit.support import stand_in_force_model
+from tests.unit.support import stand_in_force_model, template_pair
 
 from sabsim.driver.commands import (
     ForceModel,
@@ -37,17 +37,13 @@ from sabsim.driver.commands import (
     region_group_commands,
     to_metal,
 )
-from sabsim.spec.loader import load_and_validate_study
 from sabsim.spec.records import Quantity
 
-_TEMPLATE_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "study_spec.toml"))
 
 
 def _template_member():
-    """The first template member — a real MemberSpecification."""
-    return load_and_validate_study(_TEMPLATE_PATH).members[0]
+    """The template's pair — a real PairSpecification."""
+    return template_pair()
 
 
 def _fake_pair():
@@ -258,11 +254,11 @@ def test_press_drive_load_mode_ramps_a_normal_force():
 
 def test_press_drive_displacement_mode_moves_the_grip():
     """Displacement control rigidly moves the top grip down at rate."""
-    member = _template_member()
+    pair = _template_member()
     displacement = dataclasses.replace(
-        member,
+        pair,
         protocol=dataclasses.replace(
-            member.protocol, press_control="displacement"))
+            pair.protocol, press_control="displacement"))
     commands = press_drive_commands(_fake_pair(), displacement)
     # 1 m/s = 0.01 Å/ps, downward.
     assert commands == [
@@ -305,10 +301,10 @@ def test_press_release_unfixes_drive_and_load_integrator():
 
 def test_press_script_is_ordered_and_runs_the_hold():
     """The press script sets up, drives, approaches, and holds in order."""
-    member = _template_member()
+    pair = _template_member()
     model = stand_in_force_model({"Si": 1})
     commands = press_script(
-        _fake_pair(), member, model, "pair.data", seed=7)
+        _fake_pair(), pair, model, "pair.data", seed=7)
 
     assert commands[0] == "units metal"
     assert "pair_style zero 6.0" in commands
@@ -322,10 +318,10 @@ def test_press_script_is_ordered_and_runs_the_hold():
 
 def test_pull_script_records_and_runs_the_distance(tmp_path):
     """The pull script drives, records strided frames, and runs once."""
-    member = _template_member()
+    pair = _template_member()
     model = stand_in_force_model({"Si": 1})
     commands = pull_script(
-        _fake_pair(), member, model, "reference.data",
+        _fake_pair(), pair, model, "reference.data",
         rate=Quantity(3.2, "m/s"),
         pull_distance=Quantity(20.0, "angstrom"), seed=7,
         output_directory=str(tmp_path))
@@ -333,7 +329,7 @@ def test_pull_script_records_and_runs_the_distance(tmp_path):
     text = "\n".join(commands)
     assert "fix hold_bottom bottom_grip setforce 0.0 0.0 0.0" in text
     # The dump lands under the supplied output directory, not the CWD.
-    dump = os.path.join(str(tmp_path), "si-sio2_pull.dump")
+    dump = os.path.join(str(tmp_path), "si_sio2_pull.dump")
     assert f"dump traj all custom 100 {dump} id type x y z" in text
     # 20 Å at 3.2 m/s (0.032 Å/ps) = 625 ps / 0.001 ps = 625000 steps.
     runs = [c for c in commands if c.startswith("run ")]

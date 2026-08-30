@@ -1,12 +1,22 @@
 """The `sabsim prepare` writer (PSEUDOCODE.md §14.4, §14.5; DESIGN §10).
 
 `prepare` is the WRITER half of the deployment consumer (`run` is the
-executor, :mod:`sabsim.deploy`/`sabsim.pipeline.member_jobs`). It reads
-BOTH inputs — the study spec and the machine-local deployment rc — and
-emits one ready-to-submit script per (member, job) plus a submission
-guide. It **submits nothing** (§10.1): a long-lived submit-and-watch
-process cannot sit on a login node, so the human submits the scripts and
-inspects each gate before the next.
+executor, :mod:`sabsim.deploy`/`sabsim.pipeline.pair_jobs`). It reads
+BOTH inputs — the project file (one wafer pair) and the machine-local
+deployment rc — and emits one ready-to-submit script per job of the
+registry (:mod:`sabsim.deploy.registry`: the two surface preparations,
+the bond, the analysis) plus a submission guide. It **submits nothing**
+(§10.1): a long-lived submit-and-watch process cannot sit on a login
+node, so the human submits the scripts and inspects each gate before
+the next.
+
+The scripts are named after the STAGE FOLDERS they fill (ARCHITECTURE
+§1, revised 2026-08-30 (Paul)): ``prep_surf1_si.slurm`` runs the job
+whose deliverables land in ``prep_surf1_si/`` and whose bulk lands in
+``intermediate/prep_surf1_si/``, so a reader of the project folder sees
+ONE name per stage. `prepare` also makes the four stage folders if they
+do not exist yet, never touching one that does — a prep folder may
+already hold a prepared surface's recipe and environment library.
 
 Because it runs on the login node, it must FAIL THERE, readably — an
 unset root or a walltime over its partition ceiling stops here with a
@@ -34,43 +44,53 @@ from sabsim.deploy.config import (
     UsageBlock,
     load_deployment,
 )
-from sabsim.deploy.registry import JOB_NAMES, JOB_REGISTRY, JobKind
+from sabsim.deploy.registry import (
+    JOB_REGISTRY,
+    JobKind,
+    jobs_depending_on,
+)
 from sabsim.deploy.roots import LocationRoots, resolve_location_roots
-from sabsim.spec.loader import load_and_validate_study
+from sabsim.spec.loader import load_and_validate_project
+from sabsim.spec.records import stage_folders
 
 # The submission guide's filename — a descriptively named guided index
 # dropped beside the scripts (§10.5: a submission GUIDE, never `index` or
 # `readme`).
 GUIDE_FILENAME = "SUBMISSION_GUIDE.md"
 
-# The generated scripts' extension. `.slurm` matches the one such file the
-# repo already carries (jobs/status_deck/render_movies.slurm).
+# The generated scripts' extension.
 SCRIPT_EXTENSION = ".slurm"
 
 
 @dataclass(frozen=True)
 class SubmissionEntry:
-    """One prepared job: which member, which job, and the script written.
+    """One prepared job: which job, which stage folder, which script.
 
     The ORDER of these entries IS the submission order (§10.5) — the guide
     and the returned tuple both preserve it, so a human (or a test) reads
-    the sequence off one list, never a filename ordinal.
+    the sequence off one list, never a filename ordinal. ``depends_on``
+    repeats the registry's dependency list by job name so the guide can
+    be rendered from the entries alone.
     """
 
-    member_name: str
     job_name: str
+    stage_folder: str
     script_name: str
+    depends_on: tuple[str, ...]
 
 
-def prepare(study_spec_path, deployment_rc_path,
-            job_directory,
+def prepare(project_spec_path, deployment_rc_path,
+            project_directory=None,
             dump_visuals: bool = True) -> tuple[SubmissionEntry, ...]:
-    """Write one script per (member, job) plus a guide (§14.4).
+    """Write one script per job plus a guide, into the project (§14.4).
 
-    ``job_directory`` is where the scripts and guide are written AND the
-    run's home (each script ``cd``s there before launching, matching the
-    CLI's CWD-is-home rule, §14.3). Returns the submission entries in
-    order; also drops the guide beside the scripts. Raises
+    ``project_directory`` is where the scripts, the guide and the four
+    stage folders are made AND the run's home (each script ``cd``s there
+    before launching, matching the CLI's CWD-is-home rule, §14.3). It
+    defaults to the folder holding the project file, which is where a
+    project's things belong (ARCHITECTURE §1); a test may point it
+    elsewhere. Returns the submission entries in order; also drops the
+    guide beside the scripts. Raises
     :class:`~sabsim.deploy.config.DeploymentError` on the login-node gates
     (unset root, walltime over ceiling) before writing anything.
 
@@ -80,47 +100,51 @@ def prepare(study_spec_path, deployment_rc_path,
     2026-08-26) that a dynamic run leaves a movie behind as its evidence;
     ``False`` writes ``--no-dump-visuals`` instead.
     """
-    job_directory = Path(job_directory)
-
     # The roots gate FIRST (§10.5): resolve the three location roots, or
     # stop on the login node naming the missing one — before any file is
     # written, so a misconfigured environment fails cleanly.
     roots = resolve_location_roots()
 
     deployment = load_deployment(deployment_rc_path)
-    validated = load_and_validate_study(study_spec_path)
-    spec_path = os.path.abspath(study_spec_path)
+    validated = load_and_validate_project(project_spec_path)
+    spec_path = os.path.abspath(project_spec_path)
+    if project_directory is None:
+        project_directory = validated.project_directory
+    project_directory = Path(project_directory)
+    folders = stage_folders(validated.pair)
 
-    # Validate every (member, job) against its walltime ceiling BEFORE
+    # Validate every job against its walltime and GPU ceilings BEFORE
     # writing any script, so a bad walltime does not leave a half-written
-    # set of scripts behind (§10.6, the cheap check).
-    for member in validated.members:
-        for job in JOB_REGISTRY:
-            usage, partition = _resolve_usage_and_partition(deployment, job)
-            _check_walltime_ceiling(job, usage, partition)
-            _check_gpu_ceiling(job, usage, partition)
+    # set of scripts behind (§10.6, the cheap checks).
+    for job in JOB_REGISTRY:
+        usage, partition = _resolve_usage_and_partition(deployment, job)
+        _check_walltime_ceiling(job, usage, partition)
+        _check_gpu_ceiling(job, usage, partition)
 
     entries = []
-    for member in validated.members:
-        for job in JOB_REGISTRY:
-            usage, partition = _resolve_usage_and_partition(deployment, job)
-            script = render_job_script(
-                member, job, usage, partition, deployment, roots,
-                spec_path, job_directory, dump_visuals=dump_visuals)
-            script_name = _semantic_name(member.name, job.name)
-            _write_script(job_directory / script_name, script)
-            entries.append(SubmissionEntry(
-                member_name=member.name, job_name=job.name,
-                script_name=script_name))
+    for job in JOB_REGISTRY:
+        usage, partition = _resolve_usage_and_partition(deployment, job)
+        stage_folder = job.folder(folders)
+        # The stage folder itself: made if absent, left alone if present
+        # (a prep folder may already hold its recipe and library).
+        (project_directory / stage_folder).mkdir(parents=True, exist_ok=True)
+        script = render_job_script(
+            validated, job, usage, partition, deployment, roots,
+            spec_path, project_directory, dump_visuals=dump_visuals)
+        script_name = _semantic_name(stage_folder)
+        _write_script(project_directory / script_name, script)
+        entries.append(SubmissionEntry(
+            job_name=job.name, stage_folder=stage_folder,
+            script_name=script_name, depends_on=job.depends_on))
 
-    _write_guide(job_directory, validated.name, tuple(entries))
+    _write_guide(project_directory, validated, tuple(entries))
     return tuple(entries)
 
 
 def render_job_script(
-        member, job: JobKind, usage: UsageBlock, partition: Partition,
+        project, job: JobKind, usage: UsageBlock, partition: Partition,
         deployment: DeploymentConfig, roots: LocationRoots,
-        spec_path: str, job_directory: Path,
+        spec_path: str, project_directory: Path,
         dump_visuals: bool = False) -> str:
     """Render one job's submission script — the lean §10.5 form (§14.5).
 
@@ -131,23 +155,29 @@ def render_job_script(
     and the next job to submit. The deepmd ``plugin load`` is NOT here —
     the bond job's LAMMPS input issues it (ARCHITECTURE.md §4.4); this only
     loads the module that exports its path.
+
+    The scheduler job NAME is the stage folder's name, so ``squeue``
+    reads like the project folder does (§14.5).
     """
-    stem = f"{member.name}_{job.name}"
+    folders = stage_folders(project.pair)
+    stem = job.folder(folders)
     lines: list = ["#!/bin/bash"]
 
     lines += [
-        f"# {member.name} / {job.name} — generated by `sabsim prepare` "
-        f"(DESIGN §10).",
+        f"# {stem} — the {job.name} job of this project.",
+        "# Generated by `sabsim prepare` (DESIGN §10). Deliverables land",
+        "# in the folder of the same name",
+        "# beside this script; bulk output under intermediate/ (§10.8).",
         "# Lean by design (§10.5): scheduler directives, modules, frozen",
         "# roots, and the run line. The interpreter, launcher, and",
         "# potentials come from the activated install (the sourced",
         "# .sabsim/sabsimrc), so they are NOT restated here.",
     ]
 
-    # (1) Scheduler directives — the §10.7 field set the throwaway jobs/*
-    # scripts already enumerate, with values filled from the rc.
+    # (1) Scheduler directives — the §10.7 field set, with values filled
+    # from the rc.
     lines += [
-        f"#SBATCH --job-name=sabsim-{stem}",
+        f"#SBATCH --job-name={stem}",
         f"#SBATCH --partition={partition.name}",
         f"#SBATCH --account={deployment.default_account}",
         f"#SBATCH --nodes={usage.nodes}",
@@ -162,8 +192,8 @@ def render_job_script(
     lines += [
         f"#SBATCH --mem={_slurm_memory(usage)}",
         f"#SBATCH --time={_slurm_walltime(usage)}",
-        f"#SBATCH --output={job_directory}/{stem}-%j.out",
-        f"#SBATCH --error={job_directory}/{stem}-%j.err",
+        f"#SBATCH --output={project_directory}/{stem}-%j.out",
+        f"#SBATCH --error={project_directory}/{stem}-%j.err",
         "",
         "set -euo pipefail",
         "",
@@ -198,7 +228,7 @@ def render_job_script(
 
     # (3b) Per-kind environment from the rc's [usage.<kind>.environment]
     # (ARCHITECTURE §4.4): machine-specific knobs the job needs but that are
-    # not science settings — e.g. the universal-cascade activate job points
+    # not science settings — e.g. the universal-cascade prep jobs point
     # SABSIM_CASCADE_ENGINE_PREFIX at the deepmd bundle. Emitted before the
     # launch, in the block's own (sorted) order, so the script is
     # deterministic. A block with no environment emits nothing here.
@@ -208,12 +238,14 @@ def render_job_script(
                   for name, value in usage.environment]
         lines.append("")
 
-    # (4) The run's home is where it is launched (CWD, §14.3), then the
+    # (4) The run's home is the PROJECT folder (CWD, §14.3), then the
     # launcher INSIDE the allocation (§4.1) — python + mpirun on PATH from
     # the activated install.
     lines += [
-        "# The run's home is the working directory (the CLI takes CWD).",
-        f'cd "{job_directory}"',
+        "# The run's home is the project folder (the CLI takes CWD), so",
+        "# relative paths mean the same thing whichever folder you submit",
+        "# from (§14.5).",
+        f'cd "{project_directory}"',
         "",
         "# Launch inside the allocation (§4.1). `srun --mpi=pmix` is the",
         "# primary launcher (§4.1), NOT mpirun: mpirun's remote daemon does",
@@ -224,25 +256,44 @@ def render_job_script(
         "# exclusive, which aborts the nested launch, so clear them first.",
         "unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU",
         f'srun --mpi=pmix -n "${{SLURM_NTASKS}}" python -m sabsim run \\',
-        f'    {spec_path} --{job.name} --only {member.name}'
+        f'    {spec_path} {job.flag}'
         + (" --dump-visuals" if dump_visuals else " --no-dump-visuals"),
         "",
     ]
 
     # (5) On success, what to check and the next job to submit (§10.5),
-    # reinforcing the guide.
-    next_job = _next_job_name(job.name)
-    if next_job is not None:
-        next_script = _semantic_name(member.name, next_job)
-        lines.append(
-            f'echo "{job.name} done for {member.name}. Check its output, '
-            f'then submit: sbatch {next_script}"')
-    else:
-        lines.append(
-            f'echo "{job.name} done for {member.name}. The measure vector '
-            f'is written; the member chain is complete."')
+    # reinforcing the guide. The "next" is read off the registry's
+    # dependency lists, so an inserted job carries the hint for free.
+    lines.append(_success_line(job, folders))
 
     return "\n".join(lines) + "\n"
+
+
+def _success_line(job: JobKind, folders) -> str:
+    """The ``echo`` a script prints on success: what to check, what next.
+
+    A prep job's successor (bond) also needs the OTHER prep to have
+    finished, so the line says so rather than inviting a premature
+    submit; the last job in the chain announces the measure vector.
+    """
+    stem = job.folder(folders)
+    successors = jobs_depending_on(job.name)
+    if not successors:
+        return (f'echo "{job.name} done ({stem}). The measure vector is '
+                f'written in {stem}/; the pair chain is complete."')
+    parts = []
+    for successor in successors:
+        script = _semantic_name(successor.folder(folders))
+        others = [name for name in successor.depends_on
+                  if name != job.name]
+        if others:
+            parts.append(
+                f"once {' and '.join(others)} has also finished, submit: "
+                f"sbatch {script}")
+        else:
+            parts.append(f"then submit: sbatch {script}")
+    return (f'echo "{job.name} done ({stem}). Check its deliverables in '
+            f'{stem}/, {"; ".join(parts)}"')
 
 
 # ---------------------------------------------------------------------
@@ -253,18 +304,20 @@ def _resolve_usage_and_partition(
         deployment: DeploymentConfig, job: JobKind) -> tuple:
     """Look up a job's usage block and the partition it resolves to.
 
-    Both lookups can fail loudly (a job kind with no ``[usage.*]`` block,
-    or a usage block routing to an undefined resource class); those are
-    the same executability refusals :func:`~sabsim.deploy.config.
-    load_deployment` already makes, surfaced here by job name.
+    The block is found by the job's ``usage_key`` — ``prep`` for both
+    surface preparations, else the job's own name (§14.2). Both lookups
+    can fail loudly (a kind with no ``[usage.*]`` block, or a usage block
+    routing to an undefined resource class); those are the same
+    executability refusals :func:`~sabsim.deploy.config.load_deployment`
+    already makes, surfaced here by job name.
     """
-    usage = deployment.usage.get(job.name)
+    usage = deployment.usage.get(job.usage_key)
     if usage is None:
         raise DeploymentError(
-            f"the deployment rc has no [usage.{job.name}] block, so the "
-            f"'{job.name}' job cannot be prepared; the rc defines "
+            f"the deployment rc has no [usage.{job.usage_key}] block, so "
+            f"the '{job.name}' job cannot be prepared; the rc defines "
             f"{sorted(deployment.usage)}")
-    partition = deployment.partition_for(job.name)
+    partition = deployment.partition_for(job.usage_key)
     return usage, partition
 
 
@@ -279,12 +332,12 @@ def _check_walltime_ceiling(
     """
     if usage.walltime.in_hours() > partition.max_walltime.in_hours():
         raise DeploymentError(
-            f"[usage.{job.name}] asks for {usage.walltime.value} "
+            f"[usage.{job.usage_key}] asks for {usage.walltime.value} "
             f"{usage.walltime.unit} walltime, over the "
             f"'{usage.resource_class}' partition ceiling of "
             f"{partition.max_walltime.value} {partition.max_walltime.unit} "
-            f"(partition '{partition.name}'). Lower the walltime or raise "
-            f"the partition's max_walltime.")
+            f"(partition '{partition.name}', job '{job.name}'). Lower the "
+            f"walltime or raise the partition's max_walltime.")
 
 
 def _slurm_gres(usage: UsageBlock, partition: Partition) -> str | None:
@@ -321,14 +374,14 @@ def _check_gpu_ceiling(
     available = partition.capacity.get("gpus_per_node")
     if available is None:
         raise DeploymentError(
-            f"[usage.{job.name}] asks for {usage.gpus_per_node} GPU(s) per "
-            f"node, but its '{usage.resource_class}' partition "
+            f"[usage.{job.usage_key}] asks for {usage.gpus_per_node} GPU(s) "
+            f"per node, but its '{usage.resource_class}' partition "
             f"('{partition.name}') declares no gpus_per_node. Route it to a "
             f"partition that has GPUs, or set gpus_per_node = 0.")
     if usage.gpus_per_node > available:
         raise DeploymentError(
-            f"[usage.{job.name}] asks for {usage.gpus_per_node} GPU(s) per "
-            f"node, over the '{usage.resource_class}' partition's "
+            f"[usage.{job.usage_key}] asks for {usage.gpus_per_node} GPU(s) "
+            f"per node, over the '{usage.resource_class}' partition's "
             f"{int(available)} (partition '{partition.name}'). Lower the "
             f"request or move to a partition with more GPUs.")
 
@@ -370,21 +423,14 @@ def _slurm_memory(usage: UsageBlock) -> str:
     return f"{int(round(megabytes))}M"
 
 
-def _semantic_name(member_name: str, job_name: str) -> str:
-    """The script filename: ``<member>_<job>.slurm`` — no ordinal (§10.5)."""
-    return f"{member_name}_{job_name}{SCRIPT_EXTENSION}"
+def _semantic_name(stage_folder: str) -> str:
+    """The script filename: ``<stage folder>.slurm`` — no ordinal (§10.5).
 
-
-def _next_job_name(job_name: str) -> str | None:
-    """The job that follows ``job_name`` in submission order, or None.
-
-    Read off the registry order (§10.3), so an inserted job kind carries
-    the "submit next" hint for free.
+    The script carries the SAME name as the folder it fills, so the
+    script, the deliverables folder and the bulk folder under
+    ``intermediate/`` are one name to a reader (§14.4).
     """
-    position = JOB_NAMES.index(job_name)
-    if position + 1 < len(JOB_NAMES):
-        return JOB_NAMES[position + 1]
-    return None
+    return f"{stage_folder}{SCRIPT_EXTENSION}"
 
 
 # ---------------------------------------------------------------------
@@ -398,37 +444,72 @@ def _write_script(path: Path, text: str) -> None:
 
 
 def _write_guide(
-        job_directory: Path, study_name: str,
+        project_directory: Path, project,
         entries: tuple[SubmissionEntry, ...]) -> None:
-    """Drop the submission guide beside the scripts (§10.5).
+    """Drop the submission guide beside the scripts (§10.5, §14.4).
 
-    The guide is where ORDER lives (semantic filenames carry no ordinal):
-    it lists each member's jobs in submission order with the ``sbatch``
-    line for each, reinforced by every script printing its own "submit
-    next" line on success.
+    The guide is where ORDER lives (semantic filenames carry no ordinal).
+    It reads as the DEPENDENCY GRAPH in plain words: the two surface
+    preparations first, in either order or together; the bond once both
+    have finished and their gate reports are to the person's liking;
+    then the analysis. It also prints the one-line chained form for a
+    person who trusts the gates — ``sbatch --dependency=afterok:...`` —
+    reinforced by every script printing its own "submit next" line on
+    success.
     """
+    by_name = {entry.job_name: entry for entry in entries}
     lines = [
-        f"# Submission guide — study `{study_name}`",
+        f"# Submission guide — {project.pair.pair_label}",
         "",
-        "Generated by `sabsim prepare` (DESIGN.md §10). Submit these jobs",
-        "**in order**, checking each result before submitting the next",
+        f"{project.description}",
+        "",
+        "Generated by `sabsim prepare` (DESIGN.md §10). Each script fills",
+        "the stage folder of the same name: deliverables beside this guide,",
+        "bulk output under `intermediate/` (§10.8). Submit the jobs in the",
+        "order below, checking each result before submitting the next",
         "(§10.2). Each script also prints, on success, what to check and",
         "the next job to submit.",
         "",
+        "## Step by step",
+        "",
     ]
-    members_in_order: list = []
+    step = 0
     for entry in entries:
-        if entry.member_name not in members_in_order:
-            members_in_order.append(entry.member_name)
-    for member_name in members_in_order:
-        lines.append(f"## member `{member_name}`")
-        step = 0
-        for entry in entries:
-            if entry.member_name != member_name:
-                continue
-            step += 1
-            lines.append(f"{step}. `sbatch {entry.script_name}` "
-                         f"({entry.job_name})")
-        lines.append("")
-    (job_directory / GUIDE_FILENAME).write_text(
+        step += 1
+        if not entry.depends_on:
+            when = "independent — submit in either order, or together"
+        else:
+            waits = " and ".join(
+                f"`{by_name[name].stage_folder}`" for name in entry.depends_on)
+            when = f"after {waits} has finished and been checked"
+        lines.append(f"{step}. `sbatch {entry.script_name}` "
+                     f"({entry.job_name}; {when})")
+    lines += [
+        "",
+        "## Chained form, for a person who trusts the gates",
+        "",
+        "Submit everything at once and let the scheduler hold each job",
+        "until the ones it depends on succeed (`afterok`):",
+        "",
+        "```bash",
+    ]
+    for entry in entries:
+        variable = _shell_variable(entry.job_name)
+        if not entry.depends_on:
+            lines.append(
+                f"{variable}=$(sbatch --parsable {entry.script_name})")
+        else:
+            ids = ":".join(f"${_shell_variable(name)}"
+                           for name in entry.depends_on)
+            lines.append(
+                f"{variable}=$(sbatch --parsable "
+                f"--dependency=afterok:{ids} {entry.script_name})")
+    lines += ["```", ""]
+    (project_directory / GUIDE_FILENAME).write_text(
         "\n".join(lines), encoding="utf-8")
+
+
+def _shell_variable(job_name: str) -> str:
+    """A shell variable name holding one job's scheduler id in the guide."""
+    return f"{job_name}_id"
+

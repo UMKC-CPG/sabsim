@@ -24,36 +24,16 @@
 name          = "si-lean-v0"
 # Part 1 — the key. The elements the ONE shared model must handle (this
 # fixes the global type-map order, §4.3) and the structural/chemical
-# regime it claims. A pair's material_domain must lie inside this.
+# regime it claims. A member's material_domain must lie inside this.
 species_union = ["Si"]
 domain        = "diamond-cubic"
 # Points at (never contains) the §3.5 reference set the gate uses.
-reference_data_ref = "share/activation/Si.toml"
+reference_data_ref = "/cluster/pixstor/home/rulisp/CPG/cpg-repo/sabsim/share/activation/Si.toml"
 
 # The universal foundation model that RUNS the dynamics of Collection 1
 # (melt-quench, warm runs) and derives the working lattice (§2.2). The
-# same model, under the same name, that the project file's [potential]
+# same model, under the same name, that the study file's [potential]
 # block names; the identity must match the one pinned in the code.
-# ---------------------------------------------------------------------
-# The gate's RULER (DESIGN §3.5 / §4.8 part 2, 2026-08-29). The §3.5
-# activation gate calls an atom crystalline when its second-shell
-# bispectrum matches some neighbourhood of the UNDAMAGED material in
-# the environment library this recipe's Collection 1 builds. These
-# settings describe that neighbourhood, and they are recorded in the
-# library so the gate reuses them — never a copy of its own. The cutoff
-# is a PHYSICAL length through the SECOND neighbour shell and short of
-# the third (silicon: 2.35 and 3.84 A in, 4.5 A out => 4.2 A; LEDGER
-# T-37 showed a first-shell cutoff cannot tell glass from warm crystal,
-# and 600 K warm runs swallow it — hence 300 K below); LAMMPS's own
-# parameters
-# (rcutfac, per-species radii) are derived from it by the engine
-# adapter. `expansion_order` is LAMMPS's twojmax (6 -> 30 components per
-# atom, LEDGER T-35); `species_weights` tells unlike species apart
-# inside one descriptor. `gate_scatter_multiple` is the tolerance the
-# library is self-checked at: nearly every warm-run atom must read as
-# crystalline and nearly every melt-quench atom as disordered, or
-# `generate` refuses to write the library.
-# ---------------------------------------------------------------------
 [descriptor]
 descriptor_cutoff    = { value = 4.2, unit = "angstrom" }
 expansion_order       = 6
@@ -148,11 +128,10 @@ seed            = 22
 
 # ---------------------------------------------------------------------
 # Part 5 — Collection 2, the hard configurations (§4.8 part 5). NOT new
-# MD: harvested from an ordinary PROJECT run recorded with
-# `sabsim run --dump-visuals` under the universal model. `project` is
-# that project's file; its folder holds the stage folders whose
-# deliverables name the `run-<id>` scratch folders that carry the
-# dumps. Families 7-11 come from the activate dumps (7),
+# MD: harvested from an ordinary member run recorded with
+# `sabsim run --dump-visuals` under the universal model. `job_directory`
+# is that run's home (its scratch mirror holds the dumps); `member`
+# names which member. Families 7-11 come from the activate dumps (7),
 # the press dump (8-10: initial / relaxed / pressed thirds of the press
 # record) and the pull dumps (11). Interface frames are cut to the
 # §6.4 sub-cell: the activated skins plus this many crystalline layers
@@ -160,7 +139,7 @@ seed            = 22
 # for).
 # ---------------------------------------------------------------------
 [generation_plan]
-project                     = "jobs/si_si/sabsim.toml"
+project                     = "/cluster/pixstor/home/rulisp/CPG/cpg-repo/sabsim/jobs/si_si/sabsim.toml"
 frames_per_stage            = { activate = 10, press = 12, pull = 10 }
 subcell_crystalline_layers  = 2
 subcell_vacuum              = { value = 10.0, unit = "angstrom" }

@@ -3,8 +3,8 @@ library (DESIGN §3.5 / §4.8 part 2, PSEUDOCODE §10.6 / §11.2).
 
 No LAMMPS runs here: the adapter's PARAMETER derivation, script and
 dump parsing are pure; the library's assembly is tested with an
-injected descriptor function; and the study-side checks use the shipped
-template's members with the hand-built library of ``support``. The
+injected descriptor function; and the project-side checks use the
+shipped template's pair with the hand-built library of ``support``. The
 real ``compute sna/atom`` run is LEDGER T-35.
 """
 
@@ -30,25 +30,26 @@ from sabsim.driver.environment_library import (
     LIBRARY_ARRAYS_FILE,
     LIBRARY_MANIFEST_FILE,
     build_environment_library,
-    check_library_against_study,
+    check_library_against_project,
     disordered_atoms,
     false_alarm_rate,
     load_environment_library,
     read_environment_library,
     write_environment_library,
 )
-from sabsim.spec.loader import SpecificationError, load_and_validate_study
+from sabsim.spec.loader import SpecificationError, load_and_validate_project
 from sabsim.spec.records import Quantity
 from tests.unit.support import COLD_VECTOR, THERMAL_SCATTER, hand_built_library
 
 _TEMPLATE = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "study_spec.toml"))
+    "..", "..", "..", "share", "templates", "project_spec.toml"))
 
 
-def _si_si_member():
-    study = load_and_validate_study(_TEMPLATE)
-    return next(m for m in study.members if m.name == "si-si-reference")
+def _template_pair():
+    """The shipped template's pair; wafer A is Si(100), the face the
+    hand-built library catalogues."""
+    return load_and_validate_project(_TEMPLATE).pair
 
 
 def _settings(cutoff=2.6, order=6, weights=None):
@@ -143,7 +144,7 @@ def test_false_alarm_rate_follows_the_scatter_multiple():
     """At a multiple of one some warm atoms are flagged; at three, none.
 
     The baseline is recomputed from the recorded warm-run distances at
-    whatever multiple the STUDY names, never frozen at the recipe's.
+    whatever multiple the PROJECT names, never frozen at the recipe's.
     """
     library = hand_built_library()
     tight = false_alarm_rate(library, "Si", scatter_multiple=0.5)
@@ -179,82 +180,85 @@ def test_library_round_trips_through_npz_and_toml(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# The study-side checks: three refusals and the temperature band.
+# The project-side checks: three refusals and the temperature band.
 # ---------------------------------------------------------------------
 
-def _member_at(kelvin):
-    member = _si_si_member()
+def _pair_at(kelvin):
+    pair = _template_pair()
     protocol = replace(
-        member.protocol,
+        pair.protocol,
         press_temperature=Quantity(value=kelvin, unit="K"))
-    return replace(member, protocol=protocol)
+    return replace(pair, protocol=protocol)
 
 
-def _check(library, member):
-    """Check against the member's wafer A (both wafers are Si here)."""
-    return check_library_against_study(
-        library, member, member.material.wafer_a)
+def _check(library, pair):
+    """Check against the pair's wafer A (silicon, face 100)."""
+    return check_library_against_project(
+        library, pair, pair.material.wafer_a)
 
 
 def test_matching_library_passes_with_no_warning():
-    assert _check(hand_built_library(), _member_at(300.0)) == []
+    assert _check(hand_built_library(), _pair_at(300.0)) == []
 
 
 def test_library_from_another_model_is_refused():
     with pytest.raises(SpecificationError, match="rebuild"):
         _check(hand_built_library(model_name="DPA-2.4-7M"),
-               _member_at(300.0))
+               _pair_at(300.0))
 
 
 def test_library_from_another_engine_is_refused():
     with pytest.raises(SpecificationError, match="one engine"):
         _check(hand_built_library(engine="imago-bispectrum"),
-               _member_at(300.0))
+               _pair_at(300.0))
 
 
 def test_library_lacking_the_wafer_face_is_refused():
     only_111 = [{"phase": "silicon-diamond", "face": "111",
                  "termination": 0, "species": ["Si"]}]
     with pytest.raises(SpecificationError, match=r"\(100\)"):
-        _check(hand_built_library(surfaces=only_111), _member_at(300.0))
+        _check(hand_built_library(surfaces=only_111), _pair_at(300.0))
 
 
 def test_gate_temperature_a_little_above_the_warm_runs_warns():
     warnings = _check(
-        hand_built_library(warm_run_temperature=600.0), _member_at(660.0))
+        hand_built_library(warm_run_temperature=600.0), _pair_at(660.0))
     assert len(warnings) == 1 and "a little tight" in warnings[0]
 
 
 def test_gate_temperature_far_above_the_warm_runs_is_refused():
     with pytest.raises(SpecificationError, match="20 %"):
         _check(hand_built_library(warm_run_temperature=600.0),
-               _member_at(750.0))
+               _pair_at(750.0))
 
 
-def _member_prepared_in(member, study_directory):
-    """The member with both wafers' preparation folders under
-    ``study_directory / <material label>`` (ARCHITECTURE §1)."""
-    def relocate(wafer):
+def _pair_prepared_in(pair, project_directory):
+    """The pair with both prep folders moved under ``project_directory``
+    — ``prep_surf1_<a>/`` and ``prep_surf2_<b>/`` (ARCHITECTURE §1)."""
+    def relocate(wafer, surface_number):
         return replace(wafer, preparation_directory=str(
-            study_directory / wafer.identity))
-    return replace(member, material=replace(
-        member.material,
-        wafer_a=relocate(member.material.wafer_a),
-        wafer_b=relocate(member.material.wafer_b)))
+            project_directory
+            / f"prep_surf{surface_number}_{wafer.identity.lower()}"))
+    return replace(pair, material=replace(
+        pair.material,
+        wafer_a=relocate(pair.material.wafer_a, 1),
+        wafer_b=relocate(pair.material.wafer_b, 2)))
 
 
-def test_load_environment_library_finds_the_wafers_folder(tmp_path):
-    """The library lives at <study>/<material label>/ and the wafer's
-    label is the only key (Paul, 2026-08-29, after LEDGER T-39)."""
-    member = _member_prepared_in(_member_at(300.0), tmp_path)
-    wafer = member.material.wafer_a
-    assert wafer.preparation_directory == str(tmp_path / "Si")
-    (tmp_path / "Si").mkdir()
-    write_environment_library(hand_built_library(), tmp_path / "Si")
-    library, warnings = load_environment_library(member, wafer)
+def test_load_environment_library_finds_the_surfaces_prep_folder(
+        tmp_path):
+    """The library lives at <project>/prep_surf1_<label>/ and the prep
+    folder the loader assigned is the only key (Paul, 2026-08-30)."""
+    pair = _pair_prepared_in(_pair_at(300.0), tmp_path)
+    wafer = pair.material.wafer_a
+    assert wafer.preparation_directory == str(tmp_path / "prep_surf1_si")
+    (tmp_path / "prep_surf1_si").mkdir()
+    write_environment_library(
+        hand_built_library(), tmp_path / "prep_surf1_si")
+    library, warnings = load_environment_library(pair, wafer)
     assert library.model_name == "DPA-3.1-3M" and warnings == []
 
-    unprepared = _member_prepared_in(member, tmp_path / "elsewhere")
+    unprepared = _pair_prepared_in(pair, tmp_path / "elsewhere")
     with pytest.raises(SpecificationError, match="bootstrap generate"):
         load_environment_library(
             unprepared, unprepared.material.wafer_a)

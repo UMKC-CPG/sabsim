@@ -55,14 +55,15 @@ def _drop_lines_containing(text: str, needle: str) -> str:
 def test_usage_environment_is_optional_and_sorted(tmp_path):
     """An environment table parses to sorted pairs; absent gives ()."""
     text = _template_text() + (
-        '\n[usage.analyze.environment]\n'
+        '\n[usage.analysis.environment]\n'
         'ZED = "z"\nALPHA = "a"\n')
     config = load_deployment(_write_rc(tmp_path, text))
 
     # Present: sorted (name, value) pairs, whatever order they were written.
-    assert config.usage["analyze"].environment == (("ALPHA", "a"), ("ZED", "z"))
-    # The template's activate block carries the cascade engine env, sorted.
-    activate_env = config.usage["activate"].environment
+    assert config.usage["analysis"].environment == (
+        ("ALPHA", "a"), ("ZED", "z"))
+    # The template's prep block carries the cascade engine env, sorted.
+    activate_env = config.usage["prep"].environment
     assert activate_env == tuple(sorted(activate_env))
     assert dict(activate_env)["SABSIM_CASCADE_ENGINE_PREFIX"]
     # Absent on a block with no environment table: the empty map, not a guess.
@@ -84,7 +85,7 @@ def test_usage_environment_rejects_a_non_table(tmp_path):
 
 # ---------------------------------------------------------------------
 # Happy path: the real template loads and the values land where §14.1
-# says, keyed by member job (activate / bond / analyze).
+# says, keyed by kind of pair job (prep / bond / analysis).
 # ---------------------------------------------------------------------
 
 def test_template_loads_into_a_config():
@@ -115,14 +116,15 @@ def test_partitions_carry_name_capacity_and_ceiling():
     assert gpu.max_walltime.in_hours() == 24.0
 
 
-def test_usage_is_keyed_by_member_job():
-    """The usage map keys are the member jobs (plus the bootstrap's
-    labelling array, routed by the same rc), not tool kinds."""
+def test_usage_is_keyed_by_pair_job_kind():
+    """The usage map keys are the pair-job kinds (plus the bootstrap's
+    labelling array, routed by the same rc), not tool kinds. One `prep`
+    block serves BOTH surface preparations (PSEUDOCODE.md §14.1)."""
     config = load_deployment(_TEMPLATE_PATH)
 
-    assert set(config.usage) == {"activate", "bond", "analyze", "label"}
+    assert set(config.usage) == {"prep", "bond", "analysis", "label"}
 
-    activate = config.usage["activate"]
+    activate = config.usage["prep"]
     assert activate.resource_class == "gpu"  # universal cascade -> GPU (§4.1)
     assert activate.nodes == 1
     assert activate.tasks_per_node == 1      # one rank, one GPU
@@ -131,7 +133,7 @@ def test_usage_is_keyed_by_member_job():
     assert activate.memory.in_megabytes() == 48 * 1024.0   # 48 GB ceiling
     assert activate.modules == ()            # engine is the bundle, no module
     # The per-kind environment points at the deepmd bundle + model; NO
-    # LAMMPS_POTENTIALS (activate is cascade-only, §3.4).
+    # LAMMPS_POTENTIALS (the cascade needs no classical file, §3.4).
     activate_env = dict(activate.environment)
     assert activate_env["SABSIM_CASCADE_ENGINE_PREFIX"]
     assert "LAMMPS_POTENTIALS" not in activate_env
@@ -146,24 +148,24 @@ def test_usage_is_keyed_by_member_job():
     assert bond.modules == ("cpg_lammps_conda/deepmd-kit-3.2.0b0",)
     assert bond.venv.endswith("virtual_envs/sabsim-dp3")
 
-    analyze = config.usage["analyze"]
+    analyze = config.usage["analysis"]
     assert analyze.resource_class == "cpu"
     assert analyze.tasks_per_node == 1       # serial Python measure
     assert analyze.gpus_per_node == 0        # pure-Python CPU measure
     assert analyze.memory.in_megabytes() == 8 * 1024.0     # smallest job
-    # The v1 analyze job loads NO science module — the mechanical measure
+    # The v1 analysis job loads NO science module — the mechanical measure
     # is pure Python and the §8 characterization is Tier-B (DESIGN §10.5).
     # An empty list is allowed and MEANINGFUL, but the key is required.
     assert analyze.modules == ()
 
 
 def test_partition_for_joins_usage_to_hardware():
-    """A member job resolves to its real partition through the class seam."""
+    """A usage block resolves to its real partition through the class seam."""
     config = load_deployment(_TEMPLATE_PATH)
 
-    assert config.partition_for("activate").name == "gpu,requeue"
+    assert config.partition_for("prep").name == "gpu,requeue"
     assert config.partition_for("bond").name == "gpu,requeue"
-    assert config.partition_for("analyze").name == "general"
+    assert config.partition_for("analysis").name == "general"
 
 
 # ---------------------------------------------------------------------

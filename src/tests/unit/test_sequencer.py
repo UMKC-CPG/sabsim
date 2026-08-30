@@ -2,9 +2,10 @@
 
 These pin the walking skeleton's guarantees (ARCHITECTURE.md §5, wave
 0): one well-formed number travels the whole eight-step pipeline for
-every member; every member is marked untrusted; relations are graded
-and reported; the run's record is machine-readable; and a stage that
-breaks its contract HALTS the pipeline instead of poisoning it.
+the project's pair; the pair is marked untrusted; the run's record is
+machine-readable; the four stages hand off through the project's stage
+folders; and a stage that breaks its contract HALTS the pipeline
+instead of poisoning it.
 """
 
 import dataclasses
@@ -13,7 +14,7 @@ import os
 
 import pytest
 
-from sabsim.pipeline import exec_full_study
+from sabsim.pipeline import exec_full_project
 from sabsim.pipeline.contracts import (
     SLABS_CONTRACT,
     PipelineHalt,
@@ -28,52 +29,49 @@ from sabsim.pipeline.measures import (
     merge_measures,
 )
 from sabsim.pipeline.sequencer import to_record
-from sabsim.spec.loader import load_and_validate_study
-
-_TEMPLATE_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "study_spec.toml"))
+from sabsim.spec.records import stage_folders
+from tests.unit.support import project_in, template_pair
 
 
 @pytest.fixture
-def job_home(tmp_path, monkeypatch):
-    """A throwaway run home: SABSIM_SCRATCH set + an existing job dir.
+def project_file(tmp_path, monkeypatch):
+    """A throwaway project: the template copied in, SABSIM_SCRATCH set.
 
-    The sequencer now writes each member's intermediates under a scratch
-    subtree (ARCHITECTURE.md §4.3), so ``exec_full_study`` needs a job
-    directory and ``SABSIM_SCRATCH``. A tmp home keeps the W0 control-flow
-    tests login-node-runnable and self-contained (the W0 stubs write no
-    files, but the sequencer still derives each member's scratch path).
+    The sequencer writes each stage's intermediates under the project's
+    scratch mirror and its deliverables into the project's stage folders
+    (ARCHITECTURE.md §1), so a W0 run needs a real folder and a scratch
+    root. A tmp project keeps the control-flow tests login-node-runnable
+    and self-contained.
     """
     monkeypatch.setenv("SABSIM_SCRATCH", str(tmp_path / "scratch"))
-    job_directory = tmp_path / "jobs" / "study"
-    job_directory.mkdir(parents=True)
-    return str(job_directory)
+    home = tmp_path / "si_sio2"
+    home.mkdir()
+    return project_in(home)
 
 
 # ---------------------------------------------------------------------
 # The pipeline runs end to end and produces a well-formed, untrusted
-# study report.
+# project report.
 # ---------------------------------------------------------------------
 
-def test_exec_full_study_runs_every_member(job_home):
-    """Every template member runs to a self-standing report."""
-    report = exec_full_study(_TEMPLATE_PATH, job_home)
-    assert report.study_name == "sio2-si-sab-v1"
-    assert tuple(r.specification.name for r in report.member_results) == (
-        "si-sio2", "si-si-reference", "sio2-sio2-reference")
+def test_exec_full_project_runs_the_pair(project_file):
+    """The project's one pair runs to a self-standing report."""
+    report = exec_full_project(project_file)
+    assert report.pair_label == "si_sio2"
+    assert report.result.specification.pair_label == "si_sio2"
+    assert "SiO2" in report.description or "Si" in report.description
 
 
-def test_every_skeleton_member_is_untrusted(job_home):
-    """A wave-0 member's number is plumbing, not physics (§5.3)."""
-    report = exec_full_study(_TEMPLATE_PATH, job_home)
-    assert all(not r.trusted for r in report.member_results)
+def test_the_skeleton_pair_is_untrusted(project_file):
+    """A wave-0 pair's number is plumbing, not physics (§5.3)."""
+    report = exec_full_project(project_file)
+    assert report.result.trusted is False
 
 
-def test_mechanical_measure_travels_the_pipeline(job_home):
+def test_mechanical_measure_travels_the_pipeline(project_file):
     """The one real measure is present and OK; the rest unresolved."""
-    report = exec_full_study(_TEMPLATE_PATH, job_home)
-    measures = report.member_results[0].measures
+    report = exec_full_project(project_file)
+    measures = report.result.measures
 
     mechanical = measures.by_name("mechanical_work_of_separation")
     assert mechanical is not None
@@ -85,79 +83,60 @@ def test_mechanical_measure_travels_the_pipeline(job_home):
             MeasureStatus.UNRESOLVED)
 
 
-def test_gate_reports_but_does_not_act(job_home):
+def test_gate_reports_but_does_not_act(project_file):
     """v1's gate is a reporter; it never acts (VISION principle 5)."""
-    report = exec_full_study(_TEMPLATE_PATH, job_home)
-    gate = report.member_results[0].gate
+    report = exec_full_project(project_file)
+    gate = report.result.gate
     assert gate.acted is False
     assert "mechanical_work_of_separation" in gate.measures_seen
 
 
-def test_ratio_relation_is_graded_and_reported(job_home):
-    """The declared ratio relation produces a (untrusted) outcome."""
-    report = exec_full_study(_TEMPLATE_PATH, job_home)
-    assert len(report.relation_outcomes) == 1
-
-    ratio = report.relation_outcomes[0]
-    assert ratio.kind == "ratio"
-    # Both members emit the same placeholder value, so the skeleton
-    # ratio is 1.0 — well-formed, and correctly flagged untrusted.
-    assert ratio.value == 1.0
-    assert ratio.trusted is False
+def test_the_four_stage_folders_hold_the_deliverables(project_file):
+    """A whole-chain run leaves each stage's deliverable in its folder
+    and its bulk under the scratch mirror's run folder (§10.8)."""
+    exec_full_project(project_file)
+    home = os.path.dirname(project_file)
+    folders = stage_folders(template_pair())
+    for folder in (folders.prep_surf1, folders.prep_surf2):
+        assert os.path.isfile(
+            os.path.join(home, folder, "activated_half.manifest.toml"))
+    assert os.path.isfile(
+        os.path.join(home, folders.bond, "pull_results.manifest.toml"))
+    assert os.path.isfile(
+        os.path.join(home, folders.analysis, "measure_vector.toml"))
+    assert os.path.islink(os.path.join(home, "intermediate"))
+    mirror = os.path.join(home, "intermediate", folders.bond)
+    assert any(name.startswith("run-") for name in os.listdir(mirror))
 
 
 # ---------------------------------------------------------------------
 # The run's output is machine-readable, and provenance is stamped.
 # ---------------------------------------------------------------------
 
-def test_study_record_is_json_serializable(job_home):
+def test_project_record_is_json_serializable(project_file):
     """to_record emits a plain, JSON-serializable view (§6.6)."""
-    report = exec_full_study(_TEMPLATE_PATH, job_home)
+    report = exec_full_project(project_file)
     record = to_record(report)
     # Round-trips through JSON without custom encoders.
     restored = json.loads(json.dumps(record))
-    assert restored["study"] == "sio2-si-sab-v1"
-    assert len(restored["members"]) == 3
+    assert restored["pair"] == "si_sio2"
+    assert restored["result"]["pair"] == "si_sio2"
+    assert "relations" not in restored
 
 
-def test_provenance_stamps_the_fingerprinted_protocol(job_home):
-    """Every member result carries a protocol fingerprint (§1.6)."""
-    report = exec_full_study(_TEMPLATE_PATH, job_home)
-    provenance = report.member_results[0].potential
+def test_provenance_stamps_the_fingerprinted_protocol(project_file):
+    """The pair result carries a protocol fingerprint (§1.6)."""
+    report = exec_full_project(project_file)
+    provenance = report.result.potential
     assert provenance.protocol_fingerprint
     assert provenance.universal_model == "DPA-3.1-3M"
     assert provenance.production_weights.endswith("dpa3.pth")
     assert provenance.master_seed == 20260713
 
 
-def test_only_runs_a_subset(job_home):
-    """`only` restricts the run to the named members."""
-    report = exec_full_study(
-        _TEMPLATE_PATH, job_home, only=["si-si-reference"])
-    assert tuple(
-        r.specification.name for r in report.member_results) == (
-            "si-si-reference",)
-
-
-def test_only_relation_over_absent_member_is_unresolved(job_home):
-    """A relation over a member `only` excluded degrades, never crashes."""
-    report = exec_full_study(
-        _TEMPLATE_PATH, job_home, only=["si-si-reference"])
-    ratio = report.relation_outcomes[0]
-    assert ratio.value is None
-    assert "did not run" in ratio.note
-
-
-def test_only_unknown_member_is_an_error(job_home):
-    """`only` naming a member not in the study is an error, not a no-op."""
-    with pytest.raises(ValueError):
-        exec_full_study(_TEMPLATE_PATH, job_home, only=["not-a-member"])
-
-
 def test_fingerprint_is_stable_and_sensitive():
     """The content fingerprint changes iff a knob changes (§1.4)."""
-    study = load_and_validate_study(_TEMPLATE_PATH)
-    protocol = study.members[0].protocol
+    protocol = template_pair().protocol
 
     same = content_fingerprint(protocol)
     assert same == content_fingerprint(protocol)      # stable

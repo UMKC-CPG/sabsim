@@ -13,7 +13,7 @@ The three phase functions mirror §9.3-§9.5. Each runs the simulation in
 CHUNKS and, after each chunk, reads the state back and asks slice 3
 whether to stop — the essence of a protocol whose transitions are
 decided at runtime, not written into a static input script. Sequencing
-the phases into one member's BondDebondResult (with a fresh restore per
+the phases into one pair's BondDebondResult (with a fresh restore per
 pull rung) is thin wiring that lands with the real adapter, where the
 persistent-engine lifecycle is real; here each phase is exercised on its
 own.
@@ -69,7 +69,7 @@ from sabsim.driver.resume import (
     verify_inputs_or_stop,
     write_checkpoint,
 )
-from sabsim.spec.records import MemberSpecification, Quantity
+from sabsim.spec.records import PairSpecification, Quantity
 from sabsim.structure.wafer_tags import WAFER_A_TAG, WAFER_B_TAG
 
 
@@ -262,7 +262,7 @@ def _chunks(duration: Quantity, interval: Quantity) -> int:
 
 
 def _press_setup(
-        built, member, force_model, data_file, seed, geometry,
+        built, pair, force_model, data_file, seed, geometry,
         trajectory_file=None, trajectory_stride=None) -> list:
     """The press command block WITHOUT the drive or the runs (§9.3).
 
@@ -281,23 +281,23 @@ def _press_setup(
     read as one continuous movie of the wafers meeting and relaxing.
     """
     commands = (
-        preamble_commands(data_file, member.numerical.md_timestep,
+        preamble_commands(data_file, pair.numerical.md_timestep,
                           force_model)
         + force_model_commands(force_model)
         + region_group_commands(built, geometry)
-        + integrator_commands(member, seed)
+        + integrator_commands(pair, seed)
         + grip_hold_and_readback_commands())
     if trajectory_file is not None:
         commands += trajectory_dump_commands(
             trajectory_file,
-            trajectory_stride or member.numerical.frame_stride)
+            trajectory_stride or pair.numerical.frame_stride)
     return commands
 
 
 def press_and_bond(
         engine: Engine,
         built,
-        member: MemberSpecification,
+        pair: PairSpecification,
         force_model: ForceModel,
         data_file: str,
         seed: int,
@@ -315,17 +315,17 @@ def press_and_bond(
     drive is then installed and the press advances in chunks: after each,
     it measures the surface-to-surface opening (§2.6) and appends the
     normal stress, and stops when the opening's trailing mean has closed
-    to the study's gap threshold AND the running-average stress shows a
-    sustained load of either sign above the study's floor
+    to the project's gap threshold AND the running-average stress shows a
+    sustained load of either sign above the project's floor
     (:func:`contact_reached`, DESIGN §5.2). It then holds at temperature
     for ``press_duration`` where bonding happens, recording the step each
     phase began at (the ledger, :class:`PressResult`). The bonded verdict
     and contact-quality grading reuse §8 geometric machinery not yet
     built, so this reports contact, not a graded bond.
     """
-    numerical = member.numerical
+    numerical = pair.numerical
     engine.commands(
-        _press_setup(built, member, force_model, data_file, seed, geometry,
+        _press_setup(built, pair, force_model, data_file, seed, geometry,
                      trajectory_file, trajectory_stride))
     # The §5.6 conservation baseline is the ASSEMBLED pair — the count the
     # structure was built with — not whatever the engine holds later. Every
@@ -348,11 +348,11 @@ def press_and_bond(
     engine.commands(combined_cell_relax_commands())
 
     # The drive goes on and the press begins; the ledger notes the step.
-    engine.commands(press_drive_commands(built, member))
+    engine.commands(press_drive_commands(built, pair))
     press_start_step = engine.step()
     gap_threshold = to_metal(numerical.contact_gap_threshold, "distance")
     stress_floor = to_metal(numerical.contact_stress_floor, "pressure")
-    # The chunking is the study's (DESIGN §5.2): one control_interval per
+    # The chunking is the project's (DESIGN §5.2): one control_interval per
     # read-back, and no more than press_time_budget of searching.
     chunk_steps = _steps(numerical.control_interval, numerical.md_timestep)
     chunk_budget = _chunks(numerical.press_time_budget,
@@ -392,7 +392,7 @@ def press_and_bond(
             atoms_conserved=conserved_now())
     contact_step = engine.step()
 
-    hold_steps = _steps(member.protocol.press_duration, numerical.md_timestep)
+    hold_steps = _steps(pair.protocol.press_duration, numerical.md_timestep)
     engine.commands([f"run {hold_steps}"])
     hold_end_step = engine.step()
     conserved = conserved_now()
@@ -408,7 +408,7 @@ def press_and_bond(
 
 def settle_reference(
         engine: Engine,
-        member: MemberSpecification,
+        pair: PairSpecification,
         control: RunControl = RunControl(),
         reference_data_file: str | None = None,
         expected_atom_count: int | None = None) -> ReferenceResult:
@@ -440,12 +440,12 @@ def settle_reference(
     given, the settled state is also checked for conservation against it,
     and a settle that lost an atom reports ``atoms_conserved=False``.
     """
-    numerical = member.numerical
-    engine.commands(press_release_commands(member))
+    numerical = pair.numerical
+    engine.commands(press_release_commands(pair))
     settle_start_step = engine.step()             # ledger (§9.4)
     engine.commands(["min_style cg", "minimize 1e-8 1e-8 1000 10000"])
 
-    # Settle for the study's settle_duration, one control_interval per
+    # Settle for the project's settle_duration, one control_interval per
     # read-back (DESIGN §5.3): both grip reactions and the potential
     # energy are collected per chunk, and the force gate judges the net
     # reaction's mean against its OWN scatter (two standard errors,
@@ -485,7 +485,7 @@ def settle_reference(
 
 
 def _pull_fixture_commands(
-        built, member, force_model, rate, seed, geometry,
+        built, pair, force_model, rate, seed, geometry,
         trajectory_file: str | None = None,
         trajectory_stride: int | None = None) -> list:
     """The pull's fixtures — everything that is NOT the box itself (§13.3).
@@ -500,14 +500,14 @@ def _pull_fixture_commands(
     return (
         force_model_commands(force_model)
         + region_group_commands(built, geometry)
-        + integrator_commands(member, seed)
+        + integrator_commands(pair, seed)
         + grip_hold_and_readback_commands()
         + pull_drive_commands(rate)
-        + recording_commands(member, trajectory_file, trajectory_stride))
+        + recording_commands(pair, trajectory_file, trajectory_stride))
 
 
 def _pull_setup(
-        built, member, force_model, data_file, rate, seed, geometry,
+        built, pair, force_model, data_file, rate, seed, geometry,
         travel_time: float, trajectory_file: str | None = None,
         trajectory_stride: int | None = None) -> list:
     """The FRESH pull command block WITHOUT the run (the loop issues that).
@@ -524,18 +524,18 @@ def _pull_setup(
     1.3 GB, so a run nobody intends to analyze does not write them.
     """
     return (
-        preamble_commands(data_file, member.numerical.md_timestep,
+        preamble_commands(data_file, pair.numerical.md_timestep,
                           force_model)
         + pull_headroom_commands(rate, travel_time)
         + _pull_fixture_commands(
-            built, member, force_model, rate, seed, geometry,
+            built, pair, force_model, rate, seed, geometry,
             trajectory_file, trajectory_stride))
 
 
 def begin_or_resume_pull(
         engine: Engine,
         built,
-        member: MemberSpecification,
+        pair: PairSpecification,
         force_model: ForceModel,
         data_file: str,
         rate: Quantity,
@@ -561,7 +561,7 @@ def begin_or_resume_pull(
     double. Everything else — the fixtures — is identical, because a
     restart file carries none of it (:func:`_pull_fixture_commands`).
     """
-    numerical = member.numerical
+    numerical = pair.numerical
     timestep = to_metal(numerical.md_timestep, "time")
 
     checkpoint = (
@@ -573,7 +573,7 @@ def begin_or_resume_pull(
                              numerical.md_timestep)
         travel_time = control.max_chunks * chunk_steps * timestep
         engine.commands(_pull_setup(
-            built, member, force_model, data_file, rate, seed, geometry,
+            built, pair, force_model, data_file, rate, seed, geometry,
             travel_time, trajectory_file, trajectory_stride))
         # The atom count as the pull STARTS — the §5.6 conservation
         # baseline, measured once and carried in the ledger so a resume
@@ -581,7 +581,7 @@ def begin_or_resume_pull(
         starting_atom_count = int(np.asarray(engine.positions()).shape[0])
         ledger = Ledger(
             starting_atom_count=starting_atom_count,
-            input_hash=input_hash(member, data_file, rate))
+            input_hash=input_hash(pair, data_file, rate))
         return PullStart(ledger=ledger, resumed=False, override_used=False)
 
     # RESUMING. Trust FIRST (§13.4): if the current inputs hash differently
@@ -589,7 +589,7 @@ def begin_or_resume_pull(
     # engine — unless the person has deliberately overridden, which we
     # carry forward so the provenance records it (§13.6).
     override_used = verify_inputs_or_stop(
-        checkpoint, member, data_file, rate)
+        checkpoint, pair, data_file, rate)
 
     # Restore the already-grown box with read_restart (never read_data,
     # and NO headroom — the box came back with it), then re-establish the
@@ -600,7 +600,7 @@ def begin_or_resume_pull(
     engine.commands(
         timestep_command(numerical.md_timestep)
         + _pull_fixture_commands(
-            built, member, force_model, rate, seed, geometry,
+            built, pair, force_model, rate, seed, geometry,
             trajectory_file, trajectory_stride))
     ledger = reconcile(checkpoint.ledger, engine.step())
     return PullStart(
@@ -610,7 +610,7 @@ def begin_or_resume_pull(
 def pull_at_rate(
         engine: Engine,
         built,
-        member: MemberSpecification,
+        pair: PairSpecification,
         force_model: ForceModel,
         data_file: str,
         rate: Quantity,
@@ -644,7 +644,7 @@ def pull_at_rate(
     an atom lost anywhere between assembly and separation voids the rung;
     the pull-start count is only a fallback for a rung run on its own.
     """
-    numerical = member.numerical
+    numerical = pair.numerical
     timestep = to_metal(numerical.md_timestep, "time")
 
     # Fresh setup or restore-from-checkpoint, decided by what is on disk;
@@ -652,7 +652,7 @@ def pull_at_rate(
     # whether the pull resumed and whether the trust guard was overridden
     # — the two facts the result carries into provenance (§13.3, §13.6).
     start = begin_or_resume_pull(
-        engine, built, member, force_model, data_file, rate, seed,
+        engine, built, pair, force_model, data_file, rate, seed,
         geometry, control, checkpoint_dir, trajectory_file,
         trajectory_stride)
     ledger = start.ledger

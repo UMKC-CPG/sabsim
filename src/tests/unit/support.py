@@ -82,3 +82,66 @@ def stand_in_force_model(type_map: dict) -> ForceModel:
     return ForceModel(
         pair_style="zero 6.0",
         pair_coeff=("* *",))
+
+
+# ---------------------------------------------------------------------
+# Pair fixtures from the project-file template (revised 2026-08-30): a
+# project holds ONE pair, so tests that need a real PairSpecification
+# load the template's Si/SiO2 pair, or derive the same-material Si/Si
+# pair from it — the reference pair a person would run as its own
+# project (DESIGN.md §1.1).
+# ---------------------------------------------------------------------
+
+import os as _os
+import shutil as _shutil
+from dataclasses import replace as _replace
+
+PROJECT_TEMPLATE = _os.path.abspath(_os.path.join(
+    _os.path.dirname(__file__),
+    "..", "..", "..", "share", "templates", "project_spec.toml"))
+
+
+def template_pair():
+    """The template's pair — Si(100) facing alpha-quartz SiO2(001).
+
+    Loading (not the §1.5 reference check) is all this needs, so no
+    prepared folders have to exist; the pair carries the protocol,
+    numerical, ensemble and potential blocks the stages read.
+    """
+    from sabsim.spec.loader import load_and_validate_project
+    return load_and_validate_project(PROJECT_TEMPLATE).pair
+
+
+def si_si_pair():
+    """The Si/Si same-material pair, derived from the template's pair.
+
+    Both wafers silicon (the identity coincidence case), with the
+    silicon-only material domain the silicon force-model registry
+    covers. Wafer B keeps its own prep folder name (``prep_surf2_si``)
+    so the two surfaces stay distinct, as a real Si/Si project's do.
+    """
+    from sabsim.spec.records import WaferPair
+    pair = template_pair()
+    wafer_a = pair.material.wafer_a
+    project_directory = _os.path.dirname(wafer_a.preparation_directory)
+    wafer_b = _replace(
+        wafer_a,
+        preparation_directory=_os.path.join(project_directory,
+                                            "prep_surf2_si"))
+    return _replace(
+        pair, material=WaferPair(wafer_a=wafer_a, wafer_b=wafer_b),
+        material_domain="diamond-cubic")
+
+
+def project_in(directory) -> str:
+    """Copy the template into ``directory`` as its ``sabsim.toml``.
+
+    Returns the copied file's path. The template names its CIF files
+    relative to the repository, so a project made from it elsewhere
+    still LOADS (the loader reads text); only the phase-three reference
+    check — which the walking skeleton never runs for the environment
+    libraries — cares where the files are.
+    """
+    target = _os.path.join(str(directory), "sabsim.toml")
+    _shutil.copy(PROJECT_TEMPLATE, target)
+    return target
