@@ -89,11 +89,12 @@ def _frame(upper_low: float):
 
 def test_press_stops_on_the_dual_contact_criterion():
     """Contact fires when the gap closes AND the stress runs positive."""
-    # Openings ~6, ~4, ~2 (upper-bottom minus lower-top ~9.5); the gap
-    # threshold is 2.5, so only the third frame is closed. The stress
-    # turns positive over the same three chunks.
-    frames = [_frame(15.0), _frame(13.0), _frame(11.0), _frame(11.0),
-              _frame(11.0)]
+    # Geometric openings 6.0, 4.0, 1.9 (the label-free measure of
+    # DESIGN §2.6, revised 2026-08-30, reads the whole-system profile
+    # crossing to crossing); the gap threshold is 2.5, so only the third
+    # frame is closed. The stress turns positive over the same chunks.
+    frames = [_frame(16.0), _frame(14.0), _frame(12.0), _frame(12.0),
+              _frame(12.0)]
     engine = MockEngine(
         positions=frames,
         normal_stress=[-1000.0, 2000.0, 2000.0, 2000.0, 2000.0])

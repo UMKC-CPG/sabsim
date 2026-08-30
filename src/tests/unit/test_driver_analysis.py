@@ -376,3 +376,58 @@ def test_a_flickering_last_bond_does_not_end_the_pull():
     # With no sustain requirement the flicker at index 2 would win.
     assert separation_point(opening, bridges, cutoff=6.0,
                             sustained_frames=1) == 2
+
+
+# ---------------------------------------------------------------------
+# interface_geometry — the label-free opening and plane (DESIGN §2.6,
+# revised 2026-08-30 after LEDGER T-40).
+# ---------------------------------------------------------------------
+
+def _block(low, high, atoms_per_angstrom=8.0):
+    """A uniform slab of atoms filling z in [low, high)."""
+    count = int(round((high - low) * atoms_per_angstrom))
+    return np.linspace(low, high, count, endpoint=False)
+
+
+def test_interface_geometry_finds_the_gap_past_a_transferred_layer():
+    """The T-40 failure: sixty upper-wafer atoms left on the lower
+    wafer must not hide a 60 A vacuum. Whole-system profile, no labels:
+    the opening is the real gap and the plane sits in it."""
+    from sabsim.driver.analysis import interface_geometry
+    lower = _block(0.0, 40.0)
+    transferred = _block(40.0, 45.0)      # once wafer B, now on A
+    upper = _block(105.0, 145.0)
+    z = np.concatenate([lower, transferred, upper])
+    geometry = interface_geometry(z, bin_width=0.5, recorded_plane=40.0)
+    assert geometry.found
+    assert geometry.opening == pytest.approx(60.0, abs=2.0)
+    assert 60.0 < geometry.plane < 90.0
+
+
+def test_interface_geometry_reports_joined_bodies_on_the_recorded_plane():
+    """No interior gap: opening 0 and the assembly's plane, unchanged."""
+    from sabsim.driver.analysis import interface_geometry
+    z = _block(0.0, 80.0)
+    geometry = interface_geometry(z, bin_width=0.5, recorded_plane=41.5)
+    assert not geometry.found
+    assert geometry.opening == 0.0 and geometry.plane == 41.5
+
+
+def test_interface_geometry_ignores_a_sputtered_atom_in_the_vacuum():
+    """A lone atom far above the top face bounds no gap: it is outer
+    vacuum, not an interface, so the bodies still read as joined."""
+    from sabsim.driver.analysis import interface_geometry
+    z = np.concatenate([_block(0.0, 80.0), [140.0]])
+    geometry = interface_geometry(z, bin_width=0.5, recorded_plane=40.0)
+    assert not geometry.found and geometry.opening == 0.0
+
+
+def test_interface_geometry_picks_the_widest_of_two_gaps():
+    """Two interior gaps (a crack and the interface): the wider one is
+    the interface, and the bridge count is taken on its midplane."""
+    from sabsim.driver.analysis import interface_geometry
+    z = np.concatenate([_block(0.0, 30.0), _block(34.0, 60.0),
+                        _block(72.0, 100.0)])
+    geometry = interface_geometry(z, bin_width=0.5, recorded_plane=30.0)
+    assert geometry.opening == pytest.approx(12.0, abs=2.0)
+    assert 62.0 < geometry.plane < 70.0

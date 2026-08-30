@@ -145,7 +145,14 @@ def interface_opening(
         z_lower_slab,
         z_upper_slab,
         bin_width: float) -> float:
-    """The surface-to-surface gap between the two facing slabs (§2.6).
+    """The surface-to-surface gap between two LABELLED slabs (§2.6).
+
+    SUPERSEDED for the live loops by :func:`interface_geometry`
+    (2026-08-30, LEDGER T-40): once the bodies have touched, the labels
+    no longer say which body an atom is in, and this measure lands on
+    transferred material. It remains correct — and is still used — for
+    the ASSEMBLY, where nothing has moved yet: the starting gap of the
+    press and the recorded plane the geometric measure falls back to.
 
     The opening is the upper slab's BOTTOM dividing surface minus the
     lower slab's TOP dividing surface — the real interface separation,
@@ -171,6 +178,104 @@ def interface_plane(
     lower_top = dividing_surface(z_lower_slab, "top", bin_width)
     upper_bottom = dividing_surface(z_upper_slab, "bottom", bin_width)
     return 0.5 * (lower_top + upper_bottom)
+
+
+@dataclass(frozen=True)
+class InterfaceGeometry:
+    """Where the interface IS, read from the whole system (§2.6).
+
+    ``opening`` is the width of the widest interior low-density gap
+    (zero while the bodies are joined) and ``plane`` its midpoint — or,
+    when there is no gap, the plane the assembly recorded. ``found`` says
+    which of the two the plane is.
+    """
+    opening: float
+    plane: float
+    found: bool
+
+
+def interface_geometry(
+        z_all_atoms,
+        bin_width: float,
+        recorded_plane: float,
+        interior_fraction: float = 0.5,
+        smoothing_length: float = 3.0) -> InterfaceGeometry:
+    """The opening and the interface plane, GEOMETRIC and label-free.
+
+    DESIGN §2.6 (revised 2026-08-30, Paul, after LEDGER T-40). Once the
+    bodies have touched, an atom no longer belongs to the wafer it was
+    built in: a pull tears material off one face and leaves it on the
+    other (sixty atoms in T-40). Splitting the frame by wafer label and
+    asking for "the upper wafer's bottom surface" then lands on the
+    transferred layer — an opening of ~1 Å is read across a 60 Å vacuum,
+    the plane sits inside that layer, and its internal bonds count as
+    bridges forever, so the pull never stops. This function asks the
+    question of ALL atoms at once instead:
+
+    * the smoothed number-density profile along z is thresholded at
+      ``interior_fraction`` of its peak — the same half-of-bulk rule
+      :func:`dividing_surface` uses, so the two agree on what "surface"
+      means;
+    * a run of below-threshold bins counts as a gap only when material
+      (an above-threshold bin) bounds it on BOTH sides — a sputtered
+      atom drifting in the outer vacuum bounds nothing and can never
+      invent a gap;
+    * the interface is the WIDEST such run: ``opening`` is its width,
+      crossing to crossing, and ``plane`` its midpoint.
+
+    When no such run exists the bodies are joined: ``opening`` is 0 and
+    ``plane`` is ``recorded_plane`` — the assembly's interface, which the
+    caller measures once from the labels at the start, when nothing has
+    yet been transferred. It is only ever a placeholder: nothing is
+    decided on the plane until a gap has opened (the stop test needs
+    ``opening`` past the cutoff first).
+    """
+    z = np.asarray(z_all_atoms, dtype=float)
+    if z.size < 2:
+        return InterfaceGeometry(0.0, float(recorded_plane), False)
+    centers, density = density_profile(z, bin_width)
+    window_bins = max(1, int(round(smoothing_length / bin_width)))
+    if window_bins % 2 == 0:
+        window_bins += 1
+    density = _smooth_profile(np.asarray(density, dtype=float), window_bins)
+    threshold = interior_fraction * density.max()
+    low = density < threshold
+
+    # Enumerate the maximal runs of low bins, keeping those bounded by
+    # material on both sides; remember the widest.
+    best = None           # (width_in_bins, first_index, last_index)
+    index = 0
+    while index < low.size:
+        if not low[index]:
+            index += 1
+            continue
+        start = index
+        while index < low.size and low[index]:
+            index += 1
+        end = index - 1                       # inclusive
+        bounded = start > 0 and end < low.size - 1
+        if bounded and (best is None or end - start > best[0]):
+            best = (end - start, start, end)
+    if best is None:
+        return InterfaceGeometry(0.0, float(recorded_plane), False)
+    _, start, end = best
+
+    # The crossings on either side of the run, interpolated between the
+    # bounding material bin and the first/last low bin (as
+    # dividing_surface interpolates), so the width does not jump by a
+    # whole bin as the gap grows.
+    def crossing(material_index, low_index):
+        here, there = density[material_index], density[low_index]
+        fraction = (threshold - here) / (there - here)
+        return float(centers[material_index]
+                     + fraction * (centers[low_index]
+                                   - centers[material_index]))
+    lower_top = crossing(start - 1, start)
+    upper_bottom = crossing(end + 1, end)
+    return InterfaceGeometry(
+        opening=upper_bottom - lower_top,
+        plane=0.5 * (lower_top + upper_bottom),
+        found=True)
 
 
 def cross_interface_bridges(

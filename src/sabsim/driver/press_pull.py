@@ -31,7 +31,7 @@ from sabsim.driver.analysis import (
     averaged_force_curve,
     contact_reached,
     cross_interface_bridges,
-    interface_opening,
+    interface_geometry,
     interface_plane,
     net_force_series,
     potential_energy_drift,
@@ -212,6 +212,20 @@ def _wafer_z(positions: np.ndarray, tags: np.ndarray) -> tuple:
     return z_lower, z_upper
 
 
+def _plane_from_labels(frame: np.ndarray, aligned_tags: np.ndarray,
+                       control) -> float:
+    """The interface plane the assembly made, from the wafer labels.
+
+    Read ONCE, from a loop's FIRST frame, when the labels still say
+    which body an atom is in; :func:`~sabsim.driver.analysis.
+    interface_geometry` reports it while the faces are joined and
+    replaces it with the measured gap's midpoint as soon as one opens
+    (DESIGN §2.6, revised 2026-08-30).
+    """
+    z_lower, z_upper = _wafer_z(frame, aligned_tags)
+    return float(interface_plane(z_lower, z_upper, control.density_bin_width))
+
+
 def _positions_with_tags(engine: Engine, tags: np.ndarray) -> tuple:
     """Current positions and their wafer tags, aligned row-for-row.
 
@@ -346,12 +360,18 @@ def press_and_bond(
     stress_series: list = []
     opening_series: list = []
     contact_chunk = None
+    # The interface plane the ASSEMBLY made, read once from the wafer
+    # labels before anything moves — the placeholder the geometric
+    # measure reports while the faces are joined (DESIGN §2.6, revised
+    # 2026-08-30). Every reading in the loop is label-free.
+    recorded_plane = None
     for chunk in range(chunk_budget):
         engine.commands([f"run {chunk_steps}"])
         frame, aligned_tags = _positions_with_tags(engine, tags)
-        z_lower, z_upper = _wafer_z(frame, aligned_tags)
-        opening_series.append(interface_opening(
-            z_lower, z_upper, control.density_bin_width))
+        if recorded_plane is None:
+            recorded_plane = _plane_from_labels(frame, aligned_tags, control)
+        opening_series.append(interface_geometry(
+            frame[:, 2], control.density_bin_width, recorded_plane).opening)
         stress_series.append(engine.normal_stress())
         # The gap is judged on a TRAILING MEAN of the opening, as the
         # stress already is (DESIGN §5.2): one chunk's density-surface
@@ -648,6 +668,9 @@ def pull_at_rate(
         int(np.ceil(window / per_chunk)) + 1 if per_chunk else 1)
 
     lateral_cell = np.asarray(built.atoms.get_cell())
+    # The assembly's interface plane from the labels, read once at the
+    # rung's start — the geometric measure's placeholder while joined.
+    recorded_plane = None
     # The total step budget, which is what the box headroom was sized for.
     # Bounding the loop by the engine's ABSOLUTE step means a resume
     # continues toward the SAME ceiling instead of starting a fresh budget
@@ -664,17 +687,22 @@ def pull_at_rate(
         ledger.sample_steps.append(step)
         ledger.displacement.append(rate_metal * (step * timestep))
         frame, aligned_tags = _positions_with_tags(engine, tags)
-        z_lower, z_upper = _wafer_z(frame, aligned_tags)
-        ledger.opening.append(interface_opening(
-            z_lower, z_upper, control.density_bin_width))
+        if recorded_plane is None:
+            recorded_plane = _plane_from_labels(frame, aligned_tags, control)
+        # Where the interface IS, asked of ALL atoms with no wafer labels
+        # (DESIGN §2.6, revised 2026-08-30 after LEDGER T-40, where sixty
+        # transferred atoms fooled the label-based surfaces and the rung
+        # could never stop): the widest interior low-density gap, or the
+        # recorded plane with zero opening while the bodies are joined.
+        geometry = interface_geometry(
+            frame[:, 2], control.density_bin_width, recorded_plane)
+        ledger.opening.append(geometry.opening)
         ledger.force.append(engine.grip_reaction("top"))
-        # Bonds crossing the interface plane, over ALL atoms regardless of
-        # which wafer they were built in — a transferred atom belongs to
+        # Bonds crossing that plane, over ALL atoms regardless of which
+        # wafer they were built in — a transferred atom belongs to
         # whichever body it now sits in.
         ledger.bridges.append(cross_interface_bridges(
-            frame, lateral_cell,
-            interface_plane(z_lower, z_upper, control.density_bin_width),
-            control.bond_cutoff))
+            frame, lateral_cell, geometry.plane, control.bond_cutoff))
 
         # Save the checkpoint pair on the cadence (§13.2), when resuming is
         # enabled for this rung. It is keyed to the step just run.
