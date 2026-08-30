@@ -1759,3 +1759,53 @@ T-33 demo dose (50 eV, 4 Å demanded); harness
   force-vs-opening curve (the plane hops between shallow density dips
   while the bodies are joined — harmless to the stop test, visible in
   the curve); any oxide; a production dose.
+
+## T-41 — jobs 16873512 + 16873513 (prep_surf1/prep_surf2, both PASS) + 16873514 (bond) + 16873515 (analysis) — 2026-08-30
+
+*(First run under the PROJECT-FOLDER CONVENTION — Paul's decision of
+2026-08-30: one wafer pair per project folder, no study, no members,
+no relations; four stage folders `prep_surf1_si/ prep_surf2_si/
+bond_si_si/ analysis_si_si/` mirrored under `intermediate/`; four
+jobs with the two prep jobs independent. Project `jobs/si_si/` is the
+T-40 demo re-cast (252 Si atoms per half, 50 eV Ar, 4 Å demanded,
+DPA-3.1-3M), with the T-38 silicon library copied into BOTH prep
+folders. Docs 347e9eb, code e8d2d39 (427 tests), project 620f8ad.
+The harness is the project itself: the four scripts `sabsim prepare`
+wrote in `jobs/si_si/` (tracked) and its `SUBMISSION_GUIDE.md`.)*
+
+- **Login-node check before submitting:** `sabsim prepare` in the
+  project folder wrote `prep_surf1_si.slurm`, `prep_surf2_si.slurm`,
+  `bond_si_si.slurm`, `analysis_si_si.slurm` and a guide whose chained
+  form is `bond --dependency=afterok:<prep1>:<prep2>`, `analysis
+  afterok:<bond>`; `sabsim run sabsim.toml --dry-run` walked the four
+  placeholder stages and left each deliverable in its own stage folder
+  (`prep_surf*/activated_half.manifest.toml`,
+  `bond_si_si/pull_results.manifest.toml`,
+  `analysis_si_si/measure_vector.toml`) with the bulk under
+  `intermediate/<stage>/run-<stamp>/`. The placeholders were removed
+  before the real submission.
+
+- **Submitted chained at 12:53** (the guide's second form). Both prep
+  jobs started TOGETHER on g033 (H100) — the first time the two halves
+  were activated in parallel — and each **COMPLETED in 22–23 min with
+  its gate PASSED at 16.0 Å** (T-40's single activate job did both
+  halves serially in 44 min, reading 12.0/14.0 Å):
+
+  ```
+  prep_surf1 (16873512, 22 min 52 s): surface A gate PASSED, depth 16.0 A
+    radial_distribution 2.375 (thr 0.3) ok; coordination 0.162 (0.05,0.6)
+    ok; ring_statistics 0.683 (thr 0.15) ok; amorphization_depth 16.0
+    (thr 4.0) ok
+  prep_surf2 (16873513, 22 min 25 s): surface B gate PASSED, depth 16.0 A
+    coordination 0.175; ring_statistics 0.648; depth 16.0
+  ```
+
+  Each wrote `activated_half.extxyz` + `activated_half.manifest.toml`
+  into its prep folder; the manifest records the wafer tag, the heal
+  start step (16690 for B), `run_id = "run-<jobid>"`, the shared cell
+  (Si/Si identity match, strain 0, slab 37.0 Å) and the full verdict.
+  Bond 16873514 was released by Slurm the moment both preps succeeded,
+  read both halves, passed the shared-cell agreement check, assembled
+  and began pressing (`intermediate/bond_si_si/run-16873514/`).
+
+- Bond and analysis: see below (appended when they finish).
