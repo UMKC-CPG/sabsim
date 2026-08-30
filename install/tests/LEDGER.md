@@ -1809,3 +1809,81 @@ wrote in `jobs/si_si/` (tracked) and its `SUBMISSION_GUIDE.md`.)*
   and began pressing (`intermediate/bond_si_si/run-16873514/`).
 
 - Bond and analysis: see below (appended when they finish).
+
+## T-42 — job 16873531 (bootstrap generate, silica, FAILED self-check) → 16873844 (rerun after the fix) — 2026-08-30
+
+*(The first SILICA environment library, built INSIDE the prep folder
+of a project under the folder convention: `jobs/si_sio2/
+prep_surf2_sio2/recipe.toml` = the silicon lean recipe with the silica
+lines changed — species {Si, O}, domain silicon-and-silica, the
+`O_Si.toml` gate reference (still a `real = false` stand-in),
+descriptor weights Si 1.0 / O 0.5, alpha-quartz CIF, basal (001)
+face, melt 3500 K. Harness `install/tests/t42_sio2_library/`.
+`prep_surf1_si/` of the same project is a COPY of `jobs/si_si/
+prep_surf1_si/` — the reuse-by-copy path.)*
+
+- **16873531: FAILED after 33 min on g032 (H100).** Collection 1
+  ran to the end (lattice, melt-quench, surface, warm NVT/NPT, 41
+  descriptor frames) and the library REFUSED itself:
+
+  ```
+  sabsim: bootstrap halted — the environment library cannot separate
+  warm crystal from melt-quench glass at scatter multiple 3: 0.000 of
+  warm-run atoms and 0.000 of melt-quench atoms read as disordered
+  (limits 0.1 and 0.5; DESIGN §3.5)
+  ```
+
+- **Diagnosis (login node, from the descriptor files left on
+  scratch).** Replaying the self-check by hand gave the thermal
+  scatter as 62.6 (Si) and 85.8 (O) descriptor units — silicon's
+  library measured 5.4 — so the tolerance (3x) swallowed everything.
+  The warm-run "Si" atoms sat 57–75 units from the cold-bulk Si
+  environments: not thermal noise but a DIFFERENT SPECIES. Counting
+  atom types in the descriptor data files settled it:
+
+  ```
+  describe_bulk_0.data          Masses 1=Si 2=O   atoms: type1=24 type2=48
+  describe_melt_quench_28.data  Masses 1=Si 2=O   atoms: type1=48 type2=24
+  describe_warm_nvt_40.data     Masses 1=Si 2=O   atoms: type1=48 type2=24
+  ```
+
+  The MD families were physically right (their `start.data` numbered
+  {O: 1, Si: 2} and `pair_coeff * * O Si` matched it; the frames read
+  back with the correct 24 Si / 48 O symbols). The swap happened in
+  the DESCRIBE stage: a frame read from a LAMMPS dump keeps the dump's
+  raw ids in `atoms.arrays["type"]`, and **ASE 3.29's
+  `write_lammps_data` prefers that array to the `specorder` it is
+  given** — it numbered the atoms by the stale {O: 1, Si: 2} while
+  writing the `Masses` section in the requested {Si: 1, O: 2}. Every
+  atom of every MD frame changed species on disk; the cold bulk and
+  surface (built from the crystal, no such array) did not. Reproduced
+  on the login node with three atoms: `OOSi` carrying `type =
+  [1, 1, 2]` written under {Si: 1, O: 2} came out as types `1, 1, 2`
+  with `1 = Si` in the masses; with the array removed, `2, 2, 1`.
+  Silicon (T-38) was immune — one species has nothing to swap.
+
+  A secondary observation, real but not the cause: the LAST quench
+  frames of the 72-atom quartz cell (steps 17600–20800, near 300 K)
+  have Si–Si and Si–O distance distributions almost as sharp as the
+  warm crystal — the tiny periodic cell re-orders on the way down —
+  while the hot frames (step 6400, ~3000 K) are properly broad. If
+  the rerun's melt-quench fraction lands low for THAT reason, the
+  recipe answer is a larger cell (`cells_per_axis = 3`) and a faster
+  quench, not a code change.
+
+- **Fix (commit 130755c):** the one shared data-file writer
+  (`_write_atoms_as_lammps_data`, used by describe, the facing pair
+  and the standalone half) and `write_bulk_data` now drop a stale
+  `type` array before writing, so the chemical symbols are the only
+  source of an atom's type; regression test
+  `test_data_writer_ignores_a_stale_lammps_type_array`. The failed
+  run's files are kept at `prep_surf2_sio2/intermediate/
+  bootstrap_t42_16873531_FAILED_type_swap/`. **Rerun 16873844**
+  submitted 14:07 — result below.
+
+- **Scope NOT covered:** whether the stale-array path ever reached a
+  PRODUCTION structure. The activated half and the assembled pair are
+  built from arrays, not dump readbacks, and every run so far was
+  single-species silicon, so no earlier ledger result is affected;
+  the first oxide pair through prep→bond (T-43, once this library
+  exists) is the check.
