@@ -874,6 +874,37 @@ placement the minimum cross-slab atomic distance is checked; if it
 violates the floor, the gap is backed off and the adjustment is
 recorded, rather than aborting the member as prior art does.
 
+**The opening and the interface plane are GEOMETRIC, never by
+provenance (revised 2026-08-30 (Paul), after LEDGER T-40).** Once the
+two bodies are in contact, atoms no longer belong to the wafer they
+were built in: a press welds them, and a pull tears material off one
+face and leaves it on the other — in T-40, sixty atoms of the upper
+wafer stayed on the lower one. So "the upper wafer's bottom surface"
+cannot be found by taking the atoms LABELLED upper and looking for
+their lowest dividing surface: that search lands on the transferred
+layer, reads an opening of one ångström across a sixty-ångström vacuum,
+puts the interface plane inside the transferred layer, and counts that
+layer's own internal bonds as material still joining the wafers — so
+the pull can never stop. Every question about where the interface IS
+is therefore asked of the WHOLE system's density profile along the
+normal, with no atom labels at all: the interface is the widest run of
+low density (below the same half-of-bulk threshold the dividing
+surfaces use, on the same smoothed profile) that is bounded by material
+on BOTH sides — a sputtered atom drifting in the outer vacuum bounds
+nothing, so it can never invent a gap. The **opening** is that run's
+width, measured crossing to crossing, and zero when no such run exists,
+which is what "in contact" means; the **interface plane** is that
+run's midpoint. While the bodies are joined there is no gap to find,
+and the plane is then the one the assembly recorded (§2.6 above, the
+builder's per-wafer z-ranges), which is exact at that moment because
+nothing has yet been transferred; the recorded plane is only ever a
+placeholder, since nothing is decided on it until a gap has opened.
+The labels keep one job: reporting, after the fact, where transferred
+material came from. The bridge count (§5.4) was made geometric for the
+same reason first; this brings the two measures that feed it into
+line, and the T-32 run that seemed to prove the old measure worked
+had only a BALANCED transfer that happened to hide the error.
+
 **There is no registry search.** Prior art exposes a `lateral_shift`
 knob "to explore different bonding registries." Registry is a
 crystalline-epitaxy concept, and STRUCTURAL 4 is precisely the
@@ -2477,11 +2508,16 @@ therefore emits **two curves**:
   interface actually is.
 
 **Complete separation** is declared when the interface opening exceeds
-the potential's cutoff (6.0 Å for `se_e2_a`, §4.6) *and* NO ATOM STILL
-BRIDGES THE TWO WAFERS — no atom of one wafer lies within a bond length
-of any atom of the other. The mechanical work integral runs from the
-§5.3 reference state to that point and stops; prior art integrates the
-entire record, noise tail included.
+the potential's cutoff (6.0 Å for `se_e2_a`, §4.6) *and* NO BONDED PAIR
+STILL STRADDLES THE INTERFACE PLANE — no two atoms within a bond length
+of each other sit on opposite sides of it. Both the opening and the
+plane are the geometric ones of §2.6 (revised 2026-08-30 (Paul), after
+LEDGER T-40): found in the whole system's density profile, never by
+which wafer an atom was built in, because a pull transfers material
+between the faces and a label-based surface then sits on the
+transferred layer and never sees the gap. The mechanical work integral
+runs from the §5.3 reference state to that point and stops; prior art
+integrates the entire record, noise tail included.
 
 **The press hands over a stage ledger too (revised 2026-08-28 (Paul)).**
 Alongside the curves, the bond stage records the MD step at which each

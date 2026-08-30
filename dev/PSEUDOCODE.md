@@ -1978,7 +1978,8 @@ function press_and_bond(driver, member_specification):
     run_until(driver, step = numerical.control_interval,
         budget = numerical.press_time_budget,
         condition =
-            trailing_mean(opening_between_dividing_surfaces(driver),
+            trailing_mean(interface_geometry(driver, recorded_plane,
+                                             numerical).opening,   # §9.6
                           numerical.contact_gap_window)
                 <= numerical.contact_gap_threshold
             and abs(trailing_mean(normal_stress(driver),
@@ -2095,6 +2096,32 @@ function pull_at_rate(driver, reference, rate, member_specification):
 ### 9.6 reduce_to_trajectory — two curves, separation, and the gates
 
 ```
+function interface_geometry(driver, recorded_plane, numerical):
+    # DESIGN §2.6 (revised 2026-08-30, Paul, after LEDGER T-40): where
+    # the interface IS, asked of the WHOLE system's density profile with
+    # NO wafer labels — a pull transfers material between the faces, and
+    # a label-based surface then lands on the transferred layer, reads
+    # a ~1 A opening across a 60 A vacuum, and the pull never stops.
+    z_all   = z of every atom in the box
+    profile = smooth(density_profile(z_all, numerical.density_bin_width))
+    low     = profile < HALF_OF_BULK * max(profile)     # the §2.6 rule
+    # A run of low bins counts only when MATERIAL bounds it on BOTH
+    # sides: a sputtered atom in the outer vacuum bounds nothing.
+    runs    = maximal runs of `low` with an above-threshold bin on each side
+    if runs is empty:                       # joined: nothing to find
+        return record{ opening: 0.0, plane: recorded_plane }
+    widest  = the run of greatest width
+    lower_top    = threshold crossing on the low-z side of `widest`
+    upper_bottom = threshold crossing on the high-z side of `widest`
+    return record{ opening: upper_bottom - lower_top,
+                   plane:   0.5 * (lower_top + upper_bottom) }
+    # `recorded_plane` is the assembly's interface plane (§2.6, the
+    # builder's per-wafer z-ranges), exact before anything moved and
+    # only ever a placeholder: nothing is decided on the plane until a
+    # gap has opened. The labels keep one job — reporting where
+    # transferred material came from.
+
+
 function reduce_to_trajectory(driver, series, frames_ref, reference,
                               rate, member_specification):
     numerical = member_specification.numerical
@@ -2114,9 +2141,10 @@ function reduce_to_trajectory(driver, series, frames_ref, reference,
                         drop_leading_zero = true)
 
     # TWO curves (§5.5). Force vs GRIP DISPLACEMENT is the M1 integrand.
-    # Force vs INTERFACE OPENING (distance between the two §2.6 dividing
-    # surfaces) is where the interface actually is — separation is NOT
-    # grip displacement, which also holds the slabs' elastic stretch.
+    # Force vs INTERFACE OPENING (the §2.6 geometric gap of
+    # interface_geometry, whole-system profile, no labels) is where the
+    # interface actually is — separation is NOT grip displacement, which
+    # also holds the slabs' elastic stretch.
     # Both re-expressions run off the SERIES, never off stored frames.
     force_vs_opening = reexpress_versus_opening(force_vs_grip,
                            series.displacement, series.opening)
@@ -4362,8 +4390,10 @@ function pull_at_rate(driver, reference, rate, member, control,
             sample_steps <- step
             displacement <- rate * (step * timestep)
             force        <- grip_reaction(driver.grips.top)
-            opening      <- interface_opening(driver)
-            bridges      <- cross_interface_bridges(driver)
+            geometry     <- interface_geometry(driver, recorded_plane,
+                                               numerical)      # §9.6
+            opening      <- geometry.opening
+            bridges      <- cross_interface_bridges(driver, geometry.plane)
 
         # Save the pair on a cadence. Cheap relative to the MD between
         # saves; the cadence trades work-lost-on-a-kill against
