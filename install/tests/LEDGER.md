@@ -1668,3 +1668,44 @@ T-33 demo dose (50 eV, 4 Å demanded); harness
   writing — appended below when done); any material other than
   silicon (the `SiO2/` folder is the first real test of two libraries
   in one study); the re-based coordination/ring survivors (TODO).
+
+- **Bond 16870692 (appended 2026-08-30 05:50, job still RUNNING at
+  7 h 40 min): the press BONDED and the settle passed within 45 min
+  (`log.press`, `settled_reference.data` at 22:55), but the first pull
+  rung (20 m/s) CANNOT STOP.** Read from the rung's own ledger
+  (`pull_20mps/checkpoints/ledger.json`) and its dump, by atom id
+  (wafer A = ids 1-252, B = 253-504):
+
+  ```
+  step       widest z-gap   B atoms below the gap   A atoms above it
+  40 000      1.4 A  (no gap: bonded)
+  49 200      6.4 A  (separated)      60                     0
+  100 000    17.1 A                   60                     0
+  324 400    62.7 A                   60                     0
+  ledger at 320 000: displacement 64.0 A, opening 1.2 A, bridges 11
+  ```
+
+  The pair separated at ~49 ps (grip travel ~10 A) and 60 atoms of
+  wafer B stayed on wafer A. `interface_opening` and `interface_plane`
+  (driver/analysis.py) still split the frame BY BUILD TAG (`_wafer_z`),
+  so wafer B's "bottom dividing surface" is found in that transferred
+  layer on top of A (49 A) instead of at B's real bottom (118 A): the
+  opening reads ~1 A with a 60 A vacuum between the bodies, the
+  interface plane sits inside the transferred layer, and its internal
+  bonds are the 11 "bridges" that never reach zero. This is EXACTLY the
+  trap `cross_interface_bridges` was rewritten to escape (its docstring:
+  "wafer labels record which half an atom was BUILT in, not where it
+  now is"), one function upstream of it. The rung therefore runs to its
+  `max_chunks` budget (500 000 steps, ~10 h), and rungs 2 and 3 will do
+  the same, so the 18 h limit will be hit and analyze 16870693 will
+  never run. **The T-32 precedent (dpa3e) separated at ~41 ps with a
+  BALANCED transfer (14 B atoms down, 18 A atoms up), so the tag-based
+  surfaces were only mildly wrong and its stop fired at 45 ps** — the
+  defect was latent, not absent. A DESIGN question (§2.6 dividing
+  surfaces / §5.4 stop test): the opening and the plane must be
+  GEOMETRIC too — the widest low-density gap between the two grips,
+  with each body's surface taken from the whole-system profile, not
+  from the build tags. Brought to Paul; nothing changed in code.
+- **Scope NOT covered (bond):** the pull's work integral M1 for this
+  run (the rung's reduced curves will exist at its budget end but the
+  separation point is judged on the same tag-based opening); analyze.
