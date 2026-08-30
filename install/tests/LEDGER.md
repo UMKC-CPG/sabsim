@@ -1725,3 +1725,37 @@ T-33 demo dose (50 eV, 4 Å demanded); harness
   Bond 16870692 cancelled at 7 h 55 min (its press/pull outputs kept
   under the member scratch's `t40_label_based_pull/`); bond
   RESUBMITTED as 16871414 -> analyze 16871415 from the standing activate artifacts.
+
+- **Bond 16871414 (rerun under the geometric measure): COMPLETED in
+  2 h 31 min; analyze 16871415: COMPLETED (19 s). T-40 STANDS as the
+  first full chain under the per-wafer library.**
+
+  ```
+  press: bonded=True — contact reached and held (§9.3)
+  stage ledger (MD steps): press_start=56 contact=2056 hold_end=12056
+                           settle_start=12056 settle_end=32215
+  pull 20 m/s: separated   (sample 40 of 45, grip 8.8 Å; dump to 48 000)
+  pull 50 m/s: separated   (sample 20 of 23, grip 11.0 Å)
+  pull 100 m/s: separated  (sample  8 of 11, grip 10.0 Å)
+  mechanical_work_of_separation = 0.2570 eV/Å² = 4.12 J/m²
+      (slowest separated rung, §8.4; T-32 read 0.259 on dpa3e)
+  activated_depth_a = 12.0 Å, activated_depth_b = 14.0 Å
+  reference_ok = false (settle net grip force above the strict 0.05
+      eV/Å noise floor — the same knob question as T-32, unchanged)
+  ```
+
+  Reading: the 20 m/s rung that could not stop under the label-based
+  measure (7 h 55 min, 324 000+ steps, no end) stopped at ~44 000 steps
+  under the geometric one — exactly where the replay put it — and the
+  bond number it yields agrees with the earlier, balanced-transfer run
+  to 1 %, so the fix changed WHEN the integral stops, not what it
+  measures. Wall clock for the whole bond job fell from an unbounded
+  18 h to 2.5 h. Dumps: `si-si-reference_press.dump`,
+  `pull_{20,50,100}mps/si-si-reference_pull.dump` under the member
+  scratch; the label-based attempt's outputs sit beside them in
+  `t40_label_based_pull/` for comparison.
+- **Scope NOT covered:** `reference_ok` (the settle noise-floor knob,
+  open since T-32); the pre-separation jitter of the geometric
+  force-vs-opening curve (the plane hops between shallow density dips
+  while the bodies are joined — harmless to the stop test, visible in
+  the curve); any oxide; a production dose.
