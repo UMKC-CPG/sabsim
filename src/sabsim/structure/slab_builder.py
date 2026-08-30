@@ -811,8 +811,31 @@ def _write_atoms_as_lammps_data(
     # parallel=False: this write must NOT become an MPI collective, since
     # its callers already guard it to one process (see the imports note).
     ase_write(
-        path, atoms, format="lammps-data", parallel=False,
-        atom_style="atomic", specorder=species_order, masses=True)
+        path, _without_stale_type_array(atoms), format="lammps-data",
+        parallel=False, atom_style="atomic", specorder=species_order,
+        masses=True)
+
+
+def _without_stale_type_array(atoms: Atoms) -> Atoms:
+    """A copy of ``atoms`` with any leftover LAMMPS ``type`` array gone.
+
+    A structure read back from a LAMMPS dump keeps the dump's raw type
+    ids in ``atoms.arrays["type"]``, and ASE's data-file writer (3.29)
+    PREFERS that array to the ``specorder`` it is handed: it numbers the
+    atoms by the stale ids while writing the ``Masses`` section in the
+    requested order. When the two orders differ — a melt-quench frame
+    whose MD stage numbered {O: 1, Si: 2}, re-written for the descriptor
+    stage under {Si: 1, O: 2} — every atom silently changes species on
+    disk, and nothing downstream can notice (LEDGER T-42: the silica
+    environment library read 0.000 of its own glass as disordered).
+    Dropping the array makes the CHEMICAL SYMBOLS the only source of an
+    atom's type, which is what ``type_map`` promises.
+    """
+    if "type" not in atoms.arrays:
+        return atoms
+    cleaned = atoms.copy()
+    del cleaned.arrays["type"]
+    return cleaned
 
 
 def write_lammps_data(built: BuiltPair, path: str) -> None:
@@ -905,8 +928,9 @@ def write_bulk_data(
         type_map, key=lambda symbol: type_map[symbol])
     # parallel=False for the same reason as every other ASE call here.
     ase_write(
-        path, atoms, format="lammps-data", parallel=False,
-        atom_style="atomic", specorder=species_order, masses=True)
+        path, _without_stale_type_array(atoms), format="lammps-data",
+        parallel=False, atom_style="atomic", specorder=species_order,
+        masses=True)
     return type_map
 
 

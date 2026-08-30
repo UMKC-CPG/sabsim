@@ -471,3 +471,28 @@ def test_charge_labels_do_not_reach_the_type_map():
     slab = build_slab(quartz, (0, 0, 1),
                       min_slab_thickness=6.0, min_vacuum=8.0)
     assert set(slab.get_chemical_symbols()) == {"O", "Si"}
+
+
+def test_data_writer_ignores_a_stale_lammps_type_array(tmp_path):
+    """The chemical symbols, never a leftover dump ``type`` array, decide
+    an atom's LAMMPS type (LEDGER T-42: ASE 3.29 prefers the stale
+    array to ``specorder``, so a melt-quench frame numbered {O: 1,
+    Si: 2} by its MD stage was re-written under {Si: 1, O: 2} with
+    every atom's species swapped on disk)."""
+    from ase import Atoms
+    from sabsim.structure.slab_builder import _write_atoms_as_lammps_data
+    frame = Atoms("OOSi", positions=[[0, 0, 0], [1.6, 0, 0], [3, 0, 0]],
+                  cell=[6.0, 6.0, 6.0], pbc=True)
+    # What a dump readback leaves behind: the MD stage's own numbering.
+    frame.arrays["type"] = np.array([1, 1, 2])
+    path = tmp_path / "frame.data"
+    _write_atoms_as_lammps_data(frame, {"Si": 1, "O": 2}, str(path))
+    lines = path.read_text().splitlines()
+    atom_lines = [line.split() for line in lines[-3:]]
+    written_types = [int(fields[1]) for fields in atom_lines]
+    # O, O, Si under {Si: 1, O: 2} must read 2, 2, 1 — the map's order.
+    assert written_types == [2, 2, 1]
+    masses = [line for line in lines if line.strip().endswith("# Si")]
+    assert masses and masses[0].split()[0] == "1"
+    # The caller's structure is untouched (a copy was written).
+    assert "type" in frame.arrays
