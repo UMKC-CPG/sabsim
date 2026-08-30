@@ -1709,3 +1709,19 @@ T-33 demo dose (50 eV, 4 Å demanded); harness
 - **Scope NOT covered (bond):** the pull's work integral M1 for this
   run (the rung's reduced curves will exist at its budget end but the
   separation point is judged on the same tag-based opening); analyze.
+
+- **Fix (Paul, 2026-08-30 morning): the opening and the plane are now
+  GEOMETRIC** — DESIGN §2.6/§5.4, PSEUDOCODE §9.3/§9.5/§9.6
+  `interface_geometry` (e067153), code `analysis.interface_geometry` +
+  both `press_pull` loops (4c44758, 404 green): the widest interior
+  low-density run of the WHOLE-system smoothed profile, bounded by
+  material on both sides; opening = its crossing-to-crossing width (0
+  while joined), plane = its midpoint (the label-based plane of the
+  loop's first frame while joined). **Replayed over the T-40 rung-1
+  dump on the login node:** opening ≤ 1.5 Å with 7-16 bridges up to
+  step 40 000 (joined), then `STOP would fire at step 46100` (opening
+  > 6 Å, zero bridges, sustained 3 samples) — the real separation,
+  versus the 500 000-step budget the label-based rung was heading for.
+  Bond 16870692 cancelled at 7 h 55 min (its press/pull outputs kept
+  under the member scratch's `t40_label_based_pull/`); bond
+  RESUBMITTED as 16871414 -> analyze 16871415 from the standing activate artifacts.
