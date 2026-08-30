@@ -323,7 +323,16 @@ record MaterialKnobs:             # one per wafer; two wafers per member
     crystal_structure: string      # a human LABEL (e.g. "diamond"); the
                                    # CIF is authoritative, never this
     surface_face:      Miller indices
-    identity:          string      # the material itself
+    identity:          string      # the material itself; ALSO the name
+                                   # of this wafer's preparation
+                                   # subfolder of the study folder,
+                                   # <study>/<identity>/, which holds
+                                   # its recipe and environment library
+                                   # (DESIGN §1.2, ARCHITECTURE §1;
+                                   # Paul, 2026-08-29)
+    preparation_directory: path    # <study directory>/<identity>, set
+                                   # by the loader from the study
+                                   # file's own location — never typed
     # NEVER a lattice constant — the CIF fixes symmetry/basis but its
     # SCALE is a starting geometry only; §2.2 derives the working lattice
     # from the potential (DESIGN §1.3).
@@ -350,15 +359,13 @@ record ProtocolKnobs:
                                   # thickness floor builds for (DESIGN
                                   # §3.5/§2.5, revised 2026-08-28). A
                                   # study choice, not a material fact
-    environment_library:  string  # path of the bootstrap-made library
-                                  # of undamaged environments the §10.6
-                                  # gate judges "crystalline" against
-                                  # (DESIGN §3.5, 2026-08-29); roots
-                                  # expand like the model weights. The
-                                  # validator refuses a library whose
-                                  # recorded model is not [potential]
-                                  # universal_model, or whose surfaces
-                                  # lack this member's face
+    # NO library path here (revised 2026-08-29, Paul, after LEDGER
+    # T-39): the environment library the §10.6 gate judges against is
+    # found PER WAFER at MaterialKnobs.preparation_directory /
+    # environment_library.toml, never named in the study file. The
+    # validator refuses a library whose recorded model is not
+    # [potential] universal_model, or whose surfaces lack its wafer's
+    # face.
     cascade_duration:     number  # NVE cascade time per impact (~ps, §3.3)
     between_impact_relaxation: number  # border-thermostat settle between
                                   # impacts, so the next starts cool (§3.3)
@@ -493,10 +500,14 @@ function load_and_validate_study(study_specification):
         # so they belong to phase THREE, the "do the referenced files
         # exist and make sense" phase that also opens the weights and
         # crystal files (DESIGN §1.5; revised 2026-08-29 (Paul) from an
-        # earlier phase-2 placement). check_environment_library(member)
-        # runs there, on the login node, with the same refusals and the
+        # earlier phase-2 placement). check_environment_libraries(
+        # member) runs there, on the login node, for EACH WAFER of the
+        # member against that wafer's own library (its material
+        # subfolder, DESIGN §1.2), with the same refusals and the
         # temperature warn/refuse band as load_environment_library
-        # (§10.6), so a mismatch costs no node-hour.
+        # (§10.6), so a mismatch costs no node-hour. Only the members
+        # actually being run are checked, so the silicon member of a
+        # study is never refused on the silica members' account.
 
     for each relation in study.relations:
         # REPORT, NEVER RESTRICT (DESIGN §1.1). A relation whose controls
@@ -2369,7 +2380,8 @@ function energetic_particle_bombardment(slab, member_specification,
                               crystalline_reference(member_specification),
                               member_specification,
                               load_environment_library(
-                                  member_specification))            # §10.6
+                                  member_specification, wafer))     # §10.6
+                              # ^ THIS half's wafer's own library
     # The skin label records what the cascade amorphized, at the depth the
     # gate MEASURED (§10.7).
     healed  = label_activated_skin(healed, verdict.activated_depth)  # §10.7
@@ -2735,16 +2747,20 @@ record EnvironmentLibrary:
                                     # checks the member's face is here
 
 
-function load_environment_library(member_specification):
-    # DESIGN §3.5 / §4.8 part 2 / ARCHITECTURE §2.3. The library is a
-    # run-time input named by the study (protocol.environment_library),
-    # resolved through the location roots exactly as the weights are
-    # (SABSIM_LOCAL first, then SABSIM_SHARE, §14.5). Three refusals and
-    # one warn/refuse band, all decidable on the login node; the §2
-    # validator runs the same rules (check_environment_library) so no
-    # node-hour is spent on a mismatch.
-    path    = resolve_through_roots(
-                  member_specification.protocol.environment_library)
+function load_environment_library(member_specification, wafer):
+    # DESIGN §3.5 / §4.8 part 2 / ARCHITECTURE §2.3 and §1. The library
+    # is a run-time input found PER WAFER in the study folder, in the
+    # subfolder named by the wafer's material label (revised 2026-08-29,
+    # Paul, after LEDGER T-39; the study file names no path). Three
+    # refusals and one warn/refuse band, all decidable on the login
+    # node; the §2 validator runs the same rules
+    # (check_environment_libraries) so no node-hour is spent on a
+    # mismatch.
+    path    = wafer.preparation_directory / "environment_library.toml"
+    if not exists(path):
+        halt("wafer '<identity>' has no environment library at <path>; "
+             "run `sabsim bootstrap generate` in that folder, or copy "
+             "a prepared folder there (ARCHITECTURE §1)")
     library = read_environment_library(path)     # the .toml + .npz pair
 
     if library.model_name != member_specification.potential.universal_model:
@@ -2754,17 +2770,16 @@ function load_environment_library(member_specification):
         halt("environment library was computed with '<engine>', this "
              "deployment binds '<bound engine>' — both sides of the "
              "comparison must use one engine (ARCHITECTURE §2.3)")
-    for each wafer in (member_specification.material_A,
-                       member_specification.material_B):    # §7.4
-        # Face and species only — NOT the termination (Paul,
-        # 2026-08-29): every catalogued surface is bombarded to an
-        # amorphous skin before it matters, so which atomic plane the
-        # clean cut ended on makes no difference to the gate.
-        face = (wafer.species, wafer.face)
-        if face not in library.provenance.surfaces:
-            halt("environment library catalogues no clean <face> "
-                 "surface; the slab's own faces would read as damage — "
-                 "add the face to the recipe's surfaces and rebuild")
+    # Face and species only — NOT the termination (Paul, 2026-08-29):
+    # every catalogued surface is bombarded to an amorphous skin before
+    # it matters, so which atomic plane the clean cut ended on makes no
+    # difference to the gate. Only THIS wafer's face: the other wafer
+    # has a library of its own.
+    face = (wafer.species, wafer.face)
+    if face not in library.provenance.surfaces:
+        halt("environment library catalogues no clean <face> "
+             "surface; the slab's own faces would read as damage — "
+             "add the face to the recipe's surfaces and rebuild")
 
     # The warn/refuse band (DESIGN §3.5, Paul 2026-08-29): the gate
     # judges at the heal's cool-to target, the press temperature.
@@ -3650,14 +3665,16 @@ function build_environment_library(structures, force_model_recipe):
 > with `bootstrap/subcell.py`. The member run is an ordinary
 > `sabsim run --dump-visuals` under the universal model; nothing forks.
 > The committee-of-one below is that model until ALF trains one.
-> (3) It WRITES the environment library (§11.2, DESIGN §3.5; designed
-> 2026-08-29, not yet built) beside Collection 1 in the bootstrap work
-> directory as a PAIR of files: `environment_library.npz` — the arrays,
-> per-species environment vectors and warm-run nearest-cold distances —
-> and its sidecar `environment_library.toml` — model, engine, settings,
-> thermal scatter, self-check fractions, warm-run temperature and
-> provenance, readable by a person. A study points at the pair's
-> location once it is copied under `SABSIM_SHARE` (§14.5).
+> (3) It WRITES the environment library (§11.2, DESIGN §3.5; built
+> 2026-08-29) as a PAIR of files: `environment_library.npz` — the
+> arrays, per-species environment vectors and warm-run nearest-cold
+> distances — and its sidecar `environment_library.toml` — model,
+> engine, settings, thermal scatter, self-check fractions, warm-run
+> temperature and provenance, readable by a person. The pair lands in
+> the MATERIAL FOLDER the command is run from
+> (`<study>/<material label>/`, ARCHITECTURE §1; the working copy under
+> scratch is kept too), which is exactly where the study's loader looks
+> for that wafer's library — nothing is copied anywhere.
 
 
 The one genuinely OURS step, and the one worth stating carefully: the
@@ -4636,10 +4653,11 @@ function render_job_script(study, member, job, usage, partition,
         DEEPMD_LMP_PLUGIN).
       - the three location roots BAKED IN as resolved values -- a frozen
         snapshot, not a re-read of the rc at run time (§10.5, §1.4).
-        The study's two root-relative DATA paths -- the universal weights
-        and the environment library (§10.6, 2026-08-29) -- are resolved
-        against those roots by prepare's fail-fast gate before anything
-        is written, so a missing library stops on the login node.
+        The activate job's two DATA inputs -- the root-relative universal
+        weights and each wafer's environment library in its material
+        subfolder of the study (§10.6, 2026-08-29) -- are resolved by
+        prepare's fail-fast gate before anything is written, so a
+        missing library stops on the login node.
       - the launcher + `python -m sabsim run <study> --<job.name>
         --only <member.name>` (§14.3) -- e.g. `mpirun -np <N>` INSIDE the
         allocation, never on the login node (§4.1). N = usage.nodes x

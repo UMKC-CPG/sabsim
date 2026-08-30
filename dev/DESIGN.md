@@ -178,13 +178,17 @@ on it.
   material identity. The CIF names WHICH crystal, not its scale — the
   lattice constant is still derived by relaxation (§1.3, §2.2), never
   read off the file — so one uniform input serves every material with no
-  per-material code. What we are studying.
+  per-material code. What we are studying. The material identity is a
+  LABEL the person chooses (`material = "SiO2"`), and it does one
+  concrete job beyond reporting: it names the subfolder of the study
+  folder where that material's preparatory work lives — its force-model
+  recipe and the environment library the §3.5 gate judges against
+  (`<study>/<material label>/`, `ARCHITECTURE.md` §1; Paul, 2026-08-29).
+  Two wafers with the same label share one preparation; two crystals of
+  one formula that must be told apart get two labels.
 - **Protocol** — the activation species, energy, angle of incidence and
   fluence, the activated depth the surface is REQUIRED to reach (the
-  §3.5 gate's depth threshold, revised 2026-08-28), and the environment
-  library the gate judges "crystalline" against — a PATH to the
-  bootstrap-made library (§3.5, 2026-08-29), resolved through the
-  location roots exactly as the model weights are; the press mode,
+  §3.5 gate's depth threshold, revised 2026-08-28); the press mode,
   load, depth and duration; the hold temperature; the pull rates of
   §5.4's ladder. How the experiment is performed.
 - **Numerical** — tolerances, cutoffs, convergence criteria, the
@@ -1177,10 +1181,24 @@ SABSIM therefore defines crystallinity WITHOUT a coordination number:
   surface — computed under the same universal model the slab was built
   with. It is a product of the bootstrap's Collection 1 (§4.8 part 2),
   not a hand-written reference: it exists before the first gate ever
-  runs, and a production study names the library its material was
-  bootstrapped with (`[protocol.activation] environment_library`; the
-  loader refuses a library whose recorded model is not the study's
-  `[potential] universal_model`).
+  runs, and it is found PER WAFER in the study folder, in the subfolder
+  named by that wafer's `material` label
+  (`<study>/<material label>/environment_library.toml`, §1.2,
+  `ARCHITECTURE.md` §1). The loader refuses a library whose recorded
+  model is not the study's `[potential] universal_model`.
+
+  Why per wafer, and why no shared repository (Paul, 2026-08-29, after
+  LEDGER T-39): a library is built from one recipe, so it describes ONE
+  material, and a dissimilar pair such as silicon on silica needs two.
+  T-39 halted because the study named a single library for every
+  member and the silicon one could not catalogue a silica face. A
+  shared, cluster-wide collection keyed by chemical formula was
+  considered and rejected: a formula does not identify a crystal
+  (quartz and cristobalite are both SiO2), so it would have needed a
+  second layer of naming, and a folder many studies write into is a
+  folder many studies can quietly break. Keeping the preparation inside
+  the study, under the label the person already wrote, needs no rule
+  to learn; reuse is a copy of the folder.
 - An atom in the healed slab is **crystalline** if the library holds an
   environment of its species within the library's own THERMAL SCATTER
   of it — "does this neighbourhood exist anywhere in the undamaged
@@ -4247,10 +4265,11 @@ environment being installed and activated — not restated in every script.
   from the activated install. None of these is hand-named in a generated
   script. The activate job's two run-time DATA inputs — the universal
   model's weights and the environment library (§3.5, 2026-08-29) — are
-  named by the study file as root-relative paths, and `prepare`'s
-  fail-fast gate resolves BOTH against the frozen roots before writing,
-  so a missing library is reported on the login node exactly as a
-  missing weights file is (§1.5's third validation phase).
+  the weights named by the study file as a root-relative path, the
+  library found in each wafer's material subfolder of the study (§1.2)
+  — and `prepare`'s fail-fast gate resolves BOTH before writing, so a
+  missing library is reported on the login node exactly as a missing
+  weights file is (§1.5's third validation phase).
 
 **Filenames are semantic and carry no ordinal number** — `activate`,
 `bond`, `analyze`, named for the work. Ordinals were rejected because

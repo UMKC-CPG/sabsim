@@ -26,12 +26,39 @@ sabsim/
   src/tests/          Test suite
   share/              Version-controlled run-time data: gate references,
                       and the input-file TEMPLATES (share/templates/).
-                      The bootstrap's ENVIRONMENT LIBRARIES (DESIGN
-                      §3.5) are run-time data too, but manufactured,
-                      so they live under the deployment SABSIM_SHARE
-                      root, not in the repository (§2.3, §4.1)
   CLAUDE.md           AI assistant guidance
 ```
+
+A STUDY FOLDER (one per study, e.g. `jobs/si_sio2/`; its name is the
+person's own label and means nothing to the program) holds everything
+that study needs, so that a study is self-contained and can be copied,
+archived and reproduced as one thing (`VISION.md`). Decided 2026-08-29
+(Paul, after LEDGER T-39) when a single study-wide environment library
+could not serve a dissimilar pair:
+
+```
+  <study>/
+    sabsim.toml         the study file (DESIGN §1.2)
+    deployment.toml     the machine-local rc file (§4.1)
+    <material label>/   ONE SUBFOLDER PER DISTINCT WAFER MATERIAL, named
+                        EXACTLY by the wafer's `material` label in the
+                        study file (`material = "SiO2"` -> `SiO2/`).
+                        Every preparatory calculation for that material
+                        is made here: the force-model recipe
+                        (`recipe.toml`) and what `sabsim bootstrap`
+                        manufactures from it — the ENVIRONMENT LIBRARY
+                        the §3.5 gate judges against (DESIGN §3.5) and,
+                        as the bootstrap grows, its training structures
+                        and the trained committee.
+    <member>_activate.slurm, ... the per-member jobs `prepare` writes
+```
+
+There is deliberately NO shared repository of prepared materials. The
+label is chosen by the person, so quartz and cristobalite are simply
+two labels (`"SiO2-quartz"`, `"SiO2-cristobalite"`) with two folders,
+and the program never has to guess which crystal a chemical formula
+means. Reusing last month's silicon preparation is a plain copy of its
+folder into the new study under the label the new study uses.
 
 SABSIM is the **orchestration project**: the code we write here wires
 together many *external* programs. Two tools from the prior effort are
@@ -325,10 +352,12 @@ is.
   the descriptors of Collection 1's cold bulk, warm bulk and clean
   surfaces, its self-check fractions, and full provenance (model name,
   engine, settings, families and frame counts). It is a run-time
-  input of the activate job, resolved like the model weights through
-  the `SABSIM_LOCAL` → `SABSIM_SHARE` roots (§4.1), and the study
-  names it (`[protocol.activation] environment_library`). It is NOT
-  in `share/activation/`, because that directory holds hand-written,
+  input of the activate job, found PER WAFER: each wafer's library is
+  `<study>/<material label>/environment_library.toml`, the subfolder
+  named by that wafer's `material` label (§1; Paul, 2026-08-29, after
+  LEDGER T-39 showed one study-wide library cannot serve a dissimilar
+  pair). The study file names no library path at all. It is NOT in
+  `share/activation/`, because that directory holds hand-written,
   version-controlled references and the library is neither.
 - **Training-data physics — VASP [ADOPT].** Produces the varied
   atom-configuration-and-forces training set (step 1). Chosen over
@@ -451,8 +480,9 @@ is.
   consumes (DESIGN §4.8 part 2, added 2026-08-29): `generate` runs the
   descriptor engine over families 1, 4 and 6, measures the tolerance
   and its false-alarm baseline on the warm family, runs the
-  melt-quench self-check, and writes the library beside the
-  collection. A study that never bootstraps still needs a library, so
+  melt-quench self-check, and writes the library into the MATERIAL
+  FOLDER it is run from (`<study>/<material label>/`, §1) beside the
+  recipe. A study that never bootstraps still needs a library, so
   a material is not usable by the gate until its recipe's Collection 1
   has been built at least once — the same dependency order the model
   weights already impose. Its runs are
