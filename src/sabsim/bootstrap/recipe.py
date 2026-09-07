@@ -440,10 +440,18 @@ def check_recipe_references(recipe: ForceModelRecipe) -> None:
             if not potcar.is_file():
                 problems.append(
                     f"[{block}] no POTCAR for {element} at {potcar}")
-    if not os.path.isfile(recipe.reference_data_ref):
+    # The gate reference is looked up the way a crystal file is — the
+    # launch directory, then the repository root — so a template's
+    # repository-relative ``share/activation/...`` path resolves from
+    # inside a prep folder too, where `sabsim bootstrap generate` runs
+    # (found by `sabsim init`, 2026-09-07).
+    try:
+        resolve_crystal_file(recipe.reference_data_ref)
+    except FileNotFoundError:
         problems.append(
             f"[recipe] reference_data_ref not found: "
-            f"{recipe.reference_data_ref}")
+            f"{recipe.reference_data_ref} (tried the launch directory "
+            f"and the repository root)")
     if problems:
         listed = "\n  - ".join(problems)
         raise SpecificationError(

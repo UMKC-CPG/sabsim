@@ -2149,9 +2149,10 @@ load-time check that refuses a pair whose structures fall outside it.
 
 **Built state (2026-08-26): the recipe is a file, and the first slice is
 silicon.** The recipe of the eight parts above is a TOML file,
-`force_model_recipe.toml` (template in `share/templates/`), loaded by
-`src/sabsim/bootstrap/recipe.py` with `sabsim.toml`'s own discipline: every key
-required, units carried, three validation phases. The production settings block
+`recipe.toml` (templates in `share/templates/recipes/`, one per
+material), loaded by `src/sabsim/bootstrap/recipe.py` with
+`sabsim.toml`'s own discipline: every key required, units carried,
+three validation phases. The production settings block
 is the LEAN recipe of `dev/notes/vasp-labelling-recipe-lean.md` (chosen cheap
 on purpose, to learn the cost by spending): PAW `Si`, `O`, `Li`, `Nb_pv`; PBE;
 `ENCUT = 350 eV`; Γ only for every non-bulk system and `KSPACING = 0.5 Å⁻¹` for
@@ -4433,6 +4434,63 @@ run's files stay where they were. This is what let LEDGER T-40 keep a
 failed pull beside the corrected one for comparison, and it is the
 general case: a rerun is evidence about the earlier run, which is
 destroyed if the rerun writes over it.
+
+### 10.9 `init` — the generator §1.4 promised (2026-09-07)
+
+§1.4 forbids a hidden default and pays for that with a promise: the
+defaults exist as a **generator**, a command that writes a complete,
+editable input for the person to start from. Until now that generator
+was a person copying `share/templates/` by hand — and a student's first
+hour with the tool was spent learning which four files go where and
+what a silica recipe changes from a silicon one. `sabsim init` is that
+generator made a command:
+
+```
+sabsim init [<project folder>]        # default: the current directory
+```
+
+It writes the project folder of `ARCHITECTURE.md` §1 from the tracked
+templates, and it obeys three rules.
+
+**It never overwrites.** Each file it would write is written only if
+it is missing; an existing file is reported and left exactly as it
+is. So `init` is safe to run again in a folder that is half made —
+after a person has edited `sabsim.toml`, say — and the second run
+adds only what the first could not.
+
+**It reads the project file it wrote to learn the rest.** The four
+stage folders are named from the two wafers' material labels
+(`prep_surf1_si/`, `prep_surf2_sio2/`, ...), so `init` writes
+`sabsim.toml` and `deployment.toml` first, then reads the two
+`material` labels back out of `sabsim.toml` and makes the folders that
+pair names. This is why the two-pass use works: run `init`, edit the
+wafer tables to the pair you actually want, run `init` again, and the
+folders follow the edited labels. Reading uses the plain TOML parser,
+not the full validating loader, because a file the person is midway
+through editing must still yield its labels.
+
+**Each surface gets a recipe for ITS material.** A prep folder needs a
+force-model recipe (§4.8) before its environment library can be built,
+and the recipe differs per material in a known set of lines (species,
+domain, gate reference, descriptor weights, crystal, melt temperature,
+face, pseudopotentials). Those differences are not for a student to
+rediscover: the templates hold one recipe per material we have built a
+library for, under `share/templates/recipes/<label>.toml`, keyed by
+the lower-cased material label (`si.toml`, `sio2.toml`). `init` copies
+the matching one into each prep folder as `recipe.toml`, rewriting its
+`[generation_plan] project` line to point at THIS project's file. A
+material with no recipe of its own gets the silicon recipe as a
+starting point and a printed notice saying so — a start, in the open,
+never a silent guess.
+
+What `init` does NOT do is as deliberate. It does not run the
+bootstrap (a compute-node job), does not write the environment
+library, and does not call `prepare` — each of those reads a file the
+person is expected to look at first. It writes inputs and prints what
+to edit and what to run next, and stops. The generated project is
+complete in the §1.4 sense (every knob written) and wrong in the
+science sense until the person has read it — exactly the relationship
+a template is meant to have with its user.
 
 ## 11. Resuming an interrupted run
 

@@ -55,6 +55,13 @@ is the person's own label and means nothing to the program. Decided
                           four folder names as above (§4.1)
 ```
 
+`sabsim init [<project>]` writes this folder from the tracked templates
+(`share/templates/`): the two top-level files, the four stage folders
+named from the wafer labels it reads back out of `sabsim.toml`, and a
+per-material `recipe.toml` in each prep folder (`share/templates/
+recipes/<label>.toml`). It never overwrites and can be re-run after an
+edit to add what is missing (DESIGN §10.9, PSEUDOCODE §14.7).
+
 The PREFIX of a stage folder names the stage; the SUFFIX is the wafer
 material label(s) from `sabsim.toml`, LOWER-CASED so the names are
 shell-friendly (`material = "SiO2"` -> `sio2`). `surf1`/`surf2` fix
@@ -498,8 +505,8 @@ is.
   DESIGN §4.7), never a second code path.
 - **Bootstrap — the potential manufactory [BUILD, 2026-08-26].** The
   code that runs steps 1–2: it reads a FORCE-MODEL RECIPE (the third
-  input file, `DESIGN.md` §4.8; template `share/templates/
-  force_model_recipe.toml`), manufactures the training structures,
+  input file, `DESIGN.md` §4.8; templates `share/templates/
+  recipes/<label>.toml`), manufactures the training structures,
   writes and harvests the VASP labels, and — later — hands the labels to
   ALF to train the committee and refines by uncertainty. It lives in
   `src/sabsim/bootstrap/` behind its own verb, `sabsim bootstrap`, with

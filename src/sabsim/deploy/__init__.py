@@ -37,6 +37,7 @@ from sabsim.deploy.roots import (
     LocationRoots,
     resolve_location_roots,
 )
+from sabsim.deploy.init_project import InitError, InitReport, init_project
 from sabsim.deploy.prepare import (
     SubmissionEntry,
     prepare,
@@ -62,6 +63,9 @@ __all__ = [
     "registry_lookup",
     "LocationRoots",
     "resolve_location_roots",
+    "InitError",
+    "InitReport",
+    "init_project",
     "SubmissionEntry",
     "prepare",
     "render_job_script",

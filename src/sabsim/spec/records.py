@@ -343,8 +343,22 @@ def stage_folders(pair: PairSpecification) -> StageFolders:
     with its own seed. Every module that needs a folder name asks here
     rather than spelling the pattern out again.
     """
-    label_a = folder_label(pair.material.wafer_a.identity)
-    label_b = folder_label(pair.material.wafer_b.identity)
+    return stage_folder_names(pair.material.wafer_a.identity,
+                              pair.material.wafer_b.identity)
+
+
+def stage_folder_names(material_a: str, material_b: str) -> StageFolders:
+    """The layout from two bare material labels (PSEUDOCODE §14.7).
+
+    The label-level form of :func:`stage_folders`, for a caller that
+    has the two ``material`` strings but no validated pair yet: ``sabsim
+    init`` reads them out of a freshly written, possibly half-edited
+    ``sabsim.toml`` with the plain TOML parser and needs the folder
+    names before any loader would accept the file. Both forms spell the
+    pattern here, once.
+    """
+    label_a = folder_label(material_a)
+    label_b = folder_label(material_b)
     return StageFolders(
         prep_surf1=f"prep_surf1_{label_a}",
         prep_surf2=f"prep_surf2_{label_b}",

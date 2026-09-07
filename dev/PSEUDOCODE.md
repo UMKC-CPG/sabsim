@@ -4867,6 +4867,68 @@ read side maps a missing key back to "none". The CONTRACT here is only
 "readable manifest + referenced payloads, small-inline /
 large-by-reference."]`
 
+### 14.7 init -- the project-folder generator (`DESIGN.md` §10.9)
+
+The §1.4 generator as a command. It writes what is MISSING from a
+project folder and touches nothing that is there; it reads the project
+file it wrote to learn the pair's labels; it gives each surface the
+recipe template of ITS material. It submits nothing and runs nothing.
+
+```
+constant TEMPLATE_ROOT     = <repository>/share/templates
+constant RECIPE_TEMPLATES  = TEMPLATE_ROOT/recipes      # <label>.toml
+constant FALLBACK_RECIPE   = RECIPE_TEMPLATES/si.toml   # a start, in
+                                                        # the open
+
+record InitReport:
+    written: list[path]          # files and folders this run made
+    kept:    list[path]          # already there -- left untouched
+    notices: list[str]           # e.g. "no recipe template for X"
+
+function init_project(project_folder) -> InitReport:
+    make_folder_if_missing(project_folder)
+
+    # 1. The two top-level inputs, straight from the templates.
+    copy_if_missing(TEMPLATE_ROOT/project_spec.toml,
+                    project_folder/sabsim.toml)
+    copy_if_missing(TEMPLATE_ROOT/deployment_rc.toml,
+                    project_folder/deployment.toml)
+
+    # 2. Read the labels back with the PLAIN TOML parser -- a file the
+    #    person is midway through editing must still yield them.
+    raw     = parse_toml(project_folder/sabsim.toml)
+    label_a = raw["wafer_a"]["material"];  label_b = raw["wafer_b"]["material"]
+    folders = stage_folder_names(label_a, label_b)        # §2, one source
+
+    # 3. The four stage folders, and a recipe in each prep folder.
+    for name in folders:
+        make_folder_if_missing(project_folder/name)
+    for (prep_folder, label) in [(folders.prep_surf1, label_a),
+                                 (folders.prep_surf2, label_b)]:
+        template = RECIPE_TEMPLATES/(lower(label) + ".toml")
+        if not exists(template):
+            template = FALLBACK_RECIPE
+            notice("no recipe template for " + label + "; wrote the "
+                   "silicon recipe as a starting point -- edit it")
+        target = project_folder/prep_folder/recipe.toml
+        if missing(target):
+            text = read(template)
+            # The one line that is per-project, not per-material.
+            text = set_generation_plan_project(text,
+                       absolute(project_folder/sabsim.toml))
+            write(target, text)
+
+    return InitReport(written, kept, notices)
+```
+
+`stage_folder_names(label_a, label_b)` is the label-level form of §2's
+`stage_folders(pair)`; the pair-level one delegates to it so the
+layout is still written down once. The CLI prints the report and then
+the three next steps in order -- edit the inputs, build each surface's
+environment library on a compute node, run `prepare` -- because the
+generated folder is complete in the §1.4 sense and unread in the
+science sense until the person has looked at it (§10.9).
+
 `[CODE level, below pseudocode]` the exact directive syntax (SLURM
 `#SBATCH`), the script templating, and the guide's on-disk format.
 

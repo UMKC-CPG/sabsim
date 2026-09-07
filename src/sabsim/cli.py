@@ -18,6 +18,9 @@ and put a ``sabsim.toml`` there — the run's location is where you launch it,
 never a guessed path (VISION.md principle 1). Outputs land under that
 directory's scratch mirror (§4.2).
 
+``sabsim init [folder]`` comes before all of that: it writes a project
+folder from the tracked templates (DESIGN.md §10.9) and never overwrites.
+
 The run/restart/refresh/test operations are FLAGS on ``run``, not separate
 verbs. v1 ships ``--dry-run`` (the login-node stub run) and the four
 job flags; ``--dump-visuals`` (record every dynamic stage for viewing) and
@@ -93,6 +96,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="record one frame per STEPS of MD, overriding the spec's "
              "frame_stride. Only meaningful with --dump-visuals; raise it "
              "for smaller files, lower it for smoother playback")
+
+    # `init` — the GENERATOR (DESIGN.md §10.9, PSEUDOCODE §14.7): writes
+    # a project folder from the tracked templates and never overwrites,
+    # so it can be re-run after an edit to add what is still missing.
+    init = subcommands.add_parser(
+        "init",
+        help="write a project folder (sabsim.toml, deployment.toml, the "
+             "four stage folders, a recipe per surface) from the "
+             "templates; never overwrites")
+    init.add_argument(
+        "project", nargs="?", default=".",
+        help="the project folder to fill (default: this directory); "
+             "made if missing")
 
     # `prepare` — the WRITER (DESIGN.md §10.1, PSEUDOCODE §14.4): reads
     # the project file AND the machine-local deployment rc, and writes
@@ -339,6 +355,46 @@ def _print_job_summary(result) -> None:
               "is written.")
 
 
+def _init(args: argparse.Namespace) -> int:
+    """Execute ``sabsim init``: write the missing parts of a project.
+
+    Prints what was written and what was left alone, any notice the
+    person must see (a material with no recipe template of its own),
+    and the three steps that come next — because the generated folder
+    is complete in the §1.4 sense and unread in the science sense
+    until the person has looked at it (DESIGN.md §10.9).
+    """
+    from sabsim.deploy.init_project import InitError, init_project
+
+    try:
+        report = init_project(args.project)
+    except InitError as failure:
+        print(f"sabsim: init halted — {failure}", file=sys.stderr)
+        return 1
+
+    print(f"sabsim init: project folder {report.project_directory}")
+    for path in report.written:
+        print(f"  wrote  {path}")
+    for path in report.kept:
+        print(f"  kept   {path}  (already there, untouched)")
+    for notice in report.notices:
+        print(f"  NOTE   {notice}")
+    print("\nNext, in order (DESIGN.md §10.9):")
+    print("  1. read and edit sabsim.toml (the science of this pair) and "
+          "deployment.toml\n     (this machine); each prep folder's "
+          "recipe.toml describes its surface's\n     material.")
+    print("  2. in each prep_surf*/ folder, build the environment library "
+          "on a compute\n     node: `sabsim bootstrap generate recipe.toml "
+          "--skip-collection2` inside\n     an sbatch job (a GPU "
+          "allocation; never the login node).")
+    print("  3. back in the project folder, `sabsim prepare` writes the "
+          "four job\n     scripts and a SUBMISSION_GUIDE.md; submit them "
+          "in the guide's order.")
+    print("  Running `sabsim init` again is safe: it adds only what is "
+          "missing.")
+    return 0
+
+
 def _prepare(args: argparse.Namespace) -> int:
     """Execute ``sabsim prepare``: write the submission scripts + guide.
 
@@ -385,6 +441,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.command == "run":
         return _run(args)
+    if args.command == "init":
+        return _init(args)
     if args.command == "prepare":
         return _prepare(args)
     if args.command == "bootstrap":

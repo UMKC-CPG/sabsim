@@ -23,6 +23,7 @@ from sabsim.spec.records import (
     StageFolders,
     WaferPair,
     folder_label,
+    stage_folder_names,
     stage_folders,
 )
 
@@ -40,5 +41,6 @@ __all__ = [
     "StageFolders",
     "WaferPair",
     "folder_label",
+    "stage_folder_names",
     "stage_folders",
 ]

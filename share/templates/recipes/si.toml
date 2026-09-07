@@ -157,10 +157,12 @@ seed            = 22
 # record) and the pull dumps (11). Interface frames are cut to the
 # §6.4 sub-cell: the activated skins plus this many crystalline layers
 # under each (Paul, 2026-08-26: the surface atoms are what training is
-# for).
+# for). `sabsim init` rewrites the `project` line below to the
+# project folder it is writing; by hand, point it at the sabsim.toml
+# two levels up from this recipe.
 # ---------------------------------------------------------------------
 [generation_plan]
-project                     = "jobs/si_si/sabsim.toml"
+project                     = "../sabsim.toml"
 frames_per_stage            = { activate = 10, press = 12, pull = 10 }
 subcell_crystalline_layers  = 2
 subcell_vacuum              = { value = 10.0, unit = "angstrom" }

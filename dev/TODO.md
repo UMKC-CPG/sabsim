@@ -45,6 +45,17 @@
 
 <!-- Tasks related to layout, modules, build. -->
 
+- [x] **`sabsim init` — the §1.4 generator as a command** (Paul,
+      2026-09-07; `DESIGN.md` §10.9, `PSEUDOCODE.md` §14.7,
+      `ARCHITECTURE.md` §1). Writes a project folder from
+      `share/templates/` (project file, rc, four stage folders, a
+      per-material recipe from `share/templates/recipes/<label>.toml`
+      with its `[generation_plan] project` line rewritten); never
+      overwrites; re-run after an edit adds what is missing. Module
+      `src/sabsim/deploy/init_project.py`, 9 tests. Follow-ons: a
+      recipe template per new material as its library is first built
+      (LiNbO3 next); a generator for `.sabsim/sabsimrc` (install intro
+      still says "copy an existing one").
 - [ ] **Project-folder convention — code migration** (decided
       2026-08-30, Paul; documented top-down in `ARCHITECTURE.md` §1/§4.3,
       `DESIGN.md` §1.1/§10, `PSEUDOCODE.md` §2/§14). One wafer pair per
@@ -2077,7 +2088,8 @@ foundations, interaction rules. -->
       study_spec.toml` + every `jobs/*/sabsim.toml`; the validator's
       `check_environment_library`. (f) Recipe `descriptor_settings` +
       `gate_scatter_multiple` in `bootstrap/recipe.py` + `share/
-      templates/force_model_recipe.toml`. (g) `build_environment_library`
+      templates/recipes/si.toml` since 2026-09-07). (g)
+      `build_environment_library`
       + self-check in `bootstrap/collection1.py`; `sabsim bootstrap
       generate` writes the pair and refuses one that cannot separate
       warm from melt-quench. (h) `live_stages` loads the library once per

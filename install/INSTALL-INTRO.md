@@ -113,6 +113,24 @@ source .sabsim/sabsimrc
 pytest src/tests/ -v
 ```
 
+## Your first project
+
+Do not copy another person's job folder. `sabsim init` writes a
+complete project folder from the tracked templates — the project file,
+the machine rc, the four stage folders, and a force-model recipe for
+each surface's material — and never overwrites, so it is safe to run
+again after you edit the pair (`DESIGN.md` §10.9):
+
+```bash
+mkdir -p ~/sabsim/jobs && sabsim init ~/sabsim/jobs/si_sio2
+cd ~/sabsim/jobs/si_sio2
+# 1. read and edit sabsim.toml, deployment.toml, prep_surf*/recipe.toml
+# 2. build each surface's environment library on a GPU node (sbatch a
+#    job that runs `sabsim bootstrap generate recipe.toml
+#    --skip-collection2` inside the prep folder)
+sabsim prepare          # 3. writes the four .slurm + SUBMISSION_GUIDE.md
+```
+
 ## The four things that trip people up
 
 **Edit the paths.** `build_venv.sh` and `build_lammps.sh` both open with
