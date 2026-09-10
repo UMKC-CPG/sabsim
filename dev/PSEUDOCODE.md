@@ -2762,11 +2762,22 @@ record EnvironmentLibrary:
     environments:     map of species -> list of vector
                                     # every catalogued environment of
                                     # that species: families 1, 4, 6
+    warm_mean:        map of species -> vector
+    whitening:        map of species -> matrix (K x K)
+                                    # the RULER (DESIGN §3.5, 2026-09-10):
+                                    # a vector is judged as
+                                    # (v - warm_mean) @ whitening, so each
+                                    # direction is in units of its own
+                                    # thermal standard deviation (the
+                                    # warm-run covariance, floored at
+                                    # COVARIANCE_RIDGE_FRACTION of its
+                                    # mean variance). Stored, so the gate
+                                    # and the self-check use ONE ruler
     thermal_scatter:  map of species -> number
-                                    # the typical descriptor-space
-                                    # distance of a warm-run atom from
-                                    # its nearest cold-bulk environment;
-                                    # the unit the tolerance is counted in
+                                    # the typical WHITENED distance of a
+                                    # warm-run atom from its nearest
+                                    # cold-bulk environment; the unit the
+                                    # tolerance is counted in
     warm_distances:   map of species -> list of number
                                     # every warm-run atom's nearest-cold
                                     # distance, kept so the FALSE-ALARM
@@ -2858,8 +2869,13 @@ function disordered_atoms(slab, library, scatter_multiple):
     #     silent difference in what "crystalline" means
     flags = empty list
     for each atom in slab:
+        # Both sides whitened by the library's ruler for this species
+        # (DESIGN §3.5, 2026-09-10): distance in units of thermal
+        # motion, direction by direction.
+        query     = whiten(library, atom.species, vectors[atom])
         nearest = min over library.environments[atom.species] of
-                  descriptor_distance(vectors[atom], environment)
+                  euclidean_distance(query, whiten(library, atom.species,
+                                                   environment))
         tolerance = scatter_multiple * library.thermal_scatter[atom.species]
         flags.append(nearest > tolerance)
     return flags                      # true = disordered, one per atom
@@ -3351,7 +3367,11 @@ record QuenchSpec:
     # eighths of the hold, and the mean-square displacement measured
     # from the half-way frame must grow at least MELT_MIN_DIFFUSION_
     # RATIO (= 2) from one eighth later to four eighths later — a
-    # liquid gives about 4, a vibrating crystal about 1. Implemented
+    # liquid gives about 4, a vibrating crystal about 1 — AND the late
+    # displacement must exceed MELT_MIN_LATE_MSD (= 2 A^2, about one
+    # bond length squared), so the ratio is never a quotient of two
+    # small numbers (LEDGER T-43: crystals under 1.2 A^2, liquids above
+    # 14). Implemented
     # by verify_melt(), called by melt_quench_family() right after
     # each run; a failure names the phase, the ratio, and the knobs.
 
@@ -3672,11 +3692,20 @@ function build_environment_library(structures, force_model_recipe):
         vectors = DESCRIPTOR_ENGINE.describe(atoms, settings)
         for each atom: environments[atom.species].append(vectors[atom])
 
-    # The TOLERANCE is measured, not guessed: the typical distance of a
-    # warm-run atom from its nearest COLD-BULK environment, per species.
+    # The RULER first (DESIGN §3.5, 2026-09-10): per species, the mean
+    # and covariance of the warm-run vectors; the whitening is the
+    # inverse square root of that covariance, floored on every
+    # direction at COVARIANCE_RIDGE_FRACTION (1e-3) of the mean variance
+    # so a direction a symmetry holds exactly still cannot blow up.
+    warm = environments restricted to family == warm_run
+    warm_mean, whitening = map species -> (mean, inverse-sqrt of the
+                                            floored covariance) of warm
+    # The TOLERANCE is measured, not guessed: the typical WHITENED
+    # distance of a warm-run atom from its nearest COLD-BULK
+    # environment, per species.
     cold = environments restricted to family == bulk
     thermal_scatter = map species -> typical (say, the 90th-percentile)
-        nearest-cold distance over that species' warm-run vectors
+        whitened nearest-cold distance over that species' warm vectors
 
     # The recipe's warm runs must be at or above the temperature the
     # gate judges at (the heal's cool-to target, §10.5), or this scatter

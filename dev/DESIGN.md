@@ -1245,6 +1245,37 @@ disordered. The two fractions are recorded in the library; a tolerance
 that cannot separate them is reported at bootstrap time, not discovered
 later as a misjudged slab.
 
+**The distance is measured in units of thermal motion, direction by
+direction (LEDGER T-43/T-44, 2026-09-10).** Silica exposed a flaw in
+the ruler that silicon had hidden. A genuine silica glass — every atom
+five angstrom from its lattice site — read as mostly crystalline under
+the plain Euclidean distance between descriptor vectors, at every
+cutoff and species weighting tried: the SiO4 tetrahedron survives in
+the glass, and the components that see it are the large ones, so the
+plain distance is dominated by what does NOT change, while the angular
+and ring disorder that does change moves components thermal motion
+never touches. The fix is to take the section's own idea literally.
+Thermal motion moves the 30-component vector along a few correlated
+directions with a definite spread in each; the warm runs measure that
+spread as a covariance per species. Distances are measured in the
+metric of that covariance (a whitening: each direction in units of its
+own thermal standard deviation, the Mahalanobis distance), so a
+displacement along a direction thermal motion never explores counts
+at full weight however small it is in absolute terms, and the thermal
+scatter — still the 90th-percentile warm-to-cold distance — is now a
+single dimensionless number that means the same thing in every
+direction. On the same frames this took the flagged fraction of glass
+atoms at three scatters from 29 % to 88 % for silicon in silica and
+from 5 % to 61 % for oxygen, with the same warm false-alarm rate by
+construction; for silicon's own library it went from 65 % to 100 %.
+The covariance is regularised by a floor of one thousandth of its mean
+variance on every direction, a guard against a direction a symmetry
+holds exactly still, not a smoothing (the gain fades quickly above
+that; T-44). The library stores the warm mean and the whitening per
+species, the gate applies them to the slab's vectors before asking
+its nearest-environment question, and a library built before this
+ruler is refused by the loader rather than read with a fallback.
+
 **The library's temperature, and a warn/refuse band (Paul, 2026-08-29).**
 The tolerance is measured on warm runs at some temperature, and the gate
 judges a slab at the temperature the heal cools it to (the press
@@ -1931,8 +1962,10 @@ student can read the file and know what was manufactured.
       mean-square displacement must keep GROWING (diffusive, so about
       fourfold from one eighth of the hold to four eighths), where a
       crystal's saturates at its vibration amplitude (about onefold).
-      The build refuses a melt whose growth is under twofold and says
-      which knob to turn — hotter, longer, or a bigger cell — instead
+      The build refuses a melt whose growth is under twofold, or whose
+      travel stays under about one bond length squared (LEDGER T-43:
+      the ratio of two small numbers is noisy), and says which knob to
+      turn — a bigger cell first, then hotter or longer — instead
       of letting the §3.5 self-check report a descriptor failure that
       is really a recipe failure.
    4. **Clean surfaces** — the free surface of each phase, unbombarded.

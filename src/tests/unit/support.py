@@ -19,6 +19,7 @@ from sabsim.driver.descriptors import (
 from sabsim.driver.environment_library import (
     EnvironmentLibrary,
     SelfCheck,
+    warm_ruler,
 )
 
 # The one "cold" neighbourhood of the hand-built library below, and the
@@ -34,24 +35,33 @@ def hand_built_library(
         model_name: str = "DPA-3.1-3M",
         engine: str = DESCRIPTOR_ENGINE_NAME,
         surfaces=None) -> EnvironmentLibrary:
-    """A tiny environment library with a known scatter, for gate tests.
+    """A tiny environment library with a known ruler, for gate tests.
 
     Each species catalogues the cold vector and twenty warm copies
-    jittered by up to ``THERMAL_SCATTER`` along the second axis; the
-    thermal scatter is exactly ``THERMAL_SCATTER`` and the recorded
-    warm-run distances are those jitters, so the false-alarm rate at a
-    multiple of one is a known small number and zero at three.
+    jittered by up to ``THERMAL_SCATTER`` along the SECOND axis, so the
+    second axis is the one direction thermal motion explores. The
+    ruler (mean, whitening, scatter, warm distances) is built by the
+    SAME functions the real builder uses (DESIGN §3.5, 2026-09-10), so
+    a jitter along that axis smaller than the scatter reads as
+    crystalline, and a displacement along any OTHER axis — a direction
+    thermal motion never explores — reads as disordered however small;
+    the false-alarm rate at a multiple of one is a known small number
+    and zero at three.
     """
     generator = np.random.default_rng(7)
     jitters = generator.uniform(0.0, THERMAL_SCATTER, size=20)
-    environments, scatter, warm = {}, {}, {}
+    environments, scatter, warm, means, whitenings = {}, {}, {}, {}, {}
     for symbol in species:
-        rows = [COLD_VECTOR] + [
+        warm_rows = np.array([
             COLD_VECTOR + np.array([0.0, jitter, 0.0, 0.0])
-            for jitter in jitters]
-        environments[symbol] = np.array(rows)
-        scatter[symbol] = THERMAL_SCATTER
-        warm[symbol] = np.array(jitters)
+            for jitter in jitters])
+        environments[symbol] = np.vstack([[COLD_VECTOR], warm_rows])
+        means[symbol], whitenings[symbol] = warm_ruler(warm_rows)
+        whitened_warm = (warm_rows - means[symbol]) @ whitenings[symbol]
+        whitened_cold = (COLD_VECTOR - means[symbol]) @ whitenings[symbol]
+        distances = np.linalg.norm(whitened_warm - whitened_cold, axis=1)
+        warm[symbol] = distances
+        scatter[symbol] = float(np.percentile(distances, 90.0))
     if surfaces is None:
         surfaces = [{"phase": "silicon-diamond", "face": "100",
                      "termination": 0, "species": sorted(species)}]
@@ -60,7 +70,8 @@ def hand_built_library(
         settings=DescriptorSettings(
             descriptor_cutoff=2.6, expansion_order=6,
             species_weights={symbol: 1.0 for symbol in species}),
-        environments=environments, thermal_scatter=scatter,
+        environments=environments, warm_mean=means,
+        whitening=whitenings, thermal_scatter=scatter,
         warm_distances=warm,
         self_check=SelfCheck(scatter_multiple=3.0, warm_disordered=0.0,
                              melt_quench_disordered=1.0),

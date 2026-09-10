@@ -1,3 +1,8 @@
 === Thu Sep 10 10:45:13 CDT 2026 node g018.mgmt.hellbender commit 8183832 task 0 ===
 GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-02a5262a-b8f1-8832-dc85-c15fd4508ad8)
 === T-43 variant 0: baseline_3500K_5ps_2cells ===
+T43RESULT baseline_3500K_5ps_2cells: atoms 72 melt_diffusion_ratio 1.63 (CRYSTAL)
+T43RESULT baseline_3500K_5ps_2cells: final-frame shift from lattice site median 0.46 A, p90 0.93 A, fraction > 1.6 A 0.00
+T43RESULT baseline_3500K_5ps_2cells: Si final-frame distance to catalogue / warm scatter (6.39): median 0.13x, fraction > 3x 0.00, > 2x 0.00, > 1x 0.00
+T43RESULT baseline_3500K_5ps_2cells: O final-frame distance to catalogue / warm scatter (16.30): median 0.14x, fraction > 3x 0.00, > 2x 0.00, > 1x 0.00
+=== probe exit 0 ===

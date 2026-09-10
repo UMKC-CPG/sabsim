@@ -1,0 +1,19 @@
+=== Thu Sep 10 11:25:17 CDT 2026 node c009.mgmt.hellbender commit 427a040 ===
+frames: bulk 1 (72 atoms)
+frames: warm_nvt 10 (720 atoms)
+frames: warm_npt 10 (720 atoms)
+frames: surface 1 (162 atoms)
+frames: glass 3 (387 atoms)
+T44RESULT cut4.2_Si1.0_O0.5 Si: scatter 4.88 (|cold| 59.1); glass median 1.81x; @1x warm 0.10 glass 0.71; @2x warm 0.00 glass 0.46; @3x warm 0.00 glass 0.29;
+T44RESULT cut4.2_Si1.0_O0.5 O: scatter 14.15 (|cold| 100.0); glass median 0.70x; @1x warm 0.10 glass 0.33; @2x warm 0.00 glass 0.12; @3x warm 0.00 glass 0.05;
+T44RESULT cut5.0_Si1.0_O0.5 Si: scatter 16.14 (|cold| 158.4); glass median 1.80x; @1x warm 0.10 glass 0.72; @2x warm 0.00 glass 0.43; @3x warm 0.00 glass 0.28;
+T44RESULT cut5.0_Si1.0_O0.5 O: scatter 25.82 (|cold| 218.0); glass median 1.10x; @1x warm 0.10 glass 0.58; @2x warm 0.00 glass 0.24; @3x warm 0.00 glass 0.14;
+T44RESULT cut6.0_Si1.0_O0.5 Si: scatter 84.34 (|cold| 737.6); glass median 0.70x; @1x warm 0.10 glass 0.30; @2x warm 0.00 glass 0.13; @3x warm 0.00 glass 0.05;
+T44RESULT cut6.0_Si1.0_O0.5 O: scatter 90.64 (|cold| 898.0); glass median 1.12x; @1x warm 0.10 glass 0.59; @2x warm 0.00 glass 0.17; @3x warm 0.00 glass 0.07;
+T44RESULT cut4.2_Si0.5_O1.0 Si: scatter 9.74 (|cold| 162.5); glass median 2.29x; @1x warm 0.10 glass 0.76; @2x warm 0.00 glass 0.57; @3x warm 0.00 glass 0.38;
+T44RESULT cut4.2_Si0.5_O1.0 O: scatter 12.93 (|cold| 100.9); glass median 0.83x; @1x warm 0.10 glass 0.41; @2x warm 0.00 glass 0.17; @3x warm 0.00 glass 0.09;
+T44RESULT cut6.0_Si0.5_O1.0 Si: scatter 184.42 (|cold| 1671.8); glass median 0.80x; @1x warm 0.10 glass 0.36; @2x warm 0.00 glass 0.10; @3x warm 0.00 glass 0.05;
+T44RESULT cut6.0_Si0.5_O1.0 O: scatter 170.64 (|cold| 1442.3); glass median 0.67x; @1x warm 0.10 glass 0.29; @2x warm 0.00 glass 0.12; @3x warm 0.00 glass 0.04;
+T44RESULT cut6.0_Si1.0_O0.8 Si: scatter 182.11 (|cold| 1613.7); glass median 0.71x; @1x warm 0.10 glass 0.30; @2x warm 0.00 glass 0.11; @3x warm 0.00 glass 0.05;
+T44RESULT cut6.0_Si1.0_O0.8 O: scatter 181.93 (|cold| 1712.0); glass median 0.91x; @1x warm 0.10 glass 0.42; @2x warm 0.00 glass 0.15; @3x warm 0.00 glass 0.06;
+=== probe exit 0 ===

@@ -27,14 +27,16 @@ from sabsim.driver.descriptors import (
     to_lammps_parameters,
 )
 from sabsim.driver.environment_library import (
-    LIBRARY_ARRAYS_FILE,
-    LIBRARY_MANIFEST_FILE,
     build_environment_library,
     check_library_against_project,
     disordered_atoms,
+    DISTANCE_METRIC,
     false_alarm_rate,
+    LIBRARY_ARRAYS_FILE,
+    LIBRARY_MANIFEST_FILE,
     load_environment_library,
     read_environment_library,
+    warm_ruler,
     write_environment_library,
 )
 from sabsim.spec.loader import SpecificationError, load_and_validate_project
@@ -134,6 +136,37 @@ def test_disordered_atoms_flags_a_strange_neighbourhood_not_a_jittered_one():
     assert list(flags) == [False, False, True]
 
 
+def test_the_ruler_counts_an_unexplored_direction_at_full_weight():
+    """DESIGN §3.5 (2026-09-10): a displacement thermal motion never
+    makes is disorder however small it is in absolute terms, while a
+    large one along the thermal direction is not."""
+    library = hand_built_library()
+    along_thermal = COLD_VECTOR + np.array([0.0, 0.8 * THERMAL_SCATTER,
+                                            0.0, 0.0])
+    tiny_but_strange = COLD_VECTOR + np.array([0.0, 0.0,
+                                               0.2 * THERMAL_SCATTER, 0.0])
+    flags = disordered_atoms(
+        np.array([along_thermal, tiny_but_strange]), ["Si", "Si"],
+        library, scatter_multiple=3.0)
+    assert list(flags) == [False, True]
+
+
+def test_warm_ruler_floors_a_still_direction_instead_of_blowing_up():
+    """A direction with zero spread gets the ridge floor, so the
+    whitening is finite and the ruler still works there."""
+    rng = np.random.default_rng(1)
+    rows = np.zeros((50, 3))
+    rows[:, 0] = rng.normal(0.0, 2.0, 50)       # one live direction
+    rows[:, 1] = rng.normal(0.0, 0.5, 50)       # a quieter one
+    mean, whitening = warm_ruler(rows)          # axis 2 never moves
+    assert np.all(np.isfinite(whitening))
+    unit = np.eye(3)
+    scaled = np.linalg.norm(unit @ whitening, axis=1)
+    # Loud direction scaled down, quiet one less, still one most of all,
+    # but by the floor, not to infinity.
+    assert scaled[0] < scaled[1] < scaled[2] < 1.0e4
+
+
 def test_an_uncatalogued_species_cannot_be_judged():
     with pytest.raises(SpecificationError, match="'O'"):
         disordered_atoms(np.array([COLD_VECTOR]), ["O"],
@@ -175,8 +208,29 @@ def test_library_round_trips_through_npz_and_toml(tmp_path):
             back.environments["Si"], library.environments["Si"])
         np.testing.assert_allclose(
             back.warm_distances["Si"], library.warm_distances["Si"])
+        np.testing.assert_allclose(
+            back.whitening["Si"], library.whitening["Si"])
+        np.testing.assert_allclose(back.warm_mean["Si"],
+                                   library.warm_mean["Si"])
         assert back.self_check == library.self_check
         assert back.provenance["surfaces"][0]["face"] == "100"
+    assert f'distance_metric = "{DISTANCE_METRIC}"' in text
+
+
+def test_a_library_built_under_another_ruler_is_refused(tmp_path):
+    """No silent fallback: an old-format library names its rebuild."""
+    manifest = write_environment_library(hand_built_library(), tmp_path)
+    old = manifest.read_text().replace(
+        f'distance_metric = "{DISTANCE_METRIC}"',
+        'distance_metric = "plain-euclidean"')
+    manifest.write_text(old)
+    with pytest.raises(SpecificationError, match="rebuild it"):
+        read_environment_library(manifest)
+    manifest.write_text("\n".join(
+        line for line in old.split("\n")
+        if not line.startswith("distance_metric")))
+    with pytest.raises(SpecificationError, match="ruler None"):
+        read_environment_library(manifest)
 
 
 # ---------------------------------------------------------------------

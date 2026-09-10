@@ -1,3 +1,8 @@
 === Thu Sep 10 10:29:38 CDT 2026 node g019.mgmt.hellbender commit 8183832 task 5 ===
 GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-12f5da2f-cddf-c2b7-b81a-eb8127f39088)
 === T-43 variant 5: glass_density_3500K_5ps_2cells ===
+T43RESULT glass_density_3500K_5ps_2cells: atoms 72 melt_diffusion_ratio 1.02 (CRYSTAL)
+T43RESULT glass_density_3500K_5ps_2cells: final-frame shift from lattice site median 0.47 A, p90 0.63 A, fraction > 1.6 A 0.00
+T43RESULT glass_density_3500K_5ps_2cells: Si final-frame distance to catalogue / warm scatter (6.39): median 0.59x, fraction > 3x 0.00, > 2x 0.00, > 1x 0.04
+T43RESULT glass_density_3500K_5ps_2cells: O final-frame distance to catalogue / warm scatter (16.30): median 0.67x, fraction > 3x 0.00, > 2x 0.00, > 1x 0.00
+=== probe exit 0 ===

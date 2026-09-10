@@ -92,6 +92,20 @@ LIBRARY_TEMPERATURE_REFUSE_FRACTION = 0.20
 # in memory all at once.
 _QUERY_CHUNK = 2000
 
+# The RULER (DESIGN §3.5, 2026-09-10; LEDGER T-43/T-44). Distances are
+# measured in units of thermal motion DIRECTION BY DIRECTION: each
+# species' warm-run vectors give a mean and a covariance, and every
+# vector is whitened by that covariance before any distance is taken.
+# The covariance is floored on every direction at this fraction of its
+# mean variance — a guard against a direction a symmetry holds exactly
+# still, not a smoothing: the separation of glass from warm crystal
+# fades quickly above one thousandth (T-44: silica oxygen 61 % flagged
+# at 1e-6, 54 % at 1e-3, 41 % at 1e-2, 22 % at 1e-1).
+COVARIANCE_RIDGE_FRACTION = 1.0e-3
+# Named in the manifest so a library built under another ruler is
+# refused by name rather than read with a silent fallback.
+DISTANCE_METRIC = "warm-whitened-euclidean"
+
 
 @dataclass(frozen=True)
 class SelfCheck:
@@ -108,8 +122,11 @@ class EnvironmentLibrary:
     """What the undamaged material looks like, atom by atom (§3.5).
 
     ``environments`` maps each species to an ``(M, K)`` array of every
-    catalogued descriptor vector of that species; ``thermal_scatter`` is
-    the unit the gate's tolerance is counted in; ``warm_distances`` keeps
+    catalogued descriptor vector of that species, stored RAW so the
+    file stays inspectable; ``warm_mean`` and ``whitening`` are the
+    ruler every distance is taken with (:func:`whiten`); ``thermal_
+    scatter`` is the unit the gate's tolerance is counted in, a
+    whitened distance; ``warm_distances`` keeps
     every warm-run atom's nearest-cold distance so the false-alarm rate
     — the depth profile's baseline — can be recomputed at whatever
     scatter multiple a project names. ``warm_run_temperature`` (kelvin, the
@@ -122,9 +139,11 @@ class EnvironmentLibrary:
     model_name: str
     engine: str
     settings: DescriptorSettings
-    environments: dict
-    thermal_scatter: dict
-    warm_distances: dict
+    environments: dict                 # species -> (M, K), RAW vectors
+    warm_mean: dict                    # species -> (K,)
+    whitening: dict                    # species -> (K, K); see whiten()
+    thermal_scatter: dict              # species -> whitened distance
+    warm_distances: dict               # species -> whitened distances
     self_check: SelfCheck
     warm_run_temperature: float
     provenance: dict
@@ -133,6 +152,45 @@ class EnvironmentLibrary:
 # ---------------------------------------------------------------------
 # The two questions the gate asks of a library.
 # ---------------------------------------------------------------------
+
+def warm_ruler(warm_rows: np.ndarray) -> tuple:
+    """The (mean, whitening) of one species from its warm-run vectors.
+
+    The whitening is the inverse square root of the warm covariance,
+    floored on every direction at ``COVARIANCE_RIDGE_FRACTION`` of the
+    mean variance, so ``(v - mean) @ whitening`` measures each
+    direction in units of its own thermal standard deviation — the
+    Mahalanobis distance of DESIGN §3.5. Computed by eigendecomposition
+    (the covariance is symmetric), which also makes the floor exact
+    per direction rather than approximate.
+    """
+    warm_rows = np.asarray(warm_rows, dtype=float)
+    if warm_rows.shape[0] < 2:
+        raise RuntimeError(
+            "a species' thermal ruler needs at least two warm-run "
+            "vectors to measure a spread from")
+    mean = warm_rows.mean(axis=0)
+    covariance = np.cov(warm_rows, rowvar=False)
+    covariance = np.atleast_2d(covariance)
+    floor = COVARIANCE_RIDGE_FRACTION * np.trace(covariance) / (
+        covariance.shape[0])
+    if floor <= 0.0:
+        # No spread at all (a degenerate fixture): the ruler is the
+        # identity, so the distance falls back to plain Euclidean.
+        return mean, np.eye(covariance.shape[0])
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    scale = 1.0 / np.sqrt(np.maximum(eigenvalues, floor))
+    whitening = eigenvectors @ np.diag(scale) @ eigenvectors.T
+    return mean, whitening
+
+
+def whiten(library: EnvironmentLibrary, species: str,
+           vectors: np.ndarray) -> np.ndarray:
+    """Vectors of one species in the library's thermal units (§3.5)."""
+    vectors = np.asarray(vectors, dtype=float)
+    return (vectors - library.warm_mean[species]) @ library.whitening[
+        species]
+
 
 def _nearest_distances(
         queries: np.ndarray, catalogue: np.ndarray) -> np.ndarray:
@@ -185,7 +243,8 @@ def disordered_atoms(
         rows = np.array([index for index, symbol in enumerate(symbols)
                          if symbol == species])
         nearest = _nearest_distances(
-            vectors[rows], library.environments[species])
+            whiten(library, species, vectors[rows]),
+            whiten(library, species, library.environments[species]))
         tolerance = scatter_multiple * library.thermal_scatter[species]
         flags[rows] = nearest > tolerance
     return flags
@@ -273,6 +332,8 @@ def build_environment_library(
 
     environments = _stack(catalogued)
     cold_arrays = _stack(cold)
+    warm_mean: dict = {}
+    whitening: dict = {}
     thermal_scatter: dict = {}
     warm_distances: dict = {}
     for species, rows in _stack(warm).items():
@@ -280,7 +341,12 @@ def build_environment_library(
             raise RuntimeError(
                 f"warm runs contain '{species}' but the cold bulk does "
                 f"not; every species needs a cold reference")
-        distances = _nearest_distances(rows, cold_arrays[species])
+        # The ruler for this species, then every distance in its units.
+        warm_mean[species], whitening[species] = warm_ruler(rows)
+        distances = _nearest_distances(
+            (rows - warm_mean[species]) @ whitening[species],
+            (cold_arrays[species] - warm_mean[species]) @ whitening[
+                species])
         warm_distances[species] = distances
         thermal_scatter[species] = float(
             np.percentile(distances, _SCATTER_PERCENTILE))
@@ -299,7 +365,10 @@ def build_environment_library(
     for species, rows in _stack(melt).items():
         if species not in environments:
             continue
-        nearest = _nearest_distances(rows, environments[species])
+        nearest = _nearest_distances(
+            (rows - warm_mean[species]) @ whitening[species],
+            (environments[species] - warm_mean[species]) @ whitening[
+                species])
         melt_flags.append(nearest > multiple * thermal_scatter[species])
     melt_disordered = (float(np.mean(np.concatenate(melt_flags)))
                        if melt_flags else float("nan"))
@@ -329,6 +398,8 @@ def build_environment_library(
         engine=DESCRIPTOR_ENGINE_NAME,
         settings=settings,
         environments=environments,
+        warm_mean=warm_mean,
+        whitening=whitening,
         thermal_scatter=thermal_scatter,
         warm_distances=warm_distances,
         self_check=SelfCheck(
@@ -371,11 +442,17 @@ def write_environment_library(
         arrays[f"env_{species}"] = np.asarray(vectors, dtype=float)
     for species, distances in library.warm_distances.items():
         arrays[f"warm_{species}"] = np.asarray(distances, dtype=float)
+    for species, mean in library.warm_mean.items():
+        arrays[f"mean_{species}"] = np.asarray(mean, dtype=float)
+    for species, matrix in library.whitening.items():
+        arrays[f"whitening_{species}"] = np.asarray(matrix, dtype=float)
     np.savez(directory / LIBRARY_ARRAYS_FILE, **arrays)
     manifest = {
         "model_name": library.model_name,
         "engine": library.engine,
         "arrays_file": LIBRARY_ARRAYS_FILE,
+        "distance_metric": DISTANCE_METRIC,
+        "covariance_ridge_fraction": COVARIANCE_RIDGE_FRACTION,
         "warm_run_temperature": float(library.warm_run_temperature),
         "settings": {
             "descriptor_cutoff": float(library.settings.descriptor_cutoff),
@@ -413,6 +490,14 @@ def read_environment_library(path) -> EnvironmentLibrary:
             f"no environment library manifest at {manifest_path}")
     with manifest_path.open("rb") as handle:
         manifest = tomllib.load(handle)
+    metric = manifest.get("distance_metric")
+    if metric != DISTANCE_METRIC:
+        raise SpecificationError(
+            f"the environment library at {manifest_path} was built under "
+            f"the distance ruler {metric!r}, not {DISTANCE_METRIC!r} "
+            f"(DESIGN §3.5, 2026-09-10); rebuild it with `sabsim "
+            f"bootstrap generate` (the `.library.slurm` job) — a library "
+            f"is never read under a ruler it was not checked with")
     arrays_path = manifest_path.parent / manifest["arrays_file"]
     with np.load(arrays_path) as arrays:
         environments = {
@@ -421,6 +506,12 @@ def read_environment_library(path) -> EnvironmentLibrary:
         warm_distances = {
             name[len("warm_"):]: np.array(arrays[name], dtype=float)
             for name in arrays.files if name.startswith("warm_")}
+        warm_mean = {
+            name[len("mean_"):]: np.array(arrays[name], dtype=float)
+            for name in arrays.files if name.startswith("mean_")}
+        whitening = {
+            name[len("whitening_"):]: np.array(arrays[name], dtype=float)
+            for name in arrays.files if name.startswith("whitening_")}
     settings_table = manifest["settings"]
     check = manifest["self_check"]
     return EnvironmentLibrary(
@@ -433,6 +524,8 @@ def read_environment_library(path) -> EnvironmentLibrary:
                 str(k): float(v) for k, v in
                 settings_table["species_weights"].items()}),
         environments=environments,
+        warm_mean=warm_mean,
+        whitening=whitening,
         thermal_scatter={
             str(k): float(v) for k, v in
             manifest["thermal_scatter"].items()},

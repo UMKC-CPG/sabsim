@@ -70,6 +70,13 @@ _DUMP_FRAME_CAP = 200
 # vibration about 1, so 2 sits between them with room on both sides.
 MELT_CHECK_INTERVALS = 8
 MELT_MIN_DIFFUSION_RATIO = 2.0
+# The ratio alone is a quotient of two SMALL numbers for a crystal
+# (LEDGER T-43: 0.46 and 0.76 A^2 gave 1.63 for quartz that never
+# melted), so a liquid must also have TRAVELLED: its mean-square
+# displacement four intervals after the half-way frame must exceed
+# this, about one bond length squared. Every liquid in T-43 was above
+# 14 A^2; every crystal below 1.2.
+MELT_MIN_LATE_MSD_ANGSTROM2 = 2.0
 MELT_CHECK_DUMP_NAME = "melt_check.dump"
 
 
@@ -324,16 +331,18 @@ def _read_unwrapped_positions(dump_path: str) -> list:
     return frames
 
 
-def melt_diffusion_ratio(check_dump_path: str) -> float:
-    """How much the atoms' travel GREW over the second half of the hold.
+def melt_travel(check_dump_path: str) -> tuple[float, float]:
+    """(diffusion ratio, late mean-square displacement) of the hold.
 
     With the half-way frame as the origin, the mean-square displacement
     one interval later and four intervals later are compared. A liquid
     diffuses, so its displacement grows in proportion to time: about
-    fourfold. A crystal's saturates at its vibration amplitude within
-    a fraction of a picosecond: about onefold, however hot it is. The
-    ratio is therefore the one number a superheated crystal cannot
-    fake (DESIGN §4.8 family 3).
+    fourfold, and to several square angstroms. A crystal's saturates
+    at its vibration amplitude within a fraction of a picosecond:
+    about onefold, and under a square angstrom, however hot it is. The
+    ratio is the number a superheated crystal cannot fake; the late
+    displacement guards the ratio against being a quotient of two
+    small numbers (DESIGN §4.8 family 3, LEDGER T-43).
     """
     frames = _read_unwrapped_positions(check_dump_path)
     expected = MELT_CHECK_INTERVALS + 1
@@ -347,8 +356,15 @@ def melt_diffusion_ratio(check_dump_path: str) -> float:
     early_msd = float(np.mean(np.sum((early - origin) ** 2, axis=1)))
     late_msd = float(np.mean(np.sum((late - origin) ** 2, axis=1)))
     if early_msd <= 0.0:
-        return float("inf") if late_msd > 0.0 else 1.0
-    return late_msd / early_msd
+        ratio = float("inf") if late_msd > 0.0 else 1.0
+    else:
+        ratio = late_msd / early_msd
+    return ratio, late_msd
+
+
+def melt_diffusion_ratio(check_dump_path: str) -> float:
+    """The diffusion ratio alone (see :func:`melt_travel`)."""
+    return melt_travel(check_dump_path)[0]
 
 
 def verify_melt(check_dump_path: str, spec: QuenchSpec,
@@ -363,19 +379,23 @@ def verify_melt(check_dump_path: str, spec: QuenchSpec,
     the §3.5 self-check reported that truthfully as "nothing is
     disordered").
     """
-    ratio = melt_diffusion_ratio(check_dump_path)
-    if ratio < MELT_MIN_DIFFUSION_RATIO:
+    ratio, late_msd = melt_travel(check_dump_path)
+    if ratio < MELT_MIN_DIFFUSION_RATIO or (
+            late_msd < MELT_MIN_LATE_MSD_ANGSTROM2):
         melt_kelvin = to_metal(spec.melt_temperature, "temperature")
         melt_ps = to_metal(spec.melt_duration, "time")
         raise RuntimeError(
             f"the melt-quench of '{phase_name}' never melted: over the "
             f"second half of the {melt_ps:g} ps hold at {melt_kelvin:g} K "
             f"the atoms' mean-square displacement grew {ratio:.2f}-fold "
-            f"(a liquid diffuses, at least "
-            f"{MELT_MIN_DIFFUSION_RATIO:g}-fold; a crystal only vibrates, "
-            f"about 1-fold). A small perfect periodic cell at its own "
-            f"crystal volume superheats: raise melt_temperature, "
-            f"lengthen melt_duration, or enlarge cells_per_axis in the "
+            f"to {late_msd:.2f} A^2 (a liquid diffuses: at least "
+            f"{MELT_MIN_DIFFUSION_RATIO:g}-fold and beyond "
+            f"{MELT_MIN_LATE_MSD_ANGSTROM2:g} A^2; a crystal only "
+            f"vibrates, about 1-fold and under 1 A^2). A small perfect "
+            f"periodic cell superheats far past its melting point "
+            f"(LEDGER T-43: 72 atoms of quartz stayed crystalline at "
+            f"5000 K for 5 ps; 243 atoms melted): enlarge cells_per_axis, "
+            f"raise melt_temperature, or lengthen melt_duration in the "
             f"recipe's [[collection1.melt_quench]] (DESIGN §4.8 family 3, "
             f"PSEUDOCODE §11.1)")
     return ratio

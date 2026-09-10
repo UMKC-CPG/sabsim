@@ -20,6 +20,7 @@ from ase.build import bulk
 from sabsim.bootstrap.collection1 import (
     MELT_CHECK_INTERVALS,
     melt_diffusion_ratio,
+    melt_travel,
     verify_melt,
     bulk_family,
     melt_quench_script,
@@ -236,10 +237,11 @@ def test_verify_melt_passes_a_liquid_and_refuses_a_hot_crystal(tmp_path):
     walk, position = [], sites.copy()
     for _ in range(MELT_CHECK_INTERVALS + 1):
         walk.append(position.copy())
-        position = position + rng.normal(0.0, 0.5, size=sites.shape)
+        position = position + rng.normal(0.0, 1.0, size=sites.shape)
     liquid = tmp_path / "liquid.dump"
     _write_melt_check_dump(liquid, walk)
     assert melt_diffusion_ratio(str(liquid)) > 2.5
+    assert melt_travel(str(liquid))[1] > 2.0     # it also travelled
     # A crystal, however hot: independent vibrations about fixed sites,
     # so every frame is the same distance from every other.
     vibrating = [sites + rng.normal(0.0, 0.5, size=sites.shape)

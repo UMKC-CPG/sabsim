@@ -1925,4 +1925,131 @@ glass from the warm catalogue job 16873844 described. Variants:
 density (cell scaled 1.064). Purpose: pick the silica recipe's melt
 settings from numbers.)*
 
-- **Result:** see below (appended when the array finishes).
+- **Result (all six COMPLETED, 26-45 min each on H100):**
+
+  | variant | diffusion ratio | late MSD (A^2) | site shift, final (A) | verdict |
+  |---|---|---|---|---|
+  | 3500 K, 5 ps, 72 atoms (T-42 baseline) | 1.63 | 0.76 | 0.46 | crystal |
+  | 3500 K, 5 ps, 72 atoms, glass density | 1.02 | 0.37 | 0.47 | crystal |
+  | 5000 K, 5 ps, 72 atoms | 1.11 | 0.72 | 0.27 | crystal |
+  | 5000 K, 10 ps, 72 atoms | 2.85 | 31.7 | 4.96 | LIQUID |
+  | 6000 K, 5 ps, 72 atoms | 3.14 | 45.0 | 4.85 | LIQUID |
+  | 5000 K, 5 ps, 243 atoms | 4.58 | 14.1 | 5.92 | LIQUID |
+
+  **Melting.** A 72-atom quartz cell does not melt at 3500 K, nor at
+  5000 K in 5 ps, nor at 3500 K with its cell expanded to the glass
+  density: superheating in a small perfect periodic cell is
+  nucleation-limited, and only time (10 ps at 5000 K), more heat
+  (6000 K) or more atoms (243, which melted within 2.5 ps at 5000 K,
+  cleanly diffusive: 3.1, 7.3, 11.3, 14.1 A^2) breaks it. `verify_melt`
+  separates the two groups with room on both sides — crystals 1.02 to
+  1.63 and under 1.2 A^2, liquids 2.85 to 4.58 and above 14 A^2 — and
+  the late-travel floor (2 A^2) was added because the baseline's 1.63
+  is a quotient of two small numbers.
+
+  **The descriptor, separately.** The final quenched frame of each
+  genuine glass, described at the T-42 settings (cutoff 4.2 A,
+  weights Si 1.0 / O 0.5) against the catalogue job 16873844 built,
+  as a multiple of the warm thermal scatter (Si 6.39, O 16.30):
+
+  | glass | Si median | Si > 3x | O median | O > 3x |
+  |---|---|---|---|---|
+  | 5000 K, 10 ps, 72 atoms | 1.22x | 0.17 | 0.49x | 0.00 |
+  | 6000 K, 5 ps, 72 atoms | 2.19x | 0.29 | 0.82x | 0.04 |
+  | 5000 K, 5 ps, 243 atoms | 1.35x | 0.15 | 0.60x | 0.02 |
+
+  Every atom of these frames is 5-6 A from its lattice site, and the
+  §3.5 ruler still calls 70-85 % of the silicon and 96-100 % of the
+  oxygen crystalline. The self-check (>= 0.5 of melt-quench atoms
+  disordered) would fail on a REAL glass. Reason, in the physics: the
+  SiO4 tetrahedron survives in the glass, and a 4.2 A sphere — chosen
+  for silicon's second shell — sees little beyond it; silica's
+  disorder lives in the Si-O-Si angles and ring statistics at 5-6 A.
+  And oxygen's thermal scatter is 17 % of its vector norm (silicon's
+  11 %), so its tolerance swallows more. **T-44** sweeps the cutoff
+  and the species weights on these same frames.
+
+- **Recipe consequence (pending T-44 for the descriptor half):** the
+  silica template's melt-quench should be `cells_per_axis = 3` at
+  5000 K — the physically cleanest of the three (nucleation, not
+  superheating, does the melting; the 243-atom glass is also a far
+  better amorphous network than 72 atoms in a periodic box, which
+  LEDGER T-42 saw re-order on the way down) — at the cost of a
+  243-atom VASP label per melt-quench frame.
+
+- **Scope NOT covered:** the quench RATE (200 K/ps throughout);
+  whether the 243-atom glass re-orders during a slower quench; the
+  same question for silicon, whose T-38 library passed the self-check
+  under the old, unverified melt (its 64-atom diamond cell at 3000 K
+  did melt, or the self-check could not have read 0.5+ disordered —
+  but the ratio was never measured; the next silicon library build
+  will print it).
+
+## T-44 — job 17238075 (descriptor sweep on the T-43 glasses, CPU) — 2026-09-10
+
+*(Harness `install/tests/t44_silica_descriptor/`: the T-42 catalogue
+frames — cold bulk, 20 warm NVT/NPT frames, the clean surface — and
+the three T-43 glasses re-described under six settings (cutoff 4.2 /
+5.0 / 6.0 A, weights Si 1.0 / O 0.5, Si 0.5 / O 1.0, Si 1.0 / O 0.8),
+then the §3.5 self-check replayed per setting. The metric question
+was then asked on the same dumps on the login node, numpy only.)*
+
+- **Result, plain Euclidean distance (the ruler as it was):** no
+  setting separates silica glass from warm quartz. Glass atoms flagged
+  at three scatters: cutoff 4.2 A Si 0.29 / O 0.05; 5.0 A Si 0.28 /
+  O 0.14; 6.0 A Si 0.05 / O 0.07; weights Si 0.5 / O 1.0 at 4.2 A
+  Si 0.38 / O 0.09. A larger sphere makes it WORSE: the vector norm
+  grows twelvefold (59 -> 738 for Si) and the thermal scatter with
+  it, while the glass's difference does not.
+
+- **Result, distance in the warm covariance's metric (whitened /
+  Mahalanobis), same dumps:** at three scatters, cutoff 4.2 A Si 0.88 /
+  O 0.61; 5.0 A Si 0.91 / O 0.80 (ridge 1e-6). Warm false alarms at
+  three scatters: 0.00 in every case (the tolerance is still the
+  90th-percentile warm distance, so 0.10 at one scatter by
+  construction). Per-component standardisation and direction-only
+  (cosine) distances did NOT help (Si 0.16-0.36). Ridge sensitivity
+  (fraction of the mean variance): 1e-6 -> 1e-3 -> 1e-2 -> 1e-1 gives
+  glass O at 4.2 A 0.61 / 0.54 / 0.41 / 0.22 and Si 0.88 / 0.80 /
+  0.71 / 0.58; at 5.0 A O 0.80 / 0.73 / 0.62 / 0.46, Si 0.91 / 0.89 /
+  0.79 / 0.60. The gain lives in the low-variance directions, so the
+  ridge is a floor (1e-3), not a smoothing.
+
+- **Silicon, the same replay on the T-38 library's own dumps
+  (`jobs/bootstrap_si_lib2`):** plain Euclidean reproduces the stored
+  self-check exactly (melt-quench 0.65 at three scatters, warm 0.00);
+  whitened: melt-quench 1.00 at three scatters (0.98 even at ridge
+  1e-2), warm 0.00. The new ruler is strictly better for silicon too.
+
+- **Decision (DESIGN §3.5, 2026-09-10; code `warm_ruler` /
+  `whiten` in `driver/environment_library.py`):** every distance the
+  library and the gate take is measured after whitening by the
+  species' warm-run covariance, floored at `COVARIANCE_RIDGE_FRACTION
+  = 1e-3` of its mean variance. The library stores the warm mean and
+  the whitening per species and names the metric in its manifest;
+  the loader REFUSES a library built under the old ruler (no silent
+  fallback) — every existing library is rebuilt by its
+  `.library.slurm` job. Recipe consequence for silica: descriptor
+  cutoff 5.0 A (template `recipes/sio2.toml`); silicon stays at 4.2 A.
+
+- **Scope NOT covered:** the activated-slab side of the gate under the
+  new ruler — the depth profile of a bombarded silicon half was
+  measured only under the old one (T-40/T-41: 12-16 A). The whitened
+  ruler is tighter in the quiet directions, so a warm SURFACE atom,
+  whose thermal motion the bulk warm runs did not sample, could read
+  as disordered and add a layer to the measured depth; T-45 (the
+  si_sio2 chain under the new libraries) is the first measurement.
+
+## T-45 — jobs 17238479/17238480 (library builds) -> 17238481/17238482 (preps) -> 17238483 (bond) -> 17238485 (analysis), `jobs/si_sio2` — 2026-09-10
+
+*(The first project run entirely from generated scripts — `sabsim
+prepare`'s six-job chained form, submitted as the guide prints it —
+and the first oxide pair through prep -> bond. Libraries rebuilt
+under the whitened ruler: silicon (recipe unchanged, old library
+kept aside as `*.raw-ruler-2026-08-29`) and silica (recipe: 243-atom
+melt at 5000 K, cutoff 5.0 A; old scratch kept as
+`bootstrap_t42_16873844_never_melted/`). Judged by: both libraries'
+self-check numbers and melt ratios; both preps' gate depth; bond's
+shared-cell agreement and separation; the measure vector.)*
+
+- **Result:** see below (appended as the chain runs).
