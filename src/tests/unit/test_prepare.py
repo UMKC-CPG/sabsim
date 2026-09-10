@@ -148,14 +148,22 @@ def project(tmp_path):
 
 def test_writes_four_scripts_named_by_stage_folder_plus_guide(
         roots_set, project):
-    """One script per registry job, named `<stage folder>.slurm`."""
+    """One script per registry job, named `<stage folder>.slurm`, after
+    the two library builds named `<prep folder>.library.slurm`."""
     entries = prepare(project["spec"], _RC)
 
     assert [e.job_name for e in entries] == [
+        "library_surf1", "library_surf2",
         "prep_surf1", "prep_surf2", "bond", "analysis"]
     assert [e.script_name for e in entries] == [
+        f"{_PREP_1}.library.slurm", f"{_PREP_2}.library.slurm",
         f"{_PREP_1}.slurm", f"{_PREP_2}.slurm",
         f"{_BOND}.slurm", f"{_ANALYSIS}.slurm"]
+    # Each prep is held on its own surface's library build (§10.2).
+    by_name = {e.job_name: e for e in entries}
+    assert by_name["prep_surf1"].depends_on == ("library_surf1",)
+    assert by_name["prep_surf2"].depends_on == ("library_surf2",)
+    assert by_name["library_surf1"].depends_on == ()
     for entry in entries:
         assert (project["folder"] / entry.script_name).is_file()
     assert (project["folder"] / GUIDE_FILENAME).is_file()
@@ -289,16 +297,23 @@ def test_guide_reads_as_the_dependency_graph(roots_set, project):
 
     assert "si_sio2" in guide                          # the pair label
     assert "a test project" in guide                   # the description
-    assert f"1. `sbatch {_PREP_1}.slurm`" in guide
-    assert f"2. `sbatch {_PREP_2}.slurm`" in guide
+    assert f"1. `sbatch {_PREP_1}.library.slurm`" in guide
+    assert f"2. `sbatch {_PREP_2}.library.slurm`" in guide
     assert "in either order, or together" in guide
-    assert f"3. `sbatch {_BOND}.slurm`" in guide
-    assert f"after `{_PREP_1}` and `{_PREP_2}` has finished" in guide
-    assert f"4. `sbatch {_ANALYSIS}.slurm`" in guide
-    assert f"after `{_BOND}` has finished" in guide
+    assert f"3. `sbatch {_PREP_1}.slurm`" in guide
+    assert f"after `{_PREP_1}.library.slurm` has finished" in guide
+    assert f"4. `sbatch {_PREP_2}.slurm`" in guide
+    assert f"5. `sbatch {_BOND}.slurm`" in guide
+    assert (f"after `{_PREP_1}.slurm` and `{_PREP_2}.slurm` have "
+            f"finished") in guide
+    assert f"6. `sbatch {_ANALYSIS}.slurm`" in guide
+    assert f"after `{_BOND}.slurm` has finished" in guide
     # The chained form, with the scheduler holding each job for the
-    # ones it depends on.
-    assert f"prep_surf1_id=$(sbatch --parsable {_PREP_1}.slurm)" in guide
+    # ones it depends on — the library builds first.
+    assert (f"library_surf1_id=$(sbatch --parsable "
+            f"{_PREP_1}.library.slurm)") in guide
+    assert (f"prep_surf1_id=$(sbatch --parsable --dependency=afterok:"
+            f"$library_surf1_id {_PREP_1}.slurm)") in guide
     assert ("bond_id=$(sbatch --parsable --dependency=afterok:"
             f"$prep_surf1_id:$prep_surf2_id {_BOND}.slurm)") in guide
     assert ("analysis_id=$(sbatch --parsable --dependency=afterok:"
@@ -370,12 +385,36 @@ def test_gpus_over_partition_stops_before_writing(
 
 
 def test_dump_visuals_rides_every_generated_run_line(roots_set, project):
-    """`prepare --dump-visuals` puts the flag on each job's run line."""
+    """`prepare --dump-visuals` puts the flag on each PAIR job's run line.
+
+    The library builds are bootstrap runs, not `sabsim run`, so the
+    flag does not apply to them.
+    """
+    def pair_jobs(entries):
+        return [e for e in entries if not e.job_name.startswith("library")]
     entries = prepare(project["spec"], _RC, dump_visuals=True)
-    for entry in entries:
+    assert len(pair_jobs(entries)) == 4
+    for entry in pair_jobs(entries):
         text = (project["folder"] / entry.script_name).read_text()
         assert "--dump-visuals" in text
     plain = prepare(project["spec"], _RC, dump_visuals=False)
     assert all("--no-dump-visuals" in
                (project["folder"] / e.script_name).read_text()
-               for e in plain)
+               for e in pair_jobs(plain))
+
+
+def test_library_build_runs_the_bootstrap_in_the_prep_folder(
+        roots_set, project):
+    """The `.library` script: prep resources, prep-folder home, bootstrap
+    run line, and a refusal to overwrite an existing library (§10.2)."""
+    prepare(project["spec"], _RC)
+    text = (project["folder"] / f"{_PREP_2}.library.slurm").read_text()
+    assert f"#SBATCH --job-name={_PREP_2}.library" in text
+    assert "#SBATCH --gres=gpu:H100:1" in text          # the prep block
+    assert f'cd "{project["folder"] / _PREP_2}"' in text
+    assert 'if [ -f "environment_library.toml" ]; then' in text
+    assert "exit 0" in text
+    assert "python -m sabsim bootstrap generate" in text
+    assert "recipe.toml --skip-collection2" in text
+    assert "sabsim run" not in text
+    assert f"then submit: sbatch {_PREP_2}.slurm" in text

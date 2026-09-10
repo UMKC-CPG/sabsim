@@ -18,8 +18,10 @@ and put a ``sabsim.toml`` there — the run's location is where you launch it,
 never a guessed path (VISION.md principle 1). Outputs land under that
 directory's scratch mirror (§4.2).
 
-``sabsim init [folder]`` comes before all of that: it writes a project
-folder from the tracked templates (DESIGN.md §10.9) and never overwrites.
+``sabsim setup`` and ``sabsim init [folder]`` come before all of that:
+the first checks the install and writes the shell rc (DESIGN.md §10.10),
+the second writes a project folder from the tracked templates (§10.9).
+Neither overwrites anything.
 
 The run/restart/refresh/test operations are FLAGS on ``run``, not separate
 verbs. v1 ships ``--dry-run`` (the login-node stub run) and the four
@@ -97,6 +99,26 @@ def _build_parser() -> argparse.ArgumentParser:
              "frame_stride. Only meaningful with --dump-visuals; raise it "
              "for smaller files, lower it for smoother playback")
 
+    # `setup` — the install CHECKED and the shell rc WRITTEN (DESIGN.md
+    # §10.10, PSEUDOCODE §14.8). Builds nothing; never overwrites.
+    setup = subcommands.add_parser(
+        "setup",
+        help="check each layer of the install (clone, conda, venv, share, "
+             "engine, scratch) and write .sabsim/sabsimrc from the "
+             "template if it is missing; builds nothing")
+    setup.add_argument(
+        "--scratch", metavar="PATH",
+        help="the per-user scratch root (SABSIM_SCRATCH); default: the "
+             "variable if set, else the template's worked example")
+    setup.add_argument(
+        "--share", metavar="PATH",
+        help="the group install root (SABSIM_SHARE); default: the "
+             "variable if set, else the template's worked example")
+    setup.add_argument(
+        "--venv", metavar="PATH",
+        help="the venv the rc activates; default: the one running this "
+             "command")
+
     # `init` — the GENERATOR (DESIGN.md §10.9, PSEUDOCODE §14.7): writes
     # a project folder from the tracked templates and never overwrites,
     # so it can be re-run after an edit to add what is still missing.
@@ -109,6 +131,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "project", nargs="?", default=".",
         help="the project folder to fill (default: this directory); "
              "made if missing")
+    init.add_argument(
+        "--materials", nargs=2, metavar=("WAFER_A", "WAFER_B"),
+        help="the pair to bond, as two labels from the materials "
+             "catalogue (share/templates/recipes/materials.toml), e.g. "
+             "Si SiO2; sets both wafer tables of a NEW sabsim.toml. "
+             "Without it the template pair is written and the catalogue "
+             "is printed")
 
     # `prepare` — the WRITER (DESIGN.md §10.1, PSEUDOCODE §14.4): reads
     # the project file AND the machine-local deployment rc, and writes
@@ -355,6 +384,46 @@ def _print_job_summary(result) -> None:
               "is written.")
 
 
+def _setup(args: argparse.Namespace) -> int:
+    """Execute ``sabsim setup``: the checklist, then the rc (§10.10).
+
+    Exit 0 when every layer is present, 1 when something is missing or
+    wrong — after printing the whole list either way, so one run shows
+    everything there is to fix.
+    """
+    from sabsim.deploy.setup_install import RC_RELATIVE_PATH, setup_install
+
+    try:
+        report = setup_install(scratch=args.scratch, share=args.share,
+                               venv=args.venv)
+    except RuntimeError as failure:
+        print(f"sabsim: setup halted — {failure}", file=sys.stderr)
+        return 1
+
+    print(f"sabsim setup: clone {report.clone}")
+    for check in report.checks:
+        print(f"  {check.state:8s} {check.name:8s} {check.detail}")
+    print("\nValues for the rc, and where each came from:")
+    for name in ("scratch", "share", "venv"):
+        print(f"  {name:8s} {report.values[name]}")
+        print(f"           from {report.provenance[name]}")
+    if report.rc_written:
+        print(f"\n  wrote  {RC_RELATIVE_PATH}")
+    else:
+        print(f"\n  kept   {RC_RELATIVE_PATH}  (already there, untouched)")
+    print("\nNext (DESIGN.md §10.10):")
+    print(f"  1. read {RC_RELATIVE_PATH}; fix any value marked EDIT.")
+    print(f"  2. `source {RC_RELATIVE_PATH}` in every login shell, then "
+          f"`pytest src/tests -q`.")
+    print("  3. `sabsim init <project folder> --materials <a> <b>` starts "
+          "a project.")
+    if not report.all_present:
+        print("\n  Some layers are MISSING or WRONG (above); each line "
+              "says the fix.")
+        return 1
+    return 0
+
+
 def _init(args: argparse.Namespace) -> int:
     """Execute ``sabsim init``: write the missing parts of a project.
 
@@ -364,10 +433,17 @@ def _init(args: argparse.Namespace) -> int:
     is complete in the §1.4 sense and unread in the science sense
     until the person has looked at it (DESIGN.md §10.9).
     """
-    from sabsim.deploy.init_project import InitError, init_project
+    from sabsim.deploy.init_project import (
+        InitError,
+        describe_catalogue,
+        init_project,
+        read_materials_catalogue,
+    )
 
+    materials = tuple(args.materials) if args.materials else None
     try:
-        report = init_project(args.project)
+        report = init_project(args.project, materials=materials)
+        catalogue = read_materials_catalogue()
     except InitError as failure:
         print(f"sabsim: init halted — {failure}", file=sys.stderr)
         return 1
@@ -379,17 +455,22 @@ def _init(args: argparse.Namespace) -> int:
         print(f"  kept   {path}  (already there, untouched)")
     for notice in report.notices:
         print(f"  NOTE   {notice}")
+    if materials is None:
+        print("\nThe pair was not named (--materials WAFER_A WAFER_B), so "
+              "the template's pair\nwas written. Materials the repository "
+              "ships a recipe for:")
+        for line in describe_catalogue(catalogue):
+            print(f"  {line}")
     print("\nNext, in order (DESIGN.md §10.9):")
     print("  1. read and edit sabsim.toml (the science of this pair) and "
           "deployment.toml\n     (this machine); each prep folder's "
           "recipe.toml describes its surface's\n     material.")
-    print("  2. in each prep_surf*/ folder, build the environment library "
-          "on a compute\n     node: `sabsim bootstrap generate recipe.toml "
-          "--skip-collection2` inside\n     an sbatch job (a GPU "
-          "allocation; never the login node).")
-    print("  3. back in the project folder, `sabsim prepare` writes the "
-          "four job\n     scripts and a SUBMISSION_GUIDE.md; submit them "
-          "in the guide's order.")
+    print("  2. in the project folder, `sabsim prepare` writes the job "
+          "scripts and a\n     SUBMISSION_GUIDE.md: two environment-"
+          "library builds (step 0, once per\n     recipe), the two "
+          "surface preps, bond, and analysis.")
+    print("  3. submit them in the guide's order, or as its chained form; "
+          "nothing runs\n     on the login node.")
     print("  Running `sabsim init` again is safe: it adds only what is "
           "missing.")
     return 0
@@ -441,6 +522,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.command == "run":
         return _run(args)
+    if args.command == "setup":
+        return _setup(args)
     if args.command == "init":
         return _init(args)
     if args.command == "prepare":

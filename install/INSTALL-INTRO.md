@@ -105,12 +105,16 @@ bash install/build_venv.sh
 sbatch install/build_lammps.sh
 ```
 
-Then write `.sabsim/sabsimrc` (see below), source it, and run the test
-suite:
+Then, from the venv you just built, let `sabsim setup` check every
+layer and write `.sabsim/sabsimrc` (it fills the template's three
+machine-specific lines and never overwrites; a value it could only
+take from the template's worked example is marked EDIT):
 
 ```bash
+source <your venv>/bin/activate
+sabsim setup --scratch $HOME/data/scratch/sabsim   # --share, --venv too
 source .sabsim/sabsimrc
-pytest src/tests/ -v
+pytest src/tests/ -q
 ```
 
 ## Your first project
@@ -122,13 +126,13 @@ each surface's material — and never overwrites, so it is safe to run
 again after you edit the pair (`DESIGN.md` §10.9):
 
 ```bash
-mkdir -p ~/sabsim/jobs && sabsim init ~/sabsim/jobs/si_sio2
+mkdir -p ~/sabsim/jobs
+sabsim init ~/sabsim/jobs/si_sio2 --materials Si SiO2   # no flag: lists them
 cd ~/sabsim/jobs/si_sio2
 # 1. read and edit sabsim.toml, deployment.toml, prep_surf*/recipe.toml
-# 2. build each surface's environment library on a GPU node (sbatch a
-#    job that runs `sabsim bootstrap generate recipe.toml
-#    --skip-collection2` inside the prep folder)
-sabsim prepare          # 3. writes the four .slurm + SUBMISSION_GUIDE.md
+sabsim prepare          # 2. writes six .slurm + SUBMISSION_GUIDE.md
+# 3. submit in the guide's order: the two .library builds (once per
+#    recipe), the two preps, bond, analysis — or its chained form
 ```
 
 ## The four things that trip people up
@@ -146,13 +150,14 @@ OpenMPI 5.0.10 — which is exactly what `build_lammps.sh` does. For the
 same reason, install SABSIM itself with `--no-deps`, so pip never
 re-resolves the hand-pinned stack out from under you.
 
-**Write `.sabsim/sabsimrc` by hand.** It is gitignored, so a fresh clone
-never has one, and there is no generator for it yet. It declares three
-location roots — `SABSIM_SCRATCH` (regenerable run output),
-`SABSIM_SHARE` (the group-readable install, engines and reference data),
-and the optional `SABSIM_LOCAL` override — and then activates the conda
-env and the venv on top of it. Nothing in SABSIM guesses where to run;
-this file states it. Copy an existing one and edit the paths.
+**Read `.sabsim/sabsimrc` after `sabsim setup` writes it.** It is
+gitignored, so a fresh clone never has one. It declares three location
+roots — `SABSIM_SCRATCH` (regenerable run output), `SABSIM_SHARE` (the
+group-readable install, engines and reference data), and the optional
+`SABSIM_LOCAL` override — and then activates the conda env and the venv
+on top of it. Nothing in SABSIM guesses where to run; this file states
+it, and `setup` says where each value came from (a flag, a variable
+already set, or the template's example, which you must edit).
 
 **Launching MPI needs one unset.** Slurm exports mutually-exclusive
 memory variables that abort a nested launch. Every run script should

@@ -1920,7 +1920,21 @@ student can read the file and know what was manufactured.
       whole. It is the cheapest source of the amorphous chemistry the
       interface is made of, and omitting it would leave that chemistry
       to be learned only from the expensive, surface-contaminated
-      cascade configs.
+      cascade configs. The melt is VERIFIED, not assumed (LEDGER T-42,
+      2026-09-10): a small perfect periodic cell held at its own
+      crystal volume can superheat far past its melting point and only
+      vibrate — 72 atoms of quartz did exactly that at 3500 K — and a
+      "melt" that never melted is a rattled crystal wearing an
+      amorphous label. The test is the one thing that separates a
+      liquid from any hot crystal: a liquid keeps travelling, a crystal
+      does not. Over the second half of the melt hold the atoms'
+      mean-square displacement must keep GROWING (diffusive, so about
+      fourfold from one eighth of the hold to four eighths), where a
+      crystal's saturates at its vibration amplitude (about onefold).
+      The build refuses a melt whose growth is under twofold and says
+      which knob to turn — hotter, longer, or a bigger cell — instead
+      of letting the §3.5 self-check report a descriptor failure that
+      is really a recipe failure.
    4. **Clean surfaces** — the free surface of each phase, unbombarded.
    5. **Rattled snapshots** — moderate-temperature static displacements
       about the cold cell.
@@ -4176,6 +4190,19 @@ each named like the project folder it works in (`ARCHITECTURE.md` §1):
   fan-out `ARCHITECTURE.md` §4.3 kept available through the files,
   arriving at no cost. (From 2026-08-28 to 2026-08-30 one `activate`
   job prepared both halves serially and assembled them.)
+  Each prep job needs its surface's ENVIRONMENT LIBRARY (§3.5), which
+  the bootstrap builds from the recipe in the same prep folder. That
+  build is a fifth kind of script `prepare` writes — one per surface,
+  `prep_surfN_<label>.library.slurm` — but NOT a fifth job of the pair
+  chain: it runs on the bootstrap's own clock, once per recipe, and is
+  not a `sabsim run` flag (`ARCHITECTURE.md` §4, PSEUDOCODE §14.6). The
+  guide lists it as step 0, and the script refuses to overwrite a
+  library that is already there (the deliverable is precious, §10.8):
+  a person who has changed the recipe moves the old library aside and
+  resubmits. So the chained form is six jobs — two library builds,
+  two preps held on them, bond, analysis — and a second submission of
+  the same chain skips the two builds in seconds (added 2026-09-10,
+  replacing the hand-written harness of LEDGER T-38/T-42).
 - **bond** (GPU): read both halves, check that their lateral cells
   agree, bring them together at the press-start opening (§2.6), run the
   one-time lateral cell relax (§5.6), then press, settle, and pull (§5),
@@ -4483,6 +4510,32 @@ material with no recipe of its own gets the silicon recipe as a
 starting point and a printed notice saying so — a start, in the open,
 never a silent guess.
 
+**The pair can be named on the command line.** Which two materials
+to bond is THE science decision of a project, so it is the one thing
+`init` asks for rather than guesses:
+
+```
+sabsim init si_sio2 --materials Si SiO2
+```
+
+The two labels are looked up in the MATERIALS CATALOGUE,
+`share/templates/recipes/materials.toml` — one entry per material the
+repository ships a recipe for, holding exactly what the project file's
+wafer table needs (the canonical label, the crystal file, the human
+structure label, the bonding face) and which recipe template is that
+material's. `init` writes the template project file and then sets the
+two wafer tables from the two entries, so a person never types a
+crystal path for a material we already know. The match is
+case-insensitive (`sio2` finds `SiO2`) and the CANONICAL spelling is
+what gets written, because the label is also the prep folder's name.
+Run with no `--materials`, `init` writes the template pair and prints
+the catalogue, so the person sees what is on offer before editing. A
+material that is NOT in the catalogue is refused with the catalogue
+printed, not written with a guessed crystal: `init` without the flag,
+then editing the wafer table by hand, is the honest path for a new
+material — and adding its entry and recipe to the catalogue is how it
+stops being new.
+
 What `init` does NOT do is as deliberate. It does not run the
 bootstrap (a compute-node job), does not write the environment
 library, and does not call `prepare` — each of those reads a file the
@@ -4491,6 +4544,41 @@ to edit and what to run next, and stops. The generated project is
 complete in the §1.4 sense (every knob written) and wrong in the
 science sense until the person has read it — exactly the relationship
 a template is meant to have with its user.
+
+### 10.10 `setup` — the install walked through, and the rc written (2026-09-10)
+
+The one file the install could not generate was the shell rc,
+`.sabsim/sabsimrc`, which must be live BEFORE Python starts because it
+names the install itself (`ARCHITECTURE.md` §4.1). It was "copy an
+existing one and edit the paths" — the same hand-copying `init` just
+removed from the project side. `sabsim setup` is the generator for it,
+and a checklist around it:
+
+```
+sabsim setup [--scratch PATH] [--share PATH] [--venv PATH]
+```
+
+It runs from the Python environment the person has just built, and it
+reads its own situation rather than asking: which clone this package
+is installed from (the editable install's pointer), which interpreter
+prefix it is running under (the venv), which conda environment sits
+beneath it, and what the three location roots currently are. It then
+reports each layer of the install as PRESENT, MISSING, or WRONG, with
+the exact command that fixes a missing one — the conda environment,
+the venv, the engine bundle, a writable scratch root — and, crucially,
+WRONG when the venv's editable install points at a clone other than
+the one `setup` is run from: that is the mistake a student makes by
+sourcing a lab-mate's rc, and it silently runs the wrong tree.
+
+Then it writes `.sabsim/sabsimrc` from the template, never
+overwriting, with each value taken in order from the flag, from the
+variable already set in the environment, or from the template's
+worked example — and it SAYS which, per value, so an example path that
+was not edited is reported as such rather than trusted. It builds
+nothing itself: the conda environment and the venv are hour-long steps
+a person should launch knowingly (§10.1's rule that the tool writes
+and the human runs). It ends by printing what to do next: source the
+rc, run the tests, `sabsim init`.
 
 ## 11. Resuming an interrupted run
 

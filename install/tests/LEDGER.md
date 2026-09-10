@@ -1881,9 +1881,48 @@ prep_surf1_si/` — the reuse-by-copy path.)*
   bootstrap_t42_16873531_FAILED_type_swap/`. **Rerun 16873844**
   submitted 14:07 — result below.
 
+- **Rerun 16873844: FAILED the same way, for a different reason
+  (read 2026-09-10).** The species fix landed — every describe data
+  file now has 24 Si and 48 O — and the silicon scatter came out
+  6.39 (O 16.30), comparable to the silicon library's 5.45. But the
+  self-check still read 0.000 / 0.000, and the login-node replay
+  from the descriptor dumps says why: the melt-quench atoms are
+  CLOSER to the catalogue than the warm atoms (Si median 2.3 versus a
+  warm scatter of 6.4), and even the hottest frame (3500 K) sits at
+  about 1.1 scatters. Then the direct test: every atom of the 72-atom
+  quartz cell stays within 1.6 A of its ORIGINAL lattice site through
+  the whole 5 ps hold at 3500 K and the quench, and within 0.8 A by
+  the last frame. The energy trace agrees — the potential-energy rise
+  at 3500 K is below even a harmonic crystal's, with no latent heat.
+  **The cell never melted.** A small perfect periodic cell held at
+  its own crystal volume superheats far past its melting point and
+  only vibrates; the self-check truthfully reported "nothing is
+  disordered". The bug is upstream of the descriptor: PSEUDOCODE
+  §11.1 already demanded "VERIFY, do not assume: the melt must be
+  confirmed disordered", and the code comment said "verified by the
+  caller", but no caller did. Fixed the same day (`verify_melt`: the
+  hold dumps unwrapped positions at eighths and the mean-square
+  displacement over the second half must grow at least twofold —
+  diffusion, which a hot crystal cannot fake; DESIGN §4.8 family 3),
+  and the recipe question is answered by **T-43** below, not guessed.
+
 - **Scope NOT covered:** whether the stale-array path ever reached a
   PRODUCTION structure. The activated half and the assembled pair are
   built from arrays, not dump readbacks, and every run so far was
   single-species silicon, so no earlier ledger result is affected;
   the first oxide pair through prep→bond (T-43, once this library
   exists) is the check.
+
+## T-43 — job array 17235970 (six silica melt-quench variants) — 2026-09-10
+
+*(Harness `install/tests/t43_silica_melt/`: one variant per array
+task through the real `melt_quench_script` — now with the melt-check
+dump — judged by the new diffusion ratio, by the final frame's shift
+from its lattice sites, and by the §3.5 separation of the quenched
+glass from the warm catalogue job 16873844 described. Variants:
+3500 K/5 ps/2 cells (the T-42 baseline), 5000 K/5 ps, 5000 K/10 ps,
+6000 K/5 ps, 5000 K/5 ps/3 cells (243 atoms), and 3500 K at the glass
+density (cell scaled 1.064). Purpose: pick the silica recipe's melt
+settings from numbers.)*
+
+- **Result:** see below (appended when the array finishes).

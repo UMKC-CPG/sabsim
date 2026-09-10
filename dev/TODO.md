@@ -45,6 +45,24 @@
 
 <!-- Tasks related to layout, modules, build. -->
 
+- [x] **`sabsim setup`, `init --materials`, library builds from
+      `prepare`, melt verification** (Paul, 2026-09-10; DESIGN §10.2,
+      §10.9, §10.10, §4.8 family 3; PSEUDOCODE §14.4, §14.7, §14.8,
+      §11.1). `setup` checks clone/conda/venv/share/engine/scratch and
+      writes `.sabsim/sabsimrc` from the template (never overwrites;
+      WRONG when the venv's editable sabsim is another clone). `init
+      --materials A B` sets the wafer tables from the materials
+      catalogue `share/templates/recipes/materials.toml`; no flag
+      prints it. `prepare` writes `prep_surfN_<label>.library.slurm`
+      (bootstrap generate in the prep folder; exits at once if the
+      library exists) and holds each prep on it: six-job chain.
+      `verify_melt` refuses a melt-quench whose mean-square
+      displacement did not grow twofold over the second half of the
+      hold (LEDGER T-42: quartz at 3500 K never melted). OPEN:
+      `bootstrap_directory` reuses `bootstrap/<recipe>` across runs,
+      against the never-overwrite rule — label/harvest need a stable
+      path, so a `run-<id>` layout there needs a "latest" pointer.
+      OPEN: the silica recipe's melt settings, from LEDGER T-43.
 - [x] **`sabsim init` — the §1.4 generator as a command** (Paul,
       2026-09-07; `DESIGN.md` §10.9, `PSEUDOCODE.md` §14.7,
       `ARCHITECTURE.md` §1). Writes a project folder from

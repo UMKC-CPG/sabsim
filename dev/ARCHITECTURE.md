@@ -50,17 +50,25 @@ is the person's own label and means nothing to the program. Decided
     analysis_<a>_<b>/     the measure vector, curves, characterization
     prep_surf1_<a>.slurm, prep_surf2_<b>.slurm, bond_<a>_<b>.slurm,
     analysis_<a>_<b>.slurm       the four jobs `prepare` writes (§4.3)
+    prep_surf1_<a>.library.slurm, prep_surf2_<b>.library.slurm
+                          the two environment-library builds `prepare`
+                          also writes: step 0 of the guide, once per
+                          recipe, on the bootstrap's clock (§4)
     intermediate ->  $SABSIM_SCRATCH/<mirror of this project's path>/
                           the bulky, regenerable files, in the SAME
                           four folder names as above (§4.1)
 ```
 
-`sabsim init [<project>]` writes this folder from the tracked templates
-(`share/templates/`): the two top-level files, the four stage folders
-named from the wafer labels it reads back out of `sabsim.toml`, and a
-per-material `recipe.toml` in each prep folder (`share/templates/
-recipes/<label>.toml`). It never overwrites and can be re-run after an
-edit to add what is missing (DESIGN §10.9, PSEUDOCODE §14.7).
+`sabsim init [<project>] [--materials <a> <b>]` writes this folder from
+the tracked templates (`share/templates/`): the two top-level files
+(the wafer tables set from the materials catalogue `share/templates/
+recipes/materials.toml` when the pair is named), the four stage
+folders named from the wafer labels it reads back out of
+`sabsim.toml`, and a per-material `recipe.toml` in each prep folder
+(`share/templates/recipes/<label>.toml`). It never overwrites and can
+be re-run after an edit to add what is missing (DESIGN §10.9,
+PSEUDOCODE §14.7). One level up, `sabsim setup` checks the install and
+writes the shell rc (DESIGN §10.10).
 
 The PREFIX of a stage folder names the stage; the SUFFIX is the wafer
 material label(s) from `sabsim.toml`, LOWER-CASED so the names are

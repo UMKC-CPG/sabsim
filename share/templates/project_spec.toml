@@ -78,10 +78,12 @@ material_domain = "silicon-and-silica"
 # cristobalite) are two labels, so the program never has to guess.
 # ---------------------------------------------------------------------
 [wafer_a]
+# `structure` is a human label (the CIF is authoritative); `face` is
+# the Miller index of the bonding surface.
 material  = "Si"
 cif       = "src/sabsim/structure/data/si_diamond.cif"
-structure = "diamond"        # human label; the CIF is authoritative
-face      = [1, 0, 0]        # Miller indices of the bonding surface
+structure = "diamond"
+face      = [1, 0, 0]
 
 [wafer_b]
 material  = "SiO2"
@@ -94,8 +96,8 @@ material  = "SiO2"
 # the project stays loadable. Swap this back the moment the
 # cristobalite CIF lands.
 cif       = "src/sabsim/structure/data/sio2_alpha_quartz.cif"
-structure = "alpha-quartz"        # stand-in; beta-cristobalite intended
-face      = [0, 0, 1]             # the basal face
+structure = "alpha-quartz"
+face      = [0, 0, 1]
 
 # ---------------------------------------------------------------------
 # POTENTIAL block (§1.6, §4.7): WHICH force models the project runs

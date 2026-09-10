@@ -18,6 +18,9 @@ from ase import Atoms
 from ase.build import bulk
 
 from sabsim.bootstrap.collection1 import (
+    MELT_CHECK_INTERVALS,
+    melt_diffusion_ratio,
+    verify_melt,
     bulk_family,
     melt_quench_script,
     rattle_family,
@@ -207,6 +210,49 @@ def test_melt_quench_script_melts_holds_then_ramps_down():
     assert "run 13500" in script
     assert any(line.startswith("dump frames all custom 1350 ")
                for line in script)                 # 10 frames
+    # The hold dumps UNWRAPPED positions at eighths for verify_melt.
+    assert any(line.startswith("dump melt_check all custom 625 ")
+               and line.endswith("id type xu yu zu") for line in script)
+    assert script.index("undump melt_check") < script.index("unfix melt")
+
+
+def _write_melt_check_dump(path, frames):
+    """Write an ``id type xu yu zu`` dump of the given (N, 3) frames."""
+    with open(path, "w", encoding="utf-8") as dump:
+        for step, positions in enumerate(frames):
+            dump.write(f"ITEM: TIMESTEP\n{step}\nITEM: NUMBER OF ATOMS\n"
+                       f"{len(positions)}\nITEM: BOX BOUNDS pp pp pp\n"
+                       f"0 10\n0 10\n0 10\nITEM: ATOMS id type xu yu zu\n")
+            for index, (x, y, z) in enumerate(positions, start=1):
+                dump.write(f"{index} 1 {x} {y} {z}\n")
+
+
+def test_verify_melt_passes_a_liquid_and_refuses_a_hot_crystal(tmp_path):
+    """Diffusive travel grows fourfold; vibration saturates at onefold."""
+    rng = np.random.default_rng(3)
+    sites = rng.uniform(0.0, 10.0, size=(40, 3))
+    # A liquid: a random walk, so the mean-square displacement from the
+    # half-way frame grows in proportion to the number of intervals.
+    walk, position = [], sites.copy()
+    for _ in range(MELT_CHECK_INTERVALS + 1):
+        walk.append(position.copy())
+        position = position + rng.normal(0.0, 0.5, size=sites.shape)
+    liquid = tmp_path / "liquid.dump"
+    _write_melt_check_dump(liquid, walk)
+    assert melt_diffusion_ratio(str(liquid)) > 2.5
+    # A crystal, however hot: independent vibrations about fixed sites,
+    # so every frame is the same distance from every other.
+    vibrating = [sites + rng.normal(0.0, 0.5, size=sites.shape)
+                 for _ in range(MELT_CHECK_INTERVALS + 1)]
+    crystal = tmp_path / "crystal.dump"
+    _write_melt_check_dump(crystal, vibrating)
+    assert melt_diffusion_ratio(str(crystal)) < 1.5
+
+    recipe = load_recipe(_RECIPE)
+    spec = recipe.starting_collection.melt_quench[0]
+    assert verify_melt(str(liquid), spec, "silicon-diamond") > 2.5
+    with pytest.raises(RuntimeError, match="never melted.*melt_temperature"):
+        verify_melt(str(crystal), spec, "silicon-diamond")
 
 
 def test_warm_run_script_uses_npt_when_asked():

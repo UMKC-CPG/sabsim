@@ -61,6 +61,17 @@ from sabsim.structure.slab_builder import (
 # labeller would only stride over anyway.
 _DUMP_FRAME_CAP = 200
 
+# The melt VERIFICATION (DESIGN §4.8 family 3, PSEUDOCODE §11.1). A
+# liquid keeps travelling; a crystal, however hot, only vibrates about
+# its sites. Unwrapped positions are dumped at eighths of the melt
+# hold, and the mean-square displacement measured from the half-way
+# frame must grow from one eighth later to four eighths later by at
+# least this ratio: diffusive motion gives about 4, saturated
+# vibration about 1, so 2 sits between them with room on both sides.
+MELT_CHECK_INTERVALS = 8
+MELT_MIN_DIFFUSION_RATIO = 2.0
+MELT_CHECK_DUMP_NAME = "melt_check.dump"
+
 
 def _symbols_from_types(type_ids, type_map: dict) -> list:
     """LAMMPS type ids -> element symbols, by the data file's map."""
@@ -254,12 +265,24 @@ def melt_quench_script(
     quench_steps = max(1, round(quench_ps / timestep_ps))
     stride = max(1, quench_steps // max(1, spec.frames))
     damping = 100.0 * timestep_ps
+    # The hold is dumped UNWRAPPED (xu yu zu: no periodic re-entry) at
+    # eighths, so `verify_melt` can measure real travel afterwards.
+    # LAMMPS writes the frame at step 0 too, giving nine frames; the
+    # hold is rounded to a whole number of intervals so the last frame
+    # lands exactly on its end.
+    check_stride = max(1, melt_steps // MELT_CHECK_INTERVALS)
+    melt_steps = check_stride * MELT_CHECK_INTERVALS
+    check_dump = melt_check_dump_path(dump_file)
     return [
         *_dynamics_preamble(data_file, model, timestep_ps),
         f"velocity all create {melt_kelvin:g} {seed} dist gaussian",
         f"fix melt all nvt temp {melt_kelvin:g} {melt_kelvin:g} "
         f"{damping:g}",
+        f"dump melt_check all custom {check_stride} {check_dump} "
+        f"id type xu yu zu",
+        "dump_modify melt_check sort id",
         f"run {melt_steps}",
+        "undump melt_check",
         "unfix melt",
         f"dump frames all custom {stride} {dump_file} id type x y z",
         "dump_modify frames sort id",
@@ -268,6 +291,94 @@ def melt_quench_script(
         f"run {quench_steps}",
         f"write_data {dump_file}.final.data nocoeff",
     ]
+
+
+def melt_check_dump_path(dump_file: str) -> str:
+    """Where the melt hold's unwrapped frames go: beside the run's dump."""
+    return os.path.join(os.path.dirname(dump_file), MELT_CHECK_DUMP_NAME)
+
+
+def _read_unwrapped_positions(dump_path: str) -> list:
+    """Every frame of an ``id type xu yu zu`` dump as an (N, 3) array.
+
+    A deliberately plain reader: the melt-check dump has exactly those
+    five columns, sorted by id, and nothing else needs it. Unwrapped
+    coordinates are what make displacement meaningful — an atom that
+    crossed the periodic boundary has travelled a cell length, not
+    jumped back.
+    """
+    frames = []
+    with open(dump_path, encoding="utf-8") as dump:
+        lines = dump.read().split("\n")
+    line_index = 0
+    while line_index < len(lines):
+        if lines[line_index].startswith("ITEM: NUMBER OF ATOMS"):
+            atom_count = int(lines[line_index + 1])
+        elif lines[line_index].startswith("ITEM: ATOMS"):
+            rows = lines[line_index + 1:line_index + 1 + atom_count]
+            frames.append(np.array(
+                [[float(value) for value in row.split()[2:5]]
+                 for row in rows], dtype=float))
+            line_index += atom_count
+        line_index += 1
+    return frames
+
+
+def melt_diffusion_ratio(check_dump_path: str) -> float:
+    """How much the atoms' travel GREW over the second half of the hold.
+
+    With the half-way frame as the origin, the mean-square displacement
+    one interval later and four intervals later are compared. A liquid
+    diffuses, so its displacement grows in proportion to time: about
+    fourfold. A crystal's saturates at its vibration amplitude within
+    a fraction of a picosecond: about onefold, however hot it is. The
+    ratio is therefore the one number a superheated crystal cannot
+    fake (DESIGN §4.8 family 3).
+    """
+    frames = _read_unwrapped_positions(check_dump_path)
+    expected = MELT_CHECK_INTERVALS + 1
+    if len(frames) != expected:
+        raise RuntimeError(
+            f"the melt-check dump {check_dump_path} holds {len(frames)} "
+            f"frames, not the {expected} the hold was set to write")
+    origin = frames[MELT_CHECK_INTERVALS // 2]
+    early = frames[MELT_CHECK_INTERVALS // 2 + 1]
+    late = frames[MELT_CHECK_INTERVALS]
+    early_msd = float(np.mean(np.sum((early - origin) ** 2, axis=1)))
+    late_msd = float(np.mean(np.sum((late - origin) ** 2, axis=1)))
+    if early_msd <= 0.0:
+        return float("inf") if late_msd > 0.0 else 1.0
+    return late_msd / early_msd
+
+
+def verify_melt(check_dump_path: str, spec: QuenchSpec,
+                phase_name: str) -> float:
+    """Refuse a melt that stayed crystalline (PSEUDOCODE §11.1).
+
+    Returns the diffusion ratio on success so the caller can record it.
+    On failure the message names the phase, the number, and the knobs
+    that change it — a hotter or longer hold, or a bigger cell — so the
+    person fixes the recipe rather than suspecting the descriptor
+    (LEDGER T-42: a 72-atom quartz cell at 3500 K only vibrated, and
+    the §3.5 self-check reported that truthfully as "nothing is
+    disordered").
+    """
+    ratio = melt_diffusion_ratio(check_dump_path)
+    if ratio < MELT_MIN_DIFFUSION_RATIO:
+        melt_kelvin = to_metal(spec.melt_temperature, "temperature")
+        melt_ps = to_metal(spec.melt_duration, "time")
+        raise RuntimeError(
+            f"the melt-quench of '{phase_name}' never melted: over the "
+            f"second half of the {melt_ps:g} ps hold at {melt_kelvin:g} K "
+            f"the atoms' mean-square displacement grew {ratio:.2f}-fold "
+            f"(a liquid diffuses, at least "
+            f"{MELT_MIN_DIFFUSION_RATIO:g}-fold; a crystal only vibrates, "
+            f"about 1-fold). A small perfect periodic cell at its own "
+            f"crystal volume superheats: raise melt_temperature, "
+            f"lengthen melt_duration, or enlarge cells_per_axis in the "
+            f"recipe's [[collection1.melt_quench]] (DESIGN §4.8 family 3, "
+            f"PSEUDOCODE §11.1)")
+    return ratio
 
 
 def warm_run_script(
@@ -299,13 +410,19 @@ def warm_run_script(
     ]
 
 
+def run_directory(work_dir: Path, family: str, phase_name: str,
+                  replica: int) -> Path:
+    """Where one dynamic run of one phase and replica keeps its files."""
+    return Path(work_dir) / family / f"{phase_name}_{replica}"
+
+
 def _run_dynamic(
         recipe: ForceModelRecipe, lattices: dict, phase_name: str,
         cells: int, script_builder, spec, family: str, replica: int,
         work_dir: Path) -> list:
     """Write the data file and script, run the bundle, read the frames."""
     crystal, _ = lattices[phase_name]
-    run_dir = work_dir / family / f"{phase_name}_{replica}"
+    run_dir = run_directory(work_dir, family, phase_name, replica)
     run_dir.mkdir(parents=True, exist_ok=True)
     data_file = str(run_dir / "start.data")
     type_map = write_bulk_data(crystal, cells, data_file)
@@ -328,9 +445,21 @@ def melt_quench_family(
     structures = []
     for spec in recipe.starting_collection.melt_quench:
         for replica in range(spec.replicas):
-            structures += _run_dynamic(
+            frames = _run_dynamic(
                 recipe, lattices, spec.phase, spec.cells_per_axis,
                 melt_quench_script, spec, "melt_quench", replica, work_dir)
+            # The quench is only trusted once the melt is shown to have
+            # been a liquid (PSEUDOCODE §11.1); the ratio is printed so
+            # a passing run leaves its evidence in the job output.
+            run_dir = run_directory(work_dir, "melt_quench", spec.phase,
+                                    replica)
+            ratio = verify_melt(
+                melt_check_dump_path(str(run_dir / "frames.dump")),
+                spec, spec.phase)
+            print(f"melt-quench '{spec.phase}' replica {replica}: melt "
+                  f"verified, mean-square displacement grew "
+                  f"{ratio:.2f}-fold over the second half of the hold")
+            structures += frames
     return structures
 
 

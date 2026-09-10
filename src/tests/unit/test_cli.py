@@ -144,6 +144,8 @@ def test_prepare_writes_scripts_and_guide(run_home, monkeypatch, capsys):
     assert "wrote" in output and ".slurm" in output
     scripts = sorted(path.name for path in run_home.glob("*.slurm"))
     assert scripts == ["analysis_si_sio2.slurm", "bond_si_sio2.slurm",
-                       "prep_surf1_si.slurm", "prep_surf2_sio2.slurm"]
+                       "prep_surf1_si.library.slurm", "prep_surf1_si.slurm",
+                       "prep_surf2_sio2.library.slurm",
+                       "prep_surf2_sio2.slurm"]
     assert (run_home / "SUBMISSION_GUIDE.md").is_file()
     assert (run_home / "prep_surf2_sio2").is_dir()

@@ -3341,11 +3341,19 @@ record QuenchSpec:
                                   # ensemble, not a structure, so a
                                   # single replica misrepresents the
                                   # phase the model must learn
-    # VERIFY, do not assume: the melt must be confirmed disordered
-    # (coordination and g(r) departing from the crystal) before the
-    # quench is trusted. A "melt" that stayed crystalline yields a
-    # rattled crystal wearing an amorphous label — training data that
-    # is wrong rather than merely useless.
+    # VERIFY, do not assume: the melt must be confirmed a LIQUID
+    # before the quench is trusted. A "melt" that stayed crystalline
+    # yields a rattled crystal wearing an amorphous label — training
+    # data that is wrong rather than merely useless — and a 72-atom
+    # quartz cell did exactly that at 3500 K (LEDGER T-42). The test
+    # (DESIGN §4.8 family 3, 2026-09-10) is diffusion, the one thing a
+    # hot crystal cannot fake: unwrapped positions are dumped at
+    # eighths of the hold, and the mean-square displacement measured
+    # from the half-way frame must grow at least MELT_MIN_DIFFUSION_
+    # RATIO (= 2) from one eighth later to four eighths later — a
+    # liquid gives about 4, a vibrating crystal about 1. Implemented
+    # by verify_melt(), called by melt_quench_family() right after
+    # each run; a failure names the phase, the ratio, and the knobs.
 
 
 record WarmRunSpec:
@@ -4730,6 +4738,18 @@ function prepare(project_spec_path, deployment_rc_path):
                                                   # folder -- NO ordinal
         write script to path
         guide.append(job, path, job.depends_on)   # ORDER lives here
+    # Step 0 of the guide (§10.2, 2026-09-10): one LIBRARY build per
+    # surface, on the bootstrap's clock, NOT a registry job. Uses the
+    # prep usage block; runs `sabsim bootstrap generate recipe.toml
+    # --skip-collection2` with the prep folder as CWD; exits at once,
+    # successfully, if that folder already holds a library (never
+    # overwrite -- move it aside to rebuild).
+    for each (surface, prep_folder) in ((1, folders.prep_surf1),
+                                        (2, folders.prep_surf2)):
+        script = render_library_script(validated, surface, usage[prep],
+                                       partition, deployment, roots)
+        write script to prep_folder + ".library.slurm"
+        guide.prepend(library build, path)  # before the preps it feeds
     write guide beside the scripts        # a submission GUIDE, not "readme"
     return guide
 ```
@@ -4885,12 +4905,26 @@ record InitReport:
     kept:    list[path]          # already there -- left untouched
     notices: list[str]           # e.g. "no recipe template for X"
 
-function init_project(project_folder) -> InitReport:
-    make_folder_if_missing(project_folder)
+constant MATERIALS_CATALOGUE = RECIPE_TEMPLATES/materials.toml
+    # one table per shipped material: canonical label, recipe template,
+    # crystal file, structure label, bonding face (§10.9)
 
-    # 1. The two top-level inputs, straight from the templates.
+function init_project(project_folder, materials=None) -> InitReport:
+    make_folder_if_missing(project_folder)
+    catalogue = parse_toml(MATERIALS_CATALOGUE)
+    if materials given:
+        # THE science decision, looked up case-insensitively; an
+        # unknown label is refused with the catalogue printed.
+        entry_a, entry_b = lookup(catalogue, materials[0]),
+                           lookup(catalogue, materials[1])
+
+    # 1. The two top-level inputs, straight from the templates; with
+    #    materials given, the two wafer tables are set from the
+    #    catalogue entries (material, cif, structure, face) in the
+    #    template's own text, comments kept.
     copy_if_missing(TEMPLATE_ROOT/project_spec.toml,
-                    project_folder/sabsim.toml)
+                    project_folder/sabsim.toml,
+                    edit=set_wafer_tables(entry_a, entry_b) if given)
     copy_if_missing(TEMPLATE_ROOT/deployment_rc.toml,
                     project_folder/deployment.toml)
 
@@ -4923,11 +4957,39 @@ function init_project(project_folder) -> InitReport:
 
 `stage_folder_names(label_a, label_b)` is the label-level form of §2's
 `stage_folders(pair)`; the pair-level one delegates to it so the
-layout is still written down once. The CLI prints the report and then
-the three next steps in order -- edit the inputs, build each surface's
-environment library on a compute node, run `prepare` -- because the
-generated folder is complete in the §1.4 sense and unread in the
-science sense until the person has looked at it (§10.9).
+layout is still written down once. The CLI prints the report (and the
+catalogue, when no materials were named) and then the next steps in
+order -- edit the inputs, run `prepare`, submit the guide's chain
+starting with the two library builds -- because the generated folder
+is complete in the §1.4 sense and unread in the science sense until
+the person has looked at it (§10.9).
+
+### 14.8 setup -- the install checked and the rc written (`DESIGN.md` §10.10)
+
+```
+function setup(scratch=None, share=None, venv=None) -> SetupReport:
+    clone  = repository root of THIS package (the editable pointer)
+    prefix = the running interpreter's prefix          # the venv
+    conda  = the conda environment beneath it ($CONDA_PREFIX)
+    checks = [
+      ("clone",  clone exists and holds share/templates),
+      ("conda",  conda is set),
+      ("venv",   prefix is a venv AND its editable sabsim points at
+                 clone -- WRONG, not MISSING, when it points elsewhere),
+      ("share",  share root exists and holds share/models),
+      ("engine", the deepmd bundle under share exists),
+      ("scratch", scratch root exists or can be made, and is writable),
+    ]
+    for each check: report PRESENT / MISSING (+ the fixing command)
+                    / WRONG (+ what is pointed at)
+    # The rc: template text with three values filled, each with its
+    # PROVENANCE said aloud -- flag, environment, or template example.
+    values = { scratch: flag or $SABSIM_SCRATCH or template example,
+               share:   flag or $SABSIM_SHARE   or template example,
+               venv:    flag or prefix }
+    write_if_missing(clone/.sabsim/sabsimrc, fill(template, values))
+    print next: source .sabsim/sabsimrc; pytest src/tests; sabsim init
+```
 
 `[CODE level, below pseudocode]` the exact directive syntax (SLURM
 `#SBATCH`), the script templating, and the guide's on-disk format.

@@ -158,6 +158,8 @@ def test_cli_init_reports_and_points_at_the_next_steps(tmp_path, capsys):
     assert main(["init", str(folder)]) == 0
     out = capsys.readouterr().out
     assert "wrote  sabsim.toml" in out
-    assert "sabsim bootstrap generate" in out
     assert "sabsim prepare" in out
+    assert "library builds" in out
+    # The pair was not named, so the catalogue is shown.
+    assert "SiO2" in out and "alpha-quartz" in out
     assert (folder / "prep_surf2_sio2" / "recipe.toml").is_file()

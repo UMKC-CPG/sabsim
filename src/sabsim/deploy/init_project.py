@@ -20,6 +20,13 @@ rules, each with a reason a student can follow:
   ``share/templates/recipes/<label>.toml``. A material with no recipe
   of its own gets the silicon recipe as a starting point, and the
   report says so out loud (PSEUDOCODE §14.7).
+* The pair may be NAMED (``--materials Si SiO2``): the one science
+  decision ``init`` asks for. Both labels are looked up in the
+  materials catalogue (``share/templates/recipes/materials.toml``) and
+  the project file's two wafer tables are set from the entries, so
+  nobody types a crystal path for a material we already ship. An
+  unknown material is refused with the catalogue printed, never
+  written with a guessed crystal.
 
 It submits nothing and runs nothing: the environment library is a
 compute-node job and ``prepare`` reads files the person is expected to
@@ -49,6 +56,8 @@ RECIPE_TEMPLATES = TEMPLATE_ROOT / "recipes"
 # starting point for a material that has no template of its own.
 FALLBACK_RECIPE_LABEL = "si"
 
+MATERIALS_CATALOGUE = RECIPE_TEMPLATES / "materials.toml"
+
 PROJECT_FILENAME = "sabsim.toml"
 DEPLOYMENT_FILENAME = "deployment.toml"
 RECIPE_FILENAME = "recipe.toml"
@@ -62,6 +71,108 @@ _GENERATION_PLAN_PROJECT_LINE = re.compile(
 
 class InitError(RuntimeError):
     """``init`` could not make a usable folder; the message says why."""
+
+
+@dataclass(frozen=True)
+class MaterialEntry:
+    """One shipped material, as the catalogue describes it (§10.9).
+
+    Exactly the four values a project file's wafer table needs, plus
+    the recipe template that belongs to the material. ``label`` is the
+    canonical spelling (``SiO2``), which is what gets written.
+    """
+
+    label: str
+    recipe: str
+    cif: str
+    structure: str
+    face: tuple[int, int, int]
+
+
+def read_materials_catalogue() -> dict[str, MaterialEntry]:
+    """The catalogue, keyed by canonical label, in file order."""
+    _require_template(MATERIALS_CATALOGUE)
+    with MATERIALS_CATALOGUE.open("rb") as handle:
+        raw = tomllib.load(handle)
+    catalogue = {}
+    for label, table in raw.items():
+        try:
+            catalogue[label] = MaterialEntry(
+                label=label, recipe=str(table["recipe"]),
+                cif=str(table["cif"]), structure=str(table["structure"]),
+                face=tuple(int(index) for index in table["face"]))
+        except (KeyError, TypeError, ValueError) as broken:
+            raise InitError(f"materials catalogue entry [{label}] is "
+                            f"incomplete ({broken}); each needs recipe, "
+                            f"cif, structure and face") from None
+    return catalogue
+
+
+def lookup_material(catalogue: dict[str, MaterialEntry],
+                    requested: str) -> MaterialEntry:
+    """Find a material case-insensitively; refuse an unknown one aloud."""
+    for label, entry in catalogue.items():
+        if label.lower() == requested.strip().lower():
+            return entry
+    known = ", ".join(catalogue) or "(none)"
+    raise InitError(
+        f"no material '{requested}' in the catalogue "
+        f"({MATERIALS_CATALOGUE}); it ships: {known}. Run `sabsim init` "
+        f"without --materials and edit the wafer table by hand, or add "
+        f"the material's recipe and catalogue entry (DESIGN §10.9)")
+
+
+def describe_catalogue(catalogue: dict[str, MaterialEntry]) -> list[str]:
+    """One printable line per shipped material."""
+    lines = []
+    for entry in catalogue.values():
+        face = "".join(str(index) for index in entry.face)
+        lines.append(f"{entry.label:8s} {entry.structure} ({face}) "
+                     f"recipe {entry.recipe}, crystal {entry.cif}")
+    return lines
+
+
+# The four lines of a wafer table `init` sets from a catalogue entry.
+# Matched at line start within the table, so a commented example in
+# the template's prose never counts; the WHOLE line is replaced, so a
+# trailing remark about the template's own value cannot outlive it.
+_WAFER_LINE = {
+    key: re.compile(rf"^({key}\s*=\s*)[^\n]*$", re.MULTILINE)
+    for key in ("material", "cif", "structure", "face")
+}
+_TABLE_HEADER = re.compile(r"^\[[^\]]+\]\s*$", re.MULTILINE)
+
+
+def set_wafer_table(text: str, table_name: str,
+                    entry: MaterialEntry) -> str:
+    """Rewrite one ``[wafer_x]`` table's four values in the template text.
+
+    Works on the text, not a parsed tree, so every comment the template
+    carries survives — the comments are the documentation a student
+    reads. Only the lines between this table's header and the next
+    header are touched.
+    """
+    header = re.search(rf"^\[{table_name}\]\s*$", text, re.MULTILINE)
+    if header is None:
+        raise InitError(f"the project template has no [{table_name}] "
+                        f"table to set")
+    following = _TABLE_HEADER.search(text, header.end())
+    end = following.start() if following else len(text)
+    block = text[header.end():end]
+    values = {
+        "material": f'"{entry.label}"',
+        "cif": f'"{entry.cif}"',
+        "structure": f'"{entry.structure}"',
+        "face": "[" + ", ".join(str(index) for index in entry.face) + "]",
+    }
+    for key, pattern in _WAFER_LINE.items():
+        block, count = pattern.subn(
+            lambda match, value=values[key]: f"{match.group(1)}{value}",
+            block, count=1)
+        if count != 1:
+            raise InitError(f"the project template's [{table_name}] "
+                            f"table has no '{key}' line to set")
+    return text[:header.end()] + block + text[end:]
 
 
 @dataclass
@@ -80,26 +191,50 @@ class InitReport:
     notices: list[str] = field(default_factory=list)
 
 
-def init_project(project_directory: str | os.PathLike) -> InitReport:
+def init_project(project_directory: str | os.PathLike,
+                 materials: tuple[str, str] | None = None) -> InitReport:
     """Write the missing parts of a project folder from the templates.
 
     Runs on the login node and touches nothing that already exists.
-    Returns the report of what was written, what was kept, and what
-    the person should be told. Raises :class:`InitError` when the
-    templates themselves are missing or the project file cannot yield
-    the two material labels.
+    ``materials`` names the pair — the science decision — as two
+    catalogue labels for wafer A and wafer B; with it, the project
+    file's wafer tables are set from the catalogue (only when the
+    project file is being written now: an existing one is kept as it
+    is, and the report says so). Returns the report of what was
+    written, what was kept, and what the person should be told. Raises
+    :class:`InitError` when the templates are missing, a material is
+    not in the catalogue, or the project file cannot yield the two
+    material labels.
     """
     project_directory = Path(project_directory).resolve()
     report = InitReport(project_directory=project_directory)
     _require_template(TEMPLATE_ROOT / "project_spec.toml")
     _require_template(TEMPLATE_ROOT / "deployment_rc.toml")
     _require_template(_recipe_template(FALLBACK_RECIPE_LABEL))
+    entries = None
+    if materials is not None:
+        catalogue = read_materials_catalogue()
+        entries = (lookup_material(catalogue, materials[0]),
+                   lookup_material(catalogue, materials[1]))
 
     _make_folder(project_directory, ".", report)
 
-    # 1. The two top-level inputs, straight from the templates.
-    _copy_if_missing(TEMPLATE_ROOT / "project_spec.toml",
-                     project_directory / PROJECT_FILENAME, report)
+    # 1. The two top-level inputs, straight from the templates — the
+    #    wafer tables set from the catalogue when the pair was named.
+    project_file = project_directory / PROJECT_FILENAME
+    if entries is not None and project_file.exists():
+        report.notices.append(
+            f"{PROJECT_FILENAME} already exists, so --materials "
+            f"{entries[0].label} {entries[1].label} was NOT applied to "
+            f"it; edit its wafer tables by hand, or move it aside and "
+            f"run init again")
+    edit = None
+    if entries is not None:
+        def edit(text: str) -> str:
+            text = set_wafer_table(text, "wafer_a", entries[0])
+            return set_wafer_table(text, "wafer_b", entries[1])
+    _copy_if_missing(TEMPLATE_ROOT / "project_spec.toml", project_file,
+                     report, edit=edit)
     _copy_if_missing(TEMPLATE_ROOT / "deployment_rc.toml",
                      project_directory / DEPLOYMENT_FILENAME, report)
 
@@ -204,11 +339,19 @@ def _make_folder(path: Path, relative: str, report: InitReport) -> None:
         report.written.append(f"{relative}/")
 
 
-def _copy_if_missing(template: Path, target: Path,
-                     report: InitReport) -> None:
-    """Copy a template to its target unless the target already exists."""
+def _copy_if_missing(template: Path, target: Path, report: InitReport,
+                     edit=None) -> None:
+    """Copy a template to its target unless the target already exists.
+
+    ``edit``, when given, transforms the template text on the way (the
+    wafer tables set from the catalogue); it is never applied to a
+    file that is already there.
+    """
     if target.exists():
         report.kept.append(target.name)
         return
-    target.write_text(template.read_text())
+    text = template.read_text()
+    if edit is not None:
+        text = edit(text)
+    target.write_text(text)
     report.written.append(target.name)
