@@ -45,6 +45,25 @@
 
 <!-- Tasks related to layout, modules, build. -->
 
+- [x] **Pull zones carved from the restored atoms, not the assembly**
+      (Paul's stale-`built` question, 2026-09-23; DESIGN §5.4,
+      PSEUDOCODE §9.2/§9.5/§13, LEDGER T-41). The si_si bond
+      16873514 timed out because the pull's top grip, carved from the
+      assembly's z-ranges after the press had moved the wafer 4.9 A,
+      held 0 atoms. Fixed in `press_pull.py` (`WaferZRanges`,
+      `wafer_z_ranges_from_frame`), both fresh and resumed paths.
+      OPEN: rerun a bond under the fix (T-45's chain once the Si/quartz
+      cell is solved, or si_si after its libraries are rebuilt).
+- [ ] **T-45 fallout (2026-09-23).** (a) `prepare`: each prep is held
+      only on its own `.library` build but the prep's load-time check
+      demands BOTH libraries — silicon prep 17238481 failed in 13 s.
+      Hold each prep on both builds, or make the check per-surface for
+      a prep job. (b) The Si(100)/alpha-quartz(001) shared cell the
+      matcher solved is degenerate — 466,578 atoms, a 1.36 A y-extent
+      with 48 A skew — and the cascade aborted; the matcher must refuse
+      a cell like that, and the beta-cristobalite stand-in question
+      (project template comment) is now live. (c) `jobs/si_si`
+      libraries predate the whitened ruler and must be rebuilt.
 - [x] **`sabsim setup`, `init --materials`, library builds from
       `prepare`, melt verification** (Paul, 2026-09-10; DESIGN §10.2,
       §10.9, §10.10, §4.8 family 3; PSEUDOCODE §14.4, §14.7, §14.8,

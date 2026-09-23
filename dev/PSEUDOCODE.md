@@ -1921,7 +1921,9 @@ function open_lammps_driver(structure, potential, pair_specification):
     # antipattern, PRIOR_ART.md §1.7). Load the potential once, then CARVE
     # press/pull depth zones from §2's z-ranges (§3 LabeledGroups, option
     # C) — the builder does NOT hand these over as atom-index sets; the
-    # driver cuts them by depth at open time:
+    # driver cuts them by depth at open time. The press cuts from the
+    # assembly's z-ranges (nothing has moved yet); every LATER stage
+    # cuts from the atoms as they stand when it opens (§9.5, §13):
     #   bottom_grip       -> held handle, the press/pull anchor (§9.5)
     #   top_grip          -> driven handle, ramped or moved (§9.3, §9.5)
     #   border            -> just inside each grip, INTEGRATED (nve) AND
@@ -2085,6 +2087,12 @@ function settle_reference(driver, press, pair_specification):
 function pull_at_rate(driver, reference, rate, pair_specification):
     numerical = pair_specification.numerical
     restore(driver, reference)           # a FRESH copy; the pull deforms it
+    # CARVE FROM THE RESTORED ATOMS (DESIGN §5.4, 2026-09-23): the press
+    # moved the top wafer; the assembly's z-ranges would put the top
+    # grip in empty vacuum (LEDGER T-41: 0 atoms, an 18 h no-op pull).
+    z_ranges = wafer_z_ranges_from_frame(positions(driver), tags)
+    carve_zones(driver, z_ranges)        # grips, borders, interior
+    require each grip non-empty          # a refusal, not a silent no-op
     hold(driver.grips.bottom)            # bottom grip held
     drive_grip(driver.grips.top, rate)   # top grip at constant rate
 
@@ -4348,6 +4356,8 @@ function begin_or_resume_pull(driver, reference, rate, pair,
         # rate. Seed a ledger with the baseline the §5.6 gate needs and
         # the trust hash this run will be resumed against.
         restore(driver, reference)
+        z_ranges = wafer_z_ranges_from_frame(positions(driver), tags)
+        carve_zones(driver, z_ranges)      # from the atoms as restored
         hold(driver.grips.bottom)
         drive_grip(driver.grips.top, rate)
         return new Ledger{
@@ -4360,6 +4370,8 @@ function begin_or_resume_pull(driver, reference, rate, pair,
     # the record to them.
     verify_inputs_or_stop(checkpoint, pair, reference, rate)
     read_restart(driver, checkpoint.engine_state)
+    z_ranges = wafer_z_ranges_from_frame(positions(driver), tags)
+    carve_zones(driver, z_ranges)              # from the atoms as restored
     drive_grip(driver.grips.top, rate)         # re-arm the constant pull
     return reconcile(checkpoint.ledger, driver.step)
 

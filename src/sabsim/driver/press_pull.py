@@ -200,6 +200,44 @@ class PullStart(NamedTuple):
     override_used: bool
 
 
+@dataclass(frozen=True)
+class WaferZRanges:
+    """Each wafer's z-extent, as the driver carves its zones (§9.2).
+
+    The same two attributes the builder's assembled structure carries,
+    so :func:`~sabsim.driver.commands.region_group_commands` reads
+    either. The builder's are exact at press time; a stage that opens
+    after anything has moved takes its own from the atoms as they
+    stand (:func:`wafer_z_ranges_from_frame`, DESIGN §5.4).
+    """
+
+    wafer_a_z_range: tuple[float, float]
+    wafer_b_z_range: tuple[float, float]
+
+
+def wafer_z_ranges_from_frame(
+        frame: np.ndarray, aligned_tags: np.ndarray) -> WaferZRanges:
+    """The two wafers' z-extents read off a live position frame.
+
+    DESIGN §5.4 (2026-09-23): the press moves the top wafer down by the
+    press-start opening and the contact compression, so a pull rung
+    that carved its grips from the ASSEMBLY's z-ranges would put the
+    top grip in the vacuum the wafer has left — LEDGER T-41's pull held
+    0 atoms in its top grip and ran its full budget pulling on nothing.
+    Reading the extents from the tagged atoms as they are makes the
+    carve right at any step, on a fresh restore or a resumed one.
+    """
+    z_lower, z_upper = _wafer_z(np.asarray(frame, float), aligned_tags)
+    for name, column in (("A", z_lower), ("B", z_upper)):
+        if column.size == 0:
+            raise RuntimeError(
+                f"wafer {name} has no atoms in the frame the zones are "
+                f"carved from; the pull cannot place its grips")
+    return WaferZRanges(
+        wafer_a_z_range=(float(z_lower.min()), float(z_lower.max())),
+        wafer_b_z_range=(float(z_upper.min()), float(z_upper.max())))
+
+
 def _wafer_z(positions: np.ndarray, tags: np.ndarray) -> tuple:
     """Split a position frame into the two wafers' z-columns by tag.
 
@@ -485,7 +523,7 @@ def settle_reference(
 
 
 def _pull_fixture_commands(
-        built, pair, force_model, rate, seed, geometry,
+        z_ranges: WaferZRanges, pair, force_model, rate, seed, geometry,
         trajectory_file: str | None = None,
         trajectory_stride: int | None = None) -> list:
     """The pull's fixtures — everything that is NOT the box itself (§13.3).
@@ -496,40 +534,33 @@ def _pull_fixture_commands(
     resumed ``read_restart``, because none of them live in a restart file:
     a restart carries atoms, box, velocities, and timestep — not fixes,
     computes, regions, or groups. So both setups end with this same block.
+    ``z_ranges`` come from the atoms AS RESTORED, never from the
+    assembly (DESIGN §5.4, 2026-09-23).
     """
     return (
         force_model_commands(force_model)
-        + region_group_commands(built, geometry)
+        + region_group_commands(z_ranges, geometry)
         + integrator_commands(pair, seed)
         + grip_hold_and_readback_commands()
         + pull_drive_commands(rate)
         + recording_commands(pair, trajectory_file, trajectory_stride))
 
 
-def _pull_setup(
-        built, pair, force_model, data_file, rate, seed, geometry,
-        travel_time: float, trajectory_file: str | None = None,
-        trajectory_stride: int | None = None) -> list:
-    """The FRESH pull command block WITHOUT the run (the loop issues that).
+def _pull_box_commands(
+        pair, force_model, data_file, rate, travel_time: float) -> list:
+    """The FRESH pull's box: read the reference, grow the headroom.
 
-    ``travel_time`` is how long this rung may pull for, which sizes the
-    box headroom so the separation cannot carry atoms out through the top
-    (see :func:`pull_headroom_commands`). A resumed pull instead restores
-    an already-grown box and reuses :func:`_pull_fixture_commands` over it,
-    NEVER re-growing the headroom (§13.3).
-
-    ``trajectory_file`` is optional because nothing downstream reads the
-    frames for the reduction — the strided dump is the coordinate archive
-    for §8/§12 and human inspection (§9.5). One rung's frames ran to
-    1.3 GB, so a run nobody intends to analyze does not write them.
+    Only the box — the fixtures follow separately, AFTER the atoms have
+    been read back so the zones are carved from where they are (§13.3,
+    DESIGN §5.4). ``travel_time`` is how long this rung may pull for,
+    which sizes the box headroom so the separation cannot carry atoms
+    out through the top (see :func:`pull_headroom_commands`). A resumed
+    pull instead restores an already-grown box and NEVER re-grows it.
     """
     return (
         preamble_commands(data_file, pair.numerical.md_timestep,
                           force_model)
-        + pull_headroom_commands(rate, travel_time)
-        + _pull_fixture_commands(
-            built, pair, force_model, rate, seed, geometry,
-            trajectory_file, trajectory_stride))
+        + pull_headroom_commands(rate, travel_time))
 
 
 def begin_or_resume_pull(
@@ -567,20 +598,27 @@ def begin_or_resume_pull(
     checkpoint = (
         load_checkpoint(checkpoint_dir) if checkpoint_dir else None)
 
+    tags = np.asarray(built.atoms.get_tags())
     if checkpoint is None:
-        # FRESH. Read the reference and size the box for the whole travel.
+        # FRESH. Read the reference and size the box for the whole travel,
+        # THEN read the atoms back and carve the zones from where they
+        # stand — the press moved the top wafer, so the assembly's
+        # z-ranges would miss it (DESIGN §5.4, LEDGER T-41).
         chunk_steps = _steps(numerical.control_interval,
                              numerical.md_timestep)
         travel_time = control.max_chunks * chunk_steps * timestep
-        engine.commands(_pull_setup(
-            built, pair, force_model, data_file, rate, seed, geometry,
-            travel_time, trajectory_file, trajectory_stride))
+        engine.commands(_pull_box_commands(
+            pair, force_model, data_file, rate, travel_time))
+        frame, aligned_tags = _positions_with_tags(engine, tags)
+        engine.commands(_pull_fixture_commands(
+            wafer_z_ranges_from_frame(frame, aligned_tags), pair,
+            force_model, rate, seed, geometry, trajectory_file,
+            trajectory_stride))
         # The atom count as the pull STARTS — the §5.6 conservation
         # baseline, measured once and carried in the ledger so a resume
         # checks against the ORIGINAL count, not a depleted one (§13.1).
-        starting_atom_count = int(np.asarray(engine.positions()).shape[0])
         ledger = Ledger(
-            starting_atom_count=starting_atom_count,
+            starting_atom_count=int(frame.shape[0]),
             input_hash=input_hash(pair, data_file, rate))
         return PullStart(ledger=ledger, resumed=False, override_used=False)
 
@@ -597,11 +635,14 @@ def begin_or_resume_pull(
     # ledger reconciles to where the atoms actually are.
     engine.commands(restart_preamble_commands(force_model))
     engine.read_restart(checkpoint.engine_state)
-    engine.commands(
-        timestep_command(numerical.md_timestep)
-        + _pull_fixture_commands(
-            built, pair, force_model, rate, seed, geometry,
-            trajectory_file, trajectory_stride))
+    engine.commands(timestep_command(numerical.md_timestep))
+    # The zones from the atoms as restored: the top grip has travelled
+    # since the rung began, and a resume must find it where it is.
+    frame, aligned_tags = _positions_with_tags(engine, tags)
+    engine.commands(_pull_fixture_commands(
+        wafer_z_ranges_from_frame(frame, aligned_tags), pair,
+        force_model, rate, seed, geometry, trajectory_file,
+        trajectory_stride))
     ledger = reconcile(checkpoint.ledger, engine.step())
     return PullStart(
         ledger=ledger, resumed=True, override_used=override_used)

@@ -24,6 +24,7 @@ from sabsim.driver.press_pull import (
     press_and_bond,
     pull_at_rate,
     settle_reference,
+    wafer_z_ranges_from_frame,
 )
 from sabsim.driver.resume import (
     Ledger,
@@ -217,6 +218,56 @@ def test_pull_reports_incomplete_when_it_never_separates(tmp_path):
         control=RunControl(max_chunks=3),
         output_directory=str(tmp_path))
     assert not result.complete
+
+
+# ---------------------------------------------------------------------
+# The pull carves its zones from the atoms AS RESTORED, never from the
+# assembly's z-ranges (DESIGN §5.4, 2026-09-23; LEDGER T-41: the press
+# moved the top wafer 5 A down, the pull carved from the assembly, and
+# its top grip held 0 atoms for eighteen hours).
+# ---------------------------------------------------------------------
+
+def test_pull_carves_its_grips_from_the_restored_atoms(tmp_path):
+    """Built says wafer B spans 15-25; the settled frame has it at 10-20.
+
+    The top grip (4 A thick) must be carved at 16-20 from the frame, not
+    at 21-25 from the assembly, and only after the reference was read.
+    """
+    engine = MockEngine(positions=[_frame(10.0)], top_reaction=[1.0])
+    pull_at_rate(
+        engine, _fake_built(), _member(), _MODEL, "ref.data",
+        rate=Quantity(3.2, "m/s"), seed=1,
+        control=RunControl(max_chunks=1), output_directory=str(tmp_path))
+    received = engine.received_commands
+    carved = "region top_grip block INF INF INF INF 16 20 units box"
+    assert carved in received
+    assert "region top_grip block INF INF INF INF 21 25 units box" \
+        not in received
+    assert "region bottom_grip block INF INF INF INF 0 4 units box" \
+        in received
+    assert received.index(carved) > received.index("read_data ref.data")
+
+
+def test_resumed_pull_carves_from_the_restored_atoms_too(tmp_path):
+    """A resume finds the top grip where the pull has carried it."""
+    checkpoint_dir = str(tmp_path / "pull_x" / "checkpoints")
+    _crafted_checkpoint(checkpoint_dir, _matching_hash())
+    engine = MockEngine(positions=[_frame(30.0)], top_reaction=[0.01])
+    pull_at_rate(
+        engine, _fake_built(), _member(), _MODEL, "ref.data",
+        rate=_PULL_RATE, seed=1, control=RunControl(max_chunks=1),
+        output_directory=str(tmp_path), checkpoint_dir=checkpoint_dir)
+    assert "region top_grip block INF INF INF INF 36 40 units box" \
+        in engine.received_commands
+
+
+def test_wafer_z_ranges_come_from_the_tagged_atoms():
+    tags = np.array([WAFER_A_TAG] * 100 + [WAFER_B_TAG] * 100)
+    ranges = wafer_z_ranges_from_frame(_frame(12.5), tags)
+    assert ranges.wafer_a_z_range == (0.0, 10.0)
+    assert ranges.wafer_b_z_range == (12.5, 22.5)
+    with pytest.raises(RuntimeError, match="wafer B has no atoms"):
+        wafer_z_ranges_from_frame(_frame(12.5)[:100], tags[:100])
 
 
 def test_a_short_pull_that_separates_still_yields_a_curve(tmp_path):

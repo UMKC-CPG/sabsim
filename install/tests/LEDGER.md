@@ -1808,7 +1808,34 @@ wrote in `jobs/si_si/` (tracked) and its `SUBMISSION_GUIDE.md`.)*
   read both halves, passed the shared-cell agreement check, assembled
   and began pressing (`intermediate/bond_si_si/run-16873514/`).
 
-- Bond and analysis: see below (appended when they finish).
+- Bond and analysis: **bond 16873514 TIMEOUT at 18:00 h in the first
+  pull rung; analysis 16873515 never released** (read 2026-09-23).
+
+- **Diagnosis (Paul's question, 2026-09-23: "is the built structure
+  used again instead of the held one?").** Yes, for the ZONES. The
+  pull rung reads the settled reference correctly (`settled_reference.
+  data`, top of the pair at 85.70 A), but carved its grips from the
+  ASSEMBLY's z-ranges (top at 90.59 A — the press had moved the top
+  wafer 4.9 A down and the settle held it there). With a 4 A grip the
+  top-grip region [86.6, 90.6] sat in vacuum: press log `18 atoms in
+  group top_grip`, pull log `0 atoms in group top_grip`. The drive
+  pulled on nothing, the opening never grew, and the rung ran to its
+  step budget and the wall clock. Not a physics result.
+
+- **Fix (DESIGN §5.4, PSEUDOCODE §9.2/§9.5/§13; `wafer_z_ranges_from_
+  frame` in `driver/press_pull.py`):** a pull rung reads the atoms back
+  after `read_data` (or `read_restart`) and carves the grips and
+  borders from each wafer's z-extent AS RESTORED; the assembly's
+  z-ranges are provenance only. Tests: the region line is carved from
+  the frame, after the read, on both the fresh and the resumed path.
+  The T-40 result (bond 16871414, M1 = 0.257 eV/A^2) predates the
+  per-rung fresh-engine restore and is unaffected; every bond run
+  since 2026-08-30 through the pull was a no-op and must be rerun.
+
+- **Scope NOT covered:** the press still carves from the assembly's
+  z-ranges, which is exact because nothing has moved when it opens;
+  the cascade driver's frozen_base likewise. Neither re-carves after
+  motion, so neither has this failure.
 
 ## T-42 — job 16873531 (bootstrap generate, silica, FAILED self-check) → 16873844 (rerun after the fix) — 2026-08-30
 

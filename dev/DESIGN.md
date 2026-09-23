@@ -2450,8 +2450,24 @@ instead would silently throw the press away.
 
 The bottom grip is held, the top grip is displaced at a constant rate,
 and the reaction force is recorded. The grips are carved by the driver
-from §2's z-ranges plus a single region-geometry setting (option C, §2.6),
-not from a hardcoded per-material layer thickness.
+by depth plus a single region-geometry setting (option C, §2.6), not
+from a hardcoded per-material layer thickness.
+
+**The zones are carved from where the atoms ARE, not where the builder
+put them (Paul, 2026-09-23; LEDGER T-41).** The press moves the top
+wafer down by the press-start opening and the contact compression —
+about 5 Å in the silicon demo — and the settle holds it there. A pull
+rung opens a fresh engine on the settled reference, so if it carved its
+grips from the assembly's z-ranges it would place the top grip in the
+vacuum the top wafer has left: the Si/Si bond of 2026-08-30 did exactly
+that (press log: 18 atoms in the top grip; pull log: 0), pulled on
+nothing for eighteen hours, and timed out. So the pull reads its
+frame back after the reference is restored (or the checkpoint
+re-read), takes each wafer's z-extent from the tagged atoms as they
+stand, and carves the grips and borders from THAT; the assembly's
+z-ranges are provenance, never a ruler for a stage that runs after
+anything has moved. A grip that would hold no atoms is a refusal at
+rung start, not a silent no-op.
 
 **Both reaction forces are recorded, and their sum is a free correctness
 check.** Newton's third law requires the forces on the two grips to

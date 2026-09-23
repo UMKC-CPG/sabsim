@@ -305,17 +305,21 @@ def force_model_commands(force_model: ForceModel) -> list:
             *[f"pair_coeff {coeff}" for coeff in force_model.pair_coeff]]
 
 
-def region_group_commands(built, geometry: RegionGeometry) -> list:
+def region_group_commands(z_ranges, geometry: RegionGeometry) -> list:
     """Carve the labeled groups by z-position (PSEUDOCODE.md §9.2).
 
-    From the builder's per-wafer z-ranges, define the bottom and top
-    grips (the held and driven handles), the two Langevin border layers
-    just inside them, and the NVE interior as everything left over. The
-    driver need not know the MD protocol to place these — they are pure
-    geometry (DESIGN.md §2.6).
+    From per-wafer z-ranges, define the bottom and top grips (the held
+    and driven handles), the two Langevin border layers just inside
+    them, and the NVE interior as everything left over. The driver need
+    not know the MD protocol to place these — they are pure geometry
+    (DESIGN.md §2.6). ``z_ranges`` is anything carrying
+    ``wafer_a_z_range`` and ``wafer_b_z_range``: the builder's assembled
+    structure at press time, when nothing has moved, or a
+    :class:`~sabsim.driver.press_pull.WaferZRanges` read off the live
+    atoms for any stage that opens later (DESIGN §5.4, 2026-09-23).
     """
-    base_low, _ = built.wafer_a_z_range
-    _, top_high = built.wafer_b_z_range
+    base_low, _ = z_ranges.wafer_a_z_range
+    _, top_high = z_ranges.wafer_b_z_range
     grip = geometry.grip_thickness
     border = geometry.border_thickness
 
