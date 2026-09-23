@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import datetime
 
 from sabsim.pipeline.run_options import (
     TrajectoryOptions,
@@ -516,8 +517,37 @@ def _prepare(args: argparse.Namespace) -> int:
     return 0
 
 
+COMMAND_RECORD_FILE = "command"
+
+
+def record_command(arguments=None) -> None:
+    """Append the issued command line to ``command`` in this directory.
+
+    Imago's standing convention, adopted unchanged (ARCHITECTURE §4.2,
+    Paul 2026-09-23): one dated block per run — a ``Date:`` line and a
+    ``Cmnd:`` line carrying the exact argument vector — so the file
+    grows into the history of what was done in this folder and the
+    exact invocation can be recovered later. ``arguments`` defaults to
+    ``sys.argv``; a caller may hand in the vector it actually ran.
+    """
+    arguments = sys.argv if arguments is None else list(arguments)
+    stamp = datetime.now().strftime("%b. %d, %Y: %H:%M:%S")
+    with open(COMMAND_RECORD_FILE, "a", encoding="utf-8") as record:
+        record.write(f"Date: {stamp}\n")
+        record.write("Cmnd:" + "".join(f" {arg}" for arg in arguments))
+        record.write("\n\n")
+
+
 def main(argv=None) -> int:
-    """The ``sabsim`` console entry point; returns a process exit code."""
+    """The ``sabsim`` console entry point; returns a process exit code.
+
+    The invocation is recorded in the ``command`` file ONLY when this
+    is the real entry — ``argv`` is None, so the vector is the process's
+    own — never when a test or another module hands one in, so the
+    suite leaves no stray ``command`` files (CLAUDE.md).
+    """
+    if argv is None:
+        record_command()
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command == "run":

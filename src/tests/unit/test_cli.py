@@ -149,3 +149,29 @@ def test_prepare_writes_scripts_and_guide(run_home, monkeypatch, capsys):
                        "prep_surf2_sio2.slurm"]
     assert (run_home / "SUBMISSION_GUIDE.md").is_file()
     assert (run_home / "prep_surf2_sio2").is_dir()
+
+
+# ---------------------------------------------------------------------
+# The `command` file (ARCHITECTURE §4.2, Imago's convention).
+# ---------------------------------------------------------------------
+
+def test_the_real_entry_records_its_command_line(run_home, monkeypatch,
+                                                  capsys):
+    """`sabsim init .` from the console appends a dated Cmnd block."""
+    from sabsim.cli import COMMAND_RECORD_FILE, record_command
+    monkeypatch.setattr("sys.argv", ["sabsim", "init", "."])
+    record_command()
+    record_command(["sabsim", "prepare"])
+    text = (run_home / COMMAND_RECORD_FILE).read_text()
+    blocks = [b for b in text.split("\n\n") if b.strip()]
+    assert len(blocks) == 2
+    assert blocks[0].startswith("Date: ")
+    assert blocks[0].endswith("Cmnd: sabsim init .")
+    assert blocks[1].endswith("Cmnd: sabsim prepare")
+
+
+def test_main_with_an_argument_vector_records_nothing(run_home, capsys):
+    """A test or module calling main(argv) writes no `command` file."""
+    from sabsim.cli import COMMAND_RECORD_FILE
+    main(["init", "."])
+    assert not (run_home / COMMAND_RECORD_FILE).exists()

@@ -66,6 +66,19 @@ The goal is a middle ground: short enough to keep expressions tidy,
 long enough that any student can read the code cold and follow the
 logic without guessing what a variable holds.
 
+### The `command` file
+
+Every user-invokable entry point appends the issued command line to
+a file named `command` in the current directory — a dated `Date:` /
+`Cmnd: <argv>` block per run — so the exact invocation is recoverable
+later (`ARCHITECTURE.md` §4.2; the convention is Imago's). SABSIM has
+one entry point, `sabsim.cli:main`, and the helper `record_command()`
+runs there ONLY when `main` is entered with no argument vector (the
+installed console script), never when a test or module calls
+`main(argv)` — so the suite writes no stray `command` files. A new
+standalone script under `bin/` or `src/scripts/` follows the same rule
+from its `if __name__ == "__main__":` block.
+
 ## Project Overview
 
 <!-- Replace this section with your project description, how to run it,

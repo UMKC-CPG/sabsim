@@ -1254,6 +1254,23 @@ Each stage's outputs land in that stage's folder (`prep_surf1_<a>/`,
 roll-up across pairs: a comparison between two projects is the
 person's own (revised 2026-08-30 (Paul)).
 
+**Every invocation is recorded in a `command` file (Paul, 2026-09-23;
+Imago's standing convention, adopted unchanged).** The `sabsim`
+command appends one dated block — a `Date:` line and a `Cmnd:` line
+carrying the exact argument vector — to a file named `command` in the
+directory it was issued from, before it does anything else. So a
+project folder's `command` file grows into the history of what was
+done there: the `init`, each `prepare`, and, because the generated
+Slurm scripts `cd` into the project folder before their `sabsim run`
+line, every compute-node run with its date; a prep folder's records
+its `bootstrap` phases. Recall is a `cat command`, not a search of
+shell histories. The record is written only from the real console
+entry point (the installed `sabsim` script, with no argument vector
+handed in), never when a test or another module calls `main(argv)`
+directly, so the test suite leaves no stray `command` files. A
+setting that lands in this permanent record should therefore be
+named, not numbered — the same argument Imago makes.
+
 **Per-run subdirectories, never a silent overwrite.** Re-running a
 stage (a new seed, a tweaked energy) must never clobber the previous
 result, so each run writes its working files to a fresh `run-<id>/`
