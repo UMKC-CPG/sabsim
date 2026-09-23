@@ -1267,7 +1267,8 @@ its `bootstrap` phases. Recall is a `cat command`, not a search of
 shell histories. The record is written only from the real console
 entry point (the installed `sabsim` script, with no argument vector
 handed in), never when a test or another module calls `main(argv)`
-directly, so the test suite leaves no stray `command` files. A
+directly, so the test suite leaves no stray `command` files, and
+not for a help request (`-h`/`--help`), which changes nothing. A
 setting that lands in this permanent record should therefore be
 named, not numbered — the same argument Imago makes.
 

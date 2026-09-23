@@ -175,3 +175,13 @@ def test_main_with_an_argument_vector_records_nothing(run_home, capsys):
     from sabsim.cli import COMMAND_RECORD_FILE
     main(["init", "."])
     assert not (run_home / COMMAND_RECORD_FILE).exists()
+
+
+def test_a_help_request_is_not_recorded(run_home, monkeypatch, capsys):
+    """`sabsim -h` and `sabsim init --help` leave no `command` entry."""
+    from sabsim.cli import COMMAND_RECORD_FILE
+    for vector in (["sabsim", "-h"], ["sabsim", "init", "--help"]):
+        monkeypatch.setattr("sys.argv", vector)
+        with pytest.raises(SystemExit):
+            main()
+    assert not (run_home / COMMAND_RECORD_FILE).exists()

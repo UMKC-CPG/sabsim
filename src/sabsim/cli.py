@@ -538,15 +538,27 @@ def record_command(arguments=None) -> None:
         record.write("\n\n")
 
 
+def _is_help_request(arguments) -> bool:
+    """True when the vector asks for help (``-h``/``--help``) anywhere.
+
+    argparse honours the flag at any position, including after a
+    subcommand (``sabsim init -h``), and exits before anything runs.
+    """
+    return any(arg in ("-h", "--help") for arg in arguments)
+
+
 def main(argv=None) -> int:
     """The ``sabsim`` console entry point; returns a process exit code.
 
     The invocation is recorded in the ``command`` file ONLY when this
     is the real entry — ``argv`` is None, so the vector is the process's
     own — never when a test or another module hands one in, so the
-    suite leaves no stray ``command`` files (CLAUDE.md).
+    suite leaves no stray ``command`` files (CLAUDE.md). A help
+    request is not recorded either: it changes nothing.
     """
-    if argv is None:
+    # A help request does something only to the screen, so it is not
+    # part of the folder's history (Paul, 2026-09-23).
+    if argv is None and not _is_help_request(sys.argv[1:]):
         record_command()
     parser = _build_parser()
     args = parser.parse_args(argv)

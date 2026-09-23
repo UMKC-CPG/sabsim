@@ -75,7 +75,8 @@ later (`ARCHITECTURE.md` §4.2; the convention is Imago's). SABSIM has
 one entry point, `sabsim.cli:main`, and the helper `record_command()`
 runs there ONLY when `main` is entered with no argument vector (the
 installed console script), never when a test or module calls
-`main(argv)` — so the suite writes no stray `command` files. A new
+`main(argv)` — so the suite writes no stray `command` files — and
+never for a help request (`-h`/`--help`), which changes nothing. A new
 standalone script under `bin/` or `src/scripts/` follows the same rule
 from its `if __name__ == "__main__":` block.
 
