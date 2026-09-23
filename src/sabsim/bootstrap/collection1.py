@@ -503,7 +503,7 @@ def build_collection1(recipe: ForceModelRecipe, work_dir: Path) -> tuple:
     source, Atoms)`` triples, and the path of the library's TOML
     sidecar. The same six families also yield the ENVIRONMENT LIBRARY
     the §3.5 gate judges against (DESIGN §4.8 part 2, 2026-08-29): the
-    cold bulk, the clean surfaces and the warm runs are catalogued, the
+    cold bulk, the clean surfaces and the warm runs are cataloged, the
     melt-quench family is the self-check, and the pair of files
     (``environment_library.npz`` + ``.toml``) is written beside the
     collection under ``work_dir`` (PSEUDOCODE §11.2/§11.3).

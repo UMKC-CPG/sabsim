@@ -15,7 +15,6 @@ import numpy as np
 import pytest
 from ase.io import read as ase_read
 
-import sabsim.structure
 from sabsim.structure.slab_builder import (
     WAFER_A_TAG,
     WAFER_B_TAG,
@@ -37,8 +36,11 @@ from sabsim.structure.slab_builder import (
 
 # The Si diamond CIF shipped as reference data — the authoritative
 # structure a wafer names (DESIGN.md §1.2), located beside the package.
-_SI_CIF = os.path.join(
-    os.path.dirname(sabsim.structure.__file__), "data", "si_diamond.cif")
+# The shipped crystals live in the materials catalog (DESIGN §10.11),
+# one folder per entry beside the recipe that describes them.
+from sabsim.catalog import lookup_entry
+
+_SI_CIF = str(lookup_entry("si_diamond_100").cif)
 
 _SI_100 = (1, 0, 0)
 
@@ -66,9 +68,12 @@ def test_bulk_type_map_matches_the_written_block(tmp_path):
 
 
 def _data_file(name: str) -> str:
-    """A shipped reference-data CIF, located beside the package."""
-    return os.path.join(
-        os.path.dirname(sabsim.structure.__file__), "data", name)
+    """A shipped crystal file, found through the materials catalog."""
+    for entry in (lookup_entry("si_diamond_100"),
+                  lookup_entry("sio2_quartz_001")):
+        if entry.cif.name == name:
+            return str(entry.cif)
+    raise AssertionError(f"no catalog entry ships {name}")
 
 
 def test_load_crystal_reads_the_cif():

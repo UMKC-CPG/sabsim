@@ -88,7 +88,7 @@ md_timestep       = { value = 1.0, unit = "fs" }
 # ---------------------------------------------------------------------
 [[phases]]
 name = "silica-alpha-quartz"
-cif  = "src/sabsim/structure/data/sio2_alpha_quartz.cif"
+cif  = "share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif"
 
 [collection1.bulk]
 # Family 1 — the perfect crystal at the lattice the GENERATOR model

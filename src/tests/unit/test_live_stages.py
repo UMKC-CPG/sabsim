@@ -474,24 +474,24 @@ def test_shipped_cif_resolves_from_an_unrelated_directory(
 
     The regression this guards actually happened: `sabsim run` makes the
     run's home the JOB directory, so the shipped example path
-    'src/sabsim/structure/data/si_diamond.cif' was resolved against a
+    'share/catalog/si_diamond_100/si_diamond.cif' was resolved against a
     directory nowhere near the repo and the run halted on a missing file
     before any physics started.
     """
     monkeypatch.chdir(tmp_path)
-    resolved = _resolve_cif("src/sabsim/structure/data/si_diamond.cif")
+    resolved = _resolve_cif("share/catalog/si_diamond_100/si_diamond.cif")
     assert os.path.isfile(resolved)
 
 
 def test_cif_beside_the_run_wins_over_the_shipped_copy(
         monkeypatch, tmp_path):
     """A CIF in the working directory is preferred (a user's own file)."""
-    own = tmp_path / "src" / "sabsim" / "structure" / "data"
+    own = tmp_path / "share" / "catalog" / "si_diamond_100"
     own.mkdir(parents=True)
     (own / "si_diamond.cif").write_text("# the user's own crystal\n")
     monkeypatch.chdir(tmp_path)
 
-    resolved = _resolve_cif("src/sabsim/structure/data/si_diamond.cif")
+    resolved = _resolve_cif("share/catalog/si_diamond_100/si_diamond.cif")
     assert resolved == str(own / "si_diamond.cif")
 
 
@@ -518,7 +518,7 @@ def _dissimilar_member():
     silica_wafer = replace(
         silicon.material.wafer_b,
         identity="SiO2",
-        cif_source="src/sabsim/structure/data/sio2_alpha_quartz.cif",
+        cif_source="share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif",
         crystal_structure="alpha-quartz",
         surface_face=(0, 0, 1))
     return replace(

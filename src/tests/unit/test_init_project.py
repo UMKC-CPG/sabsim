@@ -1,13 +1,12 @@
 """``sabsim init`` — the project-folder generator (DESIGN.md §10.9).
 
-Three rules, each a test: it never overwrites (a second run keeps every
-file the first wrote, and keeps a person's edit); it names the stage
-folders from the labels it reads back out of ``sabsim.toml`` (so the
-two-pass use — init, edit the pair, init again — follows the edit);
-and each surface gets the recipe template of its own material, with the
-silicon recipe and a notice for a material that has none. The generated
-files must also pass the REAL loaders, or the generator would hand a
-student a folder the tool itself refuses.
+The pair is REQUIRED and comes from the materials catalog (§10.11):
+the wafer tables are set from the two entries, the stage folders are
+named from the labels, and each prep folder receives its entry's
+recipe. It never overwrites, a second run with the same pair keeps
+everything, and a project file that names another pair is refused.
+The generated files must also pass the REAL loaders, or the generator
+would hand a student a folder the tool itself refuses.
 """
 
 import tomllib
@@ -15,11 +14,10 @@ import tomllib
 import pytest
 
 from sabsim.cli import main
-from sabsim.deploy.init_project import (
-    InitError,
-    RECIPE_TEMPLATES,
-    init_project,
-)
+from sabsim.deploy.init_project import InitError, init_project
+
+PAIR = ("si_diamond_100", "sio2_quartz_001")
+PREP_1, PREP_2 = "prep_surf1_si_diamond_100", "prep_surf2_sio2_quartz_001"
 
 
 def _generation_plan_project(recipe_path):
@@ -28,40 +26,52 @@ def _generation_plan_project(recipe_path):
         return tomllib.load(handle)["generation_plan"]["project"]
 
 
-def test_a_fresh_folder_gets_the_full_si_sio2_layout(tmp_path):
-    """The template pair is Si/SiO2, so the four folders follow it."""
+def _wafer_tables(project_file):
+    with project_file.open("rb") as handle:
+        raw = tomllib.load(handle)
+    return raw["wafer_a"], raw["wafer_b"]
+
+
+def test_a_fresh_folder_gets_the_full_layout_for_the_pair(tmp_path):
     folder = tmp_path / "si_sio2"
-    report = init_project(folder)
+    report = init_project(folder, PAIR)
 
     assert (folder / "sabsim.toml").is_file()
     assert (folder / "deployment.toml").is_file()
-    for stage in ("prep_surf1_si", "prep_surf2_sio2", "bond_si_sio2",
-                  "analysis_si_sio2"):
+    for stage in (PREP_1, PREP_2, "bond_si_diamond_100_sio2_quartz_001",
+                  "analysis_si_diamond_100_sio2_quartz_001"):
         assert (folder / stage).is_dir(), stage
-    assert (folder / "prep_surf1_si" / "recipe.toml").is_file()
-    assert (folder / "prep_surf2_sio2" / "recipe.toml").is_file()
+    assert (folder / PREP_1 / "recipe.toml").is_file()
+    assert (folder / PREP_2 / "recipe.toml").is_file()
     assert report.kept == [] and report.notices == []
     assert len(report.written) == 8
 
 
-def test_each_surface_gets_its_own_materials_recipe(tmp_path):
-    """Silicon's recipe in prep_surf1_si, silica's in prep_surf2_sio2."""
+def test_the_wafer_tables_come_from_the_catalog_entries(tmp_path):
     folder = tmp_path / "si_sio2"
-    init_project(folder)
-    silicon = (folder / "prep_surf1_si" / "recipe.toml").read_text()
-    silica = (folder / "prep_surf2_sio2" / "recipe.toml").read_text()
+    init_project(folder, PAIR)
+    wafer_a, wafer_b = _wafer_tables(folder / "sabsim.toml")
+    assert wafer_a["material"] == "si_diamond_100"
+    assert wafer_a["cif"] == "share/catalog/si_diamond_100/si_diamond.cif"
+    assert wafer_a["structure"] == "diamond"
+    assert wafer_a["face"] == [1, 0, 0]
+    assert wafer_b["material"] == "sio2_quartz_001"
+    assert wafer_b["cif"] == (
+        "share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif")
+    assert wafer_b["face"] == [0, 0, 1]
+
+
+def test_each_surface_gets_its_own_entrys_recipe(tmp_path):
+    folder = tmp_path / "si_sio2"
+    init_project(folder, PAIR)
+    silicon = (folder / PREP_1 / "recipe.toml").read_text()
+    silica = (folder / PREP_2 / "recipe.toml").read_text()
     assert 'species_union = ["Si"]' in silicon
     assert 'species_union = ["Si", "O"]' in silica
     assert "sio2_alpha_quartz.cif" in silica
     assert "sio2_alpha_quartz.cif" not in silicon
-
-
-def test_the_recipes_point_at_this_projects_file(tmp_path):
-    """The one per-project line in a per-material file is rewritten."""
-    folder = tmp_path / "si_sio2"
-    init_project(folder)
     expected = str((folder / "sabsim.toml").resolve())
-    for prep in ("prep_surf1_si", "prep_surf2_sio2"):
+    for prep in (PREP_1, PREP_2):
         assert _generation_plan_project(
             folder / prep / "recipe.toml") == expected
 
@@ -69,68 +79,38 @@ def test_the_recipes_point_at_this_projects_file(tmp_path):
 def test_a_second_run_keeps_everything_and_writes_nothing(tmp_path):
     """Never overwrites: a person's edit survives a re-run."""
     folder = tmp_path / "si_sio2"
-    init_project(folder)
+    init_project(folder, PAIR)
     edited = folder / "deployment.toml"
     edited.write_text("# my machine\n")
 
-    report = init_project(folder)
+    report = init_project(folder, PAIR)
 
     assert report.written == []
-    assert sorted(report.kept) == sorted([
-        "sabsim.toml", "deployment.toml", "prep_surf1_si/",
-        "prep_surf2_sio2/", "bond_si_sio2/", "analysis_si_sio2/",
-        "prep_surf1_si/recipe.toml", "prep_surf2_sio2/recipe.toml"])
+    assert len(report.kept) == 8
     assert edited.read_text() == "# my machine\n"
 
 
-def test_two_pass_use_follows_the_edited_pair(tmp_path):
-    """init, edit wafer_b to Si, init again -> Si/Si folders appear."""
-    folder = tmp_path / "pair"
-    init_project(folder)
-    project_file = folder / "sabsim.toml"
-    text = project_file.read_text().replace(
-        'material  = "SiO2"', 'material  = "Si"', 1)
-    project_file.write_text(text)
-
-    report = init_project(folder)
-
-    assert (folder / "prep_surf2_si" / "recipe.toml").is_file()
-    assert (folder / "bond_si_si").is_dir()
-    assert (folder / "analysis_si_si").is_dir()
-    # The first pass's silica folders are NOT removed: init only adds.
-    assert (folder / "prep_surf2_sio2").is_dir()
-    assert "prep_surf2_si/" in report.written
-    assert 'species_union = ["Si"]' in (
-        folder / "prep_surf2_si" / "recipe.toml").read_text()
+def test_a_same_material_pair_gets_two_distinct_prep_folders(tmp_path):
+    folder = tmp_path / "si_si"
+    init_project(folder, ("si_diamond_100", "si_diamond_100"))
+    assert (folder / PREP_1 / "recipe.toml").is_file()
+    assert (folder / "prep_surf2_si_diamond_100" / "recipe.toml").is_file()
+    assert (folder / "bond_si_diamond_100_si_diamond_100").is_dir()
 
 
-def test_a_material_without_a_template_gets_silicon_and_a_notice(
+def test_an_existing_project_file_naming_another_pair_is_refused(
         tmp_path):
-    """No LiNbO3 recipe yet: the silicon one is a start, said aloud."""
+    """The file is the record: init with a different pair stops."""
     folder = tmp_path / "pair"
-    init_project(folder)
-    project_file = folder / "sabsim.toml"
-    project_file.write_text(project_file.read_text().replace(
-        'material  = "SiO2"', 'material  = "LiNbO3"', 1))
-
-    report = init_project(folder)
-
-    recipe = folder / "prep_surf2_linbo3" / "recipe.toml"
-    assert recipe.is_file()
-    assert 'species_union = ["Si"]' in recipe.read_text()
-    assert len(report.notices) == 1
-    assert "LiNbO3" in report.notices[0]
-    assert "silicon recipe" in report.notices[0]
-    assert not (RECIPE_TEMPLATES / "linbo3.toml").exists()
+    init_project(folder, PAIR)
+    with pytest.raises(InitError, match="already names the pair"):
+        init_project(folder, ("sio2_quartz_001", "si_diamond_100"))
 
 
-def test_a_project_file_without_labels_is_refused_readably(tmp_path):
-    """A half-edited file must still say what init needed from it."""
-    folder = tmp_path / "pair"
-    folder.mkdir()
-    (folder / "sabsim.toml").write_text('[wafer_a]\nmaterial = "Si"\n')
-    with pytest.raises(InitError, match=r"\[wafer_b\] material"):
-        init_project(folder)
+def test_a_label_not_in_the_catalog_is_refused_with_the_list(tmp_path):
+    with pytest.raises(InitError, match="linbo3.*it holds: si_diamond_100"):
+        init_project(tmp_path / "pair", ("si_diamond_100", "linbo3_x_001"))
+    assert not (tmp_path / "pair" / "sabsim.toml").exists()
 
 
 def test_the_generated_project_passes_the_real_loaders(
@@ -142,24 +122,22 @@ def test_the_generated_project_passes_the_real_loaders(
     monkeypatch.setenv("SABSIM_SHARE", str(tmp_path / "share"))
     monkeypatch.setenv("SABSIM_SCRATCH", str(tmp_path / "scratch"))
     folder = tmp_path / "si_sio2"
-    init_project(folder)
+    init_project(folder, PAIR)
 
     project = load_and_validate_project(str(folder / "sabsim.toml"))
-    assert project.pair.pair_label == "si_sio2"
-    for prep in ("prep_surf1_si", "prep_surf2_sio2"):
+    assert project.pair.pair_label == "si_diamond_100_sio2_quartz_001"
+    for prep in (PREP_1, PREP_2):
         recipe = load_recipe(folder / prep / "recipe.toml")
         assert recipe.generation_plan.project == str(
             (folder / "sabsim.toml").resolve())
 
 
 def test_cli_init_reports_and_points_at_the_next_steps(tmp_path, capsys):
-    """`sabsim init <folder>` exits 0 and prints the three next steps."""
     folder = tmp_path / "si_sio2"
-    assert main(["init", str(folder)]) == 0
+    assert main(["init", str(folder), *PAIR]) == 0
     out = capsys.readouterr().out
     assert "wrote  sabsim.toml" in out
     assert "sabsim prepare" in out
-    assert "library builds" in out
-    # The pair was not named, so the catalogue is shown.
-    assert "SiO2" in out and "alpha-quartz" in out
-    assert (folder / "prep_surf2_sio2" / "recipe.toml").is_file()
+    assert (folder / PREP_2 / "recipe.toml").is_file()
+    assert main(["init", str(folder), "si_diamond_100", "nope_x_1"]) == 1
+    assert "catalog" in capsys.readouterr().err

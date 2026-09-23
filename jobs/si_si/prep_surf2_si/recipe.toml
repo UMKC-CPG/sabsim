@@ -54,7 +54,7 @@ md_timestep       = { value = 1.0, unit = "fs" }
 # ---------------------------------------------------------------------
 [[phases]]
 name = "silicon-diamond"
-cif  = "src/sabsim/structure/data/si_diamond.cif"
+cif  = "share/catalog/si_diamond_100/si_diamond.cif"
 
 [collection1.bulk]
 # Family 1 — the perfect crystal at the lattice the GENERATOR model

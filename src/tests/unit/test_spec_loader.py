@@ -82,8 +82,8 @@ def test_a_same_material_pair_still_has_two_prep_folders(tmp_path):
     text = _template_text().replace(
         '[wafer_b]\nmaterial  = "SiO2"', '[wafer_b]\nmaterial  = "Si"', 1)
     text = text.replace(
-        'cif       = "src/sabsim/structure/data/sio2_alpha_quartz.cif"',
-        'cif       = "src/sabsim/structure/data/si_diamond.cif"', 1)
+        'cif       = "share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif"',
+        'cif       = "share/catalog/si_diamond_100/si_diamond.cif"', 1)
     assert text != _template_text()
     pair = load_and_validate_project(_write_spec(tmp_path, text)).pair
     folders = stage_folders(pair)

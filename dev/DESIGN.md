@@ -6,7 +6,7 @@
 
 > **Prior art — read before writing the relevant sections.** Several
 > algorithms this document needs already exist, and some now run, in
-> Sunita's `bond_debond` pipeline: the reusable kernels are catalogued in
+> Sunita's `bond_debond` pipeline: the reusable kernels are cataloged in
 > `PRIOR_ART.md` §1.2, and the newer worked examples plus current status
 > are in §1.5. Lift or adapt rather than re-derive:
 > - **Surface amorphization (§3):** an Ar-bombardment + ZBL
@@ -1193,7 +1193,7 @@ SABSIM therefore defines crystallinity WITHOUT a coordination number:
   LEDGER T-39, and 2026-08-30): a library is built from one recipe, so
   it describes ONE material, and a dissimilar pair such as silicon on
   silica needs two. T-39 halted because one library had been named for
-  every pair and the silicon one could not catalogue a silica face. A
+  every pair and the silicon one could not catalog a silica face. A
   shared, cluster-wide collection keyed by chemical formula was
   considered and rejected: a formula does not identify a crystal
   (quartz and cristobalite are both SiO2), so it would have needed a
@@ -2000,15 +2000,15 @@ student can read the file and know what was manufactured.
    **Collection 1 also emits the environment library (added 2026-08-29,
    Paul).** The §3.5 gate's definition of "crystalline" — an atom whose
    second-shell bispectrum matches some environment of the undamaged material —
-   needs a catalogue of those environments, and this collection is where they
+   needs a catalog of those environments, and this collection is where they
    already are. So building Collection 1 also writes the library: the
    descriptors of every atom in family 1 (the cold ideal sites), family 6 (the
    same sites with their thermal spread — this is what fixes the gate's
    tolerance, and what its false-alarm baseline is measured on) and family 4
    (the clean faces, so a slab's own surfaces are not mistaken for damage).
    Family 2 is EXCLUDED, because it is carried past the point where bonds fail
-   and a broken environment must not be catalogued as crystalline; family 3 is
-   not catalogued either, but it is the library's self-check — the disorder
+   and a broken environment must not be cataloged as crystalline; family 3 is
+   not cataloged either, but it is the library's self-check — the disorder
    every tolerance must recognise (§3.5). Three requirements follow. The
    library RECORDS the temperature its warm runs were made at (the lowest, if
    several), and the PROJECT loader compares the temperature at which the gate
@@ -2196,8 +2196,8 @@ load-time check that refuses a pair whose structures fall outside it.
 
 **Built state (2026-08-26): the recipe is a file, and the first slice is
 silicon.** The recipe of the eight parts above is a TOML file,
-`recipe.toml` (templates in `share/templates/recipes/`, one per
-material), loaded by `src/sabsim/bootstrap/recipe.py` with
+`recipe.toml` (one per catalog entry, `share/catalog/<label>/`,
+§10.11), loaded by `src/sabsim/bootstrap/recipe.py` with
 `sabsim.toml`'s own discipline: every key required, units carried,
 three validation phases. The production settings block
 is the LEAN recipe of `dev/notes/vasp-labelling-recipe-lean.md` (chosen cheap
@@ -4545,45 +4545,35 @@ folders follow the edited labels. Reading uses the plain TOML parser,
 not the full validating loader, because a file the person is midway
 through editing must still yield its labels.
 
-**Each surface gets a recipe for ITS material.** A prep folder needs a
-force-model recipe (§4.8) before its environment library can be built,
-and the recipe differs per material in a known set of lines (species,
-domain, gate reference, descriptor weights, crystal, melt temperature,
-face, pseudopotentials). Those differences are not for a student to
-rediscover: the templates hold one recipe per material we have built a
-library for, under `share/templates/recipes/<label>.toml`, keyed by
-the lower-cased material label (`si.toml`, `sio2.toml`). `init` copies
-the matching one into each prep folder as `recipe.toml`, rewriting its
-`[generation_plan] project` line to point at THIS project's file. A
-material with no recipe of its own gets the silicon recipe as a
-starting point and a printed notice saying so — a start, in the open,
-never a silent guess.
+**Each surface gets its material's recipe.** A prep folder needs a
+force-model recipe (§4.8) before its environment library can be
+built, and the recipe differs per material in a known set of lines.
+Those differences are not for a student to rediscover: every catalog
+entry carries its own `recipe.toml` (§10.11), and `init` copies the
+entry's into the prep folder, rewriting only its `[generation_plan]
+project` line to point at THIS project's file.
 
-**The pair can be named on the command line.** Which two materials
-to bond is THE science decision of a project, so it is the one thing
-`init` asks for rather than guesses:
+**The pair is named on the command line, and it is required.** Which
+two materials to bond is THE science decision of a project, so it is
+the one thing `init` demands rather than defaults (Paul, 2026-09-23;
+a default here would be a science choice the written file then looks
+deliberate about, the §1.4 hidden default in another coat):
 
 ```
-sabsim init si_sio2 --materials Si SiO2
+sabsim init si_sio2 si_diamond_100 sio2_quartz_001
 ```
 
-The two labels are looked up in the MATERIALS CATALOGUE,
-`share/templates/recipes/materials.toml` — one entry per material the
-repository ships a recipe for, holding exactly what the project file's
-wafer table needs (the canonical label, the crystal file, the human
-structure label, the bonding face) and which recipe template is that
-material's. `init` writes the template project file and then sets the
-two wafer tables from the two entries, so a person never types a
-crystal path for a material we already know. The match is
-case-insensitive (`sio2` finds `SiO2`) and the CANONICAL spelling is
-what gets written, because the label is also the prep folder's name.
-Run with no `--materials`, `init` writes the template pair and prints
-the catalogue, so the person sees what is on offer before editing. A
-material that is NOT in the catalogue is refused with the catalogue
-printed, not written with a guessed crystal: `init` without the flag,
-then editing the wafer table by hand, is the honest path for a new
-material — and adding its entry and recipe to the catalogue is how it
-stops being new.
+The two labels are MATERIALS CATALOG entries (§10.11). `init` writes
+the template project file and sets its two wafer tables from the two
+entries — the label as the wafer's `material`, the entry's crystal
+file, structure name and bonding face — so a person never types a
+crystal path for a material the catalog holds; the labels also name
+the prep folders. A label that is not in the catalog is refused, with
+the catalog's entries printed, never written with a guessed crystal.
+If the project file already exists the pair given must match the one
+it names, or `init` refuses: the file, not the command line, is the
+record. Each prep folder receives its entry's `recipe.toml` with the
+generation plan's project line rewritten to this project.
 
 What `init` does NOT do is as deliberate. It does not run the
 bootstrap (a compute-node job), does not write the environment
@@ -4628,6 +4618,74 @@ nothing itself: the conda environment and the venv are hour-long steps
 a person should launch knowingly (§10.1's rule that the tool writes
 and the human runs). It ends by printing what to do next: source the
 rc, run the tests, `sabsim init`.
+
+### 10.11 The materials catalog — `catalog list` and `catalog add` (2026-09-23)
+
+A material the pipeline can use needs four things that used to live
+in three places: a crystal file (under `src/`), an entry naming it
+with a structure label and a face, a force-model recipe for its
+environment library, and a gate reference for its species set. The
+catalog puts the first three in ONE folder per entry:
+
+```
+share/catalog/
+  si_diamond_100/     material.toml, si_diamond.cif, recipe.toml
+  sio2_quartz_001/    material.toml, sio2_alpha_quartz.cif, recipe.toml
+```
+
+The gate references stay in `share/activation/`, keyed by species set,
+because `Si.toml` serves silicon and any other silicon-only phase.
+
+**One entry per phase AND face.** The environment library the §3.5
+gate judges against is built for one crystal and one bonding face
+(the clean-surface family, §4.8), so an entry is exactly that pair,
+and the project template's old warning holds: two crystals of one
+formula are two entries, and the program never guesses. The label is
+`<formula>_<phase>_<face>`, lower-cased, the face as bare Miller
+digits (a negative index written `m`, `1m10`): `si_diamond_100`,
+`sio2_quartz_001`, `sio2_cristobalite_100`. Explicit names, not
+ordinals, for the reason Imago gives against numbered settings: the
+label names the prep folder and lands in the project file, the
+`command` file and the ledger, and a number's meaning depends on a
+table that changes with the order things were added and differs
+between clones. `material.toml` carries the cased formula, the phase
+name, the face, and the crystal's provenance (the COD id and revision
+when it came from the Crystallography Open Database, as the shipped
+quartz did) as the AUTHORITATIVE values; the label is derived from
+them and a mismatch is refused.
+
+**What is per phase and what is per composition.** A recipe's species
+union, domain, gate reference, descriptor cutoff and weights, and
+pseudopotentials are chemistry, identical for quartz and
+cristobalite; its crystal, face, and melt cell and temperature are
+per phase (quartz needed 243 atoms at 5000 K, LEDGER T-43). The
+recipe in a prep folder serves the per-phase-and-face library, so
+each entry holds a full recipe and the chemistry lines are duplicated
+between siblings; `catalog add` clones from a sibling of the same
+formula so they start identical and a difference is a diff. The
+place the chemistry genuinely needs sharing — the bootstrap's
+Collection 1 for a whole domain, whose recipe lists every phase of the
+domain — is a later, domain-level recipe composed from entries.
+
+**`sabsim catalog list [<formula>]`** prints one line per entry —
+label, structure, face, source — and, given a formula, only that
+formula's entries. **`sabsim catalog add <label> --cif <file>
+--formula <F> --structure <name> --face h k l [--cod-id --cod-revision]
+[--from <sibling>]`** makes an entry: it refuses a label that does not
+derive from the values given or already exists, reads the crystal and
+refuses one with partial occupancy (the builder needs an ordered
+cell), copies the CIF in, writes `material.toml`, and clones the
+recipe from `--from` or, by default, the first sibling of the same
+formula, rewriting the phase name, crystal and face. A material with
+no sibling needs `--from`; when the source's formula differs the
+chemistry lines are left as they were and the command prints, by
+name, the lines the person must now decide: species union, domain,
+gate reference, descriptor weights, pseudopotentials, melt. The
+crystal file is the handoff from whatever found it — Imago's
+`cod_fish` for a COD structure — and the catalog keeps no fetch of its
+own. Removing an entry is deleting its folder. Materials live in the
+person's own clone; a second catalog under `SABSIM_LOCAL` is the
+growth path when one is needed.
 
 ## 11. Resuming an interrupted run
 

@@ -50,7 +50,7 @@ _TEMPLATE = os.path.abspath(os.path.join(
 
 def _template_pair():
     """The shipped template's pair; wafer A is Si(100), the face the
-    hand-built library catalogues."""
+    hand-built library catalogs."""
     return load_and_validate_project(_TEMPLATE).pair
 
 
@@ -167,7 +167,7 @@ def test_warm_ruler_floors_a_still_direction_instead_of_blowing_up():
     assert scaled[0] < scaled[1] < scaled[2] < 1.0e4
 
 
-def test_an_uncatalogued_species_cannot_be_judged():
+def test_an_uncataloged_species_cannot_be_judged():
     with pytest.raises(SpecificationError, match="'O'"):
         disordered_atoms(np.array([COLD_VECTOR]), ["O"],
                          hand_built_library(), 3.0)
@@ -334,7 +334,7 @@ class _FakeRecipe:
         self.generator = SimpleNamespace(model="DPA-3.1-3M")
         self.phases = [SimpleNamespace(
             name="silicon-diamond",
-            cif="src/sabsim/structure/data/si_diamond.cif")]
+            cif="share/catalog/si_diamond_100/si_diamond.cif")]
         self.starting_collection = SimpleNamespace(
             warm_runs=[SimpleNamespace(
                 temperature=Quantity(value=600.0, unit="K")),
@@ -375,7 +375,7 @@ def _collection():
             ("melt_quench", "si:0:0", _frame("melt"))]
 
 
-def test_build_environment_library_catalogues_the_right_families(tmp_path):
+def test_build_environment_library_catalogs_the_right_families(tmp_path):
     library = build_environment_library(
         _collection(), _FakeRecipe(), tmp_path,
         describe=_describe_by_tag(disorder_of_melt=5.0))

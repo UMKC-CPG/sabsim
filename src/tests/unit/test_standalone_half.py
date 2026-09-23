@@ -11,12 +11,10 @@ the beam species so the cascade can create projectile atoms against it.
 
 from __future__ import annotations
 
-import os
 
 import numpy as np
 from ase.io import read as ase_read
 
-import sabsim.structure
 from sabsim.structure.slab_builder import (
     build_standalone_half,
     load_crystal,
@@ -25,8 +23,9 @@ from sabsim.structure.slab_builder import (
 
 # The Si diamond CIF shipped as reference data — the same authoritative
 # structure the other structure tests cut from.
-_SI_CIF = os.path.join(
-    os.path.dirname(sabsim.structure.__file__), "data", "si_diamond.cif")
+from sabsim.catalog import lookup_entry
+
+_SI_CIF = str(lookup_entry("si_diamond_100").cif)   # the catalog's copy
 _SI_100 = (1, 0, 0)
 
 

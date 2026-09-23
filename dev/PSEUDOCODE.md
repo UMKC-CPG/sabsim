@@ -2768,7 +2768,7 @@ record EnvironmentLibrary:
                                     # species weights — the gate REUSES
                                     # these, never its own copy
     environments:     map of species -> list of vector
-                                    # every catalogued environment of
+                                    # every cataloged environment of
                                     # that species: families 1, 4, 6
     warm_mean:        map of species -> vector
     whitening:        map of species -> matrix (K x K)
@@ -2801,14 +2801,14 @@ record EnvironmentLibrary:
                                     # near one; both are recorded so the
                                     # separation is auditable
     warm_run_temperature: Quantity  # the LOWEST temperature among the
-                                    # warm runs catalogued: what the
+                                    # warm runs cataloged: what the
                                     # thermal scatter was measured at.
                                     # The project loader's warn/refuse
                                     # band (DESIGN §3.5) is judged
                                     # against this
     provenance:       record{ families: list, frame_counts: map,
                               surfaces: list of (species, face) }
-                                    # what was catalogued; the validator
+                                    # what was cataloged; the validator
                                     # checks the wafer's face is here
 
 
@@ -2837,13 +2837,13 @@ function load_environment_library(pair_specification, wafer):
              "deployment binds '<bound engine>' — both sides of the "
              "comparison must use one engine (ARCHITECTURE §2.3)")
     # Face and species only — NOT the termination (Paul, 2026-08-29):
-    # every catalogued surface is bombarded to an amorphous skin before
+    # every cataloged surface is bombarded to an amorphous skin before
     # it matters, so which atomic plane the clean cut ended on makes no
     # difference to the gate. Only THIS wafer's face: the other wafer
     # has a library of its own.
     face = (wafer.species, wafer.face)
     if face not in library.provenance.surfaces:
-        halt("environment library catalogues no clean <face> "
+        halt("environment library catalogs no clean <face> "
              "surface; the slab's own faces would read as damage — "
              "add the face to the recipe's surfaces and rebuild")
 
@@ -3685,18 +3685,18 @@ function build_collection1(force_model_recipe):
 
 ```
 function build_environment_library(structures, force_model_recipe):
-    # DESIGN §3.5 / §4.8 part 2. Catalogue the UNDAMAGED environments:
+    # DESIGN §3.5 / §4.8 part 2. Catalog the UNDAMAGED environments:
     # family 1 (cold ideal sites), family 6 (the same sites with their
     # thermal spread) and family 4 (the clean faces, so a slab's own
     # surfaces are not mistaken for damage). Family 2 is EXCLUDED — it
     # is carried past bond failure, and a broken environment must not
-    # be catalogued as crystalline. Family 3 is not catalogued; it is
+    # be cataloged as crystalline. Family 3 is not cataloged; it is
     # the SELF-CHECK: the disorder every tolerance must recognise.
     settings = force_model_recipe.descriptor_settings   # recipe part 7
-    catalogued = frames of structures with family in {bulk, surface,
+    cataloged = frames of structures with family in {bulk, surface,
                                                       warm_run}
     environments = map species -> []
-    for each (family, source, atoms) in catalogued:
+    for each (family, source, atoms) in cataloged:
         vectors = DESCRIPTOR_ENGINE.describe(atoms, settings)
         for each atom: environments[atom.species].append(vectors[atom])
 
@@ -3726,7 +3726,7 @@ function build_environment_library(structures, force_model_recipe):
     warm_disordered = fraction of warm-run atoms whose nearest-cold
                       distance > multiple * thermal_scatter[species]
     melt_disordered = fraction of melt-quench atoms (family 3) whose
-                      nearest CATALOGUED distance > the same tolerance
+                      nearest CATALOGED distance > the same tolerance
     # A sound tolerance keeps warm_disordered near 0 and melt_disordered
     # near 1; the library REPORTS both, and generate refuses to write a
     # library that cannot separate them (DESIGN §3.5).
@@ -3735,10 +3735,10 @@ function build_environment_library(structures, force_model_recipe):
         engine: DESCRIPTOR_ENGINE.name, settings: settings,
         environments: environments, thermal_scatter: thermal_scatter,
         warm_distances: per species, the nearest-cold distances above,
-        warm_run_temperature: min over catalogued warm runs of
+        warm_run_temperature: min over cataloged warm runs of
                               spec.temperature,
         self_check: { multiple, warm_disordered, melt_disordered },
-        provenance: { families, frame_counts, surfaces catalogued } }
+        provenance: { families, frame_counts, surfaces cataloged } }
 ```
 
 ### 11.3 generate_hard_configs — reuse §9/§10 in "generate" mode
@@ -4946,48 +4946,39 @@ record InitReport:
     kept:    list[path]          # already there -- left untouched
     notices: list[str]           # e.g. "no recipe template for X"
 
-constant MATERIALS_CATALOGUE = RECIPE_TEMPLATES/materials.toml
-    # one table per shipped material: canonical label, recipe template,
-    # crystal file, structure label, bonding face (§10.9)
+constant CATALOG_ROOT = <repository>/share/catalog
+    # one folder per entry (§10.11): material.toml, the CIF, recipe.toml
 
-function init_project(project_folder, materials=None) -> InitReport:
+function init_project(project_folder, label_a, label_b) -> InitReport:
     make_folder_if_missing(project_folder)
-    catalogue = parse_toml(MATERIALS_CATALOGUE)
-    if materials given:
-        # THE science decision, looked up case-insensitively; an
-        # unknown label is refused with the catalogue printed.
-        entry_a, entry_b = lookup(catalogue, materials[0]),
-                           lookup(catalogue, materials[1])
+    # THE science decision, REQUIRED (§10.9): two catalog entries,
+    # looked up by label; an unknown label is refused with the
+    # catalog printed.
+    entry_a, entry_b = lookup(CATALOG_ROOT, label_a),
+                       lookup(CATALOG_ROOT, label_b)
 
-    # 1. The two top-level inputs, straight from the templates; with
-    #    materials given, the two wafer tables are set from the
-    #    catalogue entries (material, cif, structure, face) in the
-    #    template's own text, comments kept.
+    # 1. The two top-level inputs. A project file that already exists
+    #    must NAME THIS PAIR, or init refuses: the file is the record.
+    if exists(project_folder/sabsim.toml):
+        require labels in it == (label_a, label_b)
     copy_if_missing(TEMPLATE_ROOT/project_spec.toml,
                     project_folder/sabsim.toml,
-                    edit=set_wafer_tables(entry_a, entry_b) if given)
+                    edit=set_wafer_tables(entry_a, entry_b))
+                    # material = label, cif, structure, face; the
+                    # template's comments kept
     copy_if_missing(TEMPLATE_ROOT/deployment_rc.toml,
                     project_folder/deployment.toml)
 
-    # 2. Read the labels back with the PLAIN TOML parser -- a file the
-    #    person is midway through editing must still yield them.
-    raw     = parse_toml(project_folder/sabsim.toml)
-    label_a = raw["wafer_a"]["material"];  label_b = raw["wafer_b"]["material"]
-    folders = stage_folder_names(label_a, label_b)        # §2, one source
-
-    # 3. The four stage folders, and a recipe in each prep folder.
+    # 2. The four stage folders from the labels (§2, one source), and
+    #    each entry's recipe in its prep folder.
+    folders = stage_folder_names(label_a, label_b)
     for name in folders:
         make_folder_if_missing(project_folder/name)
-    for (prep_folder, label) in [(folders.prep_surf1, label_a),
-                                 (folders.prep_surf2, label_b)]:
-        template = RECIPE_TEMPLATES/(lower(label) + ".toml")
-        if not exists(template):
-            template = FALLBACK_RECIPE
-            notice("no recipe template for " + label + "; wrote the "
-                   "silicon recipe as a starting point -- edit it")
+    for (prep_folder, entry) in [(folders.prep_surf1, entry_a),
+                                 (folders.prep_surf2, entry_b)]:
         target = project_folder/prep_folder/recipe.toml
         if missing(target):
-            text = read(template)
+            text = read(entry.folder/recipe.toml)
             # The one line that is per-project, not per-material.
             text = set_generation_plan_project(text,
                        absolute(project_folder/sabsim.toml))
@@ -4996,14 +4987,53 @@ function init_project(project_folder, materials=None) -> InitReport:
     return InitReport(written, kept, notices)
 ```
 
+### 14.9 catalog -- list and add (`DESIGN.md` §10.11)
+
+```
+record MaterialEntry:
+    label:      string        # folder name: <formula>_<phase>_<face>
+    formula:    string        # cased, "SiO2"
+    structure:  string        # phase name, "alpha-quartz"
+    face:       (h, k, l)
+    cif:        path          # repository-relative, inside the folder
+    recipe:     path          # the folder's recipe.toml
+    provenance: map           # e.g. cod_id, cod_revision, note
+
+function entry_label(formula, structure, face) -> string:
+    # lower(formula) + "_" + slug(structure) + "_" + face digits, a
+    # negative index as "m": "sio2_quartz_001". slug() lower-cases
+    # what the person wrote and turns runs of non-alphanumerics into
+    # "_"; the phase word is the person's choice, and the label must
+    # derive from it by one rule a student can apply by hand.
+
+function read_catalog() -> list of MaterialEntry:
+    for each folder under CATALOG_ROOT holding material.toml:
+        entry = parse; require entry_label(...) == folder name
+    return entries in name order
+
+function catalog_add(label, cif, formula, structure, face,
+                     provenance, source=None):
+    require label == entry_label(formula, structure, face)
+    require no folder CATALOG_ROOT/label
+    crystal = load_crystal(cif); require crystal.is_ordered
+    source = source or first entry with the same formula
+             or REFUSE ("give --from: no sibling of this formula")
+    make CATALOG_ROOT/label; copy cif in; write material.toml
+    text = read(source.recipe)
+    rewrite the phase name, the cif line, the surface face
+    write CATALOG_ROOT/label/recipe.toml
+    if source.formula != formula:
+        notice(the chemistry lines to decide by hand: species_union,
+               domain, reference_data_ref, species_weights, paw, melt)
+```
+
 `stage_folder_names(label_a, label_b)` is the label-level form of §2's
 `stage_folders(pair)`; the pair-level one delegates to it so the
-layout is still written down once. The CLI prints the report (and the
-catalogue, when no materials were named) and then the next steps in
-order -- edit the inputs, run `prepare`, submit the guide's chain
-starting with the two library builds -- because the generated folder
-is complete in the §1.4 sense and unread in the science sense until
-the person has looked at it (§10.9).
+layout is still written down once. The CLI prints the report and then
+the next steps in order -- edit the inputs, run `prepare`, submit the
+guide's chain starting with the two library builds -- because the
+generated folder is complete in the §1.4 sense and unread in the
+science sense until the person has looked at it (§10.9).
 
 ### 14.8 setup -- the install checked and the rc written (`DESIGN.md` §10.10)
 

@@ -45,6 +45,15 @@
 
 <!-- Tasks related to layout, modules, build. -->
 
+- [x] **Materials catalog** (Paul, 2026-09-23; ARCHITECTURE §1,
+      DESIGN §10.9/§10.11, PSEUDOCODE §14.7/§14.9). `share/catalog/
+      <formula>_<phase>_<face>/` = material.toml + CIF + recipe.toml;
+      `sabsim catalog list [formula]`, `sabsim catalog add`; `init`
+      takes the pair as two REQUIRED labels. CIFs moved out of
+      `src/sabsim/structure/data/`. Growth: a domain-level recipe
+      composed from entries for the production-potential bootstrap;
+      a second catalog under SABSIM_LOCAL. Codfish (Imago) is the
+      upstream fetch; the CIF file is the handoff.
 - [x] **Pull zones carved from the restored atoms, not the assembly**
       (Paul's stale-`built` question, 2026-09-23; DESIGN §5.4,
       PSEUDOCODE §9.2/§9.5/§13, LEDGER T-41). The si_si bond
@@ -71,7 +80,7 @@
       writes `.sabsim/sabsimrc` from the template (never overwrites;
       WRONG when the venv's editable sabsim is another clone). `init
       --materials A B` sets the wafer tables from the materials
-      catalogue `share/templates/recipes/materials.toml`; no flag
+      catalog `share/templates/recipes/materials.toml`; no flag
       prints it. `prepare` writes `prep_surfN_<label>.library.slurm`
       (bootstrap generate in the prep folder; exits at once if the
       library exists) and holds each prep on it: six-job chain.
@@ -2113,7 +2122,7 @@ foundations, interaction rules. -->
       + the `environment_library.npz`/`.toml` writer and reader;
       `load_environment_library` with the three refusals (model, engine,
       member face) and the warm-run temperature warn/refuse band (20 %).
-      (c) `disordered_atoms` — nearest catalogued environment per atom,
+      (c) `disordered_atoms` — nearest cataloged environment per atom,
       per species, against `disorder_scatter_multiple` x thermal scatter.
       (d) `activation_gate.AmorphizationDepthMetric` rewrite — whole
       profile, layers of `depth_bin_width`, baseline = the library's

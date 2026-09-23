@@ -5,7 +5,7 @@ bispectrum (:mod:`sabsim.driver.descriptors`) lies within the material's
 own thermal scatter of SOME environment of the undamaged material —
 "does this neighbourhood exist anywhere in the undamaged crystal?" —
 and DISORDERED otherwise (DESIGN §3.5, revised 2026-08-29). This module
-holds the catalogue that question is asked of:
+holds the catalog that question is asked of:
 
 * :class:`EnvironmentLibrary` — the record: the descriptors of every
   atom of the cold bulk crystal (family 1), the warm bulk crystal
@@ -53,7 +53,7 @@ from sabsim.spec.loader import SpecificationError
 LIBRARY_ARRAYS_FILE = "environment_library.npz"
 LIBRARY_MANIFEST_FILE = "environment_library.toml"
 
-# Which Collection-1 families are CATALOGUED as undamaged environments,
+# Which Collection-1 families are CATALOGED as undamaged environments,
 # which one is the disorder SELF-CHECK, and which are deliberately left
 # out (DESIGN §4.8 part 2): the strain family is carried past bond
 # failure and the rattled snapshots are static kicks, so neither is a
@@ -62,7 +62,7 @@ COLD_BULK_FAMILY = "bulk"
 SURFACE_FAMILY = "surface"
 WARM_FAMILIES = ("warm_nvt", "warm_npt")
 MELT_QUENCH_FAMILY = "melt_quench"
-CATALOGUED_FAMILIES = (COLD_BULK_FAMILY, SURFACE_FAMILY, *WARM_FAMILIES)
+CATALOGED_FAMILIES = (COLD_BULK_FAMILY, SURFACE_FAMILY, *WARM_FAMILIES)
 
 # The thermal scatter is the TYPICAL nearest-cold distance of a warm-run
 # atom; the 90th percentile is "typical" here so that a handful of
@@ -87,7 +87,7 @@ SELF_CHECK_MIN_MELT_DISORDERED = 0.50
 # (DESIGN §7.5), not a project knob.
 LIBRARY_TEMPERATURE_REFUSE_FRACTION = 0.20
 
-# Query vectors are compared with the catalogue in chunks so the N x M
+# Query vectors are compared with the catalog in chunks so the N x M
 # distance matrix of a big slab against a big library never has to fit
 # in memory all at once.
 _QUERY_CHUNK = 2000
@@ -122,7 +122,7 @@ class EnvironmentLibrary:
     """What the undamaged material looks like, atom by atom (§3.5).
 
     ``environments`` maps each species to an ``(M, K)`` array of every
-    catalogued descriptor vector of that species, stored RAW so the
+    cataloged descriptor vector of that species, stored RAW so the
     file stays inspectable; ``warm_mean`` and ``whitening`` are the
     ruler every distance is taken with (:func:`whiten`); ``thermal_
     scatter`` is the unit the gate's tolerance is counted in, a
@@ -130,10 +130,10 @@ class EnvironmentLibrary:
     every warm-run atom's nearest-cold distance so the false-alarm rate
     — the depth profile's baseline — can be recomputed at whatever
     scatter multiple a project names. ``warm_run_temperature`` (kelvin, the
-    LOWEST warm run catalogued) is what the loader's temperature band is
+    LOWEST warm run cataloged) is what the loader's temperature band is
     judged against, and ``provenance`` records the families, frame
     counts and clean surfaces (as ``{"phase", "face", "termination",
-    "species"}`` tables) the catalogue was built from.
+    "species"}`` tables) the catalog was built from.
     """
 
     model_name: str
@@ -193,26 +193,26 @@ def whiten(library: EnvironmentLibrary, species: str,
 
 
 def _nearest_distances(
-        queries: np.ndarray, catalogue: np.ndarray) -> np.ndarray:
-    """Distance from each query vector to its nearest catalogue vector.
+        queries: np.ndarray, catalog: np.ndarray) -> np.ndarray:
+    """Distance from each query vector to its nearest catalog vector.
 
     Uses the expansion |q - c|^2 = |q|^2 + |c|^2 - 2 q.c so one matrix
     product per chunk does the work of a double loop; the tiny negative
     round-off that expansion can produce is clipped before the root.
     """
     queries = np.asarray(queries, dtype=float)
-    catalogue = np.asarray(catalogue, dtype=float)
+    catalog = np.asarray(catalog, dtype=float)
     if queries.shape[0] == 0:
         return np.zeros(0, dtype=float)
-    if catalogue.shape[0] == 0:
-        raise ValueError("the environment catalogue is empty")
-    catalogue_norms = np.einsum("ij,ij->i", catalogue, catalogue)
+    if catalog.shape[0] == 0:
+        raise ValueError("the environment catalog is empty")
+    catalog_norms = np.einsum("ij,ij->i", catalog, catalog)
     nearest = np.empty(queries.shape[0], dtype=float)
     for start in range(0, queries.shape[0], _QUERY_CHUNK):
         chunk = queries[start:start + _QUERY_CHUNK]
         chunk_norms = np.einsum("ij,ij->i", chunk, chunk)
-        squared = (chunk_norms[:, None] + catalogue_norms[None, :]
-                   - 2.0 * chunk @ catalogue.T)
+        squared = (chunk_norms[:, None] + catalog_norms[None, :]
+                   - 2.0 * chunk @ catalog.T)
         nearest[start:start + _QUERY_CHUNK] = np.sqrt(
             np.clip(squared.min(axis=1), 0.0, None))
     return nearest
@@ -227,7 +227,7 @@ def disordered_atoms(
     species within ``scatter_multiple`` thermal scatters of its vector.
     Asked that way — not "is it what THIS atom used to have" — a
     displaced atom the heal re-settled onto a good site is crystalline,
-    and both slab faces are in the catalogue through the surface family,
+    and both slab faces are in the catalog through the surface family,
     so the frozen base needs no special case. A species the library has
     never seen cannot be judged, and says so.
     """
@@ -237,7 +237,7 @@ def disordered_atoms(
     for species in set(symbols):
         if species not in library.environments:
             raise SpecificationError(
-                f"the environment library catalogues no '{species}' "
+                f"the environment library catalogs no '{species}' "
                 f"environments (it has {sorted(library.environments)}); "
                 f"the slab cannot be judged against it")
         rows = np.array([index for index, symbol in enumerate(symbols)
@@ -285,11 +285,11 @@ def _stack(rows_by_species: dict) -> dict:
 def build_environment_library(
         structures: list, recipe, work_directory,
         describe=describe_atoms) -> EnvironmentLibrary:
-    """Catalogue the undamaged environments of Collection 1 (§11.2).
+    """Catalog the undamaged environments of Collection 1 (§11.2).
 
     ``structures`` are the ``(family, source, Atoms)`` triples
     :func:`~sabsim.bootstrap.collection1.build_collection1` produced.
-    Families 1, 4 and 6 are catalogued; the strain and rattle families
+    Families 1, 4 and 6 are cataloged; the strain and rattle families
     are excluded; the melt-quench family is the SELF-CHECK. ``describe``
     is the descriptor engine (injectable so the assembly can be tested
     without LAMMPS); every frame is described under ``work_directory``.
@@ -303,13 +303,13 @@ def build_environment_library(
     """
     settings = recipe.descriptor_settings
     work_directory = Path(work_directory)
-    catalogued: dict = {}
+    cataloged: dict = {}
     cold: dict = {}
     warm: dict = {}
     melt: dict = {}
     frame_counts: dict = {}
     for index, (family, _source, atoms) in enumerate(structures):
-        if family not in CATALOGUED_FAMILIES and (
+        if family not in CATALOGED_FAMILIES and (
                 family != MELT_QUENCH_FAMILY):
             continue
         vectors = describe(atoms, settings, str(work_directory),
@@ -318,7 +318,7 @@ def build_environment_library(
         if family == MELT_QUENCH_FAMILY:
             _by_species(atoms, vectors, melt)
             continue
-        _by_species(atoms, vectors, catalogued)
+        _by_species(atoms, vectors, cataloged)
         if family == COLD_BULK_FAMILY:
             _by_species(atoms, vectors, cold)
         elif family in WARM_FAMILIES:
@@ -330,7 +330,7 @@ def build_environment_library(
                 f"Collection 1 holds no '{family}' frames; the library "
                 f"needs the cold bulk AND the warm runs (DESIGN §4.8)")
 
-    environments = _stack(catalogued)
+    environments = _stack(cataloged)
     cold_arrays = _stack(cold)
     warm_mean: dict = {}
     whitening: dict = {}
@@ -558,13 +558,13 @@ def _wafer_species(wafer) -> frozenset | None:
                      for element in crystal.composition.elements)
 
 
-def _surface_catalogued(library: EnvironmentLibrary, wafer) -> bool:
-    """Does the library catalogue a clean surface of this wafer's face?
+def _surface_cataloged(library: EnvironmentLibrary, wafer) -> bool:
+    """Does the library catalog a clean surface of this wafer's face?
 
     A project wafer names its face but no termination and no recipe phase
     (:class:`~sabsim.spec.records.MaterialKnobs`), so the match is on
     the face AND, where the wafer's crystal can be read, the species set
-    of the catalogued phase — enough to tell a silicon (100) face from a
+    of the cataloged phase — enough to tell a silicon (100) face from a
     silica one. Any termination of that face counts.
     """
     face = "".join(str(component) for component in wafer.surface_face)
@@ -572,10 +572,10 @@ def _surface_catalogued(library: EnvironmentLibrary, wafer) -> bool:
     for entry in library.provenance.get("surfaces", []):
         if str(entry.get("face")) != face:
             continue
-        catalogued = entry.get("species")
-        if species is None or catalogued is None:
+        cataloged = entry.get("species")
+        if species is None or cataloged is None:
             return True
-        if frozenset(catalogued) == species:
+        if frozenset(cataloged) == species:
             return True
     return False
 
@@ -620,10 +620,10 @@ def check_library_against_project(
             f"{context} was computed with '{library.engine}', this "
             f"deployment binds '{bound_engine_name}' — both sides of the "
             f"comparison must use one engine (ARCHITECTURE §2.3)")
-    if not _surface_catalogued(library, wafer):
+    if not _surface_cataloged(library, wafer):
         face = "".join(str(c) for c in wafer.surface_face)
         raise SpecificationError(
-            f"{context} catalogues no clean ({face}) surface of the "
+            f"{context} catalogs no clean ({face}) surface of the "
             f"wafer; the slab's own faces would read as damage — add "
             f"the face to the recipe's surfaces and rebuild (DESIGN §4.8)")
 

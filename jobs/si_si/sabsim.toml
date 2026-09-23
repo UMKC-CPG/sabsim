@@ -59,12 +59,12 @@ material_domain = "diamond-cubic"        # {Si} has one registered domain
 # and a copy of the one silicon environment library.
 [wafer_a]
 material  = "Si"
-cif       = "src/sabsim/structure/data/si_diamond.cif"
+cif       = "share/catalog/si_diamond_100/si_diamond.cif"
 structure = "diamond"        # human label; the CIF is authoritative
 face      = [1, 0, 0]        # Miller indices of the bonding surface
 [wafer_b]
 material  = "Si"
-cif       = "src/sabsim/structure/data/si_diamond.cif"
+cif       = "share/catalog/si_diamond_100/si_diamond.cif"
 structure = "diamond"
 face      = [1, 0, 0]
 

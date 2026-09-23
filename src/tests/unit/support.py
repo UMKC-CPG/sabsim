@@ -37,7 +37,7 @@ def hand_built_library(
         surfaces=None) -> EnvironmentLibrary:
     """A tiny environment library with a known ruler, for gate tests.
 
-    Each species catalogues the cold vector and twenty warm copies
+    Each species catalogs the cold vector and twenty warm copies
     jittered by up to ``THERMAL_SCATTER`` along the SECOND axis, so the
     second axis is the one direction thermal motion explores. The
     ruler (mean, whitening, scatter, warm distances) is built by the

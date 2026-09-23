@@ -37,7 +37,7 @@ def main() -> int:
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     crystal = load_crystal(
-        os.path.join(REPO, "src/sabsim/structure/data/si_diamond.cif"))
+        os.path.join(REPO, "share/catalog/si_diamond_100/si_diamond.cif"))
     data_file = os.path.join(WORK, "bulk_si.data")
     if rank == 0:
         write_bulk_data(crystal, CELLS_PER_AXIS, data_file)

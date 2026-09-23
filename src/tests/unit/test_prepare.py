@@ -35,13 +35,13 @@ material_domain = "silicon-and-silica"
 
 [wafer_a]
 material  = "Si"
-cif       = "{_REPO}/src/sabsim/structure/data/si_diamond.cif"
+cif       = "{_REPO}/share/catalog/si_diamond_100/si_diamond.cif"
 structure = "diamond"
 face      = [1, 0, 0]
 
 [wafer_b]
 material  = "SiO2"
-cif       = "{_REPO}/src/sabsim/structure/data/sio2_alpha_quartz.cif"
+cif       = "{_REPO}/share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif"
 structure = "alpha-quartz"
 face      = [0, 0, 1]
 

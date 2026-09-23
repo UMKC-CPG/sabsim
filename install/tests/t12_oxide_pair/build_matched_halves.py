@@ -45,7 +45,7 @@ from sabsim.structure.slab_builder import (
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 SIO2_CIF = os.path.join(
-    _REPO, "src/sabsim/structure/data/sio2_alpha_quartz.cif")
+    _REPO, "share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif")
 LINBO3_CIF = os.path.join(
     _REPO, "sunita/bond_debond/share/linbo3_bulk.cif")
 SIO2_FACE = (1, 0, 0)

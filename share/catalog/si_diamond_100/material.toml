@@ -1,0 +1,17 @@
+# =====================================================================
+# SABSIM materials catalog entry (DESIGN.md §10.11). This folder IS the
+# material: this file, its crystal file, and its force-model recipe.
+# The folder's name is derived from the three values below —
+# <formula>_<phase>_<face>, lower-cased — and `sabsim catalog` refuses
+# a mismatch, so a reader can trust the name without opening this.
+# =====================================================================
+formula   = "Si"
+structure = "diamond"
+face      = [1, 0, 0]
+cif       = "si_diamond.cif"
+
+[provenance]
+# Generated with pymatgen from the diamond-cubic conventional cell at
+# the handbook lattice constant (5.43 A); the working constant is
+# relaxation-derived (DESIGN §2.2), so the file's scale is a start.
+source = "pymatgen conventional diamond cell, a = 5.43 A"

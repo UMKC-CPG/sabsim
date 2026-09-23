@@ -1,0 +1,19 @@
+# =====================================================================
+# SABSIM materials catalog entry (DESIGN.md §10.11). This folder IS the
+# material: this file, its crystal file, and its force-model recipe.
+# The folder's name is derived from the three values below —
+# <formula>_<phase>_<face>, lower-cased — and `sabsim catalog` refuses
+# a mismatch, so a reader can trust the name without opening this.
+# =====================================================================
+formula   = "SiO2"
+structure = "quartz"
+face      = [0, 0, 1]
+cif       = "sio2_alpha_quartz.cif"
+
+[provenance]
+# Alpha quartz, verbatim from the Crystallography Open Database. It is
+# a STAND-IN for beta cristobalite, the lattice-matched silica against
+# Si(100), until that entry exists (see the project template).
+source       = "Crystallography Open Database"
+cod_id       = 1011097
+cod_revision = 303120

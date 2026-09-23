@@ -24,8 +24,14 @@ sabsim/
     PRIOR_ART.md      Existing overlapping work and reusable assets
   src/                Source code (orchestrator, quality gate, glue)
   src/tests/          Test suite
-  share/              Version-controlled run-time data: gate references,
-                      and the input-file TEMPLATES (share/templates/).
+  share/              Version-controlled run-time data: the MATERIALS
+                      CATALOG (share/catalog/<label>/, one folder per
+                      crystal phase and face: material.toml, its CIF,
+                      its recipe), the gate references keyed by species
+                      set (share/activation/), and the input-file
+                      TEMPLATES a person copies and edits
+                      (share/templates/: project file, deployment rc,
+                      shell rc).
   CLAUDE.md           AI assistant guidance
 ```
 
@@ -59,16 +65,20 @@ is the person's own label and means nothing to the program. Decided
                           four folder names as above (§4.1)
 ```
 
-`sabsim init [<project>] [--materials <a> <b>]` writes this folder from
-the tracked templates (`share/templates/`): the two top-level files
-(the wafer tables set from the materials catalogue `share/templates/
-recipes/materials.toml` when the pair is named), the four stage
-folders named from the wafer labels it reads back out of
-`sabsim.toml`, and a per-material `recipe.toml` in each prep folder
-(`share/templates/recipes/<label>.toml`). It never overwrites and can
-be re-run after an edit to add what is missing (DESIGN §10.9,
-PSEUDOCODE §14.7). One level up, `sabsim setup` checks the install and
-writes the shell rc (DESIGN §10.10).
+`sabsim init <project> <label_a> <label_b>` writes this folder: the
+two top-level files from the templates, with the wafer tables set from
+the two MATERIALS CATALOG entries named (the pair is the one science
+decision, so it is required, never defaulted); the four stage folders
+named from those labels; and each catalog entry's `recipe.toml` in
+its prep folder. It never overwrites and can be re-run to add what is
+missing (DESIGN §10.9, PSEUDOCODE §14.7). A catalog label is
+`<formula>_<phase>_<face>` lower-cased — `si_diamond_100`,
+`sio2_quartz_001` — because the label names the prep folder and lands
+in every permanent record, so it must say what it is without a table
+(Paul, 2026-09-23; the argument Imago makes against numbered
+settings). `sabsim catalog list [<formula>]` shows the entries;
+`sabsim catalog add` makes one (DESIGN §10.11). One level up, `sabsim
+setup` checks the install and writes the shell rc (DESIGN §10.10).
 
 The PREFIX of a stage folder names the stage; the SUFFIX is the wafer
 material label(s) from `sabsim.toml`, LOWER-CASED so the names are

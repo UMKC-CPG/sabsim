@@ -127,7 +127,8 @@ again after you edit the pair (`DESIGN.md` §10.9):
 
 ```bash
 mkdir -p ~/sabsim/jobs
-sabsim init ~/sabsim/jobs/si_sio2 --materials Si SiO2   # no flag: lists them
+sabsim catalog list                    # the materials the clone holds
+sabsim init ~/sabsim/jobs/si_sio2 si_diamond_100 sio2_quartz_001
 cd ~/sabsim/jobs/si_sio2
 # 1. read and edit sabsim.toml, deployment.toml, prep_surf*/recipe.toml
 sabsim prepare          # 2. writes six .slurm + SUBMISSION_GUIDE.md

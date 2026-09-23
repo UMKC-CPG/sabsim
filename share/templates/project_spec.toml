@@ -76,12 +76,19 @@ material_domain = "silicon-and-silica"
 # gate judges against, and this surface's own amorphization
 # (ARCHITECTURE §1). Two crystals of one formula (quartz and
 # cristobalite) are two labels, so the program never has to guess.
+#
+# `sabsim init <folder> <label_a> <label_b>` fills both tables from the
+# MATERIALS CATALOG (`share/catalog/<label>/material.toml`, DESIGN
+# §10.11): the label becomes `material`, and `cif`, `structure` and
+# `face` come from the entry. The values below are the template's
+# worked example; a project written by `init` names its catalog labels
+# (`si_diamond_100`, `sio2_quartz_001`) here instead.
 # ---------------------------------------------------------------------
 [wafer_a]
 # `structure` is a human label (the CIF is authoritative); `face` is
 # the Miller index of the bonding surface.
 material  = "Si"
-cif       = "src/sabsim/structure/data/si_diamond.cif"
+cif       = "share/catalog/si_diamond_100/si_diamond.cif"
 structure = "diamond"
 face      = [1, 0, 0]
 
@@ -95,7 +102,7 @@ material  = "SiO2"
 # there. Alpha-quartz is a real silica phase whose CIF ships today, so
 # the project stays loadable. Swap this back the moment the
 # cristobalite CIF lands.
-cif       = "src/sabsim/structure/data/sio2_alpha_quartz.cif"
+cif       = "share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif"
 structure = "alpha-quartz"
 face      = [0, 0, 1]
 
@@ -178,7 +185,7 @@ fluence = { value = 0.025, unit = "ions/angstrom^2" }
 # dose must state the lighter depth it actually expects.
 required_activated_depth = { value = 7.0, unit = "angstrom" }
 # NO library path here. The ENVIRONMENT LIBRARY the gate judges
-# "crystalline" against (§3.5, 2026-08-29) — a catalogue of the
+# "crystalline" against (§3.5, 2026-08-29) — a catalog of the
 # undamaged material's atomic neighbourhoods as second-shell bispectrum
 # vectors, MANUFACTURED by `sabsim bootstrap generate` under the same
 # universal model this project runs (§4.8 part 2) — is found PER
@@ -329,7 +336,7 @@ settle_duration      = { value = 20.0,  unit = "ps" }
 # each layer's fraction of DISORDERED atoms; an atom is disordered when
 # its neighbourhood sits more than `disorder_scatter_multiple` thermal
 # scatters (measured by the environment library's warm runs) from every
-# catalogued undamaged neighbourhood. Both are NUMERICAL: refine them
+# cataloged undamaged neighbourhood. Both are NUMERICAL: refine them
 # and the measured depth must converge (§1.2).
 depth_bin_width          = { value = 2.0, unit = "angstrom" }
 disorder_scatter_multiple = 3.0

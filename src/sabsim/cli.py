@@ -129,16 +129,50 @@ def _build_parser() -> argparse.ArgumentParser:
              "four stage folders, a recipe per surface) from the "
              "templates; never overwrites")
     init.add_argument(
-        "project", nargs="?", default=".",
-        help="the project folder to fill (default: this directory); "
-             "made if missing")
+        "project",
+        help="the project folder to fill; made if missing")
     init.add_argument(
-        "--materials", nargs=2, metavar=("WAFER_A", "WAFER_B"),
-        help="the pair to bond, as two labels from the materials "
-             "catalogue (share/templates/recipes/materials.toml), e.g. "
-             "Si SiO2; sets both wafer tables of a NEW sabsim.toml. "
-             "Without it the template pair is written and the catalogue "
-             "is printed")
+        "materials", nargs=2, metavar="LABEL",
+        help="the pair to bond: two materials-catalog labels (wafer A "
+             "is the bottom surface, wafer B the top), e.g. "
+             "si_diamond_100 sio2_quartz_001; `sabsim catalog list` "
+             "shows them")
+
+    # `catalog` — the materials catalog (DESIGN.md §10.11, PSEUDOCODE
+    # §14.9): one folder per crystal phase and face under share/catalog.
+    catalog = subcommands.add_parser(
+        "catalog",
+        help="the materials catalog: list its entries, or add one from "
+             "a crystal file")
+    catalog_verbs = catalog.add_subparsers(dest="verb")
+    listing = catalog_verbs.add_parser(
+        "list", help="print the entries, one per line; a formula "
+                     "narrows it to that chemistry")
+    listing.add_argument("formula", nargs="?",
+                         help="e.g. SiO2 — only this formula's entries")
+    adding = catalog_verbs.add_parser(
+        "add", help="make an entry from a crystal file (never "
+                    "overwrites; names what is left to decide)")
+    adding.add_argument(
+        "label", help="<formula>_<phase>_<face>, lower-cased, e.g. "
+                      "sio2_cristobalite_100 — must derive from the "
+                      "values below")
+    adding.add_argument("--cif", required=True, metavar="FILE",
+                        help="the crystal file (from cod_fish, say)")
+    adding.add_argument("--formula", required=True, help="cased, e.g. SiO2")
+    adding.add_argument("--structure", required=True,
+                        help="the phase name, e.g. cristobalite")
+    adding.add_argument("--face", required=True, nargs=3, type=int,
+                        metavar=("H", "K", "L"),
+                        help="the bonding face's Miller indices")
+    adding.add_argument("--cod-id", type=int, metavar="ID",
+                        help="Crystallography Open Database id, if that "
+                             "is where the file came from")
+    adding.add_argument("--cod-revision", type=int, metavar="REV",
+                        help="the COD revision fetched")
+    adding.add_argument("--from", dest="source", metavar="LABEL",
+                        help="the entry to clone the recipe from "
+                             "(default: the first of the same formula)")
 
     # `prepare` — the WRITER (DESIGN.md §10.1, PSEUDOCODE §14.4): reads
     # the project file AND the machine-local deployment rc, and writes
@@ -428,23 +462,15 @@ def _setup(args: argparse.Namespace) -> int:
 def _init(args: argparse.Namespace) -> int:
     """Execute ``sabsim init``: write the missing parts of a project.
 
-    Prints what was written and what was left alone, any notice the
-    person must see (a material with no recipe template of its own),
-    and the three steps that come next — because the generated folder
-    is complete in the §1.4 sense and unread in the science sense
-    until the person has looked at it (DESIGN.md §10.9).
+    Prints what was written and what was left alone, then the steps
+    that come next — because the generated folder is complete in the
+    §1.4 sense and unread in the science sense until the person has
+    looked at it (DESIGN.md §10.9).
     """
-    from sabsim.deploy.init_project import (
-        InitError,
-        describe_catalogue,
-        init_project,
-        read_materials_catalogue,
-    )
+    from sabsim.deploy.init_project import InitError, init_project
 
-    materials = tuple(args.materials) if args.materials else None
     try:
-        report = init_project(args.project, materials=materials)
-        catalogue = read_materials_catalogue()
+        report = init_project(args.project, materials=tuple(args.materials))
     except InitError as failure:
         print(f"sabsim: init halted — {failure}", file=sys.stderr)
         return 1
@@ -456,12 +482,6 @@ def _init(args: argparse.Namespace) -> int:
         print(f"  kept   {path}  (already there, untouched)")
     for notice in report.notices:
         print(f"  NOTE   {notice}")
-    if materials is None:
-        print("\nThe pair was not named (--materials WAFER_A WAFER_B), so "
-              "the template's pair\nwas written. Materials the repository "
-              "ships a recipe for:")
-        for line in describe_catalogue(catalogue):
-            print(f"  {line}")
     print("\nNext, in order (DESIGN.md §10.9):")
     print("  1. read and edit sabsim.toml (the science of this pair) and "
           "deployment.toml\n     (this machine); each prep folder's "
@@ -472,9 +492,53 @@ def _init(args: argparse.Namespace) -> int:
           "surface preps, bond, and analysis.")
     print("  3. submit them in the guide's order, or as its chained form; "
           "nothing runs\n     on the login node.")
-    print("  Running `sabsim init` again is safe: it adds only what is "
-          "missing.")
+    print("  Running `sabsim init` again with the same pair is safe: it "
+          "adds only\n  what is missing.")
     return 0
+
+
+def _catalog(args: argparse.Namespace) -> int:
+    """Execute ``sabsim catalog list`` or ``sabsim catalog add``."""
+    from sabsim.catalog import (
+        CatalogError,
+        add_entry,
+        describe_entries,
+        read_catalog,
+    )
+
+    try:
+        if args.verb == "list":
+            lines = describe_entries(read_catalog(), args.formula)
+            if not lines:
+                what = (f"of formula {args.formula}" if args.formula
+                        else "at all")
+                print(f"sabsim catalog: no entries {what}")
+                return 0
+            for line in lines:
+                print(line)
+            return 0
+        if args.verb == "add":
+            provenance = {}
+            if args.cod_id is not None:
+                provenance["source"] = "Crystallography Open Database"
+                provenance["cod_id"] = args.cod_id
+                if args.cod_revision is not None:
+                    provenance["cod_revision"] = args.cod_revision
+            report = add_entry(
+                args.label, args.cif, args.formula, args.structure,
+                args.face, provenance=provenance, source_label=args.source)
+            print(f"sabsim catalog: added {report.entry.label} (recipe "
+                  f"cloned from {report.cloned_from})")
+            for path in report.written:
+                print(f"  wrote  share/catalog/{path}")
+            for notice in report.notices:
+                print(f"  NOTE   {notice}")
+            return 0
+    except CatalogError as failure:
+        print(f"sabsim: catalog halted — {failure}", file=sys.stderr)
+        return 1
+    print("sabsim catalog: give a verb — list or add", file=sys.stderr)
+    return 2
 
 
 def _prepare(args: argparse.Namespace) -> int:
@@ -568,6 +632,8 @@ def main(argv=None) -> int:
         return _setup(args)
     if args.command == "init":
         return _init(args)
+    if args.command == "catalog":
+        return _catalog(args)
     if args.command == "prepare":
         return _prepare(args)
     if args.command == "bootstrap":
