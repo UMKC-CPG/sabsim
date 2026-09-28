@@ -1,0 +1,12 @@
+# SABSIM materials catalog entry (DESIGN.md §10.11). This folder
+# IS the material: this file, its crystal file, and its recipe.
+# The folder's name derives from the three values below —
+# <formula>_<phase>_<face>, lower-cased — and `sabsim catalog`
+# refuses a mismatch.
+formula   = "GaN"
+phase     = "hexagonal"
+face      = [0, 0, 1]
+cif       = "gan_p63mc_186_2015.cif"
+
+[provenance]
+source = "unrecorded — say where this crystal came from"
