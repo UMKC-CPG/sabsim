@@ -4696,6 +4696,13 @@ function run(project_spec_path, job_flag):
 ```
 
 ```
+function libraries_a_job_opens(job) -> list of wafer roles:
+    # DESIGN §10.2 (2026-09-28): a job is held only to the environment
+    # libraries IT opens. prep_surf1 -> [wafer_a]; prep_surf2 ->
+    # [wafer_b]; bond, analysis -> []; the whole chain -> both.
+    # check_project_references(project, libraries_needed=...) checks
+    # exactly those and no others.
+
 function run_pair_job(pair, project_directory, job):
     # ONE job's contiguous SUB-STAGE of the §1 chain. It ENTERS by
     # re-reading its `reads` artifacts from the stage folders that hold

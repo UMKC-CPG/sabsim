@@ -328,7 +328,20 @@ def test_run_holds_a_prep_job_to_the_environment_library(project):
     """A prep job without its surface's library is refused on the login
     node, naming the prep folder (DESIGN §1.5, phase three)."""
     from sabsim.spec.loader import SpecificationError
-    with pytest.raises(SpecificationError, match="prep_surf1_si"):
+    with pytest.raises(SpecificationError, match="prep_surf1_si") as caught:
         run(f"{project.project_directory}/sabsim.toml",
             project.project_directory, _fake_stage_set(),
             job_flag="prep_surf1")
+    # ... and ONLY to its own: the other surface's library, which this
+    # job never opens, is not demanded (DESIGN §10.2; LEDGER T-45).
+    assert "prep_surf2_sio2" not in str(caught.value)
+
+
+def test_each_job_opens_only_its_own_surfaces_library():
+    from sabsim.deploy.registry import registry_lookup
+    from sabsim.pipeline.pair_jobs import libraries_a_job_opens
+    opened = {name: libraries_a_job_opens(registry_lookup(name))
+              for name in ("prep_surf1", "prep_surf2", "bond", "analysis")}
+    assert opened == {"prep_surf1": ("wafer_a",),
+                      "prep_surf2": ("wafer_b",),
+                      "bond": (), "analysis": ()}

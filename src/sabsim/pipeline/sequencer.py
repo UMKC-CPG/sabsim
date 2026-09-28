@@ -117,7 +117,9 @@ def exec_full_project(
     # the §3.5 gate, so only a live stage set is held to the environment
     # libraries (DESIGN §3.5).
     check_project_references(
-        project, activation_gate_will_run=stage_set is not W0_STAGES)
+        project,
+        libraries_needed=(() if stage_set is W0_STAGES
+                          else ("wafer_a", "wafer_b")))
 
     result = exec_one_pair(
         project.pair, project_directory, stage_folders(project.pair),

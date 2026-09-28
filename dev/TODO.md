@@ -63,11 +63,19 @@
       `wafer_z_ranges_from_frame`), both fresh and resumed paths.
       OPEN: rerun a bond under the fix (T-45's chain once the Si/quartz
       cell is solved, or si_si after its libraries are rebuilt).
-- [ ] **T-45 fallout (2026-09-23).** (a) `prepare`: each prep is held
-      only on its own `.library` build but the prep's load-time check
-      demands BOTH libraries — silicon prep 17238481 failed in 13 s.
-      Hold each prep on both builds, or make the check per-surface for
-      a prep job. (b) The Si(100)/alpha-quartz(001) shared cell the
+- [ ] **T-45 fallout (2026-09-23).** (a) DONE 2026-09-28: a job is
+      held only to the environment libraries it opens
+      (`libraries_a_job_opens`, `check_project_references(...,
+      libraries_needed=)`; DESIGN §10.2) — silicon prep 17238481 had
+      failed in 13 s on silica's library. (b) CORRECTED 2026-09-28: the
+      matcher is NOT at fault. Its Si(100)/quartz(001) match is sound
+      (two rectangles ~8.5 x 34.4 A, under 1 % apart, 26.6 deg twist);
+      `even_split_shared_cell` then returns a cell 20 % short in each
+      direction (189 A^2 for a 294 A^2 match), and with the model's
+      relaxed lattices a sliver of ~0.27 A^2, which the footprint step
+      tiled 23 x 23. Nothing enforces the misfit tolerance AFTER the
+      shared cell is built. Recheck the 5.4 deg oxide pair (T-12/T-17).
+      Earlier text follows. (b-old) The Si(100)/alpha-quartz(001) shared cell the
       matcher solved is degenerate — 466,578 atoms, a 1.36 A y-extent
       with 48 A skew — and the cascade aborted; the matcher must refuse
       a cell like that, and the beta-cristobalite stand-in question

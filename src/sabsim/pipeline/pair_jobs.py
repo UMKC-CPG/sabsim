@@ -95,13 +95,34 @@ def run(project_spec_path, project_directory, stage_set, comm=None,
             project_directory=str(project_directory))
     # Phase-three reference check, the same one exec_full_project runs
     # before spending node-hours (DESIGN.md §1.5): the file is executable
-    # in principle, but does everything it points at exist? Only a PREP
-    # job opens the §3.5 gate, so only a prep job is held to the
-    # environment libraries; bond and analysis never read them.
+    # in principle, but does everything it points at exist? A job is
+    # held only to the environment libraries IT opens (§10.2,
+    # 2026-09-28): a prep job its own surface's, bond and analysis none.
     job = registry_lookup(job_flag)
     check_project_references(
-        project, activation_gate_will_run="activate" in job.stages)
+        project, libraries_needed=libraries_a_job_opens(job))
     return run_pair_job(project, job, stage_set, comm)
+
+
+# Which wafer's environment library each prep job opens, by the stage
+# folder the job fills (DESIGN §10.2). Any other job opens none.
+_LIBRARY_ROLE_OF_PREP_FOLDER = {
+    "prep_surf1": "wafer_a",
+    "prep_surf2": "wafer_b",
+}
+
+
+def libraries_a_job_opens(job: JobKind) -> tuple:
+    """The wafer roles whose environment library this job will open.
+
+    The surface 1 prep opens wafer A's library and the surface 2 prep
+    wafer B's, each to judge its own healed half at the §3.5 gate; the
+    bond and analysis jobs open neither. Holding a job to a library it
+    never reads tied the two surfaces together for no physical reason
+    (LEDGER T-45).
+    """
+    role = _LIBRARY_ROLE_OF_PREP_FOLDER.get(job.folder_key)
+    return (role,) if role is not None else ()
 
 
 def run_pair_job(project: Project, job: JobKind, stage_set,

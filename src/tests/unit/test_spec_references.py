@@ -98,6 +98,22 @@ def test_missing_environment_library_is_reported_on_the_login_node(
     assert "prep_surf*_si/" in message
 
 
+def test_a_prep_job_is_held_only_to_its_own_surfaces_library(tmp_path):
+    """DESIGN §10.2 (2026-09-28; LEDGER T-45): asking for one surface's
+    library names that prep folder and never the other's."""
+    project = _prepared_in(_template_project(), tmp_path)
+    with pytest.raises(SpecificationError) as caught:
+        check_project_references(project, libraries_needed=("wafer_a",))
+    message = str(caught.value)
+    assert str(tmp_path / "prep_surf1_si") in message
+    assert "prep_surf2_sio2" not in message
+    with pytest.raises(SpecificationError) as caught:
+        check_project_references(project, libraries_needed=("wafer_b",))
+    assert "prep_surf1_si" not in str(caught.value)
+    with pytest.raises(ValueError, match="unknown wafer role"):
+        check_project_references(project, libraries_needed=("wafer_c",))
+
+
 def test_a_mismatched_library_is_refused_before_any_node_hour(tmp_path):
     """The prep job's library checks run here too (PSEUDOCODE §2)."""
     from sabsim.driver.environment_library import write_environment_library
@@ -142,7 +158,7 @@ def test_both_surfaces_of_a_same_material_pair_need_a_library(tmp_path):
 def test_a_dry_run_is_not_refused_for_a_missing_library(tmp_path):
     """The walking skeleton never opens the gate, so it needs none."""
     project = _prepared_in(_template_project(), tmp_path)
-    check_project_references(project, activation_gate_will_run=False)
+    check_project_references(project, libraries_needed=())
 
 
 def test_missing_crystal_file_is_reported_with_every_path_tried():
@@ -152,7 +168,7 @@ def test_missing_crystal_file_is_reported_with_every_path_tried():
         cif_source="src/sabsim/structure/data/not_a_crystal.cif")
 
     with pytest.raises(SpecificationError) as caught:
-        check_project_references(broken, activation_gate_will_run=False)
+        check_project_references(broken, libraries_needed=())
     message = str(caught.value)
     assert "not_a_crystal.cif" in message
     assert "wafer_a" in message
@@ -177,7 +193,7 @@ def test_every_problem_is_reported_in_one_pass():
                         cif_source="missing_two.cif"))))
 
     with pytest.raises(SpecificationError) as caught:
-        check_project_references(broken, activation_gate_will_run=False)
+        check_project_references(broken, libraries_needed=())
     message = str(caught.value)
     assert "missing_one.cif" in message
     assert "missing_two.cif" in message
@@ -211,7 +227,7 @@ def test_wrong_universal_model_name_is_rejected():
     with pytest.raises(SpecificationError) as caught:
         check_project_references(
             _with_pair(project, replace(project.pair, potential=wrong)),
-            activation_gate_will_run=False)
+            libraries_needed=())
     assert "DPA-3.1-3M" in str(caught.value)
 
 
@@ -223,5 +239,5 @@ def test_missing_model_file_is_rejected_on_the_login_node():
     with pytest.raises(SpecificationError) as caught:
         check_project_references(
             _with_pair(project, replace(project.pair, potential=absent)),
-            activation_gate_will_run=False)
+            libraries_needed=())
     assert "/no/such/model.pb" in str(caught.value)

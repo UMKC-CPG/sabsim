@@ -159,8 +159,18 @@ def _potential_problems(pair: PairSpecification) -> list:
     return problems
 
 
-def _library_problems(pair: PairSpecification) -> list:
+# The two wafer roles, in surface order: wafer A is surface 1 (the
+# bottom half), wafer B surface 2 (the top half).
+WAFER_ROLES = ("wafer_a", "wafer_b")
+
+
+def _library_problems(pair: PairSpecification,
+                      roles: tuple = WAFER_ROLES) -> list:
     """Report an environment library a prep job could not use.
+
+    ``roles`` names the surfaces whose libraries are needed — the ones
+    the caller will actually open (DESIGN §10.2, 2026-09-28): a prep
+    job names its own surface, a whole-chain run names both.
 
     The §3.5 gate judges "crystalline" against a bootstrap-made library
     found PER SURFACE in the project: ``prep_surf1_<a>/`` for wafer A
@@ -181,8 +191,10 @@ def _library_problems(pair: PairSpecification) -> list:
         read_environment_library,
     )
     problems = []
-    for role, wafer in (("wafer_a", pair.material.wafer_a),
-                        ("wafer_b", pair.material.wafer_b)):
+    wafers = {"wafer_a": pair.material.wafer_a,
+              "wafer_b": pair.material.wafer_b}
+    for role in roles:
+        wafer = wafers[role]
         path = library_manifest_path(wafer)
         prep_folder = os.path.basename(wafer.preparation_directory)
         context = (f"[{role}] '{wafer.identity}' environment library "
@@ -205,18 +217,23 @@ def _library_problems(pair: PairSpecification) -> list:
 
 
 def check_project_references(
-        project: Project, activation_gate_will_run: bool = True) -> None:
+        project: Project,
+        libraries_needed: tuple = WAFER_ROLES) -> None:
     """Phase three: every artifact a project POINTS AT must be there.
 
     Raises :class:`~sabsim.spec.loader.SpecificationError` listing EVERY
     problem found, so one pass over the file fixes all of them. Returns
     quietly when the project is fully resolvable.
 
-    ``activation_gate_will_run`` says whether this run opens the §3.5
-    gate at all. The walking skeleton (a ``--dry-run``) never does — its
-    activation stage is a stand-in — so it has no use for the
-    environment library and is not refused for lacking one; a live run
-    always checks it, because its prep jobs WILL open the gate.
+    ``libraries_needed`` names the surfaces whose environment library
+    this run will OPEN, as wafer roles (``"wafer_a"``, ``"wafer_b"``);
+    only those are checked (DESIGN §10.2, 2026-09-28). A whole-chain
+    run opens both, the default. The prep job of one surface opens its
+    own and is not refused because the other surface's library is
+    still being built — LEDGER T-45's silicon prep was, after thirteen
+    seconds. The bond and analysis jobs open none, and neither does the
+    walking skeleton (a ``--dry-run``), whose activation stage is a
+    stand-in: each passes an empty tuple.
 
     What is deliberately NOT checked, and why it is named rather than
     skipped: ``potential_ref`` points at a manufactured force model, and
@@ -226,8 +243,12 @@ def check_project_references(
     """
     pair = project.pair
     problems = list(_crystal_problems(pair))
-    if activation_gate_will_run:
-        problems.extend(_library_problems(pair))
+    unknown = [role for role in libraries_needed
+               if role not in WAFER_ROLES]
+    if unknown:
+        raise ValueError(f"unknown wafer role(s) {unknown}; the roles are "
+                         f"{list(WAFER_ROLES)}")
+    problems.extend(_library_problems(pair, tuple(libraries_needed)))
     problems.extend(_potential_problems(pair))
 
     if problems:

@@ -4252,6 +4252,16 @@ each named like the project folder it works in (`ARCHITECTURE.md` §1):
   two preps held on them, bond, analysis — and a second submission of
   the same chain skips the two builds in seconds (added 2026-09-10,
   replacing the hand-written harness of LEDGER T-38/T-42).
+  A prep job is held to ITS OWN surface's library and no other
+  (Paul, 2026-09-28; LEDGER T-45). The check a job runs before it
+  spends node time asks only for the files that job will open: the
+  surface 1 prep opens the library in `prep_surf1_<a>/`, the surface 2
+  prep the one in `prep_surf2_<b>/`, the bond and analysis jobs open
+  neither, and only a whole-chain run needs both. Demanding both of
+  every prep job tied the two surfaces together for no physical
+  reason: the silicon prep of T-45 was refused after thirteen seconds
+  because the silica library, which it would never have read, was
+  still being built.
 - **bond** (GPU): read both halves, check that their lateral cells
   agree, bring them together at the press-start opening (§2.6), run the
   one-time lateral cell relax (§5.6), then press, settle, and pull (§5),
