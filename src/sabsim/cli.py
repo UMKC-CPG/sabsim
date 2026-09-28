@@ -154,14 +154,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "add", help="make an entry from a crystal file (never "
                     "overwrites; names what is left to decide)")
     adding.add_argument(
-        "label", help="<formula>_<phase>_<face>, lower-cased, e.g. "
-                      "sio2_cristobalite_100 — must derive from the "
-                      "values below")
+        "label", nargs="?",
+        help="optional CHECK: the label is derived and printed — "
+             "<formula>_<phase>_<face>, lower-cased, e.g. "
+             "sio2_cristobalite_100 — and one given here is refused "
+             "if the values below do not give it")
     adding.add_argument("--cif", required=True, metavar="FILE",
                         help="the crystal file (from cod_fish, say)")
-    adding.add_argument("--formula", required=True, help="cased, e.g. SiO2")
-    adding.add_argument("--structure", required=True,
-                        help="the phase name, e.g. cristobalite")
+    adding.add_argument("--formula",
+                        help="optional CHECK: the formula is read from "
+                             "the crystal file, and one given here is "
+                             "refused if the crystal is something else")
+    adding.add_argument("--phase", required=True, metavar="NAME",
+                        help="the phase name, e.g. cristobalite or "
+                             "wurtzite — it becomes part of the label")
     adding.add_argument("--face", required=True, nargs=3, type=int,
                         metavar=("H", "K", "L"),
                         help="the bonding face's Miller indices")
@@ -524,11 +530,16 @@ def _catalog(args: argparse.Namespace) -> int:
                 provenance["cod_id"] = args.cod_id
                 if args.cod_revision is not None:
                     provenance["cod_revision"] = args.cod_revision
+            # The formula and the label are optional checks of what
+            # the command derives from the crystal, phase and face.
             report = add_entry(
-                args.label, args.cif, args.formula, args.structure,
-                args.face, provenance=provenance, source_label=args.source)
+                args.cif, args.phase, args.face, formula=args.formula,
+                label=args.label, provenance=provenance,
+                source_label=args.source)
             print(f"sabsim catalog: added {report.entry.label} (recipe "
                   f"cloned from {report.cloned_from})")
+            for line in report.derived:
+                print(f"  derived {line}")
             for path in report.written:
                 print(f"  wrote  share/catalog/{path}")
             for notice in report.notices:

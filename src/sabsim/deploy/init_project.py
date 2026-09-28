@@ -95,7 +95,8 @@ def set_wafer_table(text: str, table_name: str,
     values = {
         "material": f'"{entry.label}"',
         "cif": f'"{entry.cif_repository_path}"',
-        "structure": f'"{entry.structure}"',
+        # The project file calls the phase word `structure`.
+        "structure": f'"{entry.phase}"',
         "face": "[" + ", ".join(str(index) for index in entry.face) + "]",
     }
     for key, pattern in _WAFER_LINE.items():

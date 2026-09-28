@@ -4744,18 +4744,46 @@ domain — is a later, domain-level recipe composed from entries.
 
 **`sabsim catalog list [<formula>]`** prints one line per entry —
 label, structure, face, source — and, given a formula, only that
-formula's entries. **`sabsim catalog add <label> --cif <file>
---formula <F> --structure <name> --face h k l [--cod-id --cod-revision]
-[--from <sibling>]`** makes an entry: it refuses a label that does not
-derive from the values given or already exists, reads the crystal and
-refuses one with partial occupancy (the builder needs an ordered
-cell), copies the CIF in, writes `material.toml`, and clones the
-recipe from `--from` or, by default, the first sibling of the same
-formula, rewriting the phase name, crystal and face. A material with
-no sibling needs `--from`; when the source's formula differs the
-chemistry lines are left as they were and the command prints, by
-name, the lines the person must now decide: species union, domain,
-gate reference, descriptor weights, pseudopotentials, melt. The
+formula's entries. **`sabsim catalog add --cif <file> --phase <name>
+--face h k l [<label>] [--formula <F>] [--cod-id --cod-revision]
+[--from <sibling>]`** makes an entry. Only three things are the
+person's to say — the crystal file, the phase word and the face —
+because everything else follows from them (Paul, 2026-09-28):
+
+- **The formula is read from the crystal file**, as its reduced
+  formula with the elements properly cased (`GaN`, `SiO2`), and that
+  is the value `material.toml` records. `--formula` is optional and,
+  when given, is only a CHECK: it is compared without regard to case
+  and a crystal of another composition is refused. A person who types
+  `gan` therefore still gets an entry that says `GaN`.
+- **The label is derived** by the one rule above and printed, so the
+  person sees the name that will land in the prep folder, the project
+  file, the `command` file and the ledger. The positional `<label>`
+  is optional and, when given, is likewise only a CHECK: a label that
+  does not derive from the values is refused, which is how a person
+  who already knows the name they want catches a typing slip in the
+  phase word or the face.
+- **The phase word is `--phase`**, the same word the label rule and
+  this section use, and `phase` is also the key it fills in
+  `material.toml` (both were `structure` until 2026-09-28). An entry
+  still written with the old key is refused, with the one-word repair
+  named. The project file is NOT renamed: `init` copies the phase
+  word into the wafer table's `structure` line, as it always has.
+
+The command then refuses a label that already exists, refuses a
+crystal with partial occupancy (the builder needs an ordered cell),
+copies the CIF in, writes `material.toml`, and clones the recipe
+from `--from` or, by default, the first sibling of the same formula,
+rewriting the phase name, crystal and face. A material with no
+sibling needs `--from`: with neither, the command REFUSES before it
+writes anything and prints the catalog's labels to choose from, for
+the no-guessing reason — a recipe carries chemistry (species, gate
+reference, pseudopotentials, melt), and which existing chemistry is
+nearest to a new one is a science judgement the program cannot make.
+When the source's formula differs the chemistry lines are left as
+they were and the command prints, by name, the lines the person must
+now decide: species union, domain, gate reference, descriptor
+weights, pseudopotentials, melt. The
 crystal file is the handoff from whatever found it — Imago's
 `cod_fish` for a COD structure — and the catalog keeps no fetch of its
 own. Removing an entry is deleting its folder. Materials live in the

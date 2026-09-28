@@ -5034,14 +5034,14 @@ function init_project(project_folder, label_a, label_b) -> InitReport:
 record MaterialEntry:
     label:      string        # folder name: <formula>_<phase>_<face>
     formula:    string        # cased, "SiO2"
-    structure:  string        # phase name, "alpha-quartz"
+    phase:      string        # phase name, "alpha-quartz"
     face:       (h, k, l)
     cif:        path          # repository-relative, inside the folder
     recipe:     path          # the folder's recipe.toml
     provenance: map           # e.g. cod_id, cod_revision, note
 
-function entry_label(formula, structure, face) -> string:
-    # lower(formula) + "_" + slug(structure) + "_" + face digits, a
+function entry_label(formula, phase, face) -> string:
+    # lower(formula) + "_" + slug(phase) + "_" + face digits, a
     # negative index as "m": "sio2_quartz_001". slug() lower-cases
     # what the person wrote and turns runs of non-alphanumerics into
     # "_"; the phase word is the person's choice, and the label must
@@ -5049,23 +5049,36 @@ function entry_label(formula, structure, face) -> string:
 
 function read_catalog() -> list of MaterialEntry:
     for each folder under CATALOG_ROOT holding material.toml:
-        entry = parse; require entry_label(...) == folder name
+        entry = parse; refuse the old key `structure` for `phase`
+        require entry_label(...) == folder name
     return entries in name order
 
-function catalog_add(label, cif, formula, structure, face,
+function catalog_add(cif, phase, face, formula=None, label=None,
                      provenance, source=None):
-    require label == entry_label(formula, structure, face)
-    require no folder CATALOG_ROOT/label
+    # The person says three things: the crystal, the phase word, the
+    # face. `formula` and `label` are optional CHECKS of what the
+    # command derives, never inputs it needs (DESIGN §10.11).
     crystal = load_crystal(cif); require crystal.is_ordered
+    found = reduced formula of crystal, cased      # "GaN", "SiO2"
+    if formula given: require slug(formula) == slug(found)
+    formula = found                       # the crystal's casing wins
+    derived = entry_label(formula, phase, face)
+    if label given: require lower(label) == derived
+    label = derived
+    require no folder CATALOG_ROOT/label
     source = source or first entry with the same formula
-             or REFUSE ("give --from: no sibling of this formula")
-    make CATALOG_ROOT/label; copy cif in; write material.toml
+             or REFUSE ("give --from: no sibling of this formula",
+                        listing the catalog's labels)
+    # Every refusal above happens BEFORE anything is written.
+    make CATALOG_ROOT/label; copy cif in
+    write material.toml          # formula, phase, face, cif
     text = read(source.recipe)
     rewrite the phase name, the cif line, the surface face
     write CATALOG_ROOT/label/recipe.toml
     if source.formula != formula:
         notice(the chemistry lines to decide by hand: species_union,
                domain, reference_data_ref, species_weights, paw, melt)
+    report what was derived: the label, and the formula as read
 ```
 
 `stage_folder_names(label_a, label_b)` is the label-level form of §2's

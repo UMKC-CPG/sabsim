@@ -25,6 +25,13 @@ dist/
 log.lammps
 log.cite
 
+# The `command` file. Every real `sabsim` invocation appends a dated
+# Date:/Cmnd: block to a file named `command` in the CURRENT directory
+# (ARCHITECTURE.md §4.2, Imago's convention), so one appears wherever
+# in the clone a command was issued from. It is a record of what a
+# person did on this machine, not project source.
+command
+
 # Job working directories — run output, never project source. Each job
 # directory holds an `intermediate` symlink into the SABSIM_SCRATCH
 # mirror (see sabsim/deploy/scratch.py) plus whatever the run drops

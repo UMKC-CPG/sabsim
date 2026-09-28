@@ -6,7 +6,7 @@
 # a mismatch, so a reader can trust the name without opening this.
 # =====================================================================
 formula   = "Si"
-structure = "diamond"
+phase     = "diamond"
 face      = [1, 0, 0]
 cif       = "si_diamond.cif"
 
