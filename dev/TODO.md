@@ -75,6 +75,11 @@
       relaxed lattices a sliver of ~0.27 A^2, which the footprint step
       tiled 23 x 23. Nothing enforces the misfit tolerance AFTER the
       shared cell is built. Recheck the 5.4 deg oxide pair (T-12/T-17).
+      DONE 2026-09-28: corrected product, handedness, tolerance on
+      the built cell, ranking by per-axis strain, per-edge box repeats
+      with the new setting `minimum_cell_width` (DESIGN §2.3/§2.4,
+      LEDGER T-45). OPEN: rerun the si_sio2 chain; rebuild the T-20
+      oxide cell (0.4 % short); wire the stiffness-weighted split.
       Earlier text follows. (b-old) The Si(100)/alpha-quartz(001) shared cell the
       matcher solved is degenerate — 466,578 atoms, a 1.36 A y-extent
       with 48 A skew — and the cascade aborted; the matcher must refuse

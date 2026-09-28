@@ -131,7 +131,7 @@ _BOND_CUTOFF = 2.8   # Å: Si first-g(r)-minimum stand-in (§6.3, TODO)
 # for the beam spawn, and the §2.2 ``bulk_cells_per_axis`` relax-block
 # size. The width that once "bit us" — a narrow cell over-deepening the
 # skin — is likewise the project's ``target_footprint_area``
-# (:func:`_footprint_repeat`). The defaults reproduce the §3.6-pinned Si
+# (:func:`box_repeats`). The defaults reproduce the §3.6-pinned Si
 # cell (55 Å thick, ~38 Å wide), so the measured 7 Å depth threshold that
 # cell anchors is preserved.
 
@@ -324,29 +324,56 @@ def _effective_slab_thickness(pair) -> float:
     return max(chosen, required)
 
 
-def _footprint_repeat(base_area: float, target_area: float) -> int:
-    """How many times to tile the matched cell per axis for the dose (§3.6).
+def box_repeats(base_cell, target_area: float,
+                minimum_width: float) -> tuple:
+    """How many times to repeat each edge of the matched cell (§2.4).
 
-    The coincidence match fixes the SHAPE of the shared cell but not its
-    SIZE for the beam: a single matched cell is far too small to spread an
-    areal dose without one impact dominating (§3.6). So the matched cell is
-    tiled ``n x n`` up to a target in-plane area the project chooses
-    (``target_footprint_area``), the dose-spreading footprint. This returns
-    that ``n``.
+    The coincidence match fixes the SHAPE of the shared cell; the box
+    the simulation runs in is that cell repeated a whole number of
+    times along each of its two edges. Two requirements set the two
+    numbers (DESIGN §2.4, revised 2026-09-28, Paul):
 
-    Crucially, this tiling is STRAIN-NEUTRAL — it lays down identical copies
-    of the already-matched cell — so it is decoupled from the match: the
-    match is solved once for low strain and few atoms, and the footprint is
-    grown independently for statistics (the key §2.4 insight). Because the
-    footprint is square in cell counts, ``n = round(sqrt(target / base))``,
-    where ``base`` is one tile's area; it is a knob to converge, not a
-    limit, so overshoot from rounding is harmless. At least one tile is
-    always laid down, even if the base cell already exceeds the target.
+    * the box must be at least ``minimum_width`` across in each
+      direction — narrower than twice the force model's interaction
+      radius an atom feels its own periodic copy, and a collision
+      cascade meets itself;
+    * the box area must reach ``target_area``, the dose-spreading
+      footprint of §3.6, so no single impact dominates the dose.
+
+    The WIDTH in the direction of an edge is the perpendicular distance
+    between the two sides the OTHER edge runs along: the cell's area
+    divided by the other edge's length. For a rectangle that is the
+    edge's own length; for a slanted cell it is shorter. Each edge is
+    first repeated until the box is wide enough its way, and then the
+    NARROWER direction is repeated once more for as long as that brings
+    the area closer to the target — so a long thin cell becomes a nearly square
+    box instead of a long thin one repeated equally both ways (the
+    9.4 A oxide ribbon of LEDGER T-18). Repeating is strain-neutral: it
+    lays down identical copies of an already-matched cell.
+
+    ``base_cell`` is the 2x2 in-plane cell, one edge vector per row.
+    Returns ``(repeats of edge 1, repeats of edge 2)``.
     """
-    if base_area <= 0.0:
-        return 1
-    repeat = int(round(float(np.sqrt(target_area / base_area))))
-    return max(1, repeat)
+    cell = np.asarray(base_cell, dtype=float)[:2, :2]
+    area = abs(float(np.linalg.det(cell)))
+    if area <= 0.0:
+        return (1, 1)
+    edge_lengths = np.linalg.norm(cell, axis=1)
+    widths = (area / float(edge_lengths[1]), area / float(edge_lengths[0]))
+    repeats = [max(1, int(np.ceil(minimum_width / width - 1.0e-9)))
+               for width in widths]
+    while True:
+        narrower = (0 if repeats[0] * widths[0] <= repeats[1] * widths[1]
+                    else 1)
+        grown = list(repeats)
+        grown[narrower] += 1
+        area_now = repeats[0] * repeats[1] * area
+        area_grown = grown[0] * grown[1] * area
+        # The target is a size to come CLOSE to, not a floor: stop when
+        # one more repeat would leave the area further from it.
+        if abs(area_grown - target_area) >= abs(area_now - target_area):
+            return (repeats[0], repeats[1])
+        repeats = grown
 
 
 def _standalone_half(
@@ -365,7 +392,8 @@ def _standalone_half(
     coincidence match (§2.3) operates on, since that runs on primitive
     lattices, not the tiled dose footprint. :func:`build_halves` passes the
     dose-spreading footprint tiling explicitly, sized from the project's
-    ``target_footprint_area`` (:func:`_footprint_repeat`, §3.6).
+    ``target_footprint_area`` and ``minimum_cell_width``
+    (:func:`box_repeats`, §2.4).
     ``matched_cell`` and ``shared_cell`` carry the §2.4 strained-tiling
     geometry for a real mismatch (this wafer's own matched supercell vectors
     and the shared cell both wafers are strained onto); they stay ``None``
@@ -471,9 +499,10 @@ def build_halves(
     # retiring the hardcoded 10x10. BOTH halves take the SAME tiling so they
     # stay commensurate; the tiling is strain-neutral (identical copies), so
     # growing the footprint for statistics never touches the match strain.
-    base_area = abs(float(np.linalg.det(base_cell)))
-    footprint_repeat = _footprint_repeat(
-        base_area, to_metal(pair.numerical.target_footprint_area, "area"))
+    footprint_repeat = box_repeats(
+        base_cell,
+        to_metal(pair.numerical.target_footprint_area, "area"),
+        to_metal(pair.numerical.minimum_cell_width, "distance"))
     # Now build BOTH footprint halves (the dose tiling), on the shared cell
     # for a mismatch; neither is written until both exist.
     half_a = _standalone_half(

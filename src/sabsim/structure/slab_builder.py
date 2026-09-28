@@ -341,8 +341,14 @@ def build_standalone_half(
     # and cuts on the crystal's own lattice.
     if matched_cell is not None and shared_cell is not None:
         slab = tile_slab_to_shared_cell(slab, matched_cell, shared_cell)
-    if lateral_repeat > 1:
-        slab = slab.repeat((lateral_repeat, lateral_repeat, 1))
+    # One number repeats both edges alike (the bootstrap's clean
+    # surfaces); a pair repeats each edge its own number of times (the
+    # project box, :func:`~sabsim.pipeline.live_stages.box_repeats`).
+    if isinstance(lateral_repeat, (int, np.integer)):
+        lateral_repeat = (int(lateral_repeat), int(lateral_repeat))
+    repeat_first, repeat_second = (int(n) for n in lateral_repeat)
+    if repeat_first > 1 or repeat_second > 1:
+        slab = slab.repeat((repeat_first, repeat_second, 1))
     slab = orthogonalize_in_plane(slab)
     type_map = _type_map_with_species(slab, projectile_species)
     return StandaloneHalf(
@@ -401,8 +407,7 @@ def _worst_axis_strain(
     any ribbon-averse match ranking should read.
     """
     substrate, film = _coplanar_2d(substrate_cell, film_cell)
-    twist = _polar_rotation(substrate @ np.linalg.inv(film))
-    film_aligned = film @ twist.T
+    film_aligned = _film_turned_onto_substrate(substrate, film)
     shared = 0.5 * (substrate + film_aligned)
     worst = 0.0
     for own in (substrate, film_aligned):
@@ -420,33 +425,132 @@ def match_surfaces(
     """Find the shared coincidence cell (Zur-McGill, adopted — §2.3).
 
     Runs pymatgen's ``ZSLGenerator`` on the two slabs' surface vectors
-    and keeps the SMALLEST matched cell within the area and misfit
-    budgets — the same "smallest survivor" rule DESIGN.md §2.3 states.
-    For identical lattices (Si/Si) the smallest match is the primitive
-    surface cell at zero strain, which is the matcher's null test.
+    and judges every candidate by what it would BUILD (revised
+    2026-09-28, DESIGN §2.3; LEDGER T-45):
+
+    * each candidate's two supercells are put in counterclockwise
+      order, and the film's is tried in every equivalent description
+      of the same lattice (:func:`_best_film_description`);
+    * its strain is the PER-AXIS strain of the §2.4 shared cell — the
+      largest stretch or compression, along any direction, either
+      crystal undergoes (:func:`_worst_axis_strain`);
+    * a candidate over ``misfit_tolerance`` is rejected (pymatgen's own
+      length tolerance is only a pre-filter: it compares edge lengths
+      and an unsigned angle, and so admits pairs that cannot be built);
+    * of the survivors the LEAST strained is taken, the smaller area
+      breaking a tie.
+
+    For identical lattices (Si/Si) the winner is the primitive surface
+    cell at zero strain, which is the matcher's null test.
     """
     vectors_a = _surface_vectors(slab_a)
     vectors_b = _surface_vectors(slab_b)
     generator = ZSLGenerator(
         max_area=max_area, max_length_tol=misfit_tolerance)
-    matches = list(generator(vectors_a, vectors_b))
-    if not matches:
+    survivors = []
+    least_rejected = None
+    for candidate in generator(vectors_a, vectors_b):
+        substrate_cell, substrate_tiling = _counterclockwise(
+            np.asarray(candidate.substrate_sl_vectors, dtype=float),
+            np.asarray(candidate.substrate_transformation, dtype=float))
+        film_cell, film_tiling, strain = _best_film_description(
+            substrate_cell,
+            np.asarray(candidate.film_sl_vectors, dtype=float),
+            np.asarray(candidate.film_transformation, dtype=float))
+        if strain > misfit_tolerance:
+            if least_rejected is None or strain < least_rejected:
+                least_rejected = strain
+            continue
+        survivors.append((
+            round(strain, _STRAIN_RANKING_DECIMALS),
+            float(candidate.match_area), len(survivors),
+            substrate_cell, substrate_tiling, film_cell, film_tiling,
+            strain))
+    if not survivors:
+        nearest = ("" if least_rejected is None else
+                   f" (the least strained candidate needs "
+                   f"{100.0 * least_rejected:.2f} %)")
         raise ValueError(
-            "no coincidence cell within the area/misfit budget (§2.3): "
-            "loosen misfit_tolerance or raise max_area")
-    best = min(matches, key=lambda match: match.match_area)
-    strain = _residual_strain(
-        best.substrate_sl_vectors, best.film_sl_vectors)
+            f"no coincidence cell within the area budget ({max_area:g} "
+            f"A^2) whose built per-axis strain is within the misfit "
+            f"tolerance ({100.0 * misfit_tolerance:g} %){nearest} (§2.3): "
+            f"loosen misfit_tolerance or raise max_coincidence_area")
+    (_, area, _, substrate_cell, substrate_tiling, film_cell,
+     film_tiling, strain) = min(survivors, key=lambda row: row[:3])
+    residual = _residual_strain(substrate_cell, film_cell)
     return SurfaceMatch(
-        residual_strain=strain,
-        worst_axis_strain=_worst_axis_strain(
-            best.substrate_sl_vectors, best.film_sl_vectors),
-        match_area=float(best.match_area),
-        is_identity=(strain <= _IDENTITY_STRAIN_TOLERANCE),
-        substrate_tiling=_whole_tuples(best.substrate_transformation),
-        film_tiling=_whole_tuples(best.film_transformation),
-        substrate_cell=_float_tuples(best.substrate_sl_vectors),
-        film_cell=_float_tuples(best.film_sl_vectors))
+        residual_strain=residual,
+        worst_axis_strain=strain,
+        match_area=area,
+        is_identity=(residual <= _IDENTITY_STRAIN_TOLERANCE),
+        substrate_tiling=_whole_tuples(substrate_tiling),
+        film_tiling=_whole_tuples(film_tiling),
+        substrate_cell=_float_tuples(substrate_cell),
+        film_cell=_float_tuples(film_cell))
+
+
+# Two candidates whose strains agree to this many decimals are ranked by
+# area: a difference in the fifth decimal of a strain is arithmetic
+# noise, not a reason to build a larger cell.
+_STRAIN_RANKING_DECIMALS = 4
+
+# The descriptions of ONE lattice that keep its edges in the same
+# rotational order: the pair as given, both edges reversed, and the two
+# exchanges of the edges with one reversed. Each is a whole-number
+# matrix of determinant +1 applied to the two edge vectors (and to the
+# tiling, which maps the primitive surface cell onto them).
+_SAME_ORDER_DESCRIPTIONS = (
+    np.array([[1.0, 0.0], [0.0, 1.0]]),
+    np.array([[-1.0, 0.0], [0.0, -1.0]]),
+    np.array([[0.0, 1.0], [-1.0, 0.0]]),
+    np.array([[0.0, -1.0], [1.0, 0.0]]),
+)
+
+
+def _turns_counterclockwise(cell: np.ndarray) -> bool:
+    """True when edge 1 to edge 2 turns counterclockwise seen from +z.
+
+    The slabs are cut with the surface normal along +z, so the sign of
+    the z component of ``edge_1 x edge_2`` is the rotational order.
+    """
+    edges = _promote_to_3d(cell)
+    return float(np.cross(edges[0], edges[1])[2]) > 0.0
+
+
+def _counterclockwise(cell: np.ndarray, tiling: np.ndarray) -> tuple:
+    """The cell and its tiling with the edges in counterclockwise order.
+
+    Reversing edge 2 describes the SAME lattice (the reversed vector is
+    a lattice vector too) in the opposite rotational order; the tiling
+    row that builds edge 2 is reversed with it.
+    """
+    if _turns_counterclockwise(cell):
+        return cell, tiling
+    reverse_second = np.array([[1.0, 0.0], [0.0, -1.0]])
+    return reverse_second @ cell, reverse_second @ tiling
+
+
+def _best_film_description(
+        substrate_cell: np.ndarray, film_cell: np.ndarray,
+        film_tiling: np.ndarray) -> tuple:
+    """The film supercell described so it best fits the substrate's.
+
+    pymatgen pairs edge 1 with edge 1 and edge 2 with edge 2, but
+    compares only lengths and an unsigned angle, so the pairing it
+    reports may be a mirror image or have its edges exchanged (DESIGN
+    §2.3). The film's cell is put in counterclockwise order and each
+    same-order description of its lattice is measured against the
+    substrate; the one of least per-axis strain is returned, with its
+    tiling and that strain.
+    """
+    film_cell, film_tiling = _counterclockwise(film_cell, film_tiling)
+    best = None
+    for description in _SAME_ORDER_DESCRIPTIONS:
+        described = description @ film_cell
+        strain = _worst_axis_strain(substrate_cell, described)
+        if best is None or strain < best[2]:
+            best = (described, description @ film_tiling, strain)
+    return best
 
 
 def _whole_tuples(matrix) -> tuple:
@@ -589,15 +693,45 @@ def even_split_shared_cell(
     # lengths (a naive z-drop would shorten an out-of-plane cell and shrink
     # the shared cell below both materials -- see :func:`_coplanar_2d`).
     substrate, film = _coplanar_2d(substrate_cell, film_cell)
-    # Carry the film supercell onto the substrate one; the rotation part of
-    # that map is the twist between the two slabs (§2.3).
-    film_to_substrate = substrate @ np.linalg.inv(film)
-    twist = _polar_rotation(film_to_substrate)
-    # Rotate the film cell into the substrate frame (rows are vectors, so
-    # the rotation acts on the right as ``film @ twistᵀ``), then split the
-    # misfit evenly by taking the midpoint of the two aligned cells.
-    film_aligned = film @ twist.T
+    # Turn the film cell onto the substrate cell (the twist, §2.3), then
+    # split the misfit evenly: the midpoint of the two aligned cells.
+    film_aligned = _film_turned_onto_substrate(substrate, film)
     return 0.5 * (substrate + film_aligned)
+
+
+def _film_turned_onto_substrate(
+        substrate: np.ndarray, film: np.ndarray) -> np.ndarray:
+    """The film cell rotated so its edges lie along the substrate's.
+
+    Both cells are 2x2 with ONE EDGE VECTOR PER ROW. The linear map that
+    carries each film edge onto the corresponding substrate edge acts
+    on a vector from the left, ``map @ film_edge = substrate_edge``, so
+    with rows as vectors it is ``substrate.T @ inverse(film.T)``. Its
+    rotation part is the twist, and rotating each film edge by it is
+    ``film @ twist.T``.
+
+    CORRECTED 2026-09-28 (DESIGN §2.4, LEDGER T-45). The rotation used
+    to be taken from ``substrate @ inverse(film)``, a different matrix:
+    for a square cell it is the TRANSPOSE of the right one, so the
+    angle came out with the wrong sign, and for an elongated cell the
+    angle itself was wrong. The film was turned AWAY from the
+    substrate, and the midpoint of two misaligned cells is shorter than
+    either — 20 % short for silicon (100) on quartz (001), 0.4 % for
+    the 5.4-degree oxide cell of LEDGER T-20.
+
+    The two cells must be listed in the SAME rotational order (both
+    counterclockwise). A clockwise film against a counterclockwise
+    substrate is a mirror image, which no rotation can align; that is
+    refused here rather than forced (:func:`match_surfaces` puts every
+    candidate in counterclockwise order before it reaches this).
+    """
+    if np.linalg.det(substrate) * np.linalg.det(film) <= 0.0:
+        raise ValueError(
+            "the two matched cells list their edges in opposite "
+            "rotational order (one clockwise, one counterclockwise): "
+            "no rotation aligns a cell with its mirror image (§2.3)")
+    twist = _polar_rotation(substrate.T @ np.linalg.inv(film.T))
+    return film @ twist.T
 
 
 def tile_slab_to_shared_cell(

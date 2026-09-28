@@ -170,6 +170,7 @@ class NumericalKnobs:
     noise_floor: Quantity            # peak/curve threshold vs thermal RMS
     misfit_tolerance: float          # coincidence-match strain cutoff
     max_coincidence_area: Quantity   # atom-area budget for the match
+    minimum_cell_width: Quantity     # narrowest the box may be (§2.4)
     target_footprint_area: Quantity  # in-plane dose-spreading area (§3.6)
     minimum_bulk_thickness: Quantity  # undamaged-crystal cushion (§2.5)
     slab_thickness: Quantity         # chosen total slab thickness (§2.5)

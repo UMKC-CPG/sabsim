@@ -213,6 +213,10 @@ noise_floor          = { value = 0.05, unit = "eV/angstrom" }
 misfit_tolerance     = 0.02       # max strain component in the match (§2.3)
 max_coincidence_area = { value = 400.0, unit = "angstrom^2" }
 # ^ atom-area budget bounding atoms per layer (§7.6); provisional.
+minimum_cell_width   = { value = 8.0, unit = "angstrom" }
+# ^ DEMO: 8 Å reproduces the 3x3 box of LEDGER T-40/T-41, which is
+#   8.1 by 11.5 Å wide — narrower than twice the model's 6 Å
+#   interaction radius. A production run states 12 Å (DESIGN §2.4).
 target_footprint_area = { value = 140.0, unit = "angstrom^2" }   # DEMO: 3x3 cell, ~4 impacts
 # ^ dose-spreading footprint (§3.6): the matched cell is tiled up to
 #   ~this in-plane area so no single impact dominates the areal dose.

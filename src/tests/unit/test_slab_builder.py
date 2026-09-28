@@ -189,6 +189,118 @@ def test_even_split_undoes_the_twist_before_averaging():
         film_aligned @ film_aligned.T, film @ film.T, atol=1.0e-9)
 
 
+def _rotated(cell, degrees):
+    """Each ROW of ``cell`` rotated counterclockwise by ``degrees``."""
+    angle = np.deg2rad(degrees)
+    rotation = np.array([[np.cos(angle), -np.sin(angle)],
+                         [np.sin(angle), np.cos(angle)]])
+    return np.asarray(cell) @ rotation.T
+
+
+def _edge_lengths(cell):
+    return np.linalg.norm(np.asarray(cell)[:, :2], axis=1)
+
+
+def test_even_split_of_a_twisted_cell_is_the_midpoint_of_the_lengths():
+    """The shared cell itself, not only rotation-blind quantities.
+
+    DESIGN §2.4, corrected 2026-09-28 (LEDGER T-45). The rotation used
+    to be taken from the wrong matrix product, so the film was turned
+    AWAY from the substrate and the shared cell came out short. The
+    older test compared metric tensors, which a rotation in either
+    direction leaves unchanged, and so could not see it. Here the
+    edges are checked: a square film twisted 9 degrees, and the long
+    thin cell of silicon (100) on quartz (001) twisted 26.57 degrees.
+    """
+    substrate = np.array([[5.5, 0.0], [0.0, 5.5]])
+    film = _rotated([[5.0, 0.0], [0.0, 5.0]], 9.0)
+    shared = even_split_shared_cell(substrate, film)
+    assert np.allclose(shared, [[5.25, 0.0], [0.0, 5.25]], atol=1.0e-9)
+
+    quartz = np.array([[8.510, 0.0], [0.0, 34.391]])
+    silicon = _rotated([[8.586, 0.0], [0.0, 34.342]], 26.57)
+    shared = even_split_shared_cell(quartz, silicon)
+    assert np.allclose(_edge_lengths(shared), [8.548, 34.3665], atol=1e-3)
+    # Each crystal is strained by half the misfit on each axis, under
+    # half a percent — not the 20 percent the wrong product gave.
+    assert _worst_axis_strain(quartz, silicon) < 0.005
+
+
+def test_a_mirror_image_pair_is_refused_not_forced():
+    """A clockwise film against a counterclockwise substrate (§2.3)."""
+    substrate = np.array([[8.510, 0.0], [0.0, 34.391]])
+    mirrored = np.array([[8.586, 0.0], [0.0, -34.342]])
+    with pytest.raises(ValueError, match="opposite rotational order"):
+        even_split_shared_cell(substrate, mirrored)
+
+
+def test_the_film_is_described_so_it_fits_the_substrate():
+    """Reversed, exchanged or mirrored edges are put right (§2.3)."""
+    from sabsim.structure.slab_builder import _best_film_description
+    substrate = np.array([[8.510, 0.0], [0.0, 34.391]])
+    tiling = np.array([[1.0, 2.0], [0.0, 10.0]])
+    for film in ([[8.586, 0.0], [0.0, -34.342]],       # mirrored
+                 [[0.0, 34.342], [-8.586, 0.0]],       # edges exchanged
+                 [[-8.586, 0.0], [0.0, -34.342]]):     # both reversed
+        described, new_tiling, strain = _best_film_description(
+            substrate, _rotated(film, 26.57), tiling)
+        assert strain < 0.005
+        assert np.linalg.det(described[:, :2]) > 0.0
+        assert abs(abs(np.linalg.det(new_tiling)) - 10.0) < 1.0e-9
+
+
+def test_silicon_on_quartz_builds_a_sound_cell():
+    """The pair of LEDGER T-45, end to end through the geometry.
+
+    Twenty silicon surface cells on fourteen quartz ones: a shared cell
+    of about 8.55 by 34.37 A, each crystal strained under half a
+    percent, and no two atoms closer than a bond length after tiling —
+    where the defective build put 466,578 atoms in a sliver.
+    """
+    from scipy.spatial import cKDTree
+    silicon = build_slab(load_crystal(_SI_CIF), _SI_100)
+    quartz = build_slab(
+        load_crystal(_data_file("sio2_alpha_quartz.cif")), (0, 0, 1))
+    match = match_surfaces(
+        silicon, quartz, max_area=400.0, misfit_tolerance=0.02)
+    assert match.worst_axis_strain < 0.005
+    assert abs(match.match_area - 294.8) < 1.0
+    shared = even_split_shared_cell(match.substrate_cell, match.film_cell)
+    assert np.allclose(_edge_lengths(shared), [8.548, 34.367], atol=0.01)
+    for slab, cell, copies, bond in ((silicon, match.film_cell, 20, 2.2),
+                                     (quartz, match.substrate_cell, 14,
+                                      1.5)):
+        tiled = tile_slab_to_shared_cell(slab, cell, shared)
+        assert len(tiled) == copies * len(slab)
+        positions = tiled.get_positions()
+        nearest = cKDTree(positions).query(positions, k=2)[0][:, 1]
+        assert nearest.min() > bond
+
+
+def test_the_misfit_tolerance_is_held_on_the_built_cell(monkeypatch):
+    """A candidate whose BUILT strain is over the tolerance is rejected.
+
+    pymatgen's own filter compares the two cells' edge lengths, so a
+    candidate it passes strains each crystal by about half the
+    tolerance when soundly built. The check on the built cell exists
+    for the candidates that cannot be built soundly; here every
+    candidate is made to report 3 percent, and the refusal names it.
+    """
+    import sabsim.structure.slab_builder as builder
+    original = builder._best_film_description
+
+    def three_percent(substrate_cell, film_cell, film_tiling):
+        described, tiling, _ = original(
+            substrate_cell, film_cell, film_tiling)
+        return described, tiling, 0.03
+
+    monkeypatch.setattr(builder, "_best_film_description", three_percent)
+    silicon = build_slab(load_crystal(_SI_CIF), _SI_100)
+    with pytest.raises(ValueError, match=r"needs 3\.00 %"):
+        match_surfaces(
+            silicon, silicon, max_area=400.0, misfit_tolerance=0.02)
+
+
 def test_even_split_uses_true_lengths_of_out_of_plane_vectors():
     """A film cell tilted out of xy must not be shortened by projection.
 

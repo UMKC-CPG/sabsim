@@ -594,6 +594,21 @@ That is a future study dimension, and it would enter as a protocol knob
 whatever twist the smallest cell implies, so it reads that twist out and
 records it as provenance, and imposes no grid.
 
+**Handedness.** The enumerator reports each supercell as an ordered
+pair of edge vectors, and it may list one crystal's pair in
+counterclockwise order and the other's in clockwise order, because it
+compares cells by edge length and unsigned angle. No rotation carries a
+clockwise pair onto a counterclockwise one; only a mirror does, and a
+mirrored crystal is a different crystal. So before anything is
+measured each pair is put in counterclockwise order, and the film's
+pair is tried in each of the equivalent descriptions of the SAME
+lattice that keep that order (its two edges with either sign and in
+either order, the whole-number tiling changed to match). The
+description whose per-axis strain is least is the candidate; if none
+is within tolerance the candidate is rejected. The production run of
+LEDGER T-45 took a candidate whose two pairs were oppositely ordered,
+forced a rotation onto it, and built a cell 0.04 Å wide.
+
 **The misfit.** For a candidate `(tiling_A, tiling_B, twist_angle)` the
 two supercells are almost never identical, so we ask what deformation
 carries the second onto the first. Writing each supercell as a 2×2
@@ -611,10 +626,23 @@ different cell angles. Prior art applies only a diagonal, two-number
 rescale and so cannot match two lattices whose angles differ at all.
 
 **The search.** Enumerate whole-number matrices up to an area limit, at
-the two lattices' given orientations, keep every candidate whose largest
-strain component is within the misfit tolerance and whose atom count is
-within budget, and among the survivors take the smallest cell. Two properties
-are worth stating because they are exactly what prior art lacks:
+the two lattices' given orientations, and judge every candidate by what
+it would actually BUILD (revised 2026-09-28, Paul; LEDGER T-45). For
+each candidate the shared cell of §2.4 is constructed, and the
+candidate's strain is the largest stretch or compression, along any
+direction, that either crystal undergoes in being carried onto that
+shared cell (the per-axis strain, the largest principal strain of
+either deformation). The enumerator applies the misfit tolerance to
+the difference between the two supercells' edge lengths, so a
+candidate it passes strains each crystal by about half the tolerance
+when it is soundly built. But it compares lengths and an unsigned
+angle only, and so also passes pairs that cannot be built soundly. The
+same tolerance is therefore applied a second time, to the per-axis
+strain of the built cell, and a candidate over it is REJECTED with
+the number it would have needed. Among the survivors
+the one with the LEAST per-axis strain is taken, and the smaller area
+breaks a tie. Two properties are worth stating because they are
+exactly what prior art lacks:
 
 - Nothing in this ever assumes the two surface vectors have equal
   length, or meet at 90° or 120°, or that the same whole number is used
@@ -678,6 +706,24 @@ sizes are close). Three readings of that one formula:
   the measured modulus into the weighted split is the follow-on in
   `TODO.md`.)
 
+**How the twist is removed before the split (corrected 2026-09-28,
+LEDGER T-45).** A supercell is held as two edge vectors, one per ROW.
+The twist is the rotation part of the linear map that carries each
+edge vector of the film onto the corresponding edge vector of the
+substrate. With rows as vectors that map is `transpose(substrate) @
+inverse(transpose(film))`. The code had taken the rotation from
+`substrate @ inverse(film)`, a different matrix: it equals the
+transpose of the right one only when the cell is square, so even then
+the angle came out with the wrong sign, and for an elongated cell the
+angle itself was wrong. The film was therefore turned AWAY from the
+substrate, and the midpoint of two misaligned cells is shorter than
+either. For silicon (100) on quartz (001), a 26.57° twist on a cell
+four times as long as it is wide, the shared cell came out 20 % short
+on both edges; for the 5.4° oxide cell of LEDGER T-20 the shortfall
+was 0.4 %. The earlier test of this step compared only quantities a
+rotation leaves unchanged, so it could not see a rotation in the
+wrong direction; the test now checks the shared cell itself.
+
 Two further points the two-number rescale of prior art misses:
 
 - The split is applied to the **strain tensor** of §2.3, shear included,
@@ -691,6 +737,25 @@ Two further points the two-number rescale of prior art misses:
 Strain is applied **before activation**, because amorphous material has
 no lattice to strain cleanly — the one point on which prior art's
 reasoning is exactly right, and which we adopt unchanged.
+
+**The box is widened edge by edge, and never narrower than the model
+can bear (2026-09-28, Paul).** The shared cell fixes a shape; the box
+the simulation runs in is that cell repeated a whole number of times
+along each of its two edges. Two requirements set the two numbers.
+First, the box must be at least `minimum_cell_width` across in each
+direction, the width being the perpendicular distance between
+opposite sides: narrower than twice the force model's interaction
+radius, an atom feels its own periodic copy, and a collision cascade
+meets itself. Second, the box area must reach `target_footprint_area`,
+so that no single impact dominates the dose (§3.6). The repeats are
+chosen per edge: each edge is first repeated until the box is wide
+enough in that direction, and then the NARROWER direction is repeated
+once more for as long as doing so brings the area closer to the
+target (the target is a size to come close to, not a floor). A long thin
+shared cell therefore becomes a nearly square box rather than a long
+thin one repeated equally both ways, which is how the 9.4 Å oxide
+ribbon of LEDGER T-18 came to be pressed. Repeating is strain-neutral:
+it lays down identical copies of an already-matched cell.
 
 ### 2.5 Cutting the slab
 

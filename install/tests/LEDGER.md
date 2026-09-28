@@ -2079,4 +2079,66 @@ melt at 5000 K, cutoff 5.0 A; old scratch kept as
 self-check numbers and melt ratios; both preps' gate depth; bond's
 shared-cell agreement and separation; the measure vector.)*
 
-- **Result:** see below (appended as the chain runs).
+- **Result (read 2026-09-23 and 2026-09-28): libraries PASS, both
+  preps FAILED, bond and analysis cancelled by the scheduler.**
+
+  | job | state | elapsed |
+  |---|---|---|
+  | 17238479 silicon library | COMPLETED | 00:34:14 |
+  | 17238480 silica library | COMPLETED | 00:52:35 |
+  | 17238481 silicon prep | FAILED | 00:00:13 |
+  | 17238482 silica prep | FAILED | 00:05:17 |
+
+  **Libraries, the whitened ruler's first builds.** Silicon: `melt
+  verified, mean-square displacement grew 4.03-fold`; self-check
+  `warm_disordered = 0.0`, `melt_quench_disordered = 0.9859`; thermal
+  scatter Si 6.60. Silica (243-atom melt at 5000 K, cutoff 5.0 A):
+  `grew 5.17-fold`; `warm_disordered = 0.0`, `melt_quench_disordered =
+  0.8272`; thermal scatter Si 9.04, O 8.48. The first silica library
+  to pass.
+
+  **Silicon prep, 13 s.** `[wafer_b] 'SiO2' environment library in
+  prep_surf2_sio2/ is not there`: the job was held to BOTH libraries
+  though it opens only its own. Fixed 2a3ac21 (a job is held only to
+  the libraries it opens).
+
+  **Silica prep, 5 min.** The cascade engine aborted on a half of
+  466,578 atoms in a box `104.78 x 1.355 A` with `xy = -47.76`
+  (silicon's half: 296,240 atoms, same box). Replayed on the login
+  node as pure geometry, three defects, all in our code and none in
+  pymatgen's enumerator, whose match is sound (twenty silicon surface
+  cells on fourteen quartz ones; supercells 8.586 x 34.342 A and
+  8.510 x 34.391 A, both rectangular, 26.57 degrees apart):
+  1. the twist was taken from `substrate @ inverse(film)`; with one
+     edge vector per row the map carrying each film edge onto its
+     substrate edge is `substrate.T @ inverse(film.T)`. The code
+     extracted -46.86 degrees where the geometry requires +26.57, and
+     the shared cell came out 6.852 x 27.549 A, 20 % short on both
+     edges. The sign is wrong even for a square cell, so EVERY pair
+     with a twist was affected: the T-20 oxide cell (5.4 degrees) was
+     built about 0.4 % short on each edge, and its recorded per-axis
+     strain (1.77 %) used the same product.
+  2. some candidates list the film's edges clockwise and the
+     substrate's counterclockwise; a rotation was forced onto the
+     mirror pair and the shared cell collapsed to 0.04 A on one edge
+     (area ~0.27 A^2). The footprint step then repeated that sliver
+     23 x 23 to reach 140 A^2: 529 x 882 = 466,578.
+  3. the misfit tolerance was handed to the enumerator and never
+     applied to the cell actually built.
+
+  **Repaired 2026-09-28 (DESIGN §2.3, §2.4):** corrected product;
+  every candidate put in counterclockwise order and the film tried in
+  each same-order description of its lattice; the tolerance applied
+  to the per-axis strain of the built cell; candidates ranked by that
+  strain, area breaking a tie. Login-node replay after the repair:
+  shared cell 8.548 x 34.367 A, per-axis strain 0.45 %, 560 silicon
+  and 882 quartz atoms, closest pairs 2.35 A and 1.61 A (the bond
+  lengths). The box is now widened per edge with a new project
+  setting `minimum_cell_width`: at 12 A and the demo's 140 A^2 target
+  the short edge is repeated twice, a 17.1 x 34.4 A box.
+
+- **Scope NOT covered:** no job has run on the repaired geometry;
+  the prep, bond and analysis of this pair are still to be submitted.
+  The T-20 oxide result stands on a cell 0.4 % too small and should
+  be rebuilt before it is relied on. The stiffness-weighted split of
+  DESIGN §2.4 is still the even split.

@@ -1289,10 +1289,18 @@ function coincidence_match(lattice_A, lattice_B, misfit_tolerance,
         # carries B's supercell onto A's (§7.6.1).
         strain = misfit_strain_tensor(match.supercell_A,
                                       match.supercell_B)   # 2x2, shear
-        # The AUTHORITATIVE tolerance cut is the largest strain
-        # COMPONENT — not a scalar length ratio, which cannot even see
-        # the shear (DESIGN §2.3; prior art's two-number error, §1.6).
-        if max_component(strain) <= misfit_tolerance:
+        # HANDEDNESS FIRST (DESIGN §2.3, 2026-09-28): put both edge
+        # pairs in counterclockwise order, and try the film's pair in
+        # each equivalent description of the same lattice (either
+        # sign, either order, tiling changed to match); keep the one
+        # of least per-axis strain.
+        match = best_counterclockwise_description(match)
+        # The AUTHORITATIVE tolerance cut is the PER-AXIS strain of
+        # the cell that would be BUILT: the largest principal strain
+        # either crystal undergoes on the §7.3 shared cell. The
+        # enumerator's length tolerance is only a pre-filter.
+        strain = per_axis_strain(match.supercell_A, match.supercell_B)
+        if strain <= misfit_tolerance:
             admissible.append(SharedCell(
                 lateral_cell    = match.supercell_A,
                 tiling_A        = match.tiling_A,
@@ -1310,10 +1318,36 @@ function coincidence_match(lattice_A, lattice_B, misfit_tolerance,
         return no_admissible_cell(surface_A, surface_B,
                                   misfit_tolerance, max_coincidence_area)
 
-    # Among the survivors take the SMALLEST cell (fewest atoms per
-    # layer); break ties by least misfit (DESIGN §2.3). No stiffness is
-    # needed here — the stiffness-weighted split is the SEPARATE §7.3.
-    return smallest_then_least_misfit(admissible)
+    # Among the survivors take the LEAST per-axis strain; the smaller
+    # area breaks a tie (DESIGN §2.3, revised 2026-09-28). No stiffness
+    # is needed here — the stiffness-weighted split is the SEPARATE
+    # §7.3.
+    return least_strain_then_smallest(admissible)
+```
+
+```
+function remove_twist(substrate, film):
+    # Cells are TWO EDGE VECTORS, ONE PER ROW (DESIGN §2.4, corrected
+    # 2026-09-28). The map carrying each film edge onto its substrate
+    # edge is transpose(substrate) @ inverse(transpose(film)); its
+    # rotation part is the twist. (substrate @ inverse(film) is a
+    # DIFFERENT matrix and was the LEDGER T-45 defect.)
+    twist = rotation_part(transpose(substrate) @ inverse(transpose(film)))
+    return film @ transpose(twist)        # each row rotated by twist
+
+function box_repeats(shared_cell, target_area, minimum_width):
+    # DESIGN §2.4 (2026-09-28): whole-number repeats PER EDGE.
+    # width_i = perpendicular distance between the sides parallel to
+    # the OTHER edge = area / length(other edge).
+    repeats = [ceil(minimum_width / width_1),
+               ceil(minimum_width / width_2)]
+    loop:
+        i = index of the narrower of (repeats[i] * width_i)
+        grown = repeats with repeats[i] + 1
+        # the target is a size to come CLOSE to, not a floor
+        if |area(grown) - target_area| >= |area(repeats) - target_area|:
+            return repeats
+        repeats = grown
 ```
 
 ```

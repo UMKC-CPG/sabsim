@@ -267,6 +267,8 @@ def _numerical_from_table(table: dict, context: str) -> NumericalKnobs:
             table, "misfit_tolerance", context)),
         max_coincidence_area=_require_quantity(
             table, "max_coincidence_area", context),
+        minimum_cell_width=_require_quantity(
+            table, "minimum_cell_width", context),
         target_footprint_area=_require_quantity(
             table, "target_footprint_area", context),
         minimum_bulk_thickness=_require_quantity(

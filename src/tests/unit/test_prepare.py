@@ -96,6 +96,7 @@ frame_stride           = 100
 noise_floor            = {{ value = 0.05, unit = "eV/angstrom" }}
 misfit_tolerance       = 0.02
 max_coincidence_area   = {{ value = 400.0, unit = "angstrom^2" }}
+minimum_cell_width     = {{ value = 12.0, unit = "angstrom" }}
 target_footprint_area  = {{ value = 1475.0, unit = "angstrom^2" }}
 minimum_bulk_thickness = {{ value = 30.0, unit = "angstrom" }}
 slab_thickness         = {{ value = 55.0, unit = "angstrom" }}

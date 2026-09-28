@@ -284,6 +284,11 @@ noise_floor          = { value = 0.05, unit = "eV/angstrom" }
 misfit_tolerance     = 0.02       # max strain component in the match (§2.3)
 max_coincidence_area = { value = 400.0, unit = "angstrom^2" }
 # ^ atom-area budget bounding atoms per layer (§7.6); provisional.
+minimum_cell_width   = { value = 12.0, unit = "angstrom" }
+# ^ the box is never narrower than this in either in-plane direction
+#   (DESIGN §2.4, 2026-09-28): twice the force model's interaction
+#   radius (6 Å for DPA-3.1-3M), below which an atom feels its own
+#   periodic copy. Provisional; a convergence knob.
 target_footprint_area = { value = 1475.0, unit = "angstrom^2" }
 # ^ dose-spreading footprint (§3.6): the matched cell is tiled up to
 #   ~this in-plane area so no single impact dominates the areal dose.

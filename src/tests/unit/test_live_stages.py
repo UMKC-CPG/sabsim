@@ -22,7 +22,7 @@ from sabsim.pipeline.exec_artifacts import DerivedLattices
 from sabsim.pipeline.live_stages import (
     _bonded_force_model,
     _effective_slab_thickness,
-    _footprint_repeat,
+    box_repeats,
     _publish_file,
     _pull_note,
     _pull_rung_paths,
@@ -183,18 +183,26 @@ def test_build_halves_writes_two_handles(tmp_path):
     assert shared.match_area > 0.0
 
 
-def test_footprint_repeat_sizes_the_dose_and_floors_at_one():
-    """_footprint_repeat tiles up to the target area, never below one (§3.6)."""
-    # The Si identity tile (~14.75 Å²) grown to 1475 Å² reproduces the
-    # retired 10x10 hardcode — the default preserves the pinned cell.
-    assert _footprint_repeat(14.75, 1475.0) == 10
-    # A matched cell tiled up to four times its area is a 2x2 footprint.
-    assert _footprint_repeat(300.0, 1200.0) == 2
-    # At least one tile is laid down even when the base already exceeds the
-    # target, so a large matched cell is never dropped to zero copies.
-    assert _footprint_repeat(500.0, 100.0) == 1
-    # A degenerate (zero) base area is guarded, never a divide-by-zero.
-    assert _footprint_repeat(0.0, 1475.0) == 1
+def test_box_repeats_meet_the_width_then_approach_the_area():
+    """Each edge is repeated until the box is wide enough, then the
+    narrower direction is grown while that nears the target (§2.4)."""
+    square = np.array([[3.84, 0.0], [0.0, 3.84]])
+    # Wide enough at 4 x 4 (15.4 A); the area target then grows it.
+    assert box_repeats(square, 1475.0, 12.0) == (10, 10)
+    assert box_repeats(square, 0.0, 12.0) == (4, 4)
+    # A long thin cell becomes nearly square, not thin repeated alike:
+    # silicon (100) on quartz (001), 8.5 by 34.4 A.
+    ribbon = np.array([[8.548, 0.0], [0.0, 34.367]])
+    assert box_repeats(ribbon, 140.0, 12.0) == (2, 1)
+    assert box_repeats(ribbon, 1475.0, 12.0) == (5, 1)
+    # The target is a size to come close to: 1469 A^2 is not doubled to
+    # reach 1475.
+    assert box_repeats(ribbon, 1475.0, 12.0)[1] == 1
+    # A slanted cell is judged by its perpendicular WIDTH, not its edge.
+    slanted = np.array([[3.84, 0.0], [-3.84, 3.84]])      # 135 degrees
+    assert box_repeats(slanted, 130.0, 8.0) == (3, 3)
+    # A cell with no area repeats once.
+    assert box_repeats(np.zeros((2, 2)), 1475.0, 12.0) == (1, 1)
 
 
 def test_effective_slab_thickness_is_a_floor_over_the_criterion():
