@@ -2264,7 +2264,12 @@ silicon.** The recipe of the eight parts above is a TOML file,
 `recipe.toml` (one per catalog entry, `share/catalog/<label>/`,
 §10.11), loaded by `src/sabsim/bootstrap/recipe.py` with
 `sabsim.toml`'s own discipline: every key required, units carried,
-three validation phases. The production settings block
+three validation phases. One value is refused wherever it appears:
+the string `"DECIDE"`, which `sabsim catalog add` writes on a line
+whose value is a judgement it will not guess (§10.11). The loader
+walks the whole file first and names every such line in one message,
+so a recipe nobody has finished cannot build a library. The
+production settings block
 is the LEAN recipe of `dev/notes/vasp-labelling-recipe-lean.md` (chosen cheap
 on purpose, to learn the cost by spending): PAW `Si`, `O`, `Li`, `Nb_pv`; PBE;
 `ENCUT = 350 eV`; Γ only for every non-bulk system and `KSPACING = 0.5 Å⁻¹` for
@@ -4772,18 +4777,92 @@ because everything else follows from them (Paul, 2026-09-28):
 
 The command then refuses a label that already exists, refuses a
 crystal with partial occupancy (the builder needs an ordered cell),
-copies the CIF in, writes `material.toml`, and clones the recipe
-from `--from` or, by default, the first sibling of the same formula,
-rewriting the phase name, crystal and face. A material with no
-sibling needs `--from`: with neither, the command REFUSES before it
-writes anything and prints the catalog's labels to choose from, for
-the no-guessing reason — a recipe carries chemistry (species, gate
-reference, pseudopotentials, melt), and which existing chemistry is
-nearest to a new one is a science judgement the program cannot make.
-When the source's formula differs the chemistry lines are left as
-they were and the command prints, by name, the lines the person must
-now decide: species union, domain, gate reference, descriptor
-weights, pseudopotentials, melt. The
+copies the CIF in, writes `material.toml`, and writes the entry's
+`recipe.toml` by one of the two routes below. Every refusal happens
+before anything is written.
+
+**The recipe of a NEW chemistry is written from a template, not
+cloned (Paul, 2026-09-28).** Until then a material with no sibling of
+its formula was cloned from `--from`, another chemistry's finished
+recipe, and arrived carrying that material's species, its gate
+reference, its pseudopotentials and — worst for a student reading it
+cold — its comments: a gallium nitride recipe that opened by
+explaining silica's melt. Of the dozen lines that differ between two
+materials most follow from the crystal file, so the command now fills
+`share/catalog/recipe.template.toml`, whose comments explain each
+setting in general terms and name no material, and marks every value
+it wrote as one of three kinds:
+
+- **DERIVED** — read or computed from the crystal; right by rule.
+  The recipe and phase names, the crystal path, the face,
+  `species_union`, `reference_data_ref`, `paw`.
+- **ESTIMATE** — a starting value from a stated rule, which a named
+  check refuses if it is wrong. `descriptor_cutoff`,
+  `species_weights`, the bulk and melt `cells_per_axis`,
+  `melt_temperature`, `lateral_repeat`.
+- **`"DECIDE"`** — a judgement no rule makes and no check would
+  catch. `domain`; a `paw` entry whose element has no plainly named
+  directory in the library.
+
+The rule that sorts a line into the second or the third kind is
+whether a wrong value FAILS LOUDLY. A melt that did not melt is
+refused by `verify_melt`; a descriptor that cannot tell warm crystal
+from glass is refused by the library's self-check in `generate`
+(§4.8 part 2); so those lines may start from an estimate. Nothing
+checks a domain name or a pseudopotential choice, so those are never
+guessed: the value written is the string `"DECIDE"`, and the recipe
+loader REFUSES a recipe that still holds one, naming every such line
+at once (§4.8). `sabsim init` copies such a recipe into a prep folder
+and says so; the library build is where it stops.
+
+The derivations and estimates, each stated in the template beside the
+line it fills:
+
+- `species_union` is the crystal's elements in the order of its
+  reduced formula. `reference_data_ref` is `share/activation/` plus
+  those symbols sorted and joined by `_` (`O_Si.toml`), the naming
+  the shipped references already follow; when that file does not
+  exist the command SAYS so, because a gate reference for a new
+  species set is a thing to be made, not a line to be edited.
+- `paw` names, for each element, the library directory of the same
+  name when it exists, and the command lists the other candidates
+  the library holds (`Ga_d`, `Ga_h`) so the choice is seen.
+- `descriptor_cutoff` is the midpoint between the second and third
+  neighbour shells of the crystal's SPARSEST species counted among
+  its own kind — the network-forming sublattice. This is §3.5's rule
+  ("through the second shell, short of the third") made computable
+  for a compound: silicon gives 4.2 Å, the measured value, and
+  quartz gives 4.6 Å where the best of the three values tried was
+  5.0 Å (LEDGER T-44), which is why it is an estimate.
+- `species_weights` are 1, 1/2, 1/4 … in `species_union` order: any
+  distinct values satisfy the loader, and the self-check judges them.
+- The bulk `cells_per_axis` and the surface `lateral_repeat` are the
+  smallest repeats that make the cell wider than twice the cutoff, so
+  no atom sees its own image (LEDGER T-26). They follow from the
+  cutoff, so they are estimates exactly as far as it is. A surface
+  cell is measured after reduction to its shortest pair of vectors:
+  the Si(100) cell is cut skewed, and a skewed cell looks narrower
+  than the lattice it describes.
+- The melt starts from what melted the hardest material so far
+  (LEDGER T-43): 5000 K, in the smallest cell of at least 200 atoms
+  that is also wide enough for the cutoff.
+
+When a needed quantity cannot be computed — a crystal too sparse to
+show three shells, a pseudopotential library that is not reachable
+from where the command runs — the line is written `"DECIDE"` rather
+than estimated from less.
+
+**A sibling of the same formula is still cloned**, because there the
+chemistry lines are decisions already made and a difference between
+siblings should read as a diff: by default the first entry of the
+same formula and phase (a second FACE, where everything but the
+surface block carries over), else the first of the same formula (a
+second PHASE, where the melt and the cutoff are the sibling's and the
+command says so). `--from <label>` picks the sibling. It must be of
+the same formula: a `--from` of another chemistry is refused, since
+that is the route the template replaced. A clone opens with a
+generated note saying which entry it was cloned from and that the
+comments below are that entry's. The
 crystal file is the handoff from whatever found it — Imago's
 `cod_fish` for a COD structure — and the catalog keeps no fetch of its
 own. Removing an entry is deleting its folder. Materials live in the

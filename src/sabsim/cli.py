@@ -177,8 +177,11 @@ def _build_parser() -> argparse.ArgumentParser:
     adding.add_argument("--cod-revision", type=int, metavar="REV",
                         help="the COD revision fetched")
     adding.add_argument("--from", dest="source", metavar="LABEL",
-                        help="the entry to clone the recipe from "
-                             "(default: the first of the same formula)")
+                        help="the sibling to clone the recipe from; "
+                             "it must be of the same formula (default: "
+                             "the first of the same phase, else of the "
+                             "same formula; a new chemistry is written "
+                             "from the template)")
 
     # `prepare` — the WRITER (DESIGN.md §10.1, PSEUDOCODE §14.4): reads
     # the project file AND the machine-local deployment rc, and writes
@@ -536,8 +539,11 @@ def _catalog(args: argparse.Namespace) -> int:
                 args.cif, args.phase, args.face, formula=args.formula,
                 label=args.label, provenance=provenance,
                 source_label=args.source)
+            origin = (f"cloned from {report.cloned_from}"
+                      if report.cloned_from is not None
+                      else "written from the template")
             print(f"sabsim catalog: added {report.entry.label} (recipe "
-                  f"cloned from {report.cloned_from})")
+                  f"{origin})")
             for line in report.derived:
                 print(f"  derived {line}")
             for path in report.written:

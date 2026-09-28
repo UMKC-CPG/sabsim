@@ -45,18 +45,6 @@ CATALOG_ROOT = REPOSITORY_ROOT / "share" / "catalog"
 ENTRY_FILENAME = "material.toml"
 RECIPE_FILENAME = "recipe.toml"
 
-# The recipe lines `catalog add` rewrites for a new phase (the crystal
-# and the face), matched at line start so a comment never counts, and
-# the chemistry lines it leaves alone but names for the person when
-# the source entry's formula differs.
-_PHASE_NAME_LINE = re.compile(r'^(name\s*=\s*)"[^"]*"', re.MULTILINE)
-_PHASE_CIF_LINE = re.compile(r'^(cif\s*=\s*)"[^"]*"', re.MULTILINE)
-_PHASE_REF_LINE = re.compile(r'^(phase\s*=\s*)"[^"]*"', re.MULTILINE)
-_FACE_LINE = re.compile(r"^(face\s*=\s*)\[[^\]]*\]", re.MULTILINE)
-CHEMISTRY_LINES = ("species_union", "domain", "reference_data_ref",
-                   "species_weights", "paw", "melt_temperature",
-                   "cells_per_axis")
-
 
 class CatalogError(RuntimeError):
     """The catalog could not do what was asked; the message says why."""
@@ -207,19 +195,24 @@ class AddReport:
     """What ``catalog add`` made, and what is left to the person."""
 
     entry: MaterialEntry
-    cloned_from: str
+    # The sibling the recipe was cloned from, or None when it was
+    # written from the template (a chemistry new to the catalog).
+    cloned_from: str | None
     written: list[str] = field(default_factory=list)
     notices: list[str] = field(default_factory=list)
     # What the command worked out for itself rather than was told: the
     # label always, and the formula as the crystal file states it.
     derived: list[str] = field(default_factory=list)
+    # The recipe lines left marked to decide, as the loader names them.
+    undecided: list[str] = field(default_factory=list)
 
 
 def add_entry(cif_source: str, phase: str, face,
               formula: str | None = None, label: str | None = None,
               provenance: dict | None = None,
               source_label: str | None = None,
-              root: Path = CATALOG_ROOT) -> AddReport:
+              root: Path = CATALOG_ROOT,
+              paw_library: Path | None = None) -> AddReport:
     """Make one catalog entry from a crystal file (DESIGN §10.11).
 
     The person says three things: the crystal file, the ``phase`` word
@@ -230,15 +223,24 @@ def add_entry(cif_source: str, phase: str, face,
     label the rule does not give, is refused.
 
     Also refuses a label that already exists, a crystal with partial
-    occupancy (the builder needs an ordered cell), and a material with
-    no sibling of its formula when no ``source_label`` is given. Every
-    refusal happens before anything is written. It then copies the
-    crystal in, writes ``material.toml``, and clones the recipe from
-    ``source_label`` or, by default, the first sibling of the same
-    formula, rewriting the phase name, the crystal line and the surface
-    face. When the source entry's formula differs, the chemistry lines
-    are left as they were and NAMED in the report for the person.
+    occupancy (the builder needs an ordered cell), and a
+    ``source_label`` of another formula. Every refusal happens before
+    anything is written. It then copies the crystal in, writes
+    ``material.toml``, and writes the recipe by one of two routes
+    (:mod:`sabsim.catalog_recipe`): CLONED from a sibling of the same
+    formula — ``source_label``, else the first of the same phase, else
+    the first of the same formula — or, for a chemistry the catalog
+    does not hold yet, FILLED from the material-neutral template, with
+    each value marked derived, estimated, or left to decide.
+    ``paw_library`` overrides the pseudopotential library the template
+    names.
     """
+    from sabsim.catalog_recipe import (
+        TEMPLATE_FILENAME,
+        RecipeWriteError,
+        recipe_from_sibling,
+        recipe_from_template,
+    )
     from sabsim.structure.slab_builder import load_crystal
 
     face = tuple(int(index) for index in face)
@@ -281,22 +283,47 @@ def add_entry(cif_source: str, phase: str, face,
         raise CatalogError(f"catalog entry '{expected}' already exists at "
                            f"{folder}; remove the folder to replace it")
 
+    # Where the recipe comes from: a sibling of the SAME formula, the
+    # same phase preferred (a second face), or the template when the
+    # catalog does not hold this chemistry yet. Another chemistry's
+    # recipe is never cloned.
     entries = read_catalog(root)
+    siblings = [e for e in entries if slug(e.formula) == slug(formula)]
     if source_label is not None:
         source = lookup_entry(source_label, root)
-    else:
-        siblings = [e for e in entries if slug(e.formula) == slug(formula)]
-        if not siblings:
-            known = ", ".join(e.label for e in entries) or "(none)"
+        if slug(source.formula) != slug(formula):
             raise CatalogError(
-                f"no catalog entry of formula {formula} to clone the "
-                f"recipe from; give --from <label> (the nearest "
-                f"chemistry among: {known}), then edit the chemistry "
-                f"lines it names. Nothing was written")
-        source = siblings[0]
+                f"--from {source.label} is {source.formula}, not "
+                f"{formula}: another chemistry's recipe is not cloned. "
+                f"Leave --from out and the recipe is written from the "
+                f"template (DESIGN §10.11)")
+    else:
+        same_phase = [e for e in siblings
+                      if slug(e.phase) == slug(phase)]
+        source = (same_phase or siblings or [None])[0]
+
+    cif_repository_path = f"share/catalog/{expected}/{cif_path.name}"
+    try:
+        if source is None:
+            recipe_text, undecided, notices = recipe_from_template(
+                crystal, expected, formula, phase, face,
+                cif_repository_path,
+                template_path=root / TEMPLATE_FILENAME,
+                repository_root=REPOSITORY_ROOT,
+                paw_library=paw_library)
+        else:
+            undecided = []
+            recipe_text, notices = recipe_from_sibling(
+                source.recipe.read_text(), source.label, source.phase,
+                expected, formula, phase, face, cif_repository_path)
+    except RecipeWriteError as failure:
+        raise CatalogError(str(failure)) from None
 
     folder.mkdir(parents=True)
-    report = AddReport(entry=None, cloned_from=source.label)
+    report = AddReport(
+        entry=None,
+        cloned_from=source.label if source is not None else None,
+        undecided=undecided)
     report.derived.append(f"label {expected} (from formula, phase, face)")
     report.derived.append(f"formula {formula} (read from the crystal file)")
     shutil.copy2(cif_path, folder / cif_path.name)
@@ -305,31 +332,9 @@ def add_entry(cif_source: str, phase: str, face,
         formula, phase, face, cif_path.name, provenance or {}))
     report.written.append(f"{expected}/{ENTRY_FILENAME}")
 
-    text = source.recipe.read_text()
-    phase_name = f"{slug(formula)}-{slug(phase).replace('_', '-')}"
-    text = _PHASE_NAME_LINE.sub(
-        lambda m: f'{m.group(1)}"{phase_name}"', text)
-    text = _PHASE_CIF_LINE.sub(
-        lambda m: f'{m.group(1)}"share/catalog/{expected}/{cif_path.name}"',
-        text)
-    text = _PHASE_REF_LINE.sub(lambda m: f'{m.group(1)}"{phase_name}"', text)
-    text = _FACE_LINE.sub(
-        lambda m: f"{m.group(1)}[{', '.join(str(i) for i in face)}]", text)
-    (folder / RECIPE_FILENAME).write_text(text)
+    (folder / RECIPE_FILENAME).write_text(recipe_text)
     report.written.append(f"{expected}/{RECIPE_FILENAME}")
-
-    if slug(source.formula) != slug(formula):
-        report.notices.append(
-            f"the recipe was cloned from {source.label} ({source.formula}), "
-            f"a different chemistry: decide these lines in "
-            f"{expected}/{RECIPE_FILENAME} before building a library — "
-            f"{', '.join(CHEMISTRY_LINES)} — and make sure a gate "
-            f"reference for the species set exists in share/activation/")
-    report.notices.append(
-        f"the melt settings and descriptor cutoff in "
-        f"{expected}/{RECIPE_FILENAME} are {source.label}'s; a new phase "
-        f"melts differently (LEDGER T-43) and `verify_melt` will refuse "
-        f"one that does not melt")
+    report.notices.extend(notices)
     report.entry = read_entry(folder)
     return report
 

@@ -36,6 +36,11 @@ from sabsim.spec.records import Quantity
 QUENCH_RATE_UNIT = "K/ps"
 RECIPROCAL_SPACING_UNIT = "1/angstrom"
 
+# The value `sabsim catalog add` writes on a line it will not guess — a
+# judgement no rule makes and no check would catch, such as the domain's
+# name (DESIGN §10.11). A recipe still holding one is refused whole.
+UNDECIDED_MARKER = "DECIDE"
+
 
 @dataclass(frozen=True)
 class GeneratorModel:
@@ -485,6 +490,32 @@ def _descriptor_from_table(table: dict, context: str) -> tuple:
     return settings, multiple
 
 
+def undecided_lines(raw_recipe: dict) -> list[str]:
+    """Every line of a parsed recipe still marked to be decided.
+
+    Walks the whole tree — tables, arrays of tables, inline tables —
+    and names each value equal to :data:`UNDECIDED_MARKER` the way the
+    loader names any line: ``[recipe] -> domain``,
+    ``[production_settings] -> paw -> Ga``,
+    ``[collection1] -> melt_quench[0] -> melt_temperature``.
+    """
+    found = []
+
+    def walk(node, location: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, f"{location} -> {key}" if location
+                     else f"[{key}]")
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, f"{location}[{index}]")
+        elif node == UNDECIDED_MARKER:
+            found.append(location)
+
+    walk(raw_recipe, "")
+    return found
+
+
 def load_recipe(recipe_path: str | Path) -> ForceModelRecipe:
     """Load and validate a recipe file (phases one and two).
 
@@ -492,9 +523,21 @@ def load_recipe(recipe_path: str | Path) -> ForceModelRecipe:
     :func:`check_recipe_references`, called by the commands that are
     about to spend on them, exactly as the project loader splits its own
     checks.
+
+    Before any key is read the file is searched for lines still marked
+    to be decided, so an unfinished recipe is refused with ALL of them
+    named, not with the first one a type conversion trips over.
     """
     with Path(recipe_path).open("rb") as recipe_file:
         raw = tomllib.load(recipe_file)
+    undecided = undecided_lines(raw)
+    if undecided:
+        listed = "\n  - ".join(undecided)
+        raise SpecificationError(
+            f"the recipe {recipe_path} still holds {len(undecided)} "
+            f"line(s) marked \"{UNDECIDED_MARKER}\", each a judgement "
+            f"`sabsim catalog add` would not guess (DESIGN §10.11). "
+            f"Decide them, then run again:\n  - {listed}")
     head = _require(raw, "recipe", "top level")
     species = frozenset(
         str(symbol) for symbol in _require(head, "species_union", "[recipe]"))

@@ -3093,6 +3093,22 @@ prep folder of the surface it prepares (`ARCHITECTURE.md` §1) — and it
 changes on a third clock: manufactured once, costing weeks, then
 consumed unchanged by many projects.
 
+**One value the loader refuses wherever it appears.** `sabsim catalog
+add` writes the string `"DECIDE"` on a line whose value is a judgement
+it will not guess (§14.9, `DESIGN.md` §10.11). The loader looks for it
+BEFORE it reads any key, so the message names every unfinished line
+at once rather than the first one a type conversion trips over.
+
+```
+function reject_undecided(raw_recipe_tree):
+    undecided = every key path in the tree whose value is "DECIDE"
+                # tables and lists walked: "[production_settings]
+                # -> paw -> Ga", "[collection1.melt_quench][0] ->
+                # melt_temperature"
+    if undecided: halt("the recipe still holds lines to decide: "
+                       + undecided)
+```
+
 ```
 record ReferenceSettings:
     # DESIGN §4.8 parts 3-4. The numerical controls of ONE accurate
@@ -5066,19 +5082,96 @@ function catalog_add(cif, phase, face, formula=None, label=None,
     if label given: require lower(label) == derived
     label = derived
     require no folder CATALOG_ROOT/label
-    source = source or first entry with the same formula
-             or REFUSE ("give --from: no sibling of this formula",
-                        listing the catalog's labels)
+    source = the recipe's source, chosen as written below
     # Every refusal above happens BEFORE anything is written.
     make CATALOG_ROOT/label; copy cif in
     write material.toml          # formula, phase, face, cif
-    text = read(source.recipe)
-    rewrite the phase name, the cif line, the surface face
+    if source is None:
+        text, undecided, notices = recipe_from_template(
+            crystal, label, formula, phase, face, cif)
+    else:
+        text, notices = recipe_from_sibling(source, label, formula,
+                                            phase, face, cif)
     write CATALOG_ROOT/label/recipe.toml
-    if source.formula != formula:
-        notice(the chemistry lines to decide by hand: species_union,
-               domain, reference_data_ref, species_weights, paw, melt)
     report what was derived: the label, and the formula as read
+
+# Where the recipe comes from. A sibling is an entry of the SAME
+# formula; another chemistry is never cloned.
+    source = the entry named by --from        # refuse another formula
+             or first entry of the same formula AND phase
+             or first entry of the same formula
+             or None                          # a new chemistry
+
+constant UNDECIDED = "DECIDE"       # the loader refuses it, §11.1
+constant MELT_TEMPERATURE = 5000 K  # what melted quartz, LEDGER T-43
+constant MELT_MINIMUM_ATOMS = 200   # 243 melted, 72 did not, T-43
+constant SHELL_GAP = 0.15 angstrom  # distances closer than this are
+                                    # one neighbour shell
+
+function recipe_from_template(crystal, label, formula, phase, face,
+                              cif) -> (text, undecided, notices):
+    # DERIVED: right by rule.
+    species = elements of crystal, in reduced-formula order
+    reference = "share/activation/" + join(sorted(species), "_")
+                + ".toml"
+    if reference does not exist: notice("no gate reference for this
+                                         species set; one must be made")
+    for each element of species:
+        paw[element] = element if PAW_LIBRARY/element/POTCAR exists
+                       else UNDECIDED
+        notice(the other directories of that element, if any)
+
+    # ESTIMATE: a wrong value is refused by a named check.
+    cutoff = estimate_descriptor_cutoff(crystal)    # or UNDECIDED
+    weights = { species[i]: 1 / 2^i }
+    bulk_cells = repeats_to_clear(min width of crystal cell, cutoff)
+    melt_cells = max(bulk_cells,
+                     smallest n with n^3 * atoms(crystal)
+                         >= MELT_MINIMUM_ATOMS)
+    slab = build_slab(crystal, face, template thickness and vacuum,
+                      termination 0)
+    lateral_repeat = repeats_to_clear(
+        min in-plane width of slab, its two in-plane vectors first
+        reduced to the shortest pair spanning the same lattice, cutoff)
+    # anything that needed an UNDECIDED cutoff is UNDECIDED too
+
+    # DECIDE: no rule, no check.
+    domain = UNDECIDED
+
+    text = fill(read(CATALOG_ROOT/recipe.template.toml), the values,
+                header = material, date, the three kinds explained,
+                         the undecided lines listed)
+    return text, undecided lines, notices
+
+function estimate_descriptor_cutoff(crystal) -> length or UNDECIDED:
+    # §3.5: through the second neighbour shell, short of the third —
+    # counted on the sparsest species' own sublattice, which for a
+    # compound is the network former (Si in SiO2).
+    sparsest = the species with the fewest atoms in the formula
+    for each such species (ties):
+        distances = like-species neighbour distances, widening the
+                    search radius until three shells are seen
+        shells = distances grouped where a gap exceeds SHELL_GAP
+        if fewer than three shells: return UNDECIDED
+        candidate = (outer edge of shell 2 + inner edge of shell 3) / 2
+    return the largest candidate, rounded to 0.1 angstrom
+
+function repeats_to_clear(width, cutoff) -> integer:
+    # smallest n with n * width > 2 * cutoff: no atom sees its image
+    return floor(2 * cutoff / width) + 1
+
+function recipe_from_sibling(source, label, formula, phase, face,
+                             cif) -> (text, notices):
+    text = read(source.recipe)
+    in table [recipe]:   set name
+    in table [[phases]]: set name, cif
+    everywhere:          set the `phase = ` references, the `face`
+    prepend a note: cloned from source on this date; the comments
+                    below are the source's
+    if source.phase == phase: notice(the surface block is the
+                                     source face's)
+    else: notice(the melt and the cutoff are the source phase's)
+    return text, notices
 ```
 
 `stage_folder_names(label_a, label_b)` is the label-level form of §2's

@@ -213,7 +213,11 @@ def _write_recipe(project_directory: Path, prep_folder: str,
 
     The generation plan's ``project`` line is rewritten to THIS
     project's file — the only per-project line in a per-material file.
+    A recipe that still holds lines marked to decide (one `sabsim
+    catalog add` wrote from the template, DESIGN §10.11) is copied all
+    the same and SAID to be unfinished: the library build refuses it.
     """
+    from sabsim.bootstrap.recipe import undecided_lines
     target = project_directory / prep_folder / RECIPE_FILENAME
     relative = f"{prep_folder}/{RECIPE_FILENAME}"
     if target.exists():
@@ -229,6 +233,12 @@ def _write_recipe(project_directory: Path, prep_folder: str,
                         f"this project")
     target.write_text(text)
     report.written.append(relative)
+    undecided = undecided_lines(tomllib.loads(text))
+    if undecided:
+        report.notices.append(
+            f"{relative} still holds {len(undecided)} line(s) to "
+            f"decide ({'; '.join(undecided)}); the library build "
+            f"refuses the recipe until they are")
 
 
 def _require_template(path: Path) -> None:

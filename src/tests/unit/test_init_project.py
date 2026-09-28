@@ -108,7 +108,7 @@ def test_an_existing_project_file_naming_another_pair_is_refused(
 
 
 def test_a_label_not_in_the_catalog_is_refused_with_the_list(tmp_path):
-    with pytest.raises(InitError, match="linbo3.*it holds: si_diamond_100"):
+    with pytest.raises(InitError, match="linbo3.*it holds: .*si_diamond_100"):
         init_project(tmp_path / "pair", ("si_diamond_100", "linbo3_x_001"))
     assert not (tmp_path / "pair" / "sabsim.toml").exists()
 

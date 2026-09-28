@@ -27,7 +27,9 @@ sabsim/
   share/              Version-controlled run-time data: the MATERIALS
                       CATALOG (share/catalog/<label>/, one folder per
                       crystal phase and face: material.toml, its CIF,
-                      its recipe), the gate references keyed by species
+                      its recipe; and recipe.template.toml, which a
+                      new chemistry's recipe is written from), the
+                      gate references keyed by species
                       set (share/activation/), and the input-file
                       TEMPLATES a person copies and edits
                       (share/templates/: project file, deployment rc,
