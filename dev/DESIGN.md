@@ -4849,7 +4849,8 @@ it wrote as one of three kinds:
   `melt_temperature`, `lateral_repeat`.
 - **`"DECIDE"`** — a judgement no rule makes and no check would
   catch. `domain`; a `paw` entry whose element has no plainly named
-  directory in the library.
+  directory in the library; `termination_index` when the face has
+  more than one termination.
 
 The rule that sorts a line into the second or the third kind is
 whether a wrong value FAILS LOUDLY. A melt that did not melt is
@@ -4899,22 +4900,37 @@ show three shells, a pseudopotential library that is not reachable
 from where the command runs — the line is written `"DECIDE"` rather
 than estimated from less.
 
-**The terminations of the face are REPORTED, not chosen and not
-named (Paul, 2026-09-28).** A face can usually be cut on more than
-one atomic plane, and until §2.5's selection by surface energy is
-built the recipe and the project use the first the builder offers.
-That stand-in is easy to overlook, so `catalog add` cuts the trial
-slab every way the builder can and says, for each termination, which
-species the BONDING side ends on — the slab's top, the side that is
-bombarded and pressed (§2.6) — and which the far side ends on: for
-GaN (001), termination 0 ends on N and termination 1 on Ga, and for
-GaN (00-1) — the other side of the same cuts, §2.5 — the reverse.
-The lines go to the command's output and into the recipe's opening
-comment, on both routes. The termination is deliberately NOT part of
-the label or of `material.toml`: the library is matched to a project
-by face and species and not by termination (§4.8 part 2), the value
-is an ordinal in a list the builder may reorder, and it is to become
-a computed result rather than a choice.
+**The terminations of the face are REPORTED, and where there is
+more than one the choice is the person's (Paul, 2026-09-28).** A face
+can usually be cut on more than one atomic plane, and §2.5's
+selection by surface energy is not built yet. `catalog add` cuts the
+trial slab every way the builder can and says, for each termination,
+which species the BONDING side ends on — the slab's top, the side
+that is bombarded and pressed (§2.6) — and which the far side ends
+on: for GaN (001), termination 0 ends on N and termination 1 on Ga,
+and for GaN (00-1) — the other side of the same cuts, §2.5 — the
+reverse. The lines go to the command's output and into the recipe's
+opening comment, on both routes.
+
+The recipe's `termination_index` follows from the count. A face with
+ONE termination gets `0`, derived: there is nothing to choose. A face
+with more than one gets `"DECIDE"`, on both routes — a clone is of
+another face or another crystal, so its sibling's choice does not
+carry over. Taking the first of the list silently was the very
+"first candidate is sufficient" of the prior art that §2.5 rejects,
+and nothing downstream would catch a wrong one: the gate matches
+library to project by face and species, not by termination (§4.8
+part 2). So it is a judgement, written as one, until the
+surface-energy selection makes it a computed result.
+
+The termination is still NOT part of the label or of
+`material.toml`, for the reasons that have not changed: the value is
+an ordinal in a list the builder may reorder, and it is to become a
+result rather than a choice. And what the recipe's line decides is
+the clean surface the LIBRARY is built from. The wafer a project
+bombards is cut with the builder's first termination, because the
+project file carries no termination of its own yet; giving it one is
+a follow-on (`TODO.md`).
 
 **A sibling of the same formula is still cloned**, because there the
 chemistry lines are decisions already made and a difference between

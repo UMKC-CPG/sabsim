@@ -316,9 +316,13 @@ def describe_terminations(crystal, face) -> list[str]:
         _TEMPLATE_SLAB_VACUUM)
     face_text = "".join(f"m{-index}" if index < 0 else str(index)
                         for index in face)
-    lines = [f"the ({face_text}) face has {len(slabs)} termination(s); "
-             f"termination 0 is used, a stand-in until one is "
-             f"selected by surface energy (DESIGN §2.5):"]
+    if len(slabs) == 1:
+        lines = [f"the ({face_text}) face has 1 termination, so "
+                 f"`termination_index` is 0:"]
+    else:
+        lines = [f"the ({face_text}) face has {len(slabs)} "
+                 f"terminations; `termination_index` is yours to "
+                 f"decide among them (DESIGN §10.11):"]
     for index, slab in enumerate(slabs):
         # Height is measured along the slab's own normal, which is
         # the z axis only when the cut leaves the surface level.
@@ -330,6 +334,18 @@ def describe_terminations(crystal, face) -> list[str]:
             f"  termination {index}: bonding side ends on "
             f"{'+'.join(bonding)}, far side on {'+'.join(far)}")
     return lines
+
+
+def termination_choice(terminations: list[str]) -> int | None:
+    """0 when the face has one termination, None when it has more.
+
+    ``terminations`` is what :func:`describe_terminations` returned: a
+    heading and one line per termination. One termination leaves
+    nothing to choose. More than one is the person's to decide — no
+    check would catch a wrong one, and taking the first of the list
+    silently is what DESIGN §2.5 rejects.
+    """
+    return 0 if len(terminations) - 1 == 1 else None
 
 
 def choose_pseudopotentials(species: list[str],
@@ -561,6 +577,7 @@ def recipe_from_template(crystal, label: str, formula: str, phase: str,
         lateral_repeat = estimate_lateral_repeat(crystal, face, cutoff)
     weights = {symbol: 1.0 / 2 ** position
                for position, symbol in enumerate(species)}
+    terminations = describe_terminations(crystal, face)
 
     values = {
         "@RECIPE_NAME@": recipe_name(label),
@@ -577,6 +594,7 @@ def recipe_from_template(crystal, label: str, formula: str, phase: str,
             None if melt_cells is None else MELT_TEMPERATURE_KELVIN, "K"),
         "@FACE@": "[" + ", ".join(str(index) for index in face) + "]",
         "@LATERAL_REPEAT@": _integer(lateral_repeat),
+        "@TERMINATION@": _integer(termination_choice(terminations)),
         "@PAW@": _inline_table(paw, quote_values=True),
     }
     body = template
@@ -592,7 +610,6 @@ def recipe_from_template(crystal, label: str, formula: str, phase: str,
         raise RecipeWriteError(
             f"the filled recipe template is not readable TOML: "
             f"{broken}") from None
-    terminations = describe_terminations(crystal, face)
     notices.extend(_as_one_notice(terminations))
     text = body.replace("@HEADER@", _template_header(
         label, formula, phase, face, Path(cif_repository_path).name,
@@ -659,7 +676,10 @@ def recipe_from_sibling(crystal, source_text: str, source_label: str,
     The recipe's name, the phase's name and crystal, every family's
     phase reference and the surface face are rewritten; everything
     else, comments included, is the sibling's, and a note at the top
-    says so. Returns ``(text, notices)``.
+    says so. The surface's ``termination_index`` is set afresh — the
+    sibling chose for another face or another crystal — to 0 when the
+    new face has one termination and to the undecided marker when it
+    has more. Returns ``(text, undecided, notices)``.
     """
     new_phase_name = phase_name(formula, phase)
     terminations = describe_terminations(crystal, face)
@@ -675,6 +695,16 @@ def recipe_from_sibling(crystal, source_text: str, source_label: str,
         lambda match: f"{match.group(1)}"
                       f"[{', '.join(str(index) for index in face)}]",
         text)
+    text = set_in_table(
+        text, "[[collection1.surfaces]]", "termination_index",
+        _integer(termination_choice(terminations)))
+    undecided = undecided_lines(tomllib.loads(text))
+    if undecided:
+        still_open = (["Still to decide in this file, each marked "
+                       f'"{UNDECIDED_MARKER}":']
+                      + [f"  - {line}" for line in undecided] + [""])
+    else:
+        still_open = []
     note = "\n".join([
         _RULE,
         _comment_block([
@@ -689,6 +719,7 @@ def recipe_from_sibling(crystal, source_text: str, source_label: str,
             "that",
             "crystal or that face, it is not speaking of this one.",
             "",
+            *still_open,
             *_capitalised(terminations),
         ]),
         _RULE,
@@ -696,9 +727,9 @@ def recipe_from_sibling(crystal, source_text: str, source_label: str,
     same_phase = (phase_name(formula, source_phase) == new_phase_name)
     if same_phase:
         notices = [
-            f"the surface block (termination_index, slab_thickness, "
-            f"lateral_repeat) is {source_label}'s face's; look at it "
-            f"for the new face"]
+            f"the surface block's slab_thickness and lateral_repeat "
+            f"are {source_label}'s face's; look at them for the new "
+            f"face"]
     else:
         notices = [
             f"the melt settings and descriptor cutoff are "
@@ -706,4 +737,9 @@ def recipe_from_sibling(crystal, source_text: str, source_label: str,
             f"T-43) and `verify_melt` will refuse one that does not "
             f"melt"]
     notices.extend(_as_one_notice(terminations))
-    return note + "\n" + text, notices
+    if undecided:
+        notices.append(
+            f"{len(undecided)} line(s) are yours to decide, marked "
+            f'"{UNDECIDED_MARKER}": ' + "; ".join(undecided)
+            + ". The loader refuses the recipe until they are")
+    return note + "\n" + text, undecided, notices

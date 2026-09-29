@@ -35,6 +35,7 @@ from sabsim.bootstrap.recipe import (
 from sabsim.catalog_recipe import (
     TEMPLATE_FILENAME,
     describe_terminations,
+    termination_choice,
     surface_plane_species,
     estimate_descriptor_cutoff,
     in_plane_widths,
@@ -127,13 +128,27 @@ def test_add_makes_a_sibling_entry_from_a_crystal_file(catalog_copy):
     assert 'name = "sio2-tridymite"' in recipe
     assert "sio2-quartz-lean-v0" not in recipe
     assert recipe.startswith("# ====") and "cloned from    " in recipe
-    assert load_recipe(entry.recipe).phases[0].name == "sio2-tridymite"
+    # This face has more than one termination, so the sibling's
+    # choice is not carried over: the line is the person's to decide,
+    # and the loader holds the recipe until it is.
+    termination = "[collection1] -> surfaces[0] -> termination_index"
+    assert report.undecided == [termination]
+    assert "Still to decide in this file" in recipe
+    with pytest.raises(SpecificationError, match="termination_index"):
+        load_recipe(entry.recipe)
+    entry.recipe.write_text(recipe.replace(
+        f'termination_index = "{UNDECIDED_MARKER}"',
+        "termination_index = 1"))
+    decided = load_recipe(entry.recipe)
+    assert decided.phases[0].name == "sio2-tridymite"
+    assert decided.starting_collection.surfaces[0].termination_index == 1
     assert "share/catalog/sio2_tridymite_100/sio2_alpha_quartz.cif" in recipe
     assert "face              = [1, 0, 0]" in recipe
     assert 'phase             = "sio2-tridymite"' in recipe
     assert 'species_union = ["Si", "O"]' in recipe    # chemistry kept
-    assert len(report.notices) == 2 and "verify_melt" in report.notices[0]
-    assert "termination 0 is used" in report.notices[1]
+    assert len(report.notices) == 3 and "verify_melt" in report.notices[0]
+    assert "yours to decide among them" in report.notices[1]
+    assert termination in report.notices[2]
     assert "# The (100) face has" in recipe
     # A second FACE of the same phase is cloned from that phase, and
     # what is flagged is the surface block, not the melt.
@@ -141,6 +156,7 @@ def test_add_makes_a_sibling_entry_from_a_crystal_file(catalog_copy):
                             root=catalog_copy)
     assert second_face.cloned_from == "sio2_tridymite_100"
     assert "lateral_repeat" in second_face.notices[0]
+    assert second_face.undecided == [termination]
     catalog_labels = [e.label for e in read_catalog(catalog_copy)]
     assert "sio2_tridymite_001" in catalog_labels
     shutil.rmtree(catalog_copy / "sio2_tridymite_001")
@@ -236,6 +252,8 @@ def test_a_new_chemistry_is_written_from_the_template(
     assert raw["collection1"]["bulk"]["cells_per_axis"] == 2
     assert raw["collection1"]["surfaces"][0]["lateral_repeat"] == 3
     assert raw["collection1"]["surfaces"][0]["face"] == [1, 0, 0]
+    # Si (100) has one termination: nothing to choose, so 0.
+    assert raw["collection1"]["surfaces"][0]["termination_index"] == 0
     melt = raw["collection1"]["melt_quench"][0]
     assert melt["cells_per_axis"] == 3            # 216 atoms >= 200
     assert melt["melt_temperature"]["value"] == 5000.0
@@ -289,13 +307,16 @@ def test_the_terminations_of_a_face_are_described():
     silicon = load_crystal(
         CATALOG_ROOT / "si_diamond_100" / "si_diamond.cif")
     lines = describe_terminations(silicon, (1, 0, 0))
-    assert lines[0].startswith("the (100) face has 1 termination(s)")
+    assert lines[0].startswith("the (100) face has 1 termination, so")
+    assert termination_choice(lines) == 0
     assert lines[1:] == [
         "  termination 0: bonding side ends on Si, far side on Si"]
     quartz = load_crystal(
         CATALOG_ROOT / "sio2_quartz_001" / "sio2_alpha_quartz.cif")
     lines = describe_terminations(quartz, (0, 0, 1))
     assert len(lines) == 3
+    assert "yours to decide" in lines[0]
+    assert termination_choice(lines) is None
     assert "bonding side ends on Si, far side on O" in lines[1]
     assert "bonding side ends on O, far side on O" in lines[2]
 

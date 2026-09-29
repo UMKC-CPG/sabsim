@@ -132,13 +132,16 @@ seed              = 11
 [[collection1.surfaces]]
 # Family 4 — the clean, unbombarded free surface: same face the studies
 # bond, no damage. Cut by the §7 slab builder at the derived lattice.
-# `termination_index` 0 is the FIRST termination the builder offers, a
-# stand-in until §2.5 selects one by surface energy; on a polar face
-# the terminations differ in species, so look at which one this is.
 phase             = "@PHASE_NAME@"
-# DERIVED: the bonding face this catalog entry is for.
+# DERIVED: the bonding face this catalog entry is for. Its sign
+# counts: the face names the slab's top, the side that bonds (§2.5).
 face              = @FACE@
-termination_index = 0
+# Which atomic plane the cut ends on, as a position in the builder's
+# list of terminations; this file's opening comment says what each
+# one ends on. DERIVED as 0 when the face has a single termination.
+# DECIDE when it has more: nothing checks the choice, and it stands
+# in for §2.5's selection by surface energy, which is not built yet.
+termination_index = @TERMINATION@
 slab_thickness    = { value = 10.0, unit = "angstrom" }
 vacuum            = { value = 12.0, unit = "angstrom" }
 # In-plane tiling of the slab's own surface cell. A 1x1 column is often

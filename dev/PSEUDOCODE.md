@@ -5175,6 +5175,7 @@ function recipe_from_template(crystal, label, formula, phase, face,
 
     # DECIDE: no rule, no check.
     domain = UNDECIDED
+    termination_index = termination_choice(crystal, face)
 
     text = fill(read(CATALOG_ROOT/recipe.template.toml), the values,
                 header = material, date, the three kinds explained,
@@ -5194,13 +5195,17 @@ function estimate_descriptor_cutoff(crystal) -> length or UNDECIDED:
         candidate = (outer edge of shell 2 + inner edge of shell 3) / 2
     return the largest candidate, rounded to 0.1 angstrom
 
+function termination_choice(crystal, face) -> 0 or UNDECIDED:
+    # One termination: nothing to choose. More: the person's to
+    # decide, until §2.5 selects by surface energy (DESIGN §10.11).
+    return 0 if the face has exactly one termination else UNDECIDED
+
 constant SURFACE_PLANE_DEPTH = 0.3 angstrom   # atoms within this of
                                               # the outermost atom
                                               # are the same plane
 
 function describe_terminations(crystal, face) -> list of lines:
-    # Reported, never chosen (DESIGN §10.11): termination 0 is a
-    # stand-in until §2.5 selects by surface energy.
+    # Reported, never chosen FOR the person (DESIGN §10.11).
     slabs = every termination the slab builder offers for the face,
             at the template's thickness and vacuum, each the right
             way up (§7.4 face_sense)
@@ -5220,6 +5225,9 @@ function recipe_from_sibling(source, label, formula, phase, face,
     in table [recipe]:   set name
     in table [[phases]]: set name, cif
     everywhere:          set the `phase = ` references, the `face`
+    in table [[collection1.surfaces]]:
+        set termination_index = termination_choice(crystal, face)
+        # the sibling's choice was for another face or crystal
     prepend a note: cloned from source on this date; the comments
                     below are the source's
     if source.phase == phase: notice(the surface block is the

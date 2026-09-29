@@ -312,10 +312,10 @@ def add_entry(cif_source: str, phase: str, face,
                 repository_root=REPOSITORY_ROOT,
                 paw_library=paw_library)
         else:
-            undecided = []
-            recipe_text, notices = recipe_from_sibling(
-                crystal, source.recipe.read_text(), source.label, source.phase,
-                expected, formula, phase, face, cif_repository_path)
+            recipe_text, undecided, notices = recipe_from_sibling(
+                crystal, source.recipe.read_text(), source.label,
+                source.phase, expected, formula, phase, face,
+                cif_repository_path)
     except RecipeWriteError as failure:
         raise CatalogError(str(failure)) from None
 
