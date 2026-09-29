@@ -1771,7 +1771,8 @@ T-40 demo re-cast (252 Si atoms per half, 50 eV Ar, 4 Å demanded,
 DPA-3.1-3M), with the T-38 silicon library copied into BOTH prep
 folders. Docs 347e9eb, code e8d2d39 (427 tests), project 620f8ad.
 The harness is the project itself: the four scripts `sabsim prepare`
-wrote in `jobs/si_si/` (tracked) and its `SUBMISSION_GUIDE.md`.)*
+wrote in `jobs/si_si/` (tracked then; `jobs/` was untracked whole on
+2026-09-28, the files left on disk) and its `SUBMISSION_GUIDE.md`.)*
 
 - **Login-node check before submitting:** `sabsim prepare` in the
   project folder wrote `prep_surf1_si.slurm`, `prep_surf2_si.slurm`,
