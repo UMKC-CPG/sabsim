@@ -79,18 +79,26 @@ material_domain = "silicon-and-silica"
 #
 # `sabsim init <folder> <label_a> <label_b>` fills both tables from the
 # MATERIALS CATALOG (`share/catalog/<label>/material.toml`, DESIGN
-# §10.11): the label becomes `material`, and `cif`, `structure` and
-# `face` come from the entry. The values below are the template's
+# §10.11): the label becomes `material`, and `cif`, `structure`,
+# `face` and `termination_index` come from the entry. The values
+# below are the template's
 # worked example; a project written by `init` names its catalog labels
 # (`si_diamond_100`, `sio2_quartz_001`) here instead.
 # ---------------------------------------------------------------------
 [wafer_a]
 # `structure` is a human label (the CIF is authoritative); `face` is
-# the Miller index of the bonding surface.
+# the Miller index of the bonding surface, and its SIGN counts: the
+# face names the side of the slab that is bombarded and pressed, so
+# [0, 0, 1] and [0, 0, -1] are the two sides of the same cut (§2.5).
+# `termination_index` says which atomic plane the cut ends on, as a
+# position in the builder's list for that face; `sabsim catalog add`
+# printed what each one ends on, and the entry's recipe repeats it in
+# its opening comment. A face with one termination has only 0.
 material  = "Si"
 cif       = "share/catalog/si_diamond_100/si_diamond.cif"
 structure = "diamond"
 face      = [1, 0, 0]
+termination_index = 0
 
 [wafer_b]
 material  = "SiO2"
@@ -105,6 +113,7 @@ material  = "SiO2"
 cif       = "share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif"
 structure = "alpha-quartz"
 face      = [0, 0, 1]
+termination_index = 0
 
 # ---------------------------------------------------------------------
 # POTENTIAL block (§1.6, §4.7): WHICH force models the project runs

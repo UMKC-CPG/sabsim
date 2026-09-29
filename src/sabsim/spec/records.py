@@ -62,6 +62,11 @@ class MaterialKnobs:
     cif_source: str                  # path to the authoritative CIF
     crystal_structure: str           # human label, e.g. "diamond"
     surface_face: tuple[int, int, int]   # Miller indices of the bond face
+    # Which atomic plane the cut ends on, as a position in the slab
+    # builder's list of terminations for the face (DESIGN.md §2.5). A
+    # stand-in for the selection by surface energy, and written down
+    # because on a polar face the choices end on different species.
+    termination_index: int
     # Where this wafer's PREPARATORY work lives: the PREP FOLDER of
     # the project, ``<project>/prep_surf1_<label>/`` for wafer A and
     # ``prep_surf2_<label>/`` for wafer B, the label lower-cased

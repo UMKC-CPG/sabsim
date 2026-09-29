@@ -110,6 +110,38 @@ def _crystal_problems(pair: PairSpecification) -> list:
     return problems
 
 
+def _termination_problems(pair: PairSpecification) -> list:
+    """Report a wafer whose face has no such termination (§2.5).
+
+    The wafer is cut on ``termination_index``, a position in the slab
+    builder's list for its face. An index past the end of that list
+    would otherwise surface inside the build, on a compute node. A
+    crystal that cannot be read is :func:`_crystal_problems`' to
+    report, so it is passed over here.
+    """
+    from sabsim.structure.slab_builder import (
+        load_crystal,
+        slab_terminations,
+    )
+
+    problems = []
+    for role, wafer in (("wafer_a", pair.material.wafer_a),
+                        ("wafer_b", pair.material.wafer_b)):
+        try:
+            crystal = load_crystal(resolve_crystal_file(wafer.cif_source))
+        except Exception:
+            continue
+        available = len(slab_terminations(crystal, wafer.surface_face))
+        if wafer.termination_index >= available:
+            face = "".join(str(index) for index in wafer.surface_face)
+            problems.append(
+                f"[{role}] -> termination_index: "
+                f"{wafer.termination_index} names no termination; the "
+                f"({face}) face of {wafer.identity} has {available}, "
+                f"numbered from 0")
+    return problems
+
+
 def _species_union_or_none(pair: PairSpecification):
     """The elements both wafers contribute, or None if unreadable.
 
@@ -243,6 +275,7 @@ def check_project_references(
     """
     pair = project.pair
     problems = list(_crystal_problems(pair))
+    problems.extend(_termination_problems(pair))
     unknown = [role for role in libraries_needed
                if role not in WAFER_ROLES]
     if unknown:

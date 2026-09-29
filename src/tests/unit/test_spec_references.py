@@ -241,3 +241,14 @@ def test_missing_model_file_is_rejected_on_the_login_node():
             _with_pair(project, replace(project.pair, potential=absent)),
             libraries_needed=())
     assert "/no/such/model.pb" in str(caught.value)
+
+
+def test_a_termination_the_face_does_not_have_is_refused():
+    """Si (100) has one termination, so index 1 names nothing — said
+    on the login node, with the count, not inside the build."""
+    broken = _with_wafer_a(_template_project(), termination_index=1)
+    with pytest.raises(SpecificationError) as caught:
+        check_project_references(broken, libraries_needed=())
+    message = str(caught.value)
+    assert "[wafer_a] -> termination_index" in message
+    assert "has 1, numbered from 0" in message

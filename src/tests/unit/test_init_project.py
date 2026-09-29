@@ -59,6 +59,31 @@ def test_the_wafer_tables_come_from_the_catalog_entries(tmp_path):
     assert wafer_b["cif"] == (
         "share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif")
     assert wafer_b["face"] == [0, 0, 1]
+    # The termination is the one each entry's recipe names.
+    assert wafer_a["termination_index"] == 0
+    assert wafer_b["termination_index"] == 0
+
+
+def test_an_undecided_termination_is_copied_not_settled(tmp_path):
+    """A recipe whose termination is still to decide hands the marker
+    on to the wafer table, where the project loader refuses it."""
+    import shutil
+
+    from sabsim.catalog import CATALOG_ROOT, read_entry
+    from sabsim.deploy.init_project import recipe_termination
+    folder = tmp_path / "sio2_quartz_001"
+    shutil.copytree(CATALOG_ROOT / "sio2_quartz_001", folder)
+    recipe = folder / "recipe.toml"
+    recipe.write_text(recipe.read_text().replace(
+        "termination_index = 0", 'termination_index = "DECIDE"'))
+    entry = read_entry(folder)
+    assert recipe_termination(entry) == '"DECIDE"'
+    # A recipe with no clean surface of the entry's face has nothing
+    # to copy, and says so.
+    recipe.write_text(recipe.read_text().replace(
+        "face              = [0, 0, 1]", "face              = [1, 0, 0]"))
+    with pytest.raises(InitError, match="declares no clean"):
+        recipe_termination(read_entry(folder))
 
 
 def test_each_surface_gets_its_own_entrys_recipe(tmp_path):

@@ -45,13 +45,11 @@
 
 <!-- Tasks related to layout, modules, build. -->
 
-- [ ] **The project file carries no termination** (2026-09-28;
-      DESIGN §2.5/§10.11). A recipe's `termination_index` decides the
-      clean surface the LIBRARY is built from, but the wafer a project
-      bombards is always cut with the builder's first termination
-      (`build_standalone_half` default). For a polar face (GaN) the
-      two differ in species. Give the wafer table a termination, or
-      read the prep folder recipe's, until §2.5 selects by energy.
+- [x] **The project file carries the termination** (2026-09-28;
+      DESIGN §2.5/§10.11). `termination_index` is a required key of
+      each wafer table, the wafer is cut on it, `init` copies it from
+      the entry's recipe, the reference check refuses one the face
+      does not have, and a library cut differently is warned about.
 - [x] **Materials catalog** (Paul, 2026-09-23; ARCHITECTURE §1,
       DESIGN §10.9/§10.11, PSEUDOCODE §14.7/§14.9). `share/catalog/
       <formula>_<phase>_<face>/` = material.toml + CIF + recipe.toml;

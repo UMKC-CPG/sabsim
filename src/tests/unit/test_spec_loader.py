@@ -312,3 +312,38 @@ def test_contact_test_settings_are_project_knobs_with_units():
     assert numerical.contact_gap_window == 3
     assert numerical.contact_stress_floor.value == 500.0
     assert numerical.contact_stress_floor.unit == "bar"
+
+
+# ---------------------------------------------------------------------
+# The wafer's termination (DESIGN.md §2.5): a required key, a whole
+# number, and never the undecided marker.
+# ---------------------------------------------------------------------
+
+def test_the_termination_lands_on_each_wafer(tmp_path):
+    text = _template_text().replace(
+        "termination_index = 0", "termination_index = 1", 1)
+    pair = load_and_validate_project(_write_spec(tmp_path, text)).pair
+    assert pair.material.wafer_a.termination_index == 1
+    assert pair.material.wafer_b.termination_index == 0
+
+
+def test_a_project_without_a_termination_is_refused(tmp_path):
+    """No hidden default: the first of the builder's list was one."""
+    text = _drop_lines_containing(_template_text(), "termination_index =")
+    with pytest.raises(SpecificationError,
+                       match="missing required key 'termination_index'"):
+        load_and_validate_project(_write_spec(tmp_path, text))
+
+
+@pytest.mark.parametrize("written, complaint", [
+    ('"DECIDE"', "the choice is yours"),
+    ("-1", "whole number, 0 or more"),
+    ("1.5", "whole number, 0 or more"),
+    ("true", "whole number, 0 or more"),
+])
+def test_a_termination_that_is_not_a_choice_is_refused(
+        tmp_path, written, complaint):
+    text = _template_text().replace(
+        "termination_index = 0", f"termination_index = {written}", 1)
+    with pytest.raises(SpecificationError, match=complaint):
+        load_and_validate_project(_write_spec(tmp_path, text))

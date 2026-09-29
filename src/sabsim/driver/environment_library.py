@@ -561,23 +561,56 @@ def _wafer_species(wafer) -> frozenset | None:
 def _surface_cataloged(library: EnvironmentLibrary, wafer) -> bool:
     """Does the library catalog a clean surface of this wafer's face?
 
-    A project wafer names its face but no termination and no recipe phase
+    A project wafer names no recipe phase
     (:class:`~sabsim.spec.records.MaterialKnobs`), so the match is on
     the face AND, where the wafer's crystal can be read, the species set
     of the cataloged phase — enough to tell a silicon (100) face from a
-    silica one. Any termination of that face counts.
+    silica one. Any termination of that face counts (DESIGN §4.8 part
+    2: every surface is bombarded to an amorphous skin before the gate
+    sees it); a different one is only warned about, by
+    :func:`_termination_warning`.
     """
+    return bool(_cataloged_surfaces(library, wafer))
+
+
+def _cataloged_surfaces(library: EnvironmentLibrary, wafer) -> list:
+    """The library's clean surfaces of this wafer's face and species."""
     face = "".join(str(component) for component in wafer.surface_face)
     species = _wafer_species(wafer)
+    matching = []
     for entry in library.provenance.get("surfaces", []):
         if str(entry.get("face")) != face:
             continue
         cataloged = entry.get("species")
-        if species is None or cataloged is None:
-            return True
-        if frozenset(cataloged) == species:
-            return True
-    return False
+        if (species is None or cataloged is None
+                or frozenset(cataloged) == species):
+            matching.append(entry)
+    return matching
+
+
+def _termination_warning(library: EnvironmentLibrary, wafer,
+                         context: str) -> str | None:
+    """A warning when the library's surface was cut differently.
+
+    The wafer's termination is in the project file and the library's
+    in the recipe it was built from, so the two can drift. The gate
+    does not match on termination, so this is never a refusal; but on
+    a polar face the two cuts end on different species, and a person
+    who chose one deliberately should hear that the other was used.
+    None when some cataloged surface of the face has the wafer's
+    termination, or when the library records none.
+    """
+    recorded = [entry.get("termination")
+                for entry in _cataloged_surfaces(library, wafer)
+                if entry.get("termination") is not None]
+    if not recorded or wafer.termination_index in recorded:
+        return None
+    listed = ", ".join(str(index) for index in sorted(set(recorded)))
+    return (f"{context}: its clean surface was cut on termination "
+            f"{listed}, the wafer on {wafer.termination_index}. The "
+            f"gate does not match on termination (DESIGN §4.8), so the "
+            f"run goes on; make the recipe's and the project's "
+            f"termination_index agree if that was not meant")
 
 
 def library_manifest_path(wafer) -> str:
@@ -628,6 +661,9 @@ def check_library_against_project(
             f"the face to the recipe's surfaces and rebuild (DESIGN §4.8)")
 
     warnings = []
+    different_cut = _termination_warning(library, wafer, context)
+    if different_cut is not None:
+        warnings.append(different_cut)
     judged_at = to_metal(pair.protocol.press_temperature, "temperature")
     warm_at = float(library.warm_run_temperature)
     if judged_at > warm_at:

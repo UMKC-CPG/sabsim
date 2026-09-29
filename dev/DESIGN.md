@@ -142,8 +142,10 @@ on it.
 
 - **Material** — per wafer: the crystal, supplied as a **structure file
   (CIF)** that fixes its symmetry, its atomic basis, and its
-  connectivity; one surface face given by its Miller indices; and the
-  material identity. The CIF names WHICH crystal, not its scale — the
+  connectivity; one surface face given by its Miller indices, sign
+  included, and the TERMINATION it is cut on (`termination_index`,
+  §2.5); and the material identity. The CIF names WHICH crystal, not
+  its scale — the
   lattice constant is still derived by relaxation (§1.3, §2.2), never
   read off the file — so one uniform input serves every material with no
   per-material code. What we are studying. The material identity is a
@@ -833,6 +835,25 @@ The three shipped faces — Si (100), quartz (001), GaN (001) — come
 out of the tool the right way up, so nothing built before this rule
 changes. Which species a side ends on is still the termination's to
 say (below); what this rule fixes is WHICH SIDE the face names.
+
+**Until that selection is built, the termination is written in the
+project file (Paul, 2026-09-28).** Each wafer table carries a
+`termination_index`, the position of the wanted cut in the builder's
+list for that face, and the wafer is cut on it. It is a REQUIRED key
+like every other (§1.4): for a year the wafer was cut on the first
+of the list because nothing said otherwise, which is exactly the
+hidden default this document forbids, and on a polar face the first
+and the second end on different species. `sabsim init` copies the
+value from the catalog entry's recipe, so the wafer and the clean
+surface its environment library is built from start out the same
+cut; where the recipe's value is still `"DECIDE"` (§10.11) `init`
+copies that, and the project loader refuses it by name, as the
+recipe loader does. An index the face does not have is refused on
+the login node by the reference check, with the count, not an hour
+into a job. The gate still matches library to wafer by face and
+species and not by termination (§4.8 part 2); a library whose clean
+surface was cut differently from the wafer is WARNED about, since
+the two values now sit in two files and can drift.
 
 **Termination is chosen by surface energy.** Prior art takes
 `sym_slabs[0]` with the comment "first candidate is sufficient" — the
@@ -4693,7 +4714,8 @@ sabsim init si_sio2 si_diamond_100 sio2_quartz_001
 The two labels are MATERIALS CATALOG entries (§10.11). `init` writes
 the template project file and sets its two wafer tables from the two
 entries — the label as the wafer's `material`, the entry's crystal
-file, structure name and bonding face — so a person never types a
+file, structure name and bonding face, and the termination its
+recipe's surface of that face names (§2.5) — so a person never types a
 crystal path for a material the catalog holds; the labels also name
 the prep folders. A label that is not in the catalog is refused, with
 the catalog's entries printed, never written with a guessed crystal.
@@ -4926,11 +4948,10 @@ surface-energy selection makes it a computed result.
 The termination is still NOT part of the label or of
 `material.toml`, for the reasons that have not changed: the value is
 an ordinal in a list the builder may reorder, and it is to become a
-result rather than a choice. And what the recipe's line decides is
-the clean surface the LIBRARY is built from. The wafer a project
-bombards is cut with the builder's first termination, because the
-project file carries no termination of its own yet; giving it one is
-a follow-on (`TODO.md`).
+result rather than a choice. What the recipe's line decides is the
+clean surface the LIBRARY is built from; the wafer a project
+bombards is cut on the project file's own `termination_index`
+(§2.5), which `init` copies from this line.
 
 **A sibling of the same formula is still cloned**, because there the
 chemistry lines are decisions already made and a difference between

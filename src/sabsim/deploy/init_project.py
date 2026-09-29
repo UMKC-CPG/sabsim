@@ -65,20 +65,51 @@ class InitError(RuntimeError):
     """``init`` could not make a usable folder; the message says why."""
 
 
-# The four lines of a wafer table `init` sets from a catalog entry.
+# The five lines of a wafer table `init` sets from a catalog entry.
 # Matched at line start within the table, so a commented example in
 # the template's prose never counts; the WHOLE line is replaced, so a
 # trailing remark about the template's own value cannot outlive it.
 _WAFER_LINE = {
     key: re.compile(rf"^({key}\s*=\s*)[^\n]*$", re.MULTILINE)
-    for key in ("material", "cif", "structure", "face")
+    for key in ("material", "cif", "structure", "face",
+                "termination_index")
 }
 _TABLE_HEADER = re.compile(r"^\[[^\]]+\]\s*$", re.MULTILINE)
 
 
+def recipe_termination(entry: MaterialEntry) -> str:
+    """The termination the entry's recipe names, as a TOML literal.
+
+    The wafer is cut on the same termination as the clean surface its
+    environment library is built from (DESIGN §2.5), so the value is
+    read from the recipe's surface of the entry's own face. One still
+    marked to be decided is copied as it is — the project loader
+    refuses it by name — rather than settled here by guess.
+    """
+    try:
+        recipe = tomllib.loads(entry.recipe.read_text())
+    except tomllib.TOMLDecodeError as broken:
+        raise InitError(f"catalog recipe {entry.recipe} is not "
+                        f"readable TOML ({broken})") from None
+    surfaces = recipe.get("collection1", {}).get("surfaces", [])
+    for surface in surfaces:
+        if tuple(surface.get("face", ())) != entry.face:
+            continue
+        termination = surface.get("termination_index")
+        if isinstance(termination, str):
+            return f'"{termination}"'
+        if isinstance(termination, int):
+            return str(termination)
+    face = "".join(str(index) for index in entry.face)
+    raise InitError(
+        f"catalog recipe {entry.recipe} declares no clean ({face}) "
+        f"surface with a termination_index; the wafer's termination "
+        f"is copied from it (DESIGN §2.5)")
+
+
 def set_wafer_table(text: str, table_name: str,
                     entry: MaterialEntry) -> str:
-    """Rewrite one ``[wafer_x]`` table's four values in the template text.
+    """Rewrite one ``[wafer_x]`` table's five values in the template text.
 
     Works on the text, not a parsed tree, so every comment the template
     carries survives — the comments are the documentation a student
@@ -98,6 +129,7 @@ def set_wafer_table(text: str, table_name: str,
         # The project file calls the phase word `structure`.
         "structure": f'"{entry.phase}"',
         "face": "[" + ", ".join(str(index) for index in entry.face) + "]",
+        "termination_index": recipe_termination(entry),
     }
     for key, pattern in _WAFER_LINE.items():
         block, count = pattern.subn(
@@ -166,6 +198,14 @@ def init_project(project_directory: str | os.PathLike,
         return set_wafer_table(text, "wafer_b", entries[1])
     _copy_if_missing(TEMPLATE_ROOT / "project_spec.toml", project_file,
                      report, edit=edit)
+    for table_name, entry in (("wafer_a", entries[0]),
+                              ("wafer_b", entries[1])):
+        if recipe_termination(entry).startswith('"'):
+            report.notices.append(
+                f"{PROJECT_FILENAME} [{table_name}] termination_index "
+                f"is still to decide: the face of {entry.label} has "
+                f"more than one termination, and its recipe's opening "
+                f"comment says what each ends on")
     _copy_if_missing(TEMPLATE_ROOT / "deployment_rc.toml",
                      project_directory / DEPLOYMENT_FILENAME, report)
 

@@ -38,12 +38,14 @@ material  = "Si"
 cif       = "{_REPO}/share/catalog/si_diamond_100/si_diamond.cif"
 structure = "diamond"
 face      = [1, 0, 0]
+termination_index = 0
 
 [wafer_b]
 material  = "SiO2"
 cif       = "{_REPO}/share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif"
 structure = "alpha-quartz"
 face      = [0, 0, 1]
+termination_index = 0
 
 [potential]
 universal_model    = "DPA-3.1-3M"

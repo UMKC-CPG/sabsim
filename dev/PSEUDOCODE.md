@@ -328,7 +328,12 @@ record MaterialKnobs:             # one per wafer; two wafers per pair
                                    # ANY material (DESIGN §1.2)
     crystal_structure: string      # a human LABEL (e.g. "diamond"); the
                                    # CIF is authoritative, never this
-    surface_face:      Miller indices
+    surface_face:      Miller indices   # sign included: the face
+                                   # names the slab's TOP (§7.4)
+    termination_index: integer     # which cut of that face, by its
+                                   # place in the builder's list;
+                                   # REQUIRED, and "DECIDE" is refused
+                                   # (DESIGN §2.5)
     identity:          string      # the material itself; lower-cased
                                    # it is ALSO the suffix of this
                                    # wafer's preparation folder in the
@@ -1166,6 +1171,8 @@ function build_slab(material, shared, applied_strain, potential,
     # Where a face admits several terminations, ENUMERATE and select by
     # computed surface energy (DESIGN §2.5) — which the potential-quality
     # gate needs anyway. NOT "first candidate in list order" (prior art).
+    # UNTIL THAT IS BUILT the cut is the one the project file names,
+    # material.termination_index, never a silent first.
     slab = select_termination_by_surface_energy(slab, potential)
 
     # Polar-slab symmetrizer: a HOOK and a GATE (DESIGN §2.5). v1 faces
@@ -5056,8 +5063,10 @@ function init_project(project_folder, label_a, label_b) -> InitReport:
     copy_if_missing(TEMPLATE_ROOT/project_spec.toml,
                     project_folder/sabsim.toml,
                     edit=set_wafer_tables(entry_a, entry_b))
-                    # material = label, cif, structure, face; the
-                    # template's comments kept
+                    # material = label, cif, structure, face, and
+                    # termination_index = that of the entry recipe's
+                    # surface of this face ("DECIDE" copied as it
+                    # is); the template's comments kept
     copy_if_missing(TEMPLATE_ROOT/deployment_rc.toml,
                     project_folder/deployment.toml)
 

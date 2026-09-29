@@ -130,6 +130,34 @@ def _require_face(table: dict, key: str, context: str) -> tuple:
     return tuple(int(component) for component in raw)
 
 
+# What `sabsim catalog add` writes on a line it will not guess, and
+# `sabsim init` copies into a wafer table when the recipe's termination
+# is still undecided (DESIGN.md §10.11). Spelled here rather than
+# imported from the recipe loader, which itself imports this module.
+_UNDECIDED_MARKER = "DECIDE"
+
+
+def _require_termination(table: dict, key: str, context: str) -> int:
+    """Pull a wafer's termination as a whole number, zero or more.
+
+    Which cut of the face the wafer is built on (DESIGN.md §2.5). A
+    value still marked to be decided is refused by name, with where to
+    look: the entry's recipe lists what each termination ends on.
+    """
+    raw = _require(table, key, context)
+    where = f"{context} -> {key}"
+    if raw == _UNDECIDED_MARKER:
+        raise SpecificationError(
+            f"{where}: still marked \"{_UNDECIDED_MARKER}\". The face "
+            f"has more than one termination and the choice is yours; "
+            f"the opening comment of this wafer's recipe.toml says "
+            f"what each one ends on (DESIGN §2.5, §10.11)")
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raise SpecificationError(
+            f"{where}: expected a whole number, 0 or more, got {raw!r}")
+    return raw
+
+
 # ---------------------------------------------------------------------
 # Deserialize: map the on-disk TOML layout onto the §2 records. This is
 # where the concrete file shape (short grouped keys) meets the schema
@@ -167,6 +195,8 @@ def _material_from_wafer(table: dict, context: str,
         cif_source=str(_require(table, "cif", context)),
         crystal_structure=str(_require(table, "structure", context)),
         surface_face=_require_face(table, "face", context),
+        termination_index=_require_termination(
+            table, "termination_index", context),
         preparation_directory=str(project_directory / prep_folder),
     )
 

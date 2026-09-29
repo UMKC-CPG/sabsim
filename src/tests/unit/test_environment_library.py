@@ -402,3 +402,19 @@ def test_generate_refuses_a_library_that_cannot_tell_glass_from_crystal(
         build_environment_library(
             _collection(), _FakeRecipe(), tmp_path,
             describe=_describe_by_tag(disorder_of_melt=0.0))
+
+
+def test_a_library_cut_on_another_termination_is_warned_about():
+    """The gate does not match on termination, so the run goes on; but
+    the wafer's cut and the library's now sit in two files, and a
+    difference between them is said."""
+    pair = _pair_at(300.0)
+    wafer = replace(pair.material.wafer_a, termination_index=1)
+    warnings = check_library_against_project(
+        hand_built_library(), pair, wafer)
+    assert len(warnings) == 1
+    assert "cut on termination 0, the wafer on 1" in warnings[0]
+    # A library that records no termination gives nothing to compare.
+    unrecorded = hand_built_library(surfaces=[
+        {"phase": "silicon-diamond", "face": "100", "species": ["Si"]}])
+    assert check_library_against_project(unrecorded, pair, wafer) == []

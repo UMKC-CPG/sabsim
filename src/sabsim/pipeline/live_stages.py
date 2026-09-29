@@ -412,6 +412,7 @@ def _standalone_half(
         min_slab_thickness=_effective_slab_thickness(pair),
         min_vacuum=to_metal(pair.numerical.slab_vacuum, "distance"),
         lateral_repeat=lateral_repeat,
+        termination_index=wafer.termination_index,
         matched_cell=matched_cell, shared_cell=shared_cell)
 
 

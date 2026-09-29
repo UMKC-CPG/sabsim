@@ -651,3 +651,24 @@ def test_derive_lattices_live_universal_runs_out_of_process(
         line.startswith("pair_style deepmd ") for line in scripts[0])
     assert "universal MLIP (out-of-process)" in result.provenance
 
+
+
+def test_the_wafer_is_cut_on_the_termination_the_project_names(
+        monkeypatch):
+    """The project file's termination reaches the slab cutter
+    (DESIGN §2.5); before, every wafer was cut on the first."""
+    from sabsim.pipeline import live_stages
+
+    asked_for = []
+
+    def recording_build(crystal, face, identity, declared, **settings):
+        asked_for.append(settings["termination_index"])
+        return "a half"
+
+    monkeypatch.setattr(
+        live_stages, "build_standalone_half", recording_build)
+    pair = _dissimilar_member()
+    quartz = replace(pair.material.wafer_b, termination_index=1)
+    assert live_stages._standalone_half(
+        quartz, pair, _derived_lattices(pair), ("Ar",)) == "a half"
+    assert asked_for == [1]
