@@ -303,9 +303,13 @@ def describe_terminations(crystal, face) -> list[str]:
     use termination 0 until §2.5 selects one by surface energy, and on
     a compound face the terminations can end on different species, so
     the person is shown which is which. The BONDING side is the slab's
-    top — the side that is bombarded and then pressed (§2.6).
+    top — the side that is bombarded and then pressed (§2.6) — and the
+    top is the face asked for, sign included (§2.5).
     """
-    from sabsim.structure.slab_builder import slab_terminations
+    from sabsim.structure.slab_builder import (
+        slab_terminations,
+        slab_top_normal,
+    )
 
     slabs = slab_terminations(
         crystal, tuple(face), _TEMPLATE_SLAB_THICKNESS,
@@ -316,8 +320,10 @@ def describe_terminations(crystal, face) -> list[str]:
              f"termination 0 is used, a stand-in until one is "
              f"selected by surface energy (DESIGN §2.5):"]
     for index, slab in enumerate(slabs):
-        heights = [site.coords[2] for site in slab]
-        symbols = [site.specie.symbol for site in slab]
+        # Height is measured along the slab's own normal, which is
+        # the z axis only when the cut leaves the surface level.
+        heights = slab.get_positions() @ slab_top_normal(slab.get_cell())
+        symbols = slab.get_chemical_symbols()
         bonding = surface_plane_species(heights, symbols, top=True)
         far = surface_plane_species(heights, symbols, top=False)
         lines.append(

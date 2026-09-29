@@ -229,23 +229,135 @@ def load_crystal(cif_path) -> Structure:
     return crystal
 
 
+# How closely two numbers that should be equal must agree when the
+# builder checks the cleaving tool's record against the slab it was
+# handed: relative, on squared lengths and on the cosine of an angle.
+_ORIENTATION_TOLERANCE = 1.0e-6
+
+
+def slab_top_normal(cell_vectors) -> np.ndarray:
+    """The unit normal of a slab's surface, pointing out of its TOP.
+
+    The surface is the plane of the first two cell vectors; the top is
+    the side the third vector points to.
+    """
+    cell = np.array(cell_vectors, dtype=float)
+    normal = np.cross(cell[0], cell[1])
+    normal = normal / np.linalg.norm(normal)
+    return normal if np.dot(normal, cell[2]) > 0.0 else -normal
+
+
+def face_sense(crystal: Structure, cut_slab,
+               miller_face: tuple[int, int, int]) -> int:
+    """+1 when a cut slab's top IS the face asked for, -1 when it is
+    the opposite face and the slab must be turned over (DESIGN §2.5).
+
+    The face names the slab's top: its outward normal is the face's
+    own reciprocal-lattice vector ``h a* + k b* + l c*`` in the
+    crystal file's axes. pymatgen returns either side up — the same
+    slab for GaN (001) and (00-1) — but it RECORDS the slab cell's
+    three vectors in the crystal's lattice coordinates
+    (``scale_factor``), and the third is the way to the top. So the
+    sense is the sign of ``h u + k v + l w`` for that third vector
+    ``[u v w]``.
+
+    The record is trusted only after it is shown to describe the slab
+    that was handed over: the same lengths and angles (the slab cell
+    is the record rigidly rotated), the same handedness (rotated, not
+    mirrored), and an in-plane pair perpendicular to the face's
+    normal. Anything else is refused rather than oriented by guess.
+    """
+    face = np.array(miller_face, dtype=float)
+    recorded = np.array(cut_slab.scale_factor, dtype=float)
+    in_crystal_frame = recorded @ crystal.lattice.matrix
+    slab_cell = np.array(cut_slab.lattice.matrix, dtype=float)
+    face_normal = (
+        face @ crystal.lattice.reciprocal_lattice_crystallographic.matrix)
+
+    lengths_and_angles = in_crystal_frame @ in_crystal_frame.T
+    same_shape = np.allclose(
+        lengths_and_angles, slab_cell @ slab_cell.T, rtol=0.0,
+        atol=_ORIENTATION_TOLERANCE * np.abs(lengths_and_angles).max())
+    same_hand = (np.linalg.det(in_crystal_frame)
+                 * np.linalg.det(slab_cell)) > 0.0
+    plane_normal = np.cross(in_crystal_frame[0], in_crystal_frame[1])
+    alignment = abs(np.dot(plane_normal, face_normal)) / (
+        np.linalg.norm(plane_normal) * np.linalg.norm(face_normal))
+    in_the_face = alignment > 1.0 - _ORIENTATION_TOLERANCE
+    if not (same_shape and same_hand and in_the_face):
+        raise ValueError(
+            f"the slab cut for face {tuple(miller_face)} does not match "
+            f"the cleaving tool's own record of it (same shape: "
+            f"{same_shape}, same handedness: {same_hand}, in the face: "
+            f"{in_the_face}), so which side is its top cannot be told; "
+            f"the slab is refused rather than oriented by guess "
+            f"(DESIGN §2.5)")
+    way_to_the_top = float(np.dot(in_crystal_frame[2], face_normal))
+    return 1 if way_to_the_top > 0.0 else -1
+
+
+def turn_slab_over(slab: Atoms) -> Atoms:
+    """Turn a slab over so its bottom becomes its top (DESIGN §2.5).
+
+    A ROTATION by half a turn about an in-plane axis, never a mirror: a
+    mirror would turn a handed crystal (quartz) into its twin. The axis
+    is perpendicular to the surface normal AND to the third cell
+    vector, so that vector is carried exactly onto its own negative and
+    the turned slab keeps the same cell height and vacuum. The first
+    cell vector is carried along; the second is carried along and
+    negated — negating a lattice vector leaves the lattice as it was —
+    which makes the cell right-handed again. Atoms are wrapped back
+    into the cell, where a slab centred in the vacuum stays centred.
+    Returns a new object.
+    """
+    cell = np.array(slab.get_cell(), dtype=float)
+    normal = slab_top_normal(cell)
+    axis = np.cross(cell[2], normal)
+    if np.linalg.norm(axis) < _ORIENTATION_TOLERANCE * np.linalg.norm(
+            cell[2]):
+        # The third vector is along the normal, so every in-plane axis
+        # reverses both; the first cell vector is one.
+        axis = cell[0]
+    axis = axis / np.linalg.norm(axis)
+    # Half a turn about a unit axis u sends p to 2 (p.u) u - p. The
+    # matrix is symmetric, so it acts the same on rows as on columns.
+    half_turn = 2.0 * np.outer(axis, axis) - np.eye(3)
+    turned = slab.copy()
+    turned.set_cell(
+        [cell[0] @ half_turn, -(cell[1] @ half_turn), cell[2]],
+        scale_atoms=False)
+    turned.set_positions(slab.get_positions() @ half_turn)
+    turned.wrap()
+    return turned
+
+
 def slab_terminations(
         crystal: Structure,
         miller_face: tuple[int, int, int],
         min_slab_thickness: float = 8.0,
         min_vacuum: float = 10.0) -> list:
-    """Every termination of a face, as pymatgen slabs, in builder order.
+    """Every termination of a face, as ASE slabs, in builder order.
 
     A face can usually be cut on more than one atomic plane; each cut
     is a TERMINATION. :func:`build_slab` takes one of these by its
     position in this list, and ``sabsim catalog add`` describes all of
     them (DESIGN.md §10.11), so both read the one list made here.
+
+    Every slab is returned the RIGHT WAY UP: its top is the face that
+    was asked for, sign included (:func:`face_sense`), so (001) and
+    (00-1) are the two sides of the same cuts.
     """
     generator = SlabGenerator(
         crystal, miller_index=tuple(miller_face),
         min_slab_size=min_slab_thickness, min_vacuum_size=min_vacuum,
         center_slab=True)
-    return generator.get_slabs()
+    terminations = []
+    for cut_slab in generator.get_slabs():
+        slab = AseAtomsAdaptor.get_atoms(cut_slab)
+        if face_sense(crystal, cut_slab, miller_face) < 0:
+            slab = turn_slab_over(slab)
+        terminations.append(slab)
+    return terminations
 
 
 def build_slab(
@@ -262,6 +374,9 @@ def build_slab(
     energy — which needs the force model — so until that lands the
     ``termination_index``-th candidate (the first by default) is used: a
     documented stand-in, not a silent "first candidate is sufficient".
+
+    The slab's TOP is the face asked for, sign included: (00-1) is the
+    other side of the (001) cut, not the same slab (§2.5).
     """
     candidates = slab_terminations(
         crystal, miller_face, min_slab_thickness, min_vacuum)
@@ -269,7 +384,7 @@ def build_slab(
         raise IndexError(
             f"termination {termination_index} out of range: the "
             f"{miller_face} face has {len(candidates)} termination(s)")
-    return AseAtomsAdaptor.get_atoms(candidates[termination_index])
+    return candidates[termination_index]
 
 
 def orthogonalize_in_plane(slab: Atoms) -> Atoms:

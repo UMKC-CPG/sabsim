@@ -787,6 +787,53 @@ All terms are project inputs, so a new material re-sizes with no code change,
 and the silicon defaults preserve the §3.6-anchored 55 Å cell (55 > 7 + 30)
 rather than shrinking it.
 
+**The sign of the face is honoured (Paul, 2026-09-28).** A slab has
+two sides, and the side that is bombarded and pressed is its TOP
+(§2.6). The face a person writes names that side: the top's outward
+normal is the direction of the face's own reciprocal-lattice vector,
+h **a\*** + k **b\*** + l **c\***, in the crystal file's axes. So
+(001) and (00-1) are opposite sides of the same cut, and in a crystal
+with no mirror between them they are different surfaces — in wurtzite
+GaN the bilayers all point the same way along c, and one side of any
+(001) cut ends on gallium where the other ends on nitrogen.
+
+The adopted cleaving tool does not promise this. It returns, for
+(hkl) and (-h-k-l) alike, whichever orientation its own search for
+an out-of-plane lattice vector lands on — the same slab for GaN (001)
+and (00-1), and for GaN (110) a slab whose top is the (-1-10) side
+although every index asked for was positive. The builder therefore
+checks each slab it is handed and turns over the ones that came out
+upside down:
+
+```
+sense = sign( face . out_of_plane_vector )
+```
+
+where `out_of_plane_vector` is the slab cell's third lattice vector
+written in the crystal's own lattice coordinates [u v w] (the tool
+records it), so the dot product is simply h u + k v + l w. The slab's
+top is the side that vector points to; a negative sense means the top
+is the opposite face, and the slab is turned over.
+
+Turning over is a ROTATION by half a turn about an in-plane axis,
+never a mirror: a mirror would turn a left-handed crystal into its
+right-handed twin, and quartz is handed. The axis is chosen
+perpendicular to the out-of-plane lattice vector as well as to the
+surface normal, so that vector is carried exactly onto its own
+negative and the turned slab keeps the very same cell height and
+vacuum; the two in-plane vectors are carried along, and the second is
+negated — a lattice is unchanged by that — so the cell stays
+right-handed. Before trusting the tool's record the builder confirms
+that the slab cell it was handed IS that record, rotated rigidly: the
+same lengths and angles, the same handedness, and an in-plane pair
+perpendicular to the face's normal. A slab that fails is refused, not
+oriented by guess.
+
+The three shipped faces — Si (100), quartz (001), GaN (001) — come
+out of the tool the right way up, so nothing built before this rule
+changes. Which species a side ends on is still the termination's to
+say (below); what this rule fixes is WHICH SIDE the face names.
+
 **Termination is chosen by surface energy.** Prior art takes
 `sym_slabs[0]` with the comment "first candidate is sufficient" — the
 first entry of a list, in list order. Where a face admits several
@@ -4860,8 +4907,9 @@ That stand-in is easy to overlook, so `catalog add` cuts the trial
 slab every way the builder can and says, for each termination, which
 species the BONDING side ends on — the slab's top, the side that is
 bombarded and pressed (§2.6) — and which the far side ends on: for
-GaN (001), termination 0 ends on N and termination 1 on Ga. The
-lines go to the command's output and into the recipe's opening
+GaN (001), termination 0 ends on N and termination 1 on Ga, and for
+GaN (00-1) — the other side of the same cuts, §2.5 — the reverse.
+The lines go to the command's output and into the recipe's opening
 comment, on both routes. The termination is deliberately NOT part of
 the label or of `material.toml`: the library is matched to a project
 by face and species and not by termination (§4.8 part 2), the value

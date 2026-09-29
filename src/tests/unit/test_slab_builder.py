@@ -613,3 +613,153 @@ def test_data_writer_ignores_a_stale_lammps_type_array(tmp_path):
     assert masses and masses[0].split()[0] == "1"
     # The caller's structure is untouched (a copy was written).
     assert "type" in frame.arrays
+
+
+# ---------------------------------------------------------------------
+# The sign of the face is honoured (DESIGN.md §2.5, 2026-09-28): the
+# face names the slab's TOP, so (001) and (00-1) are the two sides of
+# the same cuts. Wurtzite GaN is the test crystal because its two
+# sides differ: every bilayer points the same way along c.
+# ---------------------------------------------------------------------
+
+def _wurtzite_gallium_nitride():
+    """Wurtzite GaN, written out so the test needs no catalog entry.
+
+    Each gallium has one nitrogen straight above it along +c, 0.378 of
+    the cell height away: the VERTICAL bond, which points from gallium
+    to nitrogen along +c throughout the crystal.
+    """
+    from pymatgen.core import Lattice, Structure
+    return Structure(
+        Lattice.hexagonal(3.1972, 5.207),
+        ["Ga", "Ga", "N", "N"],
+        [[1 / 3, 2 / 3, 0.091], [2 / 3, 1 / 3, 0.591],
+         [1 / 3, 2 / 3, 0.469], [2 / 3, 1 / 3, 0.969]])
+
+
+def _top_and_bottom_species(slab):
+    """The species of a slab's highest and lowest atoms along its normal."""
+    from sabsim.structure.slab_builder import slab_top_normal
+    heights = slab.get_positions() @ slab_top_normal(slab.get_cell())
+    symbols = slab.get_chemical_symbols()
+    return symbols[int(np.argmax(heights))], symbols[int(np.argmin(heights))]
+
+
+def _vertical_bond_direction(slab):
+    """+1 if nitrogen sits straight ABOVE its gallium, -1 if below.
+
+    Looks at one gallium deep inside the slab and finds the nitrogen
+    that shares its in-plane position at one bond length (1.97 A).
+    """
+    positions = slab.get_positions()
+    symbols = np.array(slab.get_chemical_symbols())
+    heights = positions[:, 2]
+    middle = 0.5 * (heights.max() + heights.min())
+    galliums = np.where(symbols == "Ga")[0]
+    gallium = galliums[np.argmin(np.abs(heights[galliums] - middle))]
+    for nitrogen in np.where(symbols == "N")[0]:
+        offset = slab.get_distance(gallium, nitrogen, mic=True,
+                                   vector=True)
+        if np.hypot(offset[0], offset[1]) < 0.05 and (
+                abs(abs(offset[2]) - 1.97) < 0.05):
+            return 1 if offset[2] > 0.0 else -1
+    raise AssertionError("no vertical Ga-N bond found")
+
+
+def test_opposite_faces_are_the_two_sides_of_the_same_cut():
+    from sabsim.structure.slab_builder import slab_terminations
+    crystal = _wurtzite_gallium_nitride()
+    up = slab_terminations(crystal, (0, 0, 1), 10.0, 12.0)
+    down = slab_terminations(crystal, (0, 0, -1), 10.0, 12.0)
+    assert len(up) == len(down) == 2
+    for slab_up, slab_down in zip(up, down):
+        top, bottom = _top_and_bottom_species(slab_up)
+        assert top != bottom                      # the two sides differ
+        # The (00-1) slab's top is the (001) slab's bottom, and back.
+        assert _top_and_bottom_species(slab_down) == (bottom, top)
+        # In the crystal the vertical bond runs Ga -> N along +c: up
+        # out of the (001) top, down into the (00-1) one.
+        assert _vertical_bond_direction(slab_up) == 1
+        assert _vertical_bond_direction(slab_down) == -1
+        # Same cut, same cell: only turned over.
+        assert len(slab_down) == len(slab_up)
+        assert slab_down.get_volume() == pytest.approx(
+            slab_up.get_volume())
+        assert np.linalg.det(np.array(slab_down.get_cell())) > 0.0
+        assert np.allclose(np.array(slab_down.get_cell())[2],
+                           np.array(slab_up.get_cell())[2])
+
+
+def test_the_sense_of_a_cut_is_read_from_the_tools_own_record():
+    """The cleaving tool hands back the SAME slab for (001) and
+    (00-1); its record of the slab cell says which side is up, and
+    the two faces read opposite senses from it."""
+    from pymatgen.core.surface import SlabGenerator
+    from sabsim.structure.slab_builder import face_sense
+    crystal = _wurtzite_gallium_nitride()
+    cuts = {
+        face: SlabGenerator(crystal, face, 10.0, 12.0,
+                            center_slab=True).get_slabs()[0]
+        for face in ((0, 0, 1), (0, 0, -1))}
+    assert np.allclose(cuts[(0, 0, 1)].cart_coords,
+                       cuts[(0, 0, -1)].cart_coords)
+    assert face_sense(crystal, cuts[(0, 0, 1)], (0, 0, 1)) == 1
+    assert face_sense(crystal, cuts[(0, 0, -1)], (0, 0, -1)) == -1
+
+
+def test_the_shipped_faces_are_built_exactly_as_before():
+    """Si (100) and quartz (001) come out of the cleaving tool the
+    right way up, so honouring the sign moves no atom of theirs."""
+    from pymatgen.core.surface import SlabGenerator
+    from pymatgen.io.ase import AseAtomsAdaptor
+    for label, face in (("si_diamond_100", (1, 0, 0)),
+                        ("sio2_quartz_001", (0, 0, 1))):
+        crystal = load_crystal(lookup_entry(label).cif)
+        as_cut = AseAtomsAdaptor.get_atoms(SlabGenerator(
+            crystal, face, 10.0, 12.0, center_slab=True).get_slabs()[0])
+        built = build_slab(crystal, face, 10.0, 12.0)
+        assert np.array_equal(built.get_positions(),
+                              as_cut.get_positions())
+        assert np.array_equal(np.array(built.get_cell()),
+                              np.array(as_cut.get_cell()))
+
+
+def test_turning_a_slab_over_is_a_rotation_not_a_mirror():
+    """A handed cluster keeps its hand; turning twice restores it."""
+    from ase import Atoms
+    from sabsim.structure.slab_builder import turn_slab_over
+    # Four atoms near the middle of a skewed cell, none in a plane with
+    # the others: the signed volume they span tells left from right.
+    slab = Atoms(
+        "SiOOO",
+        positions=[[2.0, 2.0, 15.0], [3.0, 2.2, 15.3],
+                   [2.1, 3.1, 15.6], [2.4, 2.3, 16.4]],
+        cell=[[6.0, 0.0, 0.0], [-3.0, 5.2, 0.0], [0.0, 0.0, 30.0]],
+        pbc=True)
+
+    def signed_volume(atoms):
+        first = atoms.get_distance(0, 1, mic=True, vector=True)
+        second = atoms.get_distance(0, 2, mic=True, vector=True)
+        third = atoms.get_distance(0, 3, mic=True, vector=True)
+        return float(np.dot(np.cross(first, second), third))
+
+    turned = turn_slab_over(slab)
+    assert signed_volume(turned) == pytest.approx(signed_volume(slab))
+    assert np.linalg.det(np.array(turned.get_cell())) > 0.0
+    assert np.allclose(np.array(turned.get_cell())[2], [0.0, 0.0, 30.0])
+    # What was highest is now lowest.
+    assert np.argmax(turned.get_positions()[:, 2]) == 0
+    assert np.argmin(slab.get_positions()[:, 2]) == 0
+    twice = turn_slab_over(turned)
+    assert np.allclose(twice.get_positions(), slab.get_positions())
+
+
+def test_a_slab_that_does_not_match_its_record_is_refused():
+    from pymatgen.core.surface import SlabGenerator
+    from sabsim.structure.slab_builder import face_sense
+    crystal = _wurtzite_gallium_nitride()
+    cut = SlabGenerator(crystal, (0, 0, 1), 10.0, 12.0,
+                        center_slab=True).get_slabs()[0]
+    # Asked about a face the slab was not cut for.
+    with pytest.raises(ValueError, match="refused rather than oriented"):
+        face_sense(crystal, cut, (1, 0, 0))

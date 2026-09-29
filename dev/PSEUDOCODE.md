@@ -1147,6 +1147,12 @@ function build_slab(material, shared, applied_strain, potential,
     slab = cleave_and_tile(bulk, material.surface_face, shared,
                            applied_strain)
 
+    # The face names the slab's TOP, the side that is bombarded and
+    # pressed. The cleaving tool returns either side up, so check and
+    # turn over (DESIGN §2.5).
+    if face_sense(bulk, slab, material.surface_face) < 0:
+        slab = turn_slab_over(slab)
+
     # Thickness is a CRITERION, not a constant (DESIGN §2.5):
     #   slab_thickness >= required_activated_depth + minimum_bulk_thickness
     # The depth term is the project's REQUIREMENT on the activation (the
@@ -1170,6 +1176,35 @@ function build_slab(material, shared, applied_strain, potential,
     slab = symmetrize_if_polar(slab)
 
     return slab      # a Structure (§3): one provenance, grips unset
+```
+
+```
+function face_sense(crystal, slab, face) -> +1 or -1:
+    # +1: the slab's top is the face asked for. -1: it is the
+    # opposite face, and the slab must be turned over.
+    a, b, c = the slab cell's three lattice vectors, written in the
+              crystal's lattice coordinates (the tool's record),
+              converted to the crystal's Cartesian frame
+    normal = h a* + k b* + l c*     # the face's reciprocal vector
+    # Trust the record only if the slab cell IS it, rigidly rotated.
+    require lengths and angles of (a, b, c) == those of the slab cell
+    require handedness of (a, b, c)  == that of the slab cell
+    require a x b parallel to normal
+    return sign(c . normal)         # = sign(h u + k v + l w)
+
+function turn_slab_over(slab) -> slab:
+    # Half a turn about an in-plane axis: a rotation, NOT a mirror,
+    # so a handed crystal (quartz) keeps its hand.
+    normal = unit(a x b), pointing to the c side
+    axis = unit(c x normal) if c is not along normal
+           else unit(a)          # any in-plane axis serves
+    rotate every atom half a turn about axis    # c -> -c, n -> -n
+    cell = (rotated a, -(rotated b), c)   # negating a lattice vector
+                                          # leaves the lattice as it
+                                          # was and restores the
+                                          # right hand; c is unchanged
+    wrap the atoms into the cell    # the slab stays centred in c
+    return slab
 ```
 
 ### 7.5 assemble_pair — dividing surface, ejecta, clash, labeled groups
@@ -5167,8 +5202,10 @@ function describe_terminations(crystal, face) -> list of lines:
     # Reported, never chosen (DESIGN §10.11): termination 0 is a
     # stand-in until §2.5 selects by surface energy.
     slabs = every termination the slab builder offers for the face,
-            at the template's thickness and vacuum
+            at the template's thickness and vacuum, each the right
+            way up (§7.4 face_sense)
     for index, slab in slabs:
+        height = each atom's position along the slab's normal
         bonding = species within SURFACE_PLANE_DEPTH of the top atom
         far     = species within SURFACE_PLANE_DEPTH of the bottom one
         line(index, bonding, far, "the one used" if index == 0)
