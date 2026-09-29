@@ -34,6 +34,14 @@ PYMATGEN_VERSION="2026.5.4"
 PARSL_VERSION="2026.6.29"
 PYTEST_VERSION="9.1.1"          # the test suite's own runner (dev dep)
 
+# Versions pinned to match Imago's own venv (2026-09-29), so an Imago
+#   script behaves the same whether it runs from there or from here.
+OPENPYXL_VERSION="3.1.5"        # spreadsheet reader for plotgraph.py
+MPLCURSORS_VERSION="0.7.1"      # hover labels on plotgraph.py's plots
+VEDO_VERSION="2026.6.1"         # the 3-D scene library of viewCell.py
+VTK_VERSION="9.6.1"             # the rendering engine beneath vedo
+PYPDF_VERSION="6.14.2"          # PDF reading, kept for Imago parity
+
 # --- 1. Create the venv over the conda base ---------------------------
 # --system-site-packages so the venv SEES the conda deepmd/torch/tf/numpy
 #   AND mpi4py stack, while its OWN bin/python wins for editable sabsim.
@@ -54,6 +62,23 @@ python -m pip install \
     "pymatgen==${PYMATGEN_VERSION}" \
     "parsl==${PARSL_VERSION}" \
     "pytest==${PYTEST_VERSION}"
+
+# --- 2b. Packages that let Imago's scripts run in this venv -----------
+# Imago's Python scripts start with `#!/usr/bin/env python3`, so once
+#   Imago's rc file is sourced on top of this environment they run on
+#   THIS interpreter. Nearly everything they import is already here;
+#   the packages below are the ones that were missing. They are what
+#   lets a student work on both codes from one shell without sourcing
+#   Imago's own venv, which would take `python` away from sabsim.
+# PySide6 is deliberately NOT in this list: the conda base already
+#   provides it (with its matching Qt), and a pip copy in the venv
+#   would shadow that one with a different Qt version.
+python -m pip install \
+    "openpyxl==${OPENPYXL_VERSION}" \
+    "mplcursors==${MPLCURSORS_VERSION}" \
+    "vedo==${VEDO_VERSION}" \
+    "vtk==${VTK_VERSION}" \
+    "pypdf==${PYPDF_VERSION}"
 
 # --- 3. Editable installs: ALF first, then SABSIM ---------------------
 # ALF is the active-learning driver; SABSIM imports it. --no-deps on

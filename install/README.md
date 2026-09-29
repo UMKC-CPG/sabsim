@@ -12,7 +12,9 @@ The environment is **two layers**:
    ML/inference stack (deepmd-kit, pytorch, tensorflow, CUDA), the
    scientific core (numpy/scipy/h5py/pandas/matplotlib), and **`mpi4py`**.
 2. **`build_venv.sh`** — the venv on top: pinned `ase`/`pymatgen`/`parsl`
-   and the editable `ALF` + `sabsim`.
+   and the editable `ALF` + `sabsim`, plus the few packages Imago's
+   scripts need (`openpyxl`, `mplcursors`, `vedo`, `vtk`, `pypdf`) so
+   they run from this same venv.
 
 Read the header of `environment.yml` for the MPI decision and the two
 principles that decide what is and is not installed.

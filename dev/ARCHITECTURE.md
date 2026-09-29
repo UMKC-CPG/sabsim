@@ -981,11 +981,15 @@ is a conda/mamba base (`install/environment.yml`: Python 3.11 + the binary
 ML/inference stack — deepmd-kit, pytorch, tensorflow, CUDA — the
 scientific core, and `mpi4py`) with a venv layered on top
 (`install/build_venv.sh`: the editable `sabsim` and ALF, and the pinned
-`ase`/`pymatgen`/`parsl`). Its shape was learned by diagnosing real
-compute-node failures (probe 15520412; launcher jobs 15551533/15551674,
-2026-07-31). **The MPI is conda OpenMPI 5.0.10, and it is forced, not
-chosen**: deepmd-kit pulls it into the env, and the conda Python's
-`DT_RPATH=$ORIGIN/../lib` — searched *before* `LD_LIBRARY_PATH` — makes
+`ase`/`pymatgen`/`parsl`, plus the few pinned packages that Imago's
+Python scripts import — `openpyxl`, `mplcursors`, `vedo`, `vtk`, `pypdf`
+— so those scripts run on this same interpreter once Imago's rc file is
+sourced on top, without Imago's own venv taking `python` away from
+sabsim). Its shape was learned by diagnosing real compute-node failures
+(probe 15520412; launcher jobs 15551533/15551674, 2026-07-31). **The MPI
+is conda OpenMPI 5.0.10, and it is forced, not chosen**: deepmd-kit pulls
+it into the env, and the conda Python's `DT_RPATH=$ORIGIN/../lib` —
+searched *before* `LD_LIBRARY_PATH` — makes
 its `libmpi` the one every in-process `import` loads. It is also the right
 answer: conda's 5.0.10 ships UCX and drives this cluster's InfiniBand
 fabric at ~12 GB/s (UCX selects `rc_mlx5`), so no site-compiled OpenMPI is

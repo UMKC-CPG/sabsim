@@ -17,7 +17,7 @@ the usual way this install fails.
 | Layer | What it provides | Built by |
 |---|---|---|
 | 1. Conda base | Python 3.11, deepmd-kit, torch, TensorFlow, CUDA, MPI | `install/environment.yml` |
-| 2. Venv | ase / pymatgen / parsl pinned, editable ALF + SABSIM | `install/build_venv.sh` |
+| 2. Venv | ase / pymatgen / parsl pinned, editable ALF + SABSIM, the packages Imago's scripts need | `install/build_venv.sh` |
 | 3. LAMMPS | two engines, built from source on the cluster | `install/build_lammps.sh` |
 | 4. Cascade engine | deepmd's official bundle, for universal MLIPs | `install/cascade-engine-deepmd-official.md` |
 
