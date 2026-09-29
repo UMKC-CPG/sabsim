@@ -10,7 +10,6 @@ real ``compute sna/atom`` run is LEDGER T-35.
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 
 import numpy as np
@@ -41,11 +40,14 @@ from sabsim.driver.environment_library import (
 )
 from sabsim.spec.loader import SpecificationError, load_and_validate_project
 from sabsim.spec.records import Quantity
-from tests.unit.support import COLD_VECTOR, THERMAL_SCATTER, hand_built_library
+from tests.unit.support import (
+    COLD_VECTOR,
+    PROJECT_TEMPLATE,
+    THERMAL_SCATTER,
+    hand_built_library,
+)
 
-_TEMPLATE = os.path.abspath(os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "project_spec.toml"))
+_TEMPLATE = PROJECT_TEMPLATE
 
 
 def _template_pair():

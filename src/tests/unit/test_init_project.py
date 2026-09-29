@@ -43,8 +43,13 @@ def test_a_fresh_folder_gets_the_full_layout_for_the_pair(tmp_path):
         assert (folder / stage).is_dir(), stage
     assert (folder / PREP_1 / "recipe.toml").is_file()
     assert (folder / PREP_2 / "recipe.toml").is_file()
-    assert report.kept == [] and report.notices == []
+    assert report.kept == []
     assert len(report.written) == 8
+    # The one thing to be told: the activation numbers were measured on
+    # silicon, so for the silica wafer they are starting values.
+    assert len(report.notices) == 1
+    assert "SiO2 quartz (001)" in report.notices[0]
+    assert "starting values" in report.notices[0]
 
 
 def test_the_wafer_tables_come_from_the_catalog_entries(tmp_path):
@@ -62,6 +67,140 @@ def test_the_wafer_tables_come_from_the_catalog_entries(tmp_path):
     # The termination is the one each entry's recipe names.
     assert wafer_a["termination_index"] == 0
     assert wafer_b["termination_index"] == 0
+
+
+def _project_table(project_file):
+    with project_file.open("rb") as handle:
+        return tomllib.load(handle)["project"]
+
+
+def _entry_with_edited_recipe(tmp_path, label, edits=()):
+    """A catalog entry whose recipe is a private, edited copy.
+
+    The crystal file stays the catalog's own, so the entry still names
+    it by its path in the repository; only the recipe is swapped.
+    """
+    from dataclasses import replace
+
+    from sabsim.catalog import lookup_entry
+    entry = lookup_entry(label)
+    text = entry.recipe.read_text()
+    for old, new in edits:
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    recipe = tmp_path / f"{label}.recipe.toml"
+    recipe.write_text(text)
+    return replace(entry, recipe=recipe)
+
+
+def test_the_description_is_written_from_the_two_materials(tmp_path):
+    """The description names THIS pair, whatever the pair is."""
+    folder = tmp_path / "si_sio2"
+    init_project(folder, PAIR)
+    assert _project_table(folder / "sabsim.toml")["description"] == (
+        "Cold surface-activated bonding of Si diamond (100) (wafer A) "
+        "to SiO2 quartz (001) (wafer B)")
+    same = tmp_path / "si_si"
+    init_project(same, ("si_diamond_100", "si_diamond_100"))
+    assert _project_table(same / "sabsim.toml")["description"] == (
+        "Cold surface-activated bonding of two Si diamond (100) wafers")
+
+
+def test_the_material_domain_comes_from_the_two_recipes(tmp_path):
+    """One word when the recipes agree, both when they differ."""
+    same = tmp_path / "si_si"
+    init_project(same, ("si_diamond_100", "si_diamond_100"))
+    assert _project_table(
+        same / "sabsim.toml")["material_domain"] == "diamond-cubic"
+    folder = tmp_path / "si_sio2"
+    init_project(folder, PAIR)
+    assert _project_table(folder / "sabsim.toml")["material_domain"] == (
+        "diamond-cubic + silicon-and-silica")
+
+
+def test_an_undecided_domain_is_handed_on_and_refused_by_the_loader(
+        tmp_path, monkeypatch):
+    """A recipe that names no regime yet leaves the pair's to decide."""
+    from pathlib import Path
+
+    from sabsim.deploy.init_project import TEMPLATE_ROOT
+    from sabsim.deploy.project_file import (
+        pair_domain,
+        project_file_notices,
+        render_project_file,
+    )
+    from sabsim.spec.loader import (
+        SpecificationError,
+        load_and_validate_project,
+    )
+    silicon = _entry_with_edited_recipe(tmp_path, "si_diamond_100")
+    undecided = _entry_with_edited_recipe(
+        tmp_path, "sio2_quartz_001",
+        [('domain        = "silicon-and-silica"',
+          'domain        = "DECIDE"')])
+    entries = (silicon, undecided)
+    assert pair_domain(entries) == "DECIDE"
+    notices = project_file_notices(entries, "sabsim.toml")
+    assert any("material_domain is still to decide" in notice
+               and "sio2_quartz_001" in notice for notice in notices)
+
+    monkeypatch.setenv("SABSIM_SHARE", str(tmp_path / "share"))
+    monkeypatch.setenv("SABSIM_SCRATCH", str(tmp_path / "scratch"))
+    project_file = tmp_path / "sabsim.toml"
+    project_file.write_text(render_project_file(
+        (TEMPLATE_ROOT / "project_spec.toml").read_text(), entries,
+        Path(tmp_path)))
+    with pytest.raises(SpecificationError, match="material_domain"):
+        load_and_validate_project(str(project_file))
+
+
+def test_the_project_file_names_only_its_own_materials(tmp_path):
+    """Nothing is left over from another pair (DESIGN §10.9).
+
+    A project of two materials that are neither silicon nor silica may
+    mention silicon only where it says a number was MEASURED there; it
+    never names silica, quartz, or another project's folders.
+    """
+    from sabsim.catalog import read_catalog
+    labels = [entry.label for entry in read_catalog()]
+    others = [label for label in labels
+              if not label.startswith(("si_", "sio2_"))]
+    if len(others) < 2:
+        pytest.skip("the catalog holds fewer than two other materials")
+    folder = tmp_path / "other_pair"
+    init_project(folder, (others[0], others[1]))
+    text = (folder / "sabsim.toml").read_text()
+    for foreign in ("SiO2", "silica", "quartz", "cristobalite",
+                    "prep_surf1_si/", "si_sio2", "Si/Si"):
+        assert foreign not in text, foreign
+    assert "@" not in text
+    assert f"prep_surf1_{others[0]}/" in text
+    assert f"prep_surf2_{others[1]}/" in text
+    assert all(len(line) <= 80 for line in text.splitlines())
+    # The remarks about silicon that remain say where a number or a
+    # model was measured, which is true whatever is being bonded.
+    prose = " ".join(text.replace("#", " ").split())
+    assert "STARTING value" in prose
+
+
+def test_the_template_names_no_material(tmp_path):
+    """The shipped template holds markers, not a worked example."""
+    from sabsim.deploy.init_project import TEMPLATE_ROOT
+    text = (TEMPLATE_ROOT / "project_spec.toml").read_text()
+    for foreign in ("SiO2", "silica", "quartz", "prep_surf1_si"):
+        assert foreign not in text, foreign
+    assert "@DESCRIPTION@" in text and "@MATERIAL_DOMAIN@" in text
+
+
+def test_a_long_description_keeps_to_the_line_width():
+    """A long description is folded, and reads back as one line."""
+    from sabsim.deploy.project_file import description_literal
+    long = ("Cold surface-activated bonding of LiNbO3 trigonal (001) "
+            "(wafer A) to GaN hexagonal (001) (wafer B)")
+    literal = description_literal(long)
+    assert all(len(line) <= 80 for line in literal.splitlines())
+    assert tomllib.loads(f"description = {literal}")["description"] == long
+    assert description_literal("short") == '"short"'
 
 
 def test_an_undecided_termination_is_copied_not_settled(tmp_path):

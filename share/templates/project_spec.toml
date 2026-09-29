@@ -1,23 +1,18 @@
 # =====================================================================
-# SABSIM project file — v1 (Si / SiO2, one wafer pair per project)
+# SABSIM project file — v1, one wafer pair per project
+@PAIR_TITLE@
 # ---------------------------------------------------------------------
 # This file is what the DESIGN.md §1.4 generator emits: a FULLY
-# populated project file for the user to edit. There are no hidden
-# defaults — the loader REJECTS an incomplete file rather than filling
-# a blank from the machinery (§1.4). Every knob the pipeline reads is
-# written here, in the open. "Frozen" means written down in one place,
-# not absent.
+# populated project file for the user to edit. `sabsim init` wrote it
+# from the template `share/templates/project_spec.toml`, filling every
+# line that names a material from the two catalog entries of this
+# pair (DESIGN §10.9), so nothing below is about another project's
+# materials. There are no hidden defaults — the loader REJECTS an
+# incomplete file rather than filling a blank from the machinery
+# (§1.4). Every knob the pipeline reads is written here, in the open.
+# "Frozen" means written down in one place, not absent.
 #
-# ONE WAFER PAIR PER PROJECT (Paul, 2026-08-30; ARCHITECTURE §1). This
-# file sits in a project folder whose name is the person's own label
-# (`jobs/si_sio2/`) and means nothing to the program. Beside it the
-# pipeline finds and fills four stage folders, named from the two
-# wafers' material labels lower-cased: `prep_surf1_si/`,
-# `prep_surf2_sio2/`, `bond_si_sio2/`, `analysis_si_sio2/`. A reference
-# pair (Si/Si for this question) is a SEPARATE project folder the
-# person makes and runs; the comparison between the two is theirs, by
-# hand (DESIGN §1.1). There is no list of members and no relation
-# layer in this file.
+@FOLDERS_NOTE@
 #
 # Populated to the full PSEUDOCODE.md §2 knob inventory. Where §2 marks
 # a numerical knob [DEPTH-FIRST] (filled as its module lands) and no
@@ -46,19 +41,18 @@
 # Free text carried into the report as provenance. The program never
 # reads the project FOLDER's name; this line is where a person says
 # what the project is for.
-description = "Cold SAB of alpha-quartz(001) SiO2 to Si(100)"
+description = @DESCRIPTION@
 # The two pointers that are not knobs (§1.3), kept here beside the
 # description: WHICH potential generation this pair runs under, and
 # WHICH structural/chemical regime its force model must describe
-# (§4.8). The multi-species MLIP over
-# {Si, O, Ar} is manufactured upstream by the bootstrap (§4.5, §11) and
-# referenced here by its generation identifier, which the bootstrap
-# fills once it converges. Elemental silicon on one side and silica on
-# the other means the declared regime must span BOTH plus the
-# interface (§4.8); no code selects a potential from it today — it is
-# recorded provenance for the force-model recipe.
+# (§4.8). The multi-species MLIP is manufactured upstream by the
+# bootstrap (§4.5, §11) and referenced here by its generation
+# identifier, which the bootstrap fills once it converges. No code
+# selects a potential from the regime today — it is recorded
+# provenance for the force-model recipe.
+@DOMAIN_NOTE@
 potential_ref   = "PENDING-BOOTSTRAP"    # resolved by §11 on convergence
-material_domain = "silicon-and-silica"
+material_domain = "@MATERIAL_DOMAIN@"
 
 # ---------------------------------------------------------------------
 # MATERIAL group (§1.2): per wafer, WHAT we are bonding. `wafer_a` is
@@ -71,19 +65,16 @@ material_domain = "silicon-and-silica"
 # input serves any material. Its lattice SCALE is only a starting
 # geometry — the working constant is relaxation-derived (§2.2) — and
 # `structure` is a human LABEL, not a source. The `material` label,
-# lower-cased, names the surface's prep folder (`prep_surf1_si/` here),
-# which holds its force-model recipe, the environment library the §3.5
-# gate judges against, and this surface's own amorphization
-# (ARCHITECTURE §1). Two crystals of one formula (quartz and
-# cristobalite) are two labels, so the program never has to guess.
+# lower-cased, names the surface's prep folder, which holds its
+# force-model recipe, the environment library the §3.5 gate judges
+# against, and this surface's own amorphization (ARCHITECTURE §1). Two
+# crystals of one formula are two labels, so the program never has to
+# guess which one is meant.
 #
-# `sabsim init <folder> <label_a> <label_b>` fills both tables from the
-# MATERIALS CATALOG (`share/catalog/<label>/material.toml`, DESIGN
-# §10.11): the label becomes `material`, and `cif`, `structure`,
-# `face` and `termination_index` come from the entry. The values
-# below are the template's
-# worked example; a project written by `init` names its catalog labels
-# (`si_diamond_100`, `sio2_quartz_001`) here instead.
+# `sabsim init <folder> <label_a> <label_b>` filled both tables from
+# the MATERIALS CATALOG (`share/catalog/<label>/material.toml`, DESIGN
+# §10.11): the label became `material`, and `cif`, `structure`, `face`
+# and `termination_index` came from the entry and its recipe.
 # ---------------------------------------------------------------------
 [wafer_a]
 # `structure` is a human label (the CIF is authoritative); `face` is
@@ -94,26 +85,20 @@ material_domain = "silicon-and-silica"
 # position in the builder's list for that face; `sabsim catalog add`
 # printed what each one ends on, and the entry's recipe repeats it in
 # its opening comment. A face with one termination has only 0.
-material  = "Si"
-cif       = "share/catalog/si_diamond_100/si_diamond.cif"
-structure = "diamond"
-face      = [1, 0, 0]
-termination_index = 0
+@WAFER_A_NOTE@
+material  = "@WAFER_A_MATERIAL@"
+cif       = "@WAFER_A_CIF@"
+structure = "@WAFER_A_STRUCTURE@"
+face      = @WAFER_A_FACE@
+termination_index = @WAFER_A_TERMINATION@
 
 [wafer_b]
-material  = "SiO2"
-# STAND-IN CRYSTAL, and the reason is worth stating. The lattice-matched
-# choice for a silicon counterface is BETA-CRISTOBALITE — it is cubic,
-# so it is the closest match to Si(100) — but that CIF is created with
-# the compound build and does not exist yet, and phase-three validation
-# (§1.5) correctly refuses a file pointing at a crystal that is not
-# there. Alpha-quartz is a real silica phase whose CIF ships today, so
-# the project stays loadable. Swap this back the moment the
-# cristobalite CIF lands.
-cif       = "share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif"
-structure = "alpha-quartz"
-face      = [0, 0, 1]
-termination_index = 0
+@WAFER_B_NOTE@
+material  = "@WAFER_B_MATERIAL@"
+cif       = "@WAFER_B_CIF@"
+structure = "@WAFER_B_STRUCTURE@"
+face      = @WAFER_B_FACE@
+termination_index = @WAFER_B_TERMINATION@
 
 # ---------------------------------------------------------------------
 # POTENTIAL block (§1.6, §4.7): WHICH force models the project runs
@@ -139,8 +124,8 @@ universal_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
 # 2026-08-21 decision), so the heal relaxes structures the model already
 # knows. A model trained elsewhere (the borrowed silicon graph.pb) was
 # tried first and compacted the DPA-amorphized surfaces into unphysical
-# clumps at the heal (Paul, 2026-08-26, demo press dumps). Results under
-# a single model carry no committee uncertainty.
+# clumps at the heal (2026-08-26, demo press dumps). Results under a single
+# model carry no committee uncertainty.
 production_weights = "$SABSIM_SHARE/share/models/dpa_gpu_bench/v320fix/dpa3.pth"
 # The universal model has passed the Tier-0 crystal-below-damaged screen
 # on silicon but has NOT cleared the §3.5 activation gate on any
@@ -155,13 +140,15 @@ allow_unvalidated = true
 # so it is frozen by being written down, not by being hidden.
 # ---------------------------------------------------------------------
 [protocol.activation]
+@ACTIVATION_NOTE@
 mechanism = "bombardment"
 species   = "Ar"
 # Ar-only baseline for v1 (§3.2). Iron is the first accommodated
 # co-species, deferred to the outer-loop sweep (§1.8) — none here.
 cospecies          = "none"
 cospecies_fraction = 0.0
-# 75 eV, PINNED from the 2026-07-21 energy x dose sweep (DESIGN §3.6).
+# 75 eV, PINNED from the 2026-07-21 energy x dose sweep of silicon
+# (DESIGN §3.6).
 # The old 500 eV default OVER-SPUTTERS — it vaporized a small slab — and
 # the sweep found 40-75 eV amorphizes cleanly with ZERO sputtered atoms
 # at every dose tried, while 100 eV and up strip the surface and then
@@ -178,8 +165,9 @@ angle  = { value = 0.0,   unit = "deg" }      # from the surface normal
 # general size-independent form, or a plain impact COUNT (unit "impacts"),
 # a shortcut for a single fixed cell. The AREAL form is used now that the
 # cell size is pinned in `live_stages`: the count follows from the area
-# (0.025 x ~1474 A^2 = 37 impacts), so widening the slab later keeps the
-# same PHYSICAL dose instead of silently thinning it.
+# (0.025 x ~1474 A^2 = 37 impacts on the sweep's silicon cell), so
+# widening the slab later keeps the same PHYSICAL dose instead of
+# silently thinning it.
 # 0.025 PINNED from the sweep — paired with 75 eV it measured 10.25 A of
 # skin, a 3.25 A margin over the threshold, the largest on the grid.
 # Raising it to 0.030 buys nothing (depth saturates at 10.26 A) while
@@ -199,9 +187,9 @@ required_activated_depth = { value = 7.0, unit = "angstrom" }
 # vectors, MANUFACTURED by `sabsim bootstrap generate` under the same
 # universal model this project runs (§4.8 part 2) — is found PER
 # SURFACE in this project's prep folders, named by the wafer's
-# `material` label: `prep_surf1_si/environment_library.toml` for
-# wafer_a `material = "Si"`, `prep_surf2_sio2/...` for wafer_b
-# (ARCHITECTURE §1). The loader refuses a library built under another
+# `material` label (ARCHITECTURE §1):
+@LIBRARY_NOTE@
+# The loader refuses a library built under another
 # model or engine, or lacking the wafer's face, and warns/refuses if the
 # press temperature is above the warm runs it was measured at.
 # Per-impact cascade timing lives in PROTOCOL, not numerical (§2): these
@@ -246,7 +234,8 @@ pressure    = { value = 1.0,   unit = "MPa" }   # ~1 MPa (ratified)
 temperature = { value = 300.0, unit = "K" }     # room temperature (SAB)
 duration    = { value = 150.0, unit = "ps" }    # hold; ~100-200 ps band
 # Displacement-mode target: unused while mode = "load", but written so
-# the Si/Si reference's displacement cross-check (§5.9) has its value.
+# a same-material reference pair's displacement cross-check (§5.9)
+# has its value.
 depth        = { value = 5.0, unit = "angstrom" }
 # Grip approach/ramp speed, bounded by the no-impact guard (§9.3) so the
 # close is a press, not a collision.
@@ -301,7 +290,7 @@ minimum_cell_width   = { value = 12.0, unit = "angstrom" }
 target_footprint_area = { value = 1475.0, unit = "angstrom^2" }
 # ^ dose-spreading footprint (§3.6): the matched cell is tiled up to
 #   ~this in-plane area so no single impact dominates the areal dose.
-#   1475 Å² ~ the pinned 38.4 Å Si cell (the old 10x10). A convergence
+#   1475 Å² ~ the 38.4 Å silicon cell of the §3.6 sweep. A convergence
 #   knob, NOT a limit — raise it for more impact statistics.
 # --- Slab sizing (§2.5): thickness is a CRITERION, not a bare constant.
 # A cut slab must keep enough undamaged crystal beneath the damaged skin

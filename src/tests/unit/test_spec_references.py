@@ -9,7 +9,6 @@ that is not there are all files that parse cleanly and then die partway
 through a run, after the node-hours that reached them were spent.
 """
 
-import os
 from dataclasses import replace
 
 import pytest
@@ -23,9 +22,9 @@ from sabsim.spec.references import (
     resolve_crystal_file,
 )
 
-_TEMPLATE_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "project_spec.toml"))
+from tests.unit.support import PROJECT_TEMPLATE
+
+_TEMPLATE_PATH = PROJECT_TEMPLATE
 
 
 def _template_project():

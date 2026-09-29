@@ -18,11 +18,14 @@ rules, each with a reason a student can follow:
   the person is midway through editing still yields its labels.
 * The pair is NAMED, and required: two labels from the materials
   catalog (``share/catalog/<label>/``, DESIGN §10.11), the one science
-  decision ``init`` asks for. The project file's wafer tables are set
-  from the two entries and each prep folder receives its entry's
-  recipe. An unknown label is refused with the catalog printed, never
-  written with a guessed crystal; a project file that already exists
-  must name the same pair, or ``init`` refuses.
+  decision ``init`` asks for. The project file is WRITTEN FOR that
+  pair (:mod:`sabsim.deploy.project_file`): its description, its
+  ``material_domain``, its wafer tables and every remark that names a
+  material come from the two entries, so nothing in it is left over
+  from another project. Each prep folder receives its entry's recipe.
+  An unknown label is refused with the catalog printed, never written
+  with a guessed crystal; a project file that already exists must name
+  the same pair, or ``init`` refuses.
 
 It submits nothing and runs nothing: the environment library is a
 compute-node job and ``prepare`` reads files the person is expected to
@@ -44,7 +47,19 @@ from sabsim.catalog import (
     MaterialEntry,
     lookup_entry,
 )
+from sabsim.deploy.project_file import (
+    InitError,
+    project_file_notices,
+    recipe_termination,
+    render_project_file,
+)
 from sabsim.spec.records import stage_folder_names
+
+# `InitError` and `recipe_termination` live beside the project-file
+# writer that raises and uses them; they are named here so a caller who
+# has always imported them from this module still finds them.
+__all__ = ["InitError", "InitReport", "init_project",
+           "recipe_termination"]
 
 # The tracked templates travel with the repository, three levels above
 # this module (src/sabsim/deploy/ -> the clone root), exactly as the
@@ -61,86 +76,6 @@ _GENERATION_PLAN_PROJECT_LINE = re.compile(
     r"^(project\s*=\s*)\"[^\"]*\"", re.MULTILINE)
 
 
-class InitError(RuntimeError):
-    """``init`` could not make a usable folder; the message says why."""
-
-
-# The five lines of a wafer table `init` sets from a catalog entry.
-# Matched at line start within the table, so a commented example in
-# the template's prose never counts; the WHOLE line is replaced, so a
-# trailing remark about the template's own value cannot outlive it.
-_WAFER_LINE = {
-    key: re.compile(rf"^({key}\s*=\s*)[^\n]*$", re.MULTILINE)
-    for key in ("material", "cif", "structure", "face",
-                "termination_index")
-}
-_TABLE_HEADER = re.compile(r"^\[[^\]]+\]\s*$", re.MULTILINE)
-
-
-def recipe_termination(entry: MaterialEntry) -> str:
-    """The termination the entry's recipe names, as a TOML literal.
-
-    The wafer is cut on the same termination as the clean surface its
-    environment library is built from (DESIGN §2.5), so the value is
-    read from the recipe's surface of the entry's own face. One still
-    marked to be decided is copied as it is — the project loader
-    refuses it by name — rather than settled here by guess.
-    """
-    try:
-        recipe = tomllib.loads(entry.recipe.read_text())
-    except tomllib.TOMLDecodeError as broken:
-        raise InitError(f"catalog recipe {entry.recipe} is not "
-                        f"readable TOML ({broken})") from None
-    surfaces = recipe.get("collection1", {}).get("surfaces", [])
-    for surface in surfaces:
-        if tuple(surface.get("face", ())) != entry.face:
-            continue
-        termination = surface.get("termination_index")
-        if isinstance(termination, str):
-            return f'"{termination}"'
-        if isinstance(termination, int):
-            return str(termination)
-    face = "".join(str(index) for index in entry.face)
-    raise InitError(
-        f"catalog recipe {entry.recipe} declares no clean ({face}) "
-        f"surface with a termination_index; the wafer's termination "
-        f"is copied from it (DESIGN §2.5)")
-
-
-def set_wafer_table(text: str, table_name: str,
-                    entry: MaterialEntry) -> str:
-    """Rewrite one ``[wafer_x]`` table's five values in the template text.
-
-    Works on the text, not a parsed tree, so every comment the template
-    carries survives — the comments are the documentation a student
-    reads. Only the lines between this table's header and the next
-    header are touched.
-    """
-    header = re.search(rf"^\[{table_name}\]\s*$", text, re.MULTILINE)
-    if header is None:
-        raise InitError(f"the project template has no [{table_name}] "
-                        f"table to set")
-    following = _TABLE_HEADER.search(text, header.end())
-    end = following.start() if following else len(text)
-    block = text[header.end():end]
-    values = {
-        "material": f'"{entry.label}"',
-        "cif": f'"{entry.cif_repository_path}"',
-        # The project file calls the phase word `structure`.
-        "structure": f'"{entry.phase}"',
-        "face": "[" + ", ".join(str(index) for index in entry.face) + "]",
-        "termination_index": recipe_termination(entry),
-    }
-    for key, pattern in _WAFER_LINE.items():
-        block, count = pattern.subn(
-            lambda match, value=values[key]: f"{match.group(1)}{value}",
-            block, count=1)
-        if count != 1:
-            raise InitError(f"the project template's [{table_name}] "
-                            f"table has no '{key}' line to set")
-    return text[:header.end()] + block + text[end:]
-
-
 @dataclass
 class InitReport:
     """What one ``init`` run did, for the CLI to print (PSEUDOCODE §14.7).
@@ -148,7 +83,8 @@ class InitReport:
     ``written`` and ``kept`` hold paths relative to the project folder
     so the printout reads like a directory listing; ``notices`` carries
     the things the person must know that no path can say, such as a
-    material that received the silicon recipe as a stand-in.
+    termination that is still to decide or activation numbers that
+    were measured on another material.
     """
 
     project_directory: Path
@@ -164,7 +100,7 @@ def init_project(project_directory: str | os.PathLike,
     Runs on the login node and touches nothing that already exists.
     ``materials`` names the pair — the science decision, required —
     as two catalog labels for wafer A and wafer B. A new project file
-    has its wafer tables set from the two entries; one that already
+    is written for that pair from the two entries; one that already
     exists must name the same pair, or this refuses, because the file
     is the record. Returns the report of what was written, what was
     kept, and what the person should be told. Raises
@@ -193,19 +129,17 @@ def init_project(project_directory: str | os.PathLike,
                 f"{named[1]}, not {wanted[0]} / {wanted[1]}; the file is "
                 f"the record — run init with its pair, or move it aside")
 
-    def edit(text: str) -> str:
-        text = set_wafer_table(text, "wafer_a", entries[0])
-        return set_wafer_table(text, "wafer_b", entries[1])
+    def written_for_this_pair(template_text: str) -> str:
+        return render_project_file(template_text, entries,
+                                   project_directory)
+    newly_written = not project_file.exists()
     _copy_if_missing(TEMPLATE_ROOT / "project_spec.toml", project_file,
-                     report, edit=edit)
-    for table_name, entry in (("wafer_a", entries[0]),
-                              ("wafer_b", entries[1])):
-        if recipe_termination(entry).startswith('"'):
-            report.notices.append(
-                f"{PROJECT_FILENAME} [{table_name}] termination_index "
-                f"is still to decide: the face of {entry.label} has "
-                f"more than one termination, and its recipe's opening "
-                f"comment says what each ends on")
+                     report, edit=written_for_this_pair)
+    # The notices describe the file `init` wrote. One that was already
+    # there is the person's own by now, and is not second-guessed.
+    if newly_written:
+        report.notices.extend(
+            project_file_notices(entries, PROJECT_FILENAME))
     _copy_if_missing(TEMPLATE_ROOT / "deployment_rc.toml",
                      project_directory / DEPLOYMENT_FILENAME, report)
 
@@ -306,8 +240,8 @@ def _copy_if_missing(template: Path, target: Path, report: InitReport,
     """Copy a template to its target unless the target already exists.
 
     ``edit``, when given, transforms the template text on the way (the
-    wafer tables set from the catalog); it is never applied to a
-    file that is already there.
+    project file written for its pair); it is never applied to a file
+    that is already there.
     """
     if target.exists():
         report.kept.append(target.name)

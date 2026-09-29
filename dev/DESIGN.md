@@ -1522,19 +1522,20 @@ threshold — so it is a **protocol knob of `sabsim.toml`**,
 there. (Until 2026-08-28 it sat in the reference file as `[depth]
 target_angstrom`; the first run of the heal-in-activation flow, LEDGER T-33,
 halted a 50 eV demonstration on the production 7 Å and made the mismatch
-plain.) The same number is the depth the §2.5 thickness floor builds for. For
-v1 the material references are **documented STAND-INS anchored to the
+plain.) The same number is the depth the §2.5 thickness floor builds for.
+For v1 the material references are **documented STAND-INS anchored to the
 literature** (for amorphous silicon: a first g(r) peak near 2.35 Å, a nearly
-four-fold network with a few percent three- and five-coordinated defects, and a
-five-/six-/seven-ring population), each flagged as a stand-in; the production
-template's depth requirement is the **measured** 7 Å re-pinned in §3.6 from
-this pipeline's own sweep, pending the work-of-separation study that will
-derive it from the bond instead. The real anchors — a DFT / experimental g(r),
-and the group's existing amorphous-silicon continuous-random-network model —
-replace them as they are prepared; a large real reference need not bloat the
-repository, since the reference-data resolver can also read it from the
-deployment `SABSIM_SHARE` root (`ARCHITECTURE.md` §4.1). Pinning these numbers
-and curves is a §3.6 / STRUCTURAL-1b DESIGN follow-on.
+four-fold network with a few percent three- and five-coordinated defects,
+and a five-/six-/seven-ring population), each flagged as a stand-in; the
+production template's depth requirement is the **measured** 7 Å re-pinned in
+§3.6 from this pipeline's own sweep, pending the work-of-separation study
+that will derive it from the bond instead. The real anchors — a DFT /
+experimental g(r), and the group's existing amorphous-silicon
+continuous-random-network model — replace them as they are prepared; a large
+real reference need not bloat the repository, since the reference-data
+resolver can also read it from the deployment `SABSIM_SHARE` root
+(`ARCHITECTURE.md` §4.1). Pinning these numbers and curves is a §3.6 /
+STRUCTURAL-1b DESIGN follow-on.
 
 This is the "did the surface activate, and is its structure sane?" check
 that feeds the potential-quality gate (§7; STRUCTURAL 1b).
@@ -4712,8 +4713,8 @@ sabsim init si_sio2 si_diamond_100 sio2_quartz_001
 ```
 
 The two labels are MATERIALS CATALOG entries (§10.11). `init` writes
-the template project file and sets its two wafer tables from the two
-entries — the label as the wafer's `material`, the entry's crystal
+the project file FOR that pair and sets its two wafer tables from the
+two entries — the label as the wafer's `material`, the entry's crystal
 file, structure name and bonding face, and the termination its
 recipe's surface of that face names (§2.5) — so a person never types a
 crystal path for a material the catalog holds; the labels also name
@@ -4723,6 +4724,58 @@ If the project file already exists the pair given must match the one
 it names, or `init` refuses: the file, not the command line, is the
 record. Each prep folder receives its entry's `recipe.toml` with the
 generation plan's project line rewritten to this project.
+
+**The project file is written for its pair, not copied (2026-09-29).**
+The template `share/templates/project_spec.toml` names NO material.
+Until this date it was a worked example of silicon on silica, and
+`init` changed only the five lines of each wafer table — so a project
+of lithium niobate on gallium nitride was handed a description of
+"alpha-quartz SiO2 to Si(100)", the regime `silicon-and-silica`, a
+paragraph explaining why quartz stands in for cristobalite, and folder
+names of a silicon project. A file that talks about another project's
+materials cannot be trusted line by line, and the rule that replaces
+it is one a student can check by eye: **if a line of a generated
+`sabsim.toml` names a material, the material is one of this pair's —
+or the line says that a number was MEASURED on another material and is
+only a starting value here.** Every such line is a marker in the
+template (`@DESCRIPTION@`, `@MATERIAL_DOMAIN@`, `@WAFER_A_NOTE@`, ...)
+that `init` fills from the two catalog entries:
+
+- **`description`** is composed from the two materials, each said as
+  formula, phase and face: "Cold surface-activated bonding of Si
+  diamond (100) (wafer A) to SiO2 quartz (001) (wafer B)"; a
+  same-material pair reads "... of two Si diamond (100) wafers". It is
+  a start, and the person rewrites it to say what the project is FOR.
+- **`material_domain`** is taken from the two recipes' `[recipe]
+  domain` (§4.8). When both declare the same regime that word is the
+  pair's; when they differ BOTH are written, wafer A's first, joined
+  by " + " (`diamond-cubic + silicon-and-silica`), because the pair's
+  regime must span both wafers and the interface between them. A
+  recipe whose regime is still marked "DECIDE" leaves the pair's
+  marked the same, and the project loader refuses the file by name
+  until a person has chosen the word — never a guess.
+- **Each wafer table opens with where it came from**: the catalog
+  entry, the material in words, and the entry's `[provenance]` table
+  written out, so the source of the crystal file travels with the
+  project.
+- **The folder names in the remarks are this project's own** — the
+  project folder, the four stage folders, and where each surface's
+  environment library is looked for.
+- **The activation numbers say where they were measured.** The energy,
+  dose, required depth and per-impact durations of the template were
+  pinned by one sweep on one material, the catalog entry
+  `si_diamond_100` (§3.6). For a wafer of any other material the file
+  says, above the numbers, that they are STARTING values to be
+  re-pinned by a sweep of that material, and `init` prints the same as
+  a notice. The numbers themselves are not changed: no rule derives a
+  dose for a material that has not been swept.
+
+What remains about silicon in a generated file is of that last kind —
+a remark that a number, or the universal model's screening, was
+measured on silicon — which is true whatever is being bonded. `init`
+refuses to write a file that still holds a marker, so a template and a
+writer that have drifted apart are caught at once rather than read by
+a student.
 
 What `init` does NOT do is as deliberate. It does not run the
 bootstrap (a compute-node job), does not write the environment

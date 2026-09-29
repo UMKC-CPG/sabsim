@@ -22,11 +22,12 @@ from sabsim.spec import (
     stage_folders,
 )
 
-# The real project file the §1.4 generator emits — the happy-path
-# fixture and the starting point every negative case mutates.
-_TEMPLATE_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "project_spec.toml"))
+# The real project file the §1.4 generator emits for a Si/SiO2 pair —
+# the happy-path fixture and the starting point every negative case
+# mutates (written from the shipped template, tests/unit/support.py).
+from tests.unit.support import FIXTURE_DESCRIPTION, PROJECT_TEMPLATE
+
+_TEMPLATE_PATH = PROJECT_TEMPLATE
 
 
 def _template_text() -> str:
@@ -80,7 +81,7 @@ def test_a_same_material_pair_still_has_two_prep_folders(tmp_path):
     """Si/Si: surface 1 and surface 2 are prepared apart, each with its
     own seed, so `prep_surf1_si/` and `prep_surf2_si/` both exist."""
     text = _template_text().replace(
-        '[wafer_b]\nmaterial  = "SiO2"', '[wafer_b]\nmaterial  = "Si"', 1)
+        'material  = "SiO2"', 'material  = "Si"', 1)
     text = text.replace(
         'cif       = "share/catalog/sio2_quartz_001/sio2_alpha_quartz.cif"',
         'cif       = "share/catalog/si_diamond_100/si_diamond.cif"', 1)

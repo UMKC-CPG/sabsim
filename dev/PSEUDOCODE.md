@@ -5029,9 +5029,10 @@ large-by-reference."]`
 ### 14.7 init -- the project-folder generator (`DESIGN.md` §10.9)
 
 The §1.4 generator as a command. It writes what is MISSING from a
-project folder and touches nothing that is there; it reads the project
-file it wrote to learn the pair's labels; it gives each surface the
-recipe template of ITS material. It submits nothing and runs nothing.
+project folder and touches nothing that is there; it writes the
+project file FOR the pair it is given, so no line of it is about
+another project's materials; it gives each surface the recipe of ITS
+material. It submits nothing and runs nothing.
 
 ```
 constant TEMPLATE_ROOT     = <repository>/share/templates
@@ -5061,11 +5062,12 @@ function init_project(project_folder, label_a, label_b) -> InitReport:
         require labels in it == (label_a, label_b)
     copy_if_missing(TEMPLATE_ROOT/project_spec.toml,
                     project_folder/sabsim.toml,
-                    edit=set_wafer_tables(entry_a, entry_b))
-                    # material = label, cif, structure, face, and
-                    # termination_index = that of the entry recipe's
-                    # surface of this face ("DECIDE" copied as it
-                    # is); the template's comments kept
+                    edit=render_project_file(entry_a, entry_b,
+                                             project_folder))
+                    # the template names NO material; every marker
+                    # in it is filled for this pair (below)
+    if sabsim.toml was written by this run:
+        notices += project_file_notices(entry_a, entry_b)
     copy_if_missing(TEMPLATE_ROOT/deployment_rc.toml,
                     project_folder/deployment.toml)
 
@@ -5085,6 +5087,52 @@ function init_project(project_folder, label_a, label_b) -> InitReport:
             write(target, text)
 
     return InitReport(written, kept, notices)
+
+constant SWEEP_MATERIAL = "si_diamond_100"
+    # the entry the template's activation numbers were measured on
+    # (DESIGN §3.6)
+
+function material_name(entry) -> string:
+    # formula, phase, face: "SiO2 quartz (001)"
+    return entry.formula + " " + entry.phase + " (" + digits(face) + ")"
+
+function pair_domain(entry_a, entry_b) -> string:
+    # from the two recipes' [recipe] domain (DESIGN §4.8, §10.9)
+    a, b = recipe(entry_a).domain, recipe(entry_b).domain
+    if a == "DECIDE" or b == "DECIDE": return "DECIDE"   # loader
+                                                         # refuses it
+    if a == b: return a
+    return a + " + " + b        # both, wafer A's first: the regime
+                                # spans both and the interface
+
+function render_project_file(template, entry_a, entry_b,
+                             project_folder) -> text:
+    folders = stage_folder_names(entry_a.label, entry_b.label)
+    fill @PAIR_TITLE@        <- the two materials, in words
+    fill @FOLDERS_NOTE@      <- project_folder's name and the four
+                                stage folders of THIS pair
+    fill @DESCRIPTION@       <- "Cold surface-activated bonding of
+                                <A> (wafer A) to <B> (wafer B)", or
+                                "... of two <A> wafers"; folded over
+                                lines when it is too long for one
+    fill @DOMAIN_NOTE@       <- which regime each recipe declares
+    fill @MATERIAL_DOMAIN@   <- pair_domain(entry_a, entry_b)
+    for (X, entry) in [(A, entry_a), (B, entry_b)]:
+        fill @WAFER_X_NOTE@  <- the catalog entry and its provenance
+        fill @WAFER_X_MATERIAL@, _CIF@, _STRUCTURE@, _FACE@
+        fill @WAFER_X_TERMINATION@ <- that of the entry recipe's
+                                surface of this face ("DECIDE"
+                                copied as it is)
+    fill @ACTIVATION_NOTE@   <- measured on SWEEP_MATERIAL; for any
+                                other wafer, STARTING values
+    fill @LIBRARY_NOTE@      <- folders.prep_surf1 / prep_surf2
+    refuse if a marker the pair has a value for is missing from the
+        template, or if any @MARKER@ is left in the text
+    return text
+
+function project_file_notices(entry_a, entry_b) -> list[str]:
+    # one per termination still to decide, one if the pair's regime
+    # is still to decide, one if either wafer is not SWEEP_MATERIAL
 ```
 
 ### 14.9 catalog -- list and add (`DESIGN.md` §10.11)

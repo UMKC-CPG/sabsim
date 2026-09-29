@@ -98,18 +98,60 @@ def stand_in_force_model(type_map: dict) -> ForceModel:
 # ---------------------------------------------------------------------
 # Pair fixtures from the project-file template (revised 2026-08-30): a
 # project holds ONE pair, so tests that need a real PairSpecification
-# load the template's Si/SiO2 pair, or derive the same-material Si/Si
-# pair from it — the reference pair a person would run as its own
-# project (DESIGN.md §1.1).
+# load a Si/SiO2 project file, or derive the same-material Si/Si pair
+# from it — the reference pair a person would run as its own project
+# (DESIGN.md §1.1).
+#
+# The template names no material (DESIGN §10.9): it is filled in for a
+# pair by the same writer `sabsim init` uses. So the fixture is WRITTEN,
+# once per test session, from the shipped template and the two shipped
+# catalog entries — every knob the tests read is the template's own —
+# and then given the short hand-typed labels "Si" and "SiO2" and the
+# one-word regime the tests were written against, which is what a
+# person who edited their project file would have.
 # ---------------------------------------------------------------------
 
+import atexit as _atexit
 import os as _os
 import shutil as _shutil
+import tempfile as _tempfile
 from dataclasses import replace as _replace
+from pathlib import Path as _Path
 
-PROJECT_TEMPLATE = _os.path.abspath(_os.path.join(
-    _os.path.dirname(__file__),
-    "..", "..", "..", "share", "templates", "project_spec.toml"))
+FIXTURE_PAIR = ("si_diamond_100", "sio2_quartz_001")
+FIXTURE_DESCRIPTION = (
+    "Cold surface-activated bonding of Si diamond (100) (wafer A) "
+    "to SiO2 quartz (001) (wafer B)")
+# What the fixture changes in the file `init` would write, each line
+# exactly once: the two labels and the regime, to hand-typed ones.
+_FIXTURE_EDITS = (
+    ('material  = "si_diamond_100"', 'material  = "Si"'),
+    ('material  = "sio2_quartz_001"', 'material  = "SiO2"'),
+    ('material_domain = "diamond-cubic + silicon-and-silica"',
+     'material_domain = "silicon-and-silica"'),
+)
+
+
+def write_fixture_project() -> str:
+    """Write the Si/SiO2 fixture project file; return its path."""
+    from sabsim.catalog import lookup_entry
+    from sabsim.deploy.init_project import TEMPLATE_ROOT
+    from sabsim.deploy.project_file import render_project_file
+
+    folder = _Path(_tempfile.mkdtemp(prefix="sabsim_fixture_"))
+    _atexit.register(_shutil.rmtree, folder, ignore_errors=True)
+    entries = tuple(lookup_entry(label) for label in FIXTURE_PAIR)
+    template = (TEMPLATE_ROOT / "project_spec.toml").read_text()
+    text = render_project_file(template, entries, folder)
+    for written, hand_typed in _FIXTURE_EDITS:
+        assert text.count(written) == 1, written
+        text = text.replace(written, hand_typed)
+    path = folder / "project_spec.toml"
+    path.write_text(text)
+    return str(path)
+
+
+PROJECT_TEMPLATE = write_fixture_project()
 
 
 def template_pair():

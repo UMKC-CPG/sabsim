@@ -433,6 +433,13 @@ def _reject_if_not_executable(pair: PairSpecification) -> None:
             f"{context}: material_domain is empty — a pair must name "
             f"the structural/chemical regime its force model describes, "
             f"because the species alone cannot select one (§4.8)")
+    if _UNDECIDED_MARKER in pair.material_domain:
+        raise SpecificationError(
+            f"{context}: material_domain is still marked "
+            f"\"{_UNDECIDED_MARKER}\". `sabsim init` takes it from the "
+            f"two wafers' recipes, and one of them names no regime "
+            f"yet; choose the word in that recipe's [recipe] domain, "
+            f"then write it here (DESIGN §4.8, §10.9)")
 
 
 # ---------------------------------------------------------------------
