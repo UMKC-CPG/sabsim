@@ -5,8 +5,8 @@ The 2026-07-21 sweep established that ENERGY sets the depth the damage
 can REACH (it is the ion range) while DOSE only fills in disorder once
 that range is saturated. Tier 1 exploits that: it spends its budget on
 MANY ENERGIES at ONE impact and ONE seed rather than on full dose rows,
-which is what brackets the operating energy. Seeds come later, on the
-chosen point only (Paul, 2026-08-23).
+which is what brackets the operating energy. Seeds come later, on the chosen
+point only.
 
 Each array task runs ONE energy through the mainline pipeline call
 (`activate_one_half`), so this is the real cascade path and not a

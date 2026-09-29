@@ -33,9 +33,9 @@
 # travel with values ({ value, unit }). Paths may use the location
 # roots ($SABSIM_SHARE ...), expanded by the loader (ARCHITECTURE §4.1).
 #
-# CHEAP FIRST (Paul, 2026-08-26): every count and tolerance here is the
-# smallest that exercises the whole process end to end. The cost is
-# learned by spending; accuracy is dialled up afterwards.
+# CHEAP FIRST: every count and tolerance here is the smallest that exercises
+# the whole process end to end. The cost is learned by spending; accuracy is
+# dialled up afterwards.
 # =====================================================================
 
 [recipe]
@@ -208,11 +208,10 @@ seed            = 22
 # dumps. Families 7-11 come from the activate dumps (7),
 # the press dump (8-10: initial / relaxed / pressed thirds of the press
 # record) and the pull dumps (11). Interface frames are cut to the
-# §6.4 sub-cell: the activated skins plus this many crystalline layers
-# under each (Paul, 2026-08-26: the surface atoms are what training is
-# for). `sabsim init` rewrites the `project` line below to the
-# project folder it is writing; by hand, point it at the sabsim.toml
-# two levels up from this recipe.
+# §6.4 sub-cell: the activated skins plus this many crystalline layers under
+# each (the surface atoms are what training is for). `sabsim init` rewrites
+# the `project` line below to the project folder it is writing; by hand,
+# point it at the sabsim.toml two levels up from this recipe.
 # ---------------------------------------------------------------------
 [generation_plan]
 project                     = "../sabsim.toml"

@@ -2,19 +2,18 @@
 
 A project is ONE wafer pair, and its work is prepared and run as FOUR
 jobs — one per STAGE FOLDER of the project (ARCHITECTURE.md §1, revised
-2026-08-30 (Paul)): ``prep_surf1`` and ``prep_surf2`` prepare the two
-surfaces independently (each builds its own half in the shared cell,
-bombards it, heals it, and gates it), ``bond`` brings the two halves
-together and presses, settles and pulls them apart, and ``analysis``
-reduces the pull into the measure vector. The real safeguard against
-the two deployment commands drifting apart is that this set of jobs is
-defined ONCE, here, as a small ordered table. Both the ``run``
-selector's flags (§14.3) and the ``prepare`` writer (§14.4) read from
-it, so the truth about WHAT the jobs are, IN WHAT ORDER they run, and
-WHICH may run side by side is never written twice. Inserting a fifth
-kind later (say a relax between the preps and bond) is one entry here;
-the flags, the written filenames, and the guided index all follow
-(DESIGN.md §10.3).
+2026-08-30): ``prep_surf1`` and ``prep_surf2`` prepare the two surfaces
+independently (each builds its own half in the shared cell, bombards it,
+heals it, and gates it), ``bond`` brings the two halves together and
+presses, settles and pulls them apart, and ``analysis`` reduces the pull
+into the measure vector. The real safeguard against the two deployment
+commands drifting apart is that this set of jobs is defined ONCE, here, as a
+small ordered table. Both the ``run`` selector's flags (§14.3) and the
+``prepare`` writer (§14.4) read from it, so the truth about WHAT the jobs
+are, IN WHAT ORDER they run, and WHICH may run side by side is never written
+twice. Inserting a fifth kind later (say a relax between the preps and bond)
+is one entry here; the flags, the written filenames, and the guided index
+all follow (DESIGN.md §10.3).
 
 Each entry pins the CONTIGUOUS **sub-stage** of the §1 pair chain a job
 owns — a run of adjacent pipeline stages (its ``stages`` list): a

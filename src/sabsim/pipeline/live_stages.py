@@ -330,8 +330,8 @@ def box_repeats(base_cell, target_area: float,
 
     The coincidence match fixes the SHAPE of the shared cell; the box
     the simulation runs in is that cell repeated a whole number of
-    times along each of its two edges. Two requirements set the two
-    numbers (DESIGN §2.4, revised 2026-09-28, Paul):
+    times along each of its two edges. Two requirements set the two numbers
+    (DESIGN §2.4, revised 2026-09-28):
 
     * the box must be at least ``minimum_width`` across in each
       direction — narrower than twice the force model's interaction
@@ -785,16 +785,16 @@ def activate_one_surface_live(
         comm=None) -> ActivatedHalf:
     """Activate, heal and gate ONE surface — a prep job's stage (§10.1).
 
-    Revised 2026-08-30 (Paul): each surface is prepared by its own prep
-    job in its own folder, so the live activation stage works one half
-    at a time. The half's seed is derived from the pair's one master
-    seed by its wafer tag (surface 1 takes the first of the two seeds,
-    surface 2 the second), so the two surfaces of a same-material pair
-    are DIFFERENT realizations, and either prep job reproduces its half
-    alone. The surface's environment library is loaded from its prep
-    folder and checked before any cascade; a temperature warning, if
-    any, is said out loud. Returns the :class:`ActivatedHalf` the prep
-    job hands bond, carrying the shared cell the half was cut on.
+    Revised 2026-08-30: each surface is prepared by its own prep job in its
+    own folder, so the live activation stage works one half at a time. The
+    half's seed is derived from the pair's one master seed by its wafer tag
+    (surface 1 takes the first of the two seeds, surface 2 the second), so
+    the two surfaces of a same-material pair are DIFFERENT realizations, and
+    either prep job reproduces its half alone. The surface's environment
+    library is loaded from its prep folder and checked before any cascade; a
+    temperature warning, if any, is said out loud. Returns the
+    :class:`ActivatedHalf` the prep job hands bond, carrying the shared cell
+    the half was cut on.
     """
     wafer = _wafer_of(pair, handle)
     half_seeds = derive_seeds(pair.ensemble.master_seed, 2)

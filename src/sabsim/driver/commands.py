@@ -515,10 +515,10 @@ def heal_surface_commands(
     atoms and small fragments standing proud of it; those are what mix
     across the interface at the first touch of a press (the 50 eV demo
     press, 2026-08-26). So, after the projectile strip, the half is
-    RE-EQUILIBRATED under the same universal model that bombarded it —
-    per half, in vacuum, on the same engine (revised 2026-08-28, Paul):
-    the project's ``[protocol.reanneal]`` schedule holds every mobile atom
-    at ``hold_temperature`` for ``hold_duration``, cools it to the press
+    RE-EQUILIBRATED under the same universal model that bombarded it — per
+    half, in vacuum, on the same engine (revised 2026-08-28): the project's
+    ``[protocol.reanneal]`` schedule holds every mobile atom at
+    ``hold_temperature`` for ``hold_duration``, cools it to the press
     temperature over the same span, and THEN a short minimisation drops
     the slab into a nearby 0 K minimum (PSEUDOCODE §9.7,
     ``anneal_then_minimize``). The frozen base keeps its ``setforce``

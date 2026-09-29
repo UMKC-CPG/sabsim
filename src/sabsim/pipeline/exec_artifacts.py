@@ -178,7 +178,7 @@ class Verdict:
 class ActivatedSlabs:
     """Both HEALED slabs and the §3.5 verdict for each (§10.1).
 
-    Revised 2026-08-28 (Paul): each half is cascaded, healed and GATED in
+    Revised 2026-08-28: each half is cascaded, healed and GATED in
     its own activation session (DESIGN.md §3.4/§3.5), so the verdicts
     ride this seam again — the ACTIVATED_SLABS_CONTRACT checks that both
     slabs are present AND both verdicts passed, and a failure halts the
@@ -199,15 +199,15 @@ class ActivatedSlabs:
 class ActivatedHalf:
     """ONE healed, gated half — a prep job's deliverable (§14.6).
 
-    Revised 2026-08-30 (Paul): each surface of the pair is prepared by
-    its own job, in its own ``prep_surfN_<label>/`` folder, so the
-    activation stage yields one half at a time. Besides the healed
-    :class:`Slab` and its §3.5 verdict, the record carries what the bond
-    job cannot re-derive: WHICH wafer this is (``wafer_tag`` — bottom A
-    or top B, the assembly invariant of DESIGN §2.6), the SHARED CELL
-    the half was built in (so bond can refuse two halves that were not
-    built for each other), and the id of the run that made it (so the
-    bulky files under ``intermediate/`` can be found again).
+    Revised 2026-08-30: each surface of the pair is prepared by its own job,
+    in its own ``prep_surfN_<label>/`` folder, so the activation stage
+    yields one half at a time. Besides the healed :class:`Slab` and its §3.5
+    verdict, the record carries what the bond job cannot re-derive: WHICH
+    wafer this is (``wafer_tag`` — bottom A or top B, the assembly invariant
+    of DESIGN §2.6), the SHARED CELL the half was built in (so bond can
+    refuse two halves that were not built for each other), and the id of the
+    run that made it (so the bulky files under ``intermediate/`` can be
+    found again).
     """
 
     slab: Slab
@@ -366,11 +366,10 @@ class PairResult:
 class ProjectReport:
     """The whole project's output: ONE pair's report (§1).
 
-    A project holds exactly one pair (revised 2026-08-30, Paul), so its
-    report is that pair's result plus the project's own description and
-    the pair's label. There is no relation layer: a comparison between
-    two pairs is made by the person from two projects' summaries
-    (DESIGN.md §1.1).
+    A project holds exactly one pair (revised 2026-08-30), so its report is
+    that pair's result plus the project's own description and the pair's
+    label. There is no relation layer: a comparison between two pairs is
+    made by the person from two projects' summaries (DESIGN.md §1.1).
     """
 
     description: str

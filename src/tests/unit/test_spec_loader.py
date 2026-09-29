@@ -58,8 +58,8 @@ def test_template_loads_into_a_project_holding_one_pair():
     project = load_and_validate_project(_TEMPLATE_PATH)
 
     assert isinstance(project, Project)
-    assert project.description.startswith("Cold SAB")
-    # ONE pair per project (Paul, 2026-08-30): the dissimilar bond. The
+    assert project.description == FIXTURE_DESCRIPTION
+    # ONE pair per project (ARCHITECTURE §1): the dissimilar bond. The
     # Si/Si reference is a separate project the person runs.
     assert project.pair.pair_label == "si_sio2"
     assert project.project_directory == str(

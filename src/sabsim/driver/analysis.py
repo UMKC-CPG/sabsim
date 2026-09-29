@@ -202,15 +202,14 @@ def interface_geometry(
         smoothing_length: float = 3.0) -> InterfaceGeometry:
     """The opening and the interface plane, GEOMETRIC and label-free.
 
-    DESIGN §2.6 (revised 2026-08-30, Paul, after LEDGER T-40). Once the
-    bodies have touched, an atom no longer belongs to the wafer it was
-    built in: a pull tears material off one face and leaves it on the
-    other (sixty atoms in T-40). Splitting the frame by wafer label and
-    asking for "the upper wafer's bottom surface" then lands on the
-    transferred layer — an opening of ~1 Å is read across a 60 Å vacuum,
-    the plane sits inside that layer, and its internal bonds count as
-    bridges forever, so the pull never stops. This function asks the
-    question of ALL atoms at once instead:
+    DESIGN §2.6 (revised 2026-08-30, after LEDGER T-40). Once the bodies
+    have touched, an atom no longer belongs to the wafer it was built in: a
+    pull tears material off one face and leaves it on the other (sixty atoms
+    in T-40). Splitting the frame by wafer label and asking for "the upper
+    wafer's bottom surface" then lands on the transferred layer — an opening
+    of ~1 Å is read across a 60 Å vacuum, the plane sits inside that layer,
+    and its internal bonds count as bridges forever, so the pull never
+    stops. This function asks the question of ALL atoms at once instead:
 
     * the smoothed number-density profile along z is thresholded at
       ``interior_fraction`` of its peak — the same half-of-bulk rule

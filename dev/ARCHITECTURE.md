@@ -41,7 +41,7 @@ A PROJECT FOLDER holds ONE WAFER PAIR and everything that pair needs,
 so that a project is self-contained and can be copied, archived and
 reproduced as one thing (`VISION.md`). Its name (e.g. `jobs/si_sio2/`)
 is the person's own label and means nothing to the program. Decided
-2026-08-30 (Paul), replacing the earlier "study of members" folder of
+2026-08-30, replacing the earlier "study of members" folder of
 2026-08-29 and settling the layout for good:
 
 ```
@@ -77,7 +77,7 @@ missing (DESIGN §10.9, PSEUDOCODE §14.7). A catalog label is
 `<formula>_<phase>_<face>` lower-cased — `si_diamond_100`,
 `sio2_quartz_001` — because the label names the prep folder and lands
 in every permanent record, so it must say what it is without a table
-(Paul, 2026-09-23; the argument Imago makes against numbered
+(2026-09-23; the argument Imago makes against numbered
 settings). `sabsim catalog list [<formula>]` shows the entries;
 `sabsim catalog add` makes one (DESIGN §10.11). One level up, `sabsim
 setup` checks the install and writes the shell rc (DESIGN §10.10).
@@ -225,7 +225,7 @@ is.
   editable place, apart from the fixed machinery. `DESIGN.md` §1
   refines this in two ways. First, the configured object is a **pair**
   — two wafers under one protocol — and the project file describes
-  exactly one (revised 2026-08-30 (Paul)). An earlier design made the
+  exactly one (revised 2026-08-30). An earlier design made the
   object a "study": a set of pairs plus the *relations* among them,
   because the bond-outcome criterion is a ratio between two pairs and
   belongs to neither one alone. That machinery is retired. A reference
@@ -372,7 +372,7 @@ is.
   potential-quality bullets). Per STRUCTURAL 1b the violent Ar cascade
   runs on a UNIVERSAL foundation MLIP + ZBL, and the gentle heal of
   each half plus its §3.5 gate follow in the SAME session (revised
-  2026-08-28 (Paul): one universal model runs cascade and heal, so the
+  2026-08-28: one universal model runs cascade and heal, so the
   heal no longer waits for the bond job); the per-pair committee takes
   over only for steps 6-7. Surface activation is designed as a
   pluggable **mechanism** — energetic-particle bombardment (an ion or
@@ -380,7 +380,7 @@ is.
   v1's implementation, and the seam leaves room for other methods (e.g.
   plasma) without reworking step 4 (see DESIGN §3).
   **The gate's notion of "crystalline" is a second seam (revised
-  2026-08-29 (Paul), DESIGN §3.5).** The §3.5 gate no longer asks
+  2026-08-29, DESIGN §3.5).** The §3.5 gate no longer asks
   whether an atom has the hand-set neighbour count; it asks whether the
   atom's second-shell **bispectrum** matches any environment in an
   **environment library** of the undamaged material. Two pieces of
@@ -394,7 +394,7 @@ is.
   Whichever is bound, the SAME engine and settings must produce both
   the library and the slab's descriptors, so the binding and its
   settings are recorded IN the library and the gate reads them from
-  there. **Bound 2026-08-29 (Paul, after LEDGER T-35): LAMMPS
+  there. **Bound 2026-08-29 (after LEDGER T-35): LAMMPS
   `compute sna/atom`.** T-35 showed the ML-SNAP package compiled into
   the deepmd bundle's LAMMPS and 30 components per atom identical
   across a perfect crystal; `dscribe` is installed nowhere and Imago's
@@ -413,7 +413,7 @@ is.
   input of each prep job, found PER SURFACE: wafer A's library is
   `<project>/prep_surf1_<a>/environment_library.toml` and wafer B's is
   `<project>/prep_surf2_<b>/environment_library.toml`, the folders
-  named by the wafers' `material` labels (§1; Paul, 2026-08-29 and
+  named by the wafers' `material` labels (§1; 2026-08-29 and
   2026-08-30, after LEDGER T-39 showed one shared library cannot serve
   a dissimilar pair). The project file names no library path. It is NOT in
   `share/activation/`, because that directory holds hand-written,
@@ -491,7 +491,7 @@ is.
   the five the protocol visits: healed activated surface, assembled
   pair at press start, settled zero-load reference, pressed cell,
   pulled cell. Eleven families, all required (settled 2026-08-23;
-  family definitions revised 2026-08-28 (Paul) to the states the built
+  family definitions revised 2026-08-28 to the states the built
   flow actually visits). (2) **Label** a selected subset with VASP,
   **train** the per-pair committee, and **refine** with ALF — rerun the
   protocol, let committee / UDD uncertainty flag configs, VASP-label
@@ -519,7 +519,7 @@ is.
   has molten-regime coverage it makes the glass itself). The bootstrap
   *pattern* is pair-generic — the universal foundation model is the
   generator for every pair. There is NO fallback generator of any kind
-  (Paul, 2026-08-28): a material the named universal model cannot
+  (2026-08-28): a material the named universal model cannot
   describe is a material SABSIM does not yet cover, and the answer is a
   better universal model (a new row in the supported-model table,
   DESIGN §4.7), never a second code path.
@@ -1048,7 +1048,7 @@ long as someone remembers it exists.
 
 The mirror is keyed **by the project folder's path, and inside it by
 the same four stage-folder names the project uses** (§1; revised
-2026-08-30 (Paul)). Path, because `jobs/` may nest several levels
+2026-08-30). Path, because `jobs/` may nest several levels
 before the project itself (`jobs/2026-07/si-ladder/`) and that nesting
 is the researcher's own organisation — flattening it to a bare name
 would collide across groups and discard the grouping. The same folder
@@ -1145,7 +1145,7 @@ details into emitted scripts (`PRIOR_ART.md` §1.2 item 7). Routing is
 **per job, not per step**, because the pipeline is CPU/GPU-heterogeneous
 and step 4 in particular can straddle both — its cascade runs on a
 universal MLIP on a GPU, and the gentle heal and the §3.5 gate ride
-that same session (revised 2026-08-28 (Paul)):
+that same session (revised 2026-08-28):
 
 | Work                                   | Resource class |
 |----------------------------------------|----------------|
@@ -1161,7 +1161,7 @@ job, and the cascade runs on the universal MLIP, so prep is GPU work.
 (Resolved 2026-08-06, superseding the earlier CPU-only-activate
 assumption; the CPU opt-in that briefly existed was removed 2026-08-26.)
 
-**The heal + gate ride the PREP job (revised 2026-08-28 (Paul); the
+**The heal + gate ride the PREP job (revised 2026-08-28; the
 job was renamed from "activate" to "prep" and split per surface on
 2026-08-30).** From 2026-08-08 to 2026-08-28 the heal was done once on the
 ASSEMBLED pair at a wide gap, as the bond job's first phase, and the
@@ -1268,9 +1268,9 @@ the result appears where they already are, not in a separate root.
 Each stage's outputs land in that stage's folder (`prep_surf1_<a>/`,
 `prep_surf2_<b>/`, `bond_<a>_<b>/`, `analysis_<a>_<b>/`). There is no
 roll-up across pairs: a comparison between two projects is the
-person's own (revised 2026-08-30 (Paul)).
+person's own (revised 2026-08-30).
 
-**Every invocation is recorded in a `command` file (Paul, 2026-09-23;
+**Every invocation is recorded in a `command` file (2026-09-23;
 Imago's standing convention, adopted unchanged).** The `sabsim`
 command appends one dated block — a `Date:` line and a `Cmnd:` line
 carrying the exact argument vector — to a file named `command` in the
@@ -1331,7 +1331,7 @@ fixed the linking rule — steps decouple through file contracts on the
 shared filesystem. This section applies that rule at the altitude of a
 single bonding pair: what the stages are, which of them touch a compute
 node, and how the chain is cut into the four jobs of §1 (revised
-2026-08-30 (Paul); until then the pair was three jobs with both halves
+2026-08-30; until then the pair was three jobs with both halves
 inside one "activate" job). The file handoff is NOT a concession to a
 parallel future: it is how the simulator takes its input, how each
 result becomes a durable record, and how a crash mid-chain keeps the
@@ -1560,18 +1560,17 @@ handed back through a file (the §4.3 file-handoff model,
 mid-run read-back: every impact is seed-derived and each cascade ends on an
 in-LAMMPS halt, so the sabsim process builds the slab before and reads the
 amorphized structure back for assembly after, from a dump rather than a live
-engine. The heal DOES ride this subprocess (revised 2026-08-28
-(Paul)): the script ends with the project's re-anneal schedule — hold
-hot, cool to the press temperature, minimize — under the same universal
-model, so the dump the caller reads back is the HEALED half, and the
-§3.5 gate is judged on that read-back in the sabsim process before the
-half is assembled. The bundle is selected by the in-repo
-`SABSIM_CASCADE_ENGINE_PREFIX` env (a per-machine, GPU-architecture-
-specific prefix, so a path rather than a checked-in module), and the
-subprocess is launched in a fully-reset environment so no sabsim-side
-torch or plugin path leaks in and crashes it. A prep job carries no
-parameter files of its own: everything it needs is the universal
-model's weights file named in the project file's `[potential]` block.
+engine. The heal DOES ride this subprocess (revised 2026-08-28): the script
+ends with the project's re-anneal schedule — hold hot, cool to the press
+temperature, minimize — under the same universal model, so the dump the
+caller reads back is the HEALED half, and the §3.5 gate is judged on that
+read-back in the sabsim process before the half is assembled. The bundle is
+selected by the in-repo `SABSIM_CASCADE_ENGINE_PREFIX` env (a per-machine,
+GPU-architecture-specific prefix, so a path rather than a checked-in
+module), and the subprocess is launched in a fully-reset environment so no
+sabsim-side torch or plugin path leaks in and crashes it. A prep job carries
+no parameter files of its own: everything it needs is the universal model's
+weights file named in the project file's `[potential]` block.
 
 **The §2.2 lattice derivation rides the SAME subprocess (universal path).**
 Because the §2.2 bulk relax derives the working lattice under the same

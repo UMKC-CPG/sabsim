@@ -37,7 +37,7 @@ Every record is CLOSED — no field references a type left undefined. -->
 The sequencer owns the eight pipeline steps and the quality-gate loop
 (`ARCHITECTURE.md` §4.1, Tier A). The configured object is a **project**
 — exactly **one wafer pair** in one project folder (`DESIGN.md` §1.1,
-revised 2026-08-30 (Paul)). A project holds no list of "members" and no
+revised 2026-08-30). A project holds no list of "members" and no
 relations: a reference pair (Si/Si beside a Si/SiO2 question) is a
 SEPARATE project folder the person makes and runs themselves, and the
 comparison between the two is theirs to draw, by hand, from the two
@@ -132,7 +132,7 @@ function exec_one_pair(pair_specification, project_directory):
     # builder emits the crystalline pair in one piece (the Si/Si null
     # path) and the activate stage is skipped entirely.
 
-    # PREP, one surface at a time (revised 2026-08-30 (Paul)). Steps 3
+    # PREP, one surface at a time (revised 2026-08-30). Steps 3
     # and 4 for ONE wafer: relax both bulks and solve the pair's shared
     # cell (deterministic, so both preps reach the same cell), build
     # THIS half in it (§7.1 build_half), then cascade, heal and gate it
@@ -271,7 +271,7 @@ this document: `STRUCTURE_CONTRACT` and `BOND_DEBOND_CONTRACT` are §3,
 `MEASURE_VECTOR_CONTRACT` is §4. The structure stage's intermediate
 contracts are `ACTIVATED_HALF_CONTRACT` (one half built in the shared
 cell, amorphized, healed AND passed its §3.5 gate — the prep stage's
-deliverable, revised 2026-08-30 (Paul): each surface is prepared alone,
+deliverable, revised 2026-08-30: each surface is prepared alone,
 so the contract is per half, and the gate verdict rides with it).
 `POTENTIAL_CONTRACT` is the one
 exception — not a record of ours but the external potential's loadable
@@ -293,9 +293,9 @@ concern.
 The specification is the contract between the human and the pipeline
 (`DESIGN.md` §1). Pass 1 captures the fields the skeleton actually
 touches; the full five-group knob inventory is filled as modules land.
-A project file describes exactly ONE wafer pair (revised 2026-08-30
-(Paul)): there is no list of pairs and no relation between pairs; the
-person who wants a reference pair makes a second project folder.
+A project file describes exactly ONE wafer pair (revised 2026-08-30): there
+is no list of pairs and no relation between pairs; the person who wants a
+reference pair makes a second project folder.
 
 ```
 record Project:
@@ -338,7 +338,7 @@ record MaterialKnobs:             # one per wafer; two wafers per pair
                                    # it is ALSO the suffix of this
                                    # wafer's preparation folder in the
                                    # project (DESIGN §1.2, ARCHITECTURE
-                                   # §1; revised 2026-08-30 (Paul))
+                                   # §1; revised 2026-08-30)
     preparation_directory: path    # <project>/prep_surfN_<label>, N = 1
                                    # for wafer_a and 2 for wafer_b,
                                    # label = lower(identity); set by the
@@ -374,7 +374,7 @@ record ProtocolKnobs:
                                   # thickness floor builds for (DESIGN
                                   # §3.5/§2.5, revised 2026-08-28). A
                                   # project choice, not a material fact
-    # NO library path here (revised 2026-08-29, Paul, after LEDGER
+    # NO library path here (revised 2026-08-29, after LEDGER
     # T-39): the environment library the §10.6 gate judges against is
     # found PER WAFER at MaterialKnobs.preparation_directory /
     # environment_library.toml, never named in the project file. The
@@ -520,7 +520,7 @@ function load_and_validate_project(project_specification):
     # library file to compare model, engine, faces and temperature —
     # so they belong to phase THREE, the "do the referenced files
     # exist and make sense" phase that also opens the weights and
-    # crystal files (DESIGN §1.5; revised 2026-08-29 (Paul) from an
+    # crystal files (DESIGN §1.5; revised 2026-08-29 from an
     # earlier phase-2 placement). check_environment_libraries(pair)
     # runs there, on the login node, for EACH WAFER against that
     # wafer's own library (its prep folder, DESIGN §1.2), with the same
@@ -530,7 +530,7 @@ function load_and_validate_project(project_specification):
     # in the refusal, so the person knows which surface still needs
     # `sabsim bootstrap generate` (§11.3) or a copied prep folder.
 
-    # No relations to validate (revised 2026-08-30 (Paul)): the project
+    # No relations to validate (revised 2026-08-30): the project
     # holds one pair, and any comparison against a reference pair is
     # the person's, drawn by hand from two project reports.
     return project
@@ -834,7 +834,7 @@ function evaluate_pair_gates(measures, pair_specification, potential):
     # The five-way diagnosis routes the CAUSE of a questionable bond
     # number using those per-pair signals (DESIGN §7.6). The bond-outcome
     # RATIO against a reference pair is NOT graded here or anywhere in
-    # the program (revised 2026-08-30 (Paul)): the reference pair is its
+    # the program (revised 2026-08-30): the reference pair is its
     # own project, and the person forms the ratio from the two reports.
     return diagnose(measures, quality.bulk_surface, quality.interface)
 ```
@@ -877,7 +877,7 @@ record GateReport:
     # In v1 this is REPORTED, never acted on (DESIGN §7; VISION prin. 5).
 ```
 
-**No relation layer (revised 2026-08-30 (Paul)).** Earlier passes
+**No relation layer (revised 2026-08-30).** Earlier passes
 carried an `evaluate_relations` step that graded a declared comparison
 between two pairs of one study — v1's Si/SiO2-to-Si/Si work-of-
 separation ratio (`DESIGN.md` §7.4) against experiment. That machinery
@@ -970,7 +970,7 @@ stages explicitly — `build_half` inside each surface's `prepare_surface`
 prep stage) -> `assemble_pair` — matching the honest form the
 walking-skeleton configuration (§6) already showed. Applied at the
 programmer's direction; `run_structure_stage` is retired. Revised
-2026-08-30 (Paul): the two halves are built by two INDEPENDENT prep
+2026-08-30: the two halves are built by two INDEPENDENT prep
 stages, each solving the shared cell for itself, rather than by one
 `build_slabs` call that made both.
 
@@ -979,7 +979,7 @@ stages, each solving the shared cell for itself, rather than by one
 ```
 function prepare_surface(wafer, pair_specification, potential,
                          prep_folder):
-    # ONE prep stage (revised 2026-08-30 (Paul)): steps up to and
+    # ONE prep stage (revised 2026-08-30): steps up to and
     # including 3 for THIS wafer, then step 4 (§10.1), then the write of
     # the DELIVERABLE. Runs with no knowledge of the other wafer beyond
     # its crystal, which the shared cell needs; so the two calls are
@@ -1258,7 +1258,7 @@ function assemble_pair(activated_A, activated_B, pair_specification,
     slab_B = drop_disconnected(slab_B)
 
     # Place B facing A at the configured initial gap, measured between the
-    # two dividing surfaces. Revised 2026-08-28 (Paul, §3.4): both halves
+    # two dividing surfaces. Revised 2026-08-28 (§3.4): both halves
     # arrive HEALED and GATED from the activate stage, so this gap is the
     # opening the press starts from — near contact, the two faces within
     # range but not yet loading each other (DESIGN §2.6). Then check the
@@ -1949,8 +1949,8 @@ function run_bond_debond_md(structure, potential, pair_specification,
     driver = open_lammps_driver(structure, potential,
                                 pair_specification)   # §9.2, persistent
 
-    # The structure arrives HEALED and GATED (§10, revised 2026-08-28
-    # (Paul)): each half was annealed, minimized and judged in its own
+    # The structure arrives HEALED and GATED (§10, revised
+    # 2026-08-28): each half was annealed, minimized and judged in its own
     # cascade session, and the pair is assembled at the press-start
     # opening (§7.5). The bond flow's first act is the ONE-TIME lateral
     # cell relax of DESIGN §5.6 — the shared in-plane cell to zero
@@ -2064,7 +2064,7 @@ function press_and_bond(driver, pair_specification):
     thermostat_border_bias_removed(driver, protocol.press_temperature)
 
     # CONTACT ON A DUAL CRITERION (§5.2, adapted from prior art's one good
-    # idea, find_contact_step; revised 2026-08-28 (Paul)): PRIMARY = the
+    # idea, find_contact_step; revised 2026-08-28): PRIMARY = the
     # opening between the two §2.6 density dividing surfaces, averaged
     # over the last contact_gap_window chunks, has closed to the
     # threshold (one reading jumps by angstroms when a loose atom crosses
@@ -2144,7 +2144,7 @@ function settle_reference(driver, press, pair_specification):
     # §9.6 uses for the pull's returned force: the net grip force (top +
     # bottom, per chunk) counts as zero when its mean lies within two
     # standard errors of zero, floored by noise_floor for a noiseless
-    # record — never a fixed constant (revised 2026-08-28, Paul).
+    # record — never a fixed constant (revised 2026-08-28).
     net = series.top_reaction + series.bottom_reaction     # per chunk
     assert abs(mean(net)) <= max(2 * standard_error(net),
                                  numerical.noise_floor)
@@ -2208,7 +2208,7 @@ function pull_at_rate(driver, reference, rate, pair_specification):
 
 ```
 function interface_geometry(driver, recorded_plane, numerical):
-    # DESIGN §2.6 (revised 2026-08-30, Paul, after LEDGER T-40): where
+    # DESIGN §2.6 (revised 2026-08-30, after LEDGER T-40): where
     # the interface IS, asked of the WHOLE system's density profile with
     # NO wafer labels — a pull transfers material between the faces, and
     # a label-based surface then lands on the transferred layer, reads
@@ -2319,7 +2319,7 @@ function anneal_then_minimize(fragment, potential, anneal_schedule):
     # pair, THEN minimize_local so the result is a 0 K structure (§8.5
     # relaxed reference; the §10.5 heal). Anneal first because the heat
     # is what lets loose atoms find bonds; minimize last so what the
-    # gate judges is at rest (order settled 2026-08-28 (Paul)). The
+    # gate judges is at rest (order settled 2026-08-28). The
     # SCHEDULE is a recorded knob: an amorphous surface is kinetically
     # trapped, so "relaxed" means "as relaxed as this schedule got it"
     # (DESIGN §6.4).
@@ -2386,24 +2386,23 @@ routine below refuses one of those.
 
 Activation is **per-wafer**: each surface is amorphized independently in
 vacuum, BEFORE the two ever face each other — that is the whole point of
-surface-activated bonding (`DESIGN.md` §3.1). **Revised 2026-08-28 (Paul,
-§3.4): activation is cascade + heal + gate again.** Each half is
-bombarded, stripped of the projectile, healed (anneal then minimize,
-§10.5) and judged by the §3.5 gate (§10.6) in its own session, and only
-two passing halves are assembled. So `activate_surface` returns the
-concrete form of `ACTIVATED_HALF_CONTRACT` — ONE healed slab with its
-verdict, the deliverable of its prep stage (revised 2026-08-30 (Paul));
-a failed verdict halts that prep at this seam, before any assembly.
-(From 2026-08-08 to 2026-08-28 the heal and gate rode the bond flow on
-the assembled pair at a wide gap; that placement
-existed only because the heal then ran under a potential whose engine
-lived in the bond job, and one universal model for cascade and heal
-dissolved the reason.)
+surface-activated bonding (`DESIGN.md` §3.1). **Revised 2026-08-28 (§3.4):
+activation is cascade + heal + gate again.** Each half is bombarded,
+stripped of the projectile, healed (anneal then minimize, §10.5) and judged
+by the §3.5 gate (§10.6) in its own session, and only two passing halves are
+assembled. So `activate_surface` returns the concrete form of
+`ACTIVATED_HALF_CONTRACT` — ONE healed slab with its verdict, the
+deliverable of its prep stage (revised 2026-08-30); a failed verdict halts
+that prep at this seam, before any assembly. (From 2026-08-08 to 2026-08-28
+the heal and gate rode the bond flow on the assembled pair at a wide gap;
+that placement existed only because the heal then ran under a potential
+whose engine lived in the bond job, and one universal model for cascade and
+heal dissolved the reason.)
 
 ```
 record ActivatedHalf:
     # The concrete form of §1's ACTIVATED_HALF_CONTRACT (revised
-    # 2026-08-30 (Paul); from 2026-08-28 to then an ActivatedSlabs pair
+    # 2026-08-30; from 2026-08-28 to then an ActivatedSlabs pair
     # carried both halves at once): ONE healed slab and its §3.5
     # verdict, the deliverable of one prep stage. The contract checks
     # the slab is amorphized AND the verdict passed; a failure halts the
@@ -2449,7 +2448,7 @@ taken out of the engine is collective (every rank holds the full atom
 set), but ONE rank writes it and a barrier publishes it, so the reader
 finds it on whichever rank reads it back (§7.1).
 
-Revised 2026-08-30 (Paul): the two activations no longer share a job.
+Revised 2026-08-30: the two activations no longer share a job.
 Each runs in ITS OWN prep job on the job's FULL core allocation, and
 the scheduler runs the two side by side — the separate-job fan-out
 `ARCHITECTURE.md` §4.3 called Approach C, arriving through the files
@@ -2495,7 +2494,7 @@ function activate_surface(handle, pair_specification, potential):
 ```
 function energetic_particle_bombardment(slab, pair_specification,
                                         potential):
-    # The v1 mechanism (DESIGN §3.2–§3.5). Revised 2026-08-28 (Paul):
+    # The v1 mechanism (DESIGN §3.2–§3.5). Revised 2026-08-28:
     # cascade, strip, HEAL and GATE, all in this one session. Derive the
     # concrete impact plan and run the cascade (universal MLIP + ZBL,
     # §4.7) to the target fluence; strip the projectile; heal (§10.5);
@@ -2520,7 +2519,7 @@ function energetic_particle_bombardment(slab, pair_specification,
 
 ### 10.2 open_cascade_driver — the correctness core
 
-> **Revised 2026-08-26/28 (Paul).** The cascade has exactly ONE
+> **Revised 2026-08-26/28.** The cascade has exactly ONE
 > generator: the universal foundation MLIP the project file names, with
 > the two ZBL cores spliced in (DESIGN §4.7). The analytic forms an
 > earlier draft carried were removed on 2026-08-26 and nothing falls
@@ -2668,7 +2667,7 @@ disorder; the heal re-equilibrates GENTLY under the same universal model
 so the surface the gate judges and the press meets is settled, not
 cascade-hot — the first rung of the fidelity ladder (§4.5).
 
-**Revised 2026-08-28 (Paul): back in the activate stage, per half.** The
+**Revised 2026-08-28: back in the activate stage, per half.** The
 heal runs at the end of each half's own cascade session, in vacuum, on
 the SAME driver (§10.2): after the projectile strip, the project's
 `[protocol.reanneal]` schedule is applied — hold the mobile atoms hot,
@@ -2695,10 +2694,10 @@ function heal_surface(driver, pair_specification):
 ```
 function activation_gate(healed_surface, crystalline_slab,
                          pair_specification, environment_library):
-    # A GATE, not a report (DESIGN §3.5). Revised 2026-08-28 (Paul): it
+    # A GATE, not a report (DESIGN §3.5). Revised 2026-08-28: it
     # is called from the ACTIVATE stage (§10.1), once per half, on the
     # HEALED half as it is read back from its cascade session — before
-    # assembly, where a failure is cheapest. Revised 2026-08-29 (Paul):
+    # assembly, where a failure is cheapest. Revised 2026-08-29:
     # "crystalline" is decided per atom against the ENVIRONMENT LIBRARY
     # (below), never against a hand-set neighbour count; the depth
     # metric is re-based on it first, the coordination and ring metrics
@@ -2891,8 +2890,8 @@ record EnvironmentLibrary:
 function load_environment_library(pair_specification, wafer):
     # DESIGN §3.5 / §4.8 part 2 / ARCHITECTURE §2.3 and §1. The library
     # is a run-time input found PER WAFER in the project folder, in
-    # that wafer's prep folder `prep_surfN_<label>/` (revised 2026-08-29
-    # (Paul) after LEDGER T-39, folder renamed 2026-08-30; the project
+    # that wafer's prep folder `prep_surfN_<label>/` (revised
+    # 2026-08-29 after LEDGER T-39, folder renamed 2026-08-30; the project
     # file names no path). Three
     # refusals and one warn/refuse band, all decidable on the login
     # node; the §2 validator runs the same rules
@@ -2912,7 +2911,7 @@ function load_environment_library(pair_specification, wafer):
         halt("environment library was computed with '<engine>', this "
              "deployment binds '<bound engine>' — both sides of the "
              "comparison must use one engine (ARCHITECTURE §2.3)")
-    # Face and species only — NOT the termination (Paul, 2026-08-29):
+    # Face and species only — NOT the termination (2026-08-29):
     # every cataloged surface is bombarded to an amorphous skin before
     # it matters, so which atomic plane the clean cut ended on makes no
     # difference to the gate. Only THIS wafer's face: the other wafer
@@ -2923,7 +2922,7 @@ function load_environment_library(pair_specification, wafer):
              "surface; the slab's own faces would read as damage — "
              "add the face to the recipe's surfaces and rebuild")
 
-    # The warn/refuse band (DESIGN §3.5, Paul 2026-08-29): the gate
+    # The warn/refuse band (DESIGN §3.5, 2026-08-29): the gate
     # judges at the heal's cool-to target, the press temperature.
     judged_at = pair_specification.protocol.press_temperature
     if judged_at > library.warm_run_temperature:
@@ -4651,7 +4650,7 @@ bootstrap (§11, a SEPARATE upstream Tier-B process) has produced one — so
 the same four jobs run either, unchanged. Deployment is "where," never
 "what" (`DESIGN.md` §1.2).
 
-Revised 2026-08-30 (Paul): a project is ONE pair, and its jobs are the
+Revised 2026-08-30: a project is ONE pair, and its jobs are the
 four STAGE FOLDERS of `ARCHITECTURE.md` §1 — `prep_surf1_<a>`,
 `prep_surf2_<b>`, `bond_<a>_<b>`, `analysis_<a>_<b>` — named by
 `stage_folders` (§2). The script that runs a stage carries the same
@@ -4775,7 +4774,7 @@ run at once, joined at the bond job's barrier by the files.
 function run(project_spec_path, job_flag):
     # job_flag is at most ONE of {prep_surf1, prep_surf2, bond,
     # analysis}, or NONE for the whole pair chain (§10.4). There is no
-    # `--only`: a project holds one pair (revised 2026-08-30 (Paul)).
+    # `--only`: a project holds one pair (revised 2026-08-30).
     # This is the line that lives INSIDE each generated script; it runs
     # within an allocation and submits nothing itself.
     validated = load_and_validate_project(project_spec_path)   # §2

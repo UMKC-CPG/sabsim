@@ -302,7 +302,7 @@ def _pair_prepared_in(pair, project_directory):
 def test_load_environment_library_finds_the_surfaces_prep_folder(
         tmp_path):
     """The library lives at <project>/prep_surf1_<label>/ and the prep
-    folder the loader assigned is the only key (Paul, 2026-08-30)."""
+    folder the loader assigned is the only key (ARCHITECTURE §1)."""
     pair = _pair_prepared_in(_pair_at(300.0), tmp_path)
     wafer = pair.material.wafer_a
     assert wafer.preparation_directory == str(tmp_path / "prep_surf1_si")

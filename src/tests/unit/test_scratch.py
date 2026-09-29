@@ -217,8 +217,8 @@ def test_run_subfolder_off_the_scheduler_is_dated(deployment, monkeypatch):
 def test_a_rerun_never_overwrites_an_earlier_run(deployment, monkeypatch):
     """A run folder that already holds output is refused, not reused.
 
-    The earlier run's bytes are the evidence a comparison is made
-    against (Paul, 2026-08-30); the second attempt must go beside it.
+    The earlier run's bytes are the evidence a comparison is made against
+    (DESIGN §10.8); the second attempt must go beside it.
     """
     monkeypatch.setenv("SLURM_JOB_ID", "777")
     stage = stage_scratch(deployment["job"], "bond_si_sio2")

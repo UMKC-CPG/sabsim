@@ -12,13 +12,13 @@ The cut is made in WHOLE LAYERS of the crystal (the layer spacing along
 the surface normal is a property of the phase and face), so the last
 kept plane is a complete crystal plane rather than a ragged one, and the
 result is closed with a vacuum gap so the two cut planes become ordinary
-free surfaces. That is Paul's lean choice (2026-08-26): the surface
-atoms are what the training is for, and a free crystalline face is
-valid physics, not contamination. (§6.4's seamless re-join across the
-periodic boundary — removing layers and closing the gap with no
-surface at all — is the tighter alternative for the audit block; it
-needs the two kept blocks to be commensurate in z, which a
-same-material pair allows and a dissimilar pair does not.)
+free surfaces. That is the lean choice (2026-08-26): the surface atoms are
+what the training is for, and a free crystalline face is valid physics, not
+contamination. (§6.4's seamless re-join across the periodic boundary —
+removing layers and closing the gap with no surface at all — is the tighter
+alternative for the audit block; it needs the two kept blocks to be
+commensurate in z, which a same-material pair allows and a dissimilar pair
+does not.)
 """
 
 from __future__ import annotations

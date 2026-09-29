@@ -1,8 +1,8 @@
 """The recipe of a new catalog entry — written, not hand-copied.
 
-DESIGN.md §10.11, PSEUDOCODE §14.9 (Paul, 2026-09-28). ``sabsim catalog
-add`` needs a force-model recipe (§4.8) for the entry it makes, and
-there are two honest places to get one:
+DESIGN.md §10.11, PSEUDOCODE §14.9. ``sabsim catalog add`` needs a
+force-model recipe (§4.8) for the entry it makes, and there are two honest
+places to get one:
 
 * **A sibling of the same formula** is CLONED, because its chemistry
   lines are decisions already made and a difference between siblings

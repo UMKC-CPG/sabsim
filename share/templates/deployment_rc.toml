@@ -57,8 +57,8 @@ module_paths    = ["/cluster/VAST/rulisp-lab/cpg/modulefiles"]
 # --prep-surf1|--prep-surf2|--bond|--analysis` executes (PSEUDOCODE.md
 # §14): prep (read by BOTH surface-preparation jobs, since the two
 # surfaces want the same hardware), bond, analysis. (An earlier draft
-# keyed this map by tool — cascade-md / bond-md / vasp / sequence; and
-# a later one by activate / bond / analyze; revised 2026-08-30 (Paul).)
+# keyed this map by tool — cascade-md / bond-md / vasp / sequence; and a
+# later one by activate / bond / analyze; revised 2026-08-30.)
 # ---------------------------------------------------------------------
 [usage.prep]
 # ONE surface's preparation — either prep job reads this block: build its

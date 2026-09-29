@@ -68,7 +68,7 @@ An earlier version of this section (2026-07 to 2026-08-30) put a
 with declared **relations** among them, so that §7.4's headline ratio —
 the work of separation of Si/SiO₂ divided by that of the Si/Si
 reference — would have a place to live inside the program. That layer
-is retired (revised 2026-08-30 (Paul)). SABSIM no longer models a
+is retired (revised 2026-08-30). SABSIM no longer models a
 study, a member list, or a relation programmatically. The person who
 wants the ratio runs the reference pair as a **second project folder**
 (`jobs/si_si/`), reads the two measure vectors, and forms the ratio
@@ -156,7 +156,7 @@ on it.
   surface before bonding lives: the recipe of single-material
   calculations, the environment library the §3.5 gate judges against,
   and the surface's own amorphization (`ARCHITECTURE.md` §1; revised
-  2026-08-30 (Paul)). A homo pair has two folders, `prep_surf1_si/` and
+  2026-08-30). A homo pair has two folders, `prep_surf1_si/` and
   `prep_surf2_si/`, because it has two surfaces; two crystals of one
   formula that must be told apart get two labels.
 - **Protocol** — the activation species, energy, angle of incidence and
@@ -393,7 +393,7 @@ content fingerprint); and numbers that cannot say where they came from
 **Frozen for v1:** the project is ONE pair — the **Si/SiO₂ facing pair** — and
 the **Si/Si same-material reference** is a second project the person runs
 beside it, sharing one potential and one protocol so that §7.4's ratio can be
-formed by hand (revised 2026-08-30 (Paul)). Every protocol knob takes a single
+formed by hand (revised 2026-08-30). Every protocol knob takes a single
 value — written down, not hardcoded — and the design already admits
 distributions (an energy or angle spread) without changing shape. Iterating
 over composition, dopant, activation level, pressure, temperature or crystal
@@ -629,7 +629,7 @@ rescale and so cannot match two lattices whose angles differ at all.
 
 **The search.** Enumerate whole-number matrices up to an area limit, at
 the two lattices' given orientations, and judge every candidate by what
-it would actually BUILD (revised 2026-09-28, Paul; LEDGER T-45). For
+it would actually BUILD (revised 2026-09-28; LEDGER T-45). For
 each candidate the shared cell of §2.4 is constructed, and the
 candidate's strain is the largest stretch or compression, along any
 direction, that either crystal undergoes in being carried onto that
@@ -741,7 +741,7 @@ no lattice to strain cleanly — the one point on which prior art's
 reasoning is exactly right, and which we adopt unchanged.
 
 **The box is widened edge by edge, and never narrower than the model
-can bear (2026-09-28, Paul).** The shared cell fixes a shape; the box
+can bear (2026-09-28).** The shared cell fixes a shape; the box
 the simulation runs in is that cell repeated a whole number of times
 along each of its two edges. Two requirements set the two numbers.
 First, the box must be at least `minimum_cell_width` across in each
@@ -789,7 +789,7 @@ All terms are project inputs, so a new material re-sizes with no code change,
 and the silicon defaults preserve the §3.6-anchored 55 Å cell (55 > 7 + 30)
 rather than shrinking it.
 
-**The sign of the face is honoured (Paul, 2026-09-28).** A slab has
+**The sign of the face is honoured (2026-09-28).** A slab has
 two sides, and the side that is bombarded and pressed is its TOP
 (§2.6). The face a person writes names that side: the top's outward
 normal is the direction of the face's own reciprocal-lattice vector,
@@ -837,7 +837,7 @@ changes. Which species a side ends on is still the termination's to
 say (below); what this rule fixes is WHICH SIDE the face names.
 
 **Until that selection is built, the termination is written in the
-project file (Paul, 2026-09-28).** Each wafer table carries a
+project file (2026-09-28).** Each wafer table carries a
 `termination_index`, the position of the wanted cut in the builder's
 list for that face, and the wafer is cut on it. It is a REQUIRED key
 like every other (§1.4): for a year the wafer was cut on the first
@@ -964,7 +964,7 @@ unlucky adatom away from truncating the slab.
 
 **The gap and the clash.** The initial separation is a knob, measured
 between the two dividing surfaces, and it is the opening the PRESS
-STARTS FROM (revised 2026-08-28 (Paul)): each half arrives at assembly
+STARTS FROM (revised 2026-08-28): each half arrives at assembly
 already healed and gated by its own prep job (§3.4, §3.5, §10.2), so
 the pair is stacked close — near contact, but with the two faces not
 yet loading each other — and the bond job's press begins from there
@@ -977,7 +977,7 @@ violates the floor, the gap is backed off and the adjustment is
 recorded, rather than aborting the pair as prior art does.
 
 **The opening and the interface plane are GEOMETRIC, never by
-provenance (revised 2026-08-30 (Paul), after LEDGER T-40).** Once the
+provenance (revised 2026-08-30, after LEDGER T-40).** Once the
 two bodies are in contact, atoms no longer belong to the wafer they
 were built in: a press welds them, and a pull tears material off one
 face and leaves it on the other — in T-40, sixty atoms of the upper
@@ -1131,7 +1131,7 @@ supplies the missing hard wall while switching off well below the bond,
 so normal bonding is untouched (`PRIOR_ART.md` §1.9). There is no other
 cascade potential: the analytic forms an earlier draft carried
 (Stillinger-Weber, Tersoff, Vashishta, Buckingham) were removed on
-2026-08-26 and no fallback replaces them (Paul, 2026-08-28).
+2026-08-26 and no fallback replaces them (2026-08-28).
 
 The **heat-sink and boundary design** must be:
 
@@ -1196,7 +1196,7 @@ will not fully rearrange, so the cascade start must be a reasonable basin
 (the STRUCTURAL 1b safeguards).
 
 **The heal runs PER HALF, in vacuum, at the end of the cascade session
-(revised 2026-08-28 (Paul)).** Each amorphized half is healed in the
+(revised 2026-08-28).** Each amorphized half is healed in the
 same LAMMPS session that bombarded it, under the same universal model,
 before it is written out and before the two halves ever meet. The
 schedule is the project's `[protocol.reanneal]` block, applied as
@@ -1261,7 +1261,7 @@ naming the first that fails so a halt is diagnosable. The registry is the
 same idiom as the §6 measures and the §8 analyzer: adding a metric, or
 swapping how one is computed, touches nothing else.
 
-**When and where it runs (revised 2026-08-28, 2026-08-30 (Paul)).** The
+**When and where it runs (revised 2026-08-28, 2026-08-30).** The
 gate runs in each surface's PREP job, on the healed half as it is read
 back from its own cascade session (§3.4), BEFORE the two halves are
 assembled. Each half is one free surface judged against one reference,
@@ -1287,7 +1287,7 @@ this module, by the sequencer's realization ensemble (`PSEUDOCODE.md` §10.8,
 STRUCTURAL 4), exactly as the bond metric's spread is. So a metric verdict is
 one measurement against one threshold, not an averaged distribution.
 
-**What "crystalline" means here (revised 2026-08-29, Paul).** Until
+**What "crystalline" means here (revised 2026-08-29).** Until
 this revision every metric below rested on a hand-set neighbour count:
 an atom was "defective" if it did not have exactly the reference
 coordination (four, for silicon) inside a hand-set bond cutoff. That is
@@ -1322,7 +1322,7 @@ SABSIM therefore defines crystallinity WITHOUT a coordination number:
   library whose recorded model is not the project's `[potential]
   universal_model`.
 
-  Why per surface, and why no shared repository (Paul, 2026-08-29 after
+  Why per surface, and why no shared repository (2026-08-29 after
   LEDGER T-39, and 2026-08-30): a library is built from one recipe, so
   it describes ONE material, and a dissimilar pair such as silicon on
   silica needs two. T-39 halted because one library had been named for
@@ -1409,7 +1409,7 @@ species, the gate applies them to the slab's vectors before asking
 its nearest-environment question, and a library built before this
 ruler is refused by the loader rather than read with a fallback.
 
-**The library's temperature, and a warn/refuse band (Paul, 2026-08-29).**
+**The library's temperature, and a warn/refuse band (2026-08-29).**
 The tolerance is measured on warm runs at some temperature, and the gate
 judges a slab at the temperature the heal cools it to (the press
 temperature, §3.4). A slab hotter than the library's warm runs jiggles
@@ -1472,7 +1472,7 @@ The registered metrics, each with what it actually discriminates:
   be evaluated for narrowness before adoption (the standing rule) and drops
   in behind this backend seam without disturbing the other metrics.
 
-- **A robust amorphization-depth profile (revised 2026-08-29, Paul).**
+- **A robust amorphization-depth profile (revised 2026-08-29).**
   The fraction of DISORDERED atoms (the library definition above) in
   each horizontal layer of thickness `depth_bin_width` (a numerical knob
   of `sabsim.toml`), from the free surface down. The depth is the
@@ -1498,25 +1498,26 @@ The registered metrics, each with what it actually discriminates:
   (§2.5) only estimated a-priori, closing that loop, and that labels
   the activated skin (`PSEUDOCODE.md` §10.7).
 
-**Where the references and thresholds live (revised 2026-08-28 and 2026-08-29,
-Paul).** Three kinds of number are told apart. The ENVIRONMENT LIBRARY — what
-the undamaged material looks like, atom by atom — is MANUFACTURED by the
-bootstrap under the project's own universal model (§4.8 part 2) in the
-surface's preparation folder; it is never written by hand, and it carries the
-model name, the descriptor settings, the families and frame counts it was built
-from, and its self-check fractions, so a reader can tell exactly what
-"crystalline" was compared against. The remaining MATERIAL references — what an
-amorphous network of this material looks like: the first g(r) peak, and for the
-v1 survivors the coordination-defect band, the ring population and the bond
-cutoff — are properties of the material, not choices of the experiment, so they
-live in an **easily-locatable, version-controlled `share/` directory** in the
-repository (`share/activation/<species>.toml`, the discoverable-reference-data
-convention Imago uses), auditable and travelling with the code; as each v1
-survivor is re-based on the disorder score, its hand-written number leaves that
-file. The DEPTH REQUIREMENT is different: how deep the activated skin must
-reach is set by the project's own dose and energy budget (§3.6) and changes
-from project to project — a demonstration at a light dose cannot and should not
-meet a production threshold — so it is a **protocol knob of `sabsim.toml`**,
+**Where the references and thresholds live (revised 2026-08-28 and
+2026-08-29).** Three kinds of number are told apart. The ENVIRONMENT LIBRARY
+— what the undamaged material looks like, atom by atom — is MANUFACTURED by
+the bootstrap under the project's own universal model (§4.8 part 2) in the
+surface's preparation folder; it is never written by hand, and it carries
+the model name, the descriptor settings, the families and frame counts it
+was built from, and its self-check fractions, so a reader can tell exactly
+what "crystalline" was compared against. The remaining MATERIAL references —
+what an amorphous network of this material looks like: the first g(r) peak,
+and for the v1 survivors the coordination-defect band, the ring population
+and the bond cutoff — are properties of the material, not choices of the
+experiment, so they live in an **easily-locatable, version-controlled
+`share/` directory** in the repository (`share/activation/<species>.toml`,
+the discoverable-reference-data convention Imago uses), auditable and
+travelling with the code; as each v1 survivor is re-based on the disorder
+score, its hand-written number leaves that file. The DEPTH REQUIREMENT is
+different: how deep the activated skin must reach is set by the project's
+own dose and energy budget (§3.6) and changes from project to project — a
+demonstration at a light dose cannot and should not meet a production
+threshold — so it is a **protocol knob of `sabsim.toml`**,
 `[protocol.activation] required_activated_depth`, and the gate reads it from
 there. (Until 2026-08-28 it sat in the reference file as `[depth]
 target_angstrom`; the first run of the heal-in-activation flow, LEDGER T-33,
@@ -1835,7 +1836,7 @@ materials without change: the species-derived ZBL channels (§3.2), the
 fluence dose, the frozen-base / border / interior heat sink (§3.3), the
 heal (§3.4), and the species-derived gate metrics (§3.5).
 
-**There is exactly one generator, and no fallback (Paul, 2026-08-28).**
+**There is exactly one generator, and no fallback (2026-08-28).**
 An earlier draft of this section designed a ladder — a universal model
 by default, a curated analytic form as a per-material option, a DFT
 melt-quench as a last resort — with a registry of per-material entries.
@@ -2130,8 +2131,8 @@ student can read the file and know what was manufactured.
    supplies the correlated motion at fixed volume. For each family the
    recipe states how many and how produced.
 
-   **Collection 1 also emits the environment library (added 2026-08-29,
-   Paul).** The §3.5 gate's definition of "crystalline" — an atom whose
+   **Collection 1 also emits the environment library (added
+   2026-08-29).** The §3.5 gate's definition of "crystalline" — an atom whose
    second-shell bispectrum matches some environment of the undamaged material —
    needs a catalog of those environments, and this collection is where they
    already are. So building Collection 1 also writes the library: the
@@ -2152,7 +2153,7 @@ student can read the file and know what was manufactured.
    FACE the project's slab is cut with (matched by face and species; the
    termination — which atomic plane the clean cut ends on — is deliberately NOT
    matched, because every surface is bombarded to an amorphous skin before the
-   gate sees it, so the termination makes no difference; Paul, 2026-08-29),
+   gate sees it, so the termination makes no difference; 2026-08-29),
    checked between library and project at load time, not discovered as a
    mis-flagged face. And the descriptor engine and its settings are recipe
    settings recorded in the library, and the gate uses that record, never its
@@ -2178,7 +2179,7 @@ student can read the file and know what was manufactured.
 5. **How the hard configurations are manufactured — COLLECTION 2 of
    the settled recipe.** The configurations the protocol itself visits,
    harvested from a bootstrap run. Five families, ALL REQUIRED (settled
-   2026-08-23; definitions revised 2026-08-28 (Paul) to the states the
+   2026-08-23; definitions revised 2026-08-28 to the states the
    built flow actually visits), each a state the others do not revisit:
 
    7. **Healed activated surface** — one per half: the product of the
@@ -2353,7 +2354,7 @@ bootstrap harvests the trajectory frames the ordinary prep and bond jobs record
 when run with `--dump-visuals` under the universal model (`production_weights`
 pointing at the DPA `.pth`), the "consumer difference" of `PSEUDOCODE.md`
 §11.3. Interface frames are cut to sub-cells that keep only a couple of
-crystalline layers under each activated skin (Paul, 2026-08-26 — the surface
+crystalline layers under each activated skin (2026-08-26 — the surface
 atoms are what the training is for).
 
 ## 5. Bond/debond MD protocol
@@ -2523,13 +2524,13 @@ footprint would otherwise never declare contact (LEDGER T-30/T-31).
 Both the window and the floor are numerical knobs of `sabsim.toml`
 (§1.2), carried with their units — the window in chunks, the floor in
 bar — and their influence must vanish as they are refined. (Revised
-2026-08-28 (Paul); the trailing mean and the two-sided floor were first
+2026-08-28; the trailing mean and the two-sided floor were first
 applied in code on 2026-08-27 and are recorded here as the design.)
 (Prior art measures its gap between extremal atoms, which is exactly the
 asperity failure the stress criterion guards against; we fix both.)
 
 **The press is driven in chunks, and the chunking is a project setting
-too (revised 2026-08-28, Paul).** The driver advances the simulation a
+too (revised 2026-08-28).** The driver advances the simulation a
 `control_interval` at a time (a time, ~1 ps), reads the opening and the
 stress back between chunks, and decides; that interval is the
 resolution of the contact test, of the stage ledger (§5.5), and of the
@@ -2569,20 +2570,19 @@ force on the grips — the sum of the two reactions, which Newton's third
 law says cancels at rest — is ZERO in the statistical sense §5.5 already
 uses for the pull's returned force: its mean over the settle lies within
 two standard errors of zero, with the configured `noise_floor` as the
-floor beneath that test for a noiseless record. (Revised 2026-08-28,
-Paul: the earlier fixed test, mean force below `noise_floor`, judged a
-visibly settled 252-atom demo unsettled at 0.05 eV/Å against a thermal
-scatter several times that — LEDGER T-32; a criterion that calibrates
-itself to the noise the system actually has replaces it, and the same
-criterion now serves both places a force must be zero.) Second, that
-the potential energy has stopped drifting (`reference_pe_drift`). If
-either fails, the press did not settle, and that is reported rather
-than integrated over. Releasing the load is not a detail: equilibrating while
-the press drive is still live would settle a *loaded* state and the
-zero-load gate would pass a state that is not at zero load. The settled
-state is written to a file, because the pull restores from it on a fresh
-instance (§5.4); handing the pull the original pre-press structure
-instead would silently throw the press away.
+floor beneath that test for a noiseless record. (Revised 2026-08-28: the
+earlier fixed test, mean force below `noise_floor`, judged a visibly settled
+252-atom demo unsettled at 0.05 eV/Å against a thermal scatter several times
+that — LEDGER T-32; a criterion that calibrates itself to the noise the
+system actually has replaces it, and the same criterion now serves both
+places a force must be zero.) Second, that the potential energy has stopped
+drifting (`reference_pe_drift`). If either fails, the press did not settle,
+and that is reported rather than integrated over. Releasing the load is not
+a detail: equilibrating while the press drive is still live would settle a
+*loaded* state and the zero-load gate would pass a state that is not at zero
+load. The settled state is written to a file, because the pull restores from
+it on a fresh instance (§5.4); handing the pull the original pre-press
+structure instead would silently throw the press away.
 
 ### 5.4 The pull
 
@@ -2592,7 +2592,7 @@ by depth plus a single region-geometry setting (option C, §2.6), not
 from a hardcoded per-material layer thickness.
 
 **The zones are carved from where the atoms ARE, not where the builder
-put them (Paul, 2026-09-23; LEDGER T-41).** The press moves the top
+put them (2026-09-23; LEDGER T-41).** The press moves the top
 wafer down by the press-start opening and the contact compression —
 about 5 Å in the silicon demo — and the settle holds it there. A pull
 rung opens a fresh engine on the settled reference, so if it carved its
@@ -2677,7 +2677,7 @@ therefore emits **two curves**:
 the potential's cutoff (6.0 Å for `se_e2_a`, §4.6) *and* NO BONDED PAIR
 STILL STRADDLES THE INTERFACE PLANE — no two atoms within a bond length
 of each other sit on opposite sides of it. Both the opening and the
-plane are the geometric ones of §2.6 (revised 2026-08-30 (Paul), after
+plane are the geometric ones of §2.6 (revised 2026-08-30, after
 LEDGER T-40): found in the whole system's density profile, never by
 which wafer an atom was built in, because a pull transfers material
 between the faces and a label-based surface then sits on the
@@ -2685,7 +2685,7 @@ transferred layer and never sees the gap. The mechanical work integral
 runs from the §5.3 reference state to that point and stops; prior art
 integrates the entire record, noise tail included.
 
-**The press hands over a stage ledger too (revised 2026-08-28 (Paul)).**
+**The press hands over a stage ledger too (revised 2026-08-28).**
 Alongside the curves, the bond stage records the MD step at which each
 of its phases began and ended — press drive on, contact declared, hold
 ended, settle began, settle ended — so any consumer of the recorded
@@ -3598,7 +3598,7 @@ would overstate the ratio's uncertainty and weaken a test that ought to
 be strong. The covariance is carried, not assumed away.
 
 Nor is the cancellation assumed to be complete, and — revised
-2026-08-30 (Paul) — the ratio is no longer something the program forms.
+2026-08-30 — the ratio is no longer something the program forms.
 Each pair is its own project (§1.1); the Si/SiO₂ project and the Si/Si
 project each emit a work of separation with its uncertainty and its
 fully resolved specification, and the scientist divides one by the
@@ -4356,7 +4356,7 @@ The consumer is two commands:
   allocation (wrapped in the launcher), submits nothing itself, and
   does the actual science.
 
-### 10.2 One pair is four jobs (revised 2026-08-30 (Paul))
+### 10.2 One pair is four jobs (revised 2026-08-30)
 
 A pair's eight steps neither all want the same machine nor all want to
 run without a human looking, and its two surfaces are prepared ALONE
@@ -4391,7 +4391,7 @@ each named like the project folder it works in (`ARCHITECTURE.md` §1):
   the same chain skips the two builds in seconds (added 2026-09-10,
   replacing the hand-written harness of LEDGER T-38/T-42).
   A prep job is held to ITS OWN surface's library and no other
-  (Paul, 2026-09-28; LEDGER T-45). The check a job runs before it
+  (2026-09-28; LEDGER T-45). The check a job runs before it
   spends node time asks only for the files that job will open: the
   surface 1 prep opens the library in `prep_surf1_<a>/`, the surface 2
   prep the one in `prep_surf2_<b>/`, the bond and analysis jobs open
@@ -4703,7 +4703,7 @@ project` line to point at THIS project's file.
 
 **The pair is named on the command line, and it is required.** Which
 two materials to bond is THE science decision of a project, so it is
-the one thing `init` demands rather than defaults (Paul, 2026-09-23;
+the one thing `init` demands rather than defaults (2026-09-23;
 a default here would be a science choice the written file then looks
 deliberate about, the §1.4 hidden default in another coat):
 
@@ -4822,7 +4822,7 @@ formula's entries. **`sabsim catalog add --cif <file> --phase <name>
 --face h k l [<label>] [--formula <F>] [--cod-id --cod-revision]
 [--from <sibling>]`** makes an entry. Only three things are the
 person's to say — the crystal file, the phase word and the face —
-because everything else follows from them (Paul, 2026-09-28):
+because everything else follows from them (2026-09-28):
 
 - **The formula is read from the crystal file**, as its reduced
   formula with the elements properly cased (`GaN`, `SiO2`), and that
@@ -4851,7 +4851,7 @@ copies the CIF in, writes `material.toml`, and writes the entry's
 before anything is written.
 
 **The recipe of a NEW chemistry is written from a template, not
-cloned (Paul, 2026-09-28).** Until then a material with no sibling of
+cloned (2026-09-28).** Until then a material with no sibling of
 its formula was cloned from `--from`, another chemistry's finished
 recipe, and arrived carrying that material's species, its gate
 reference, its pseudopotentials and — worst for a student reading it
@@ -4923,7 +4923,7 @@ from where the command runs — the line is written `"DECIDE"` rather
 than estimated from less.
 
 **The terminations of the face are REPORTED, and where there is
-more than one the choice is the person's (Paul, 2026-09-28).** A face
+more than one the choice is the person's (2026-09-28).** A face
 can usually be cut on more than one atomic plane, and §2.5's
 selection by surface energy is not built yet. `catalog add` cuts the
 trial slab every way the builder can and says, for each termination,

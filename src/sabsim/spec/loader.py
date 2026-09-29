@@ -22,15 +22,14 @@ plus this hand-written validator: transparent, dependency-free, and
 readable beside PSEUDOCODE.md §2, which is exactly what a project file
 built on "no hidden defaults" wants.
 
-The on-disk TOML layout (the ``[DEPTH-FIRST] deserialize`` of §2) is
-pinned HERE. A project file describes exactly ONE wafer pair (Paul,
-2026-08-30): ``[project]`` carries the description, ``[wafer_a]`` and
-``[wafer_b]`` the two surfaces, ``potential_ref`` and
-``material_domain`` sit beside the description in ``[project]`` (the
-two pointers that are not knobs, DESIGN §1.3), and ``[potential]``,
-``[protocol.*]``, ``[numerical]`` and ``[ensemble]`` hold the knob
-groups. There is no list of members and no relation layer; a reference
-pair is its own project folder (DESIGN.md §1.1).
+The on-disk TOML layout (the ``[DEPTH-FIRST] deserialize`` of §2) is pinned
+HERE. A project file describes exactly ONE wafer pair (ARCHITECTURE §1):
+``[project]`` carries the description, ``[wafer_a]`` and ``[wafer_b]`` the
+two surfaces, ``potential_ref`` and ``material_domain`` sit beside the
+description in ``[project]`` (the two pointers that are not knobs, DESIGN
+§1.3), and ``[potential]``, ``[protocol.*]``, ``[numerical]`` and
+``[ensemble]`` hold the knob groups. There is no list of members and no
+relation layer; a reference pair is its own project folder (DESIGN.md §1.1).
 """
 
 from __future__ import annotations
@@ -176,12 +175,11 @@ def _material_from_wafer(table: dict, context: str,
     (§1.5) — not something this reader can know from the spec alone.
 
     The ``material`` label, lower-cased, also names the surface's PREP
-    FOLDER of the project (``<project>/prep_surf<N>_<label>/``,
-    ARCHITECTURE §1; Paul, 2026-08-30), where its recipe, environment
-    library and amorphization live. ``surface_number`` is 1 for wafer A
-    and 2 for wafer B. Whether that folder and its library exist is
-    phase three's business (:mod:`sabsim.spec.references`), not this
-    reader's.
+    FOLDER of the project (``<project>/prep_surf<N>_<label>/``, ARCHITECTURE
+    §1), where its recipe, environment library and amorphization live.
+    ``surface_number`` is 1 for wafer A and 2 for wafer B. Whether that
+    folder and its library exist is phase three's business
+    (:mod:`sabsim.spec.references`), not this reader's.
     """
     identity = str(_require(table, "material", context))
     if not identity or "/" in identity or identity in (".", ".."):

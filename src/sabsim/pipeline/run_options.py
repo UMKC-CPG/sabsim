@@ -14,12 +14,12 @@ at the command line cannot simply be threaded through as an argument
 without distorting every stage's interface. Instead the front door sets
 it once, before any stage runs, and the stages read it.
 
-The one option so far is trajectory recording. Since 2026-08-26 it is
-ON by default — Paul: the movie is how a run is verified, so every
-dynamic run leaves one behind — and ``--no-dump-visuals`` is the
-explicit opt-out for a run whose frames' cost is not wanted: writing a
-frame costs wall clock in the middle of a hot MD loop, and the files are
-large (a single pull rung produced 1.3 GB at the default stride).
+The one option so far is trajectory recording. Since 2026-08-26 it is ON by
+default — the movie is how a run is verified, so every dynamic run leaves
+one behind — and ``--no-dump-visuals`` is the explicit opt-out for a run
+whose frames' cost is not wanted: writing a frame costs wall clock in the
+middle of a hot MD loop, and the files are large (a single pull rung
+produced 1.3 GB at the default stride).
 """
 
 from __future__ import annotations

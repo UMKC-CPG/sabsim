@@ -129,7 +129,7 @@ def test_a_mismatched_library_is_refused_before_any_node_hour(tmp_path):
 
 
 def test_both_surfaces_of_a_same_material_pair_need_a_library(tmp_path):
-    """A Si/Si project has TWO prep folders (Paul, 2026-08-30); the
+    """A Si/Si project has TWO prep folders (ARCHITECTURE §1); the
     second usually starts as a copy of the first, and a copy that was
     never made is reported by name."""
     from sabsim.driver.environment_library import write_environment_library

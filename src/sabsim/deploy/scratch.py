@@ -23,11 +23,11 @@ may nest several levels before the project itself
 organisation: flattening it to a bare folder name would collide across
 groups and would throw the grouping away. WITHIN a project the mirror
 simply repeats the project's own four stage folders — ``prep_surf1_<a>``,
-``prep_surf2_<b>``, ``bond_<a>_<b>``, ``analysis_<a>_<b>`` (ARCHITECTURE
-§1, revised 2026-08-30 (Paul)) — so a reader who knows the project
-tree already knows the scratch tree. Nothing is keyed by a study or a
-pair name any more; the earlier ``<mirror>/<study>/<member>`` keying
-doubled the project's name inside its own mirror and is gone.
+``prep_surf2_<b>``, ``bond_<a>_<b>``, ``analysis_<a>_<b>`` (ARCHITECTURE §1,
+revised 2026-08-30) — so a reader who knows the project tree already knows
+the scratch tree. Nothing is keyed by a study or a pair name any more; the
+earlier ``<mirror>/<study>/<member>`` keying doubled the project's name
+inside its own mirror and is gone.
 
 **Two homes with one name.** Each stage has a folder in the PROJECT
 for its DELIVERABLES — manifests, ledgers, gate reports, the
@@ -214,7 +214,7 @@ def run_subfolder(stage_directory) -> Path:
     name is already taken — the same job id re-entering a stage, or
     two dated runs started within one second — this REFUSES rather
     than reusing the folder, because the earlier run's bytes are the
-    evidence a comparison would be made against (Paul, 2026-08-30).
+    evidence a comparison would be made against (DESIGN §10.8).
 
     MPI-SAFE in the same sense as the ``intermediate`` link: under a
     parallel run every rank asks for the same name, so ``mkdir`` is

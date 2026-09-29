@@ -7,18 +7,17 @@ stage is routed through the ``run_to_contract`` guard, so the pipeline
 advances only while each stage produces a contract-valid artifact and
 HALTS loudly otherwise (ARCHITECTURE.md §4.1, §5.1).
 
-Revised 2026-08-30 (Paul): a project holds exactly one wafer pair and
-its work falls into FOUR stage folders — ``prep_surf1_<a>/``,
-``prep_surf2_<b>/``, ``bond_<a>_<b>/``, ``analysis_<a>_<b>/`` — each
-mirrored under ``intermediate/`` for the bulky files (ARCHITECTURE.md
-§1). The whole-chain run below walks those same four stages in ONE
-process; the per-job run selector (:mod:`sabsim.pipeline.pair_jobs`)
-runs any one of them in a fresh process, reading the earlier stages'
-deliverables from their folders. Both call the SAME stage functions
-here (:func:`prep_stage`, :func:`bond_stage`, :func:`analysis_stage`),
-so the two entry points cannot drift apart. There is no relation
-layer: a comparison between two pairs is the person's, made from two
-projects' summaries (DESIGN.md §1.1).
+Revised 2026-08-30: a project holds exactly one wafer pair and its work
+falls into FOUR stage folders — ``prep_surf1_<a>/``, ``prep_surf2_<b>/``,
+``bond_<a>_<b>/``, ``analysis_<a>_<b>/`` — each mirrored under
+``intermediate/`` for the bulky files (ARCHITECTURE.md §1). The whole-chain
+run below walks those same four stages in ONE process; the per-job run
+selector (:mod:`sabsim.pipeline.pair_jobs`) runs any one of them in a fresh
+process, reading the earlier stages' deliverables from their folders. Both
+call the SAME stage functions here (:func:`prep_stage`, :func:`bond_stage`,
+:func:`analysis_stage`), so the two entry points cannot drift apart. There
+is no relation layer: a comparison between two pairs is the person's, made
+from two projects' summaries (DESIGN.md §1.1).
 
 In the walking skeleton (ARCHITECTURE.md §5, wave 0) the stage bodies
 are stand-ins (:mod:`sabsim.pipeline.skeleton_stages`), so the number a

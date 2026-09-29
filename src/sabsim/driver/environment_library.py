@@ -77,14 +77,13 @@ _SCATTER_PERCENTILE = 90.0
 SELF_CHECK_MAX_WARM_DISORDERED = 0.10
 SELF_CHECK_MIN_MELT_DISORDERED = 0.50
 
-# The temperature warn/refuse band (DESIGN §3.5, Paul 2026-08-29). The
-# gate judges a slab at the heal's cool-to target, the press temperature.
-# Above the library's warm-run temperature the tolerance was measured a
-# little tight — WARN; more than this fraction above it, the thermal
-# scatter grows roughly with the square root of temperature, so 20 %
-# hotter is ~10 % more scatter, past what one scatter multiple absorbs —
-# REFUSE. A validation criterion of the loader, like a gate threshold
-# (DESIGN §7.5), not a project knob.
+# The temperature warn/refuse band (DESIGN §3.5). The gate judges a slab at
+# the heal's cool-to target, the press temperature. Above the library's
+# warm-run temperature the tolerance was measured a little tight — WARN;
+# more than this fraction above it, the thermal scatter grows roughly with
+# the square root of temperature, so 20 % hotter is ~10 % more scatter, past
+# what one scatter multiple absorbs — REFUSE. A validation criterion of the
+# loader, like a gate threshold (DESIGN §7.5), not a project knob.
 LIBRARY_TEMPERATURE_REFUSE_FRACTION = 0.20
 
 # Query vectors are compared with the catalog in chunks so the N x M
@@ -617,9 +616,9 @@ def library_manifest_path(wafer) -> str:
     """Where one wafer's library lives: its prep folder.
 
     ``<project>/prep_surf<N>_<label>/environment_library.toml``
-    (ARCHITECTURE §1, DESIGN §1.2; Paul, 2026-08-30): each surface has
-    a library of its own in the prep folder the loader assigned it, and
-    the project file names no path.
+    (ARCHITECTURE §1, DESIGN §1.2): each surface has a library of its own in
+    the prep folder the loader assigned it, and the project file names no
+    path.
     """
     return os.path.join(wafer.preparation_directory, LIBRARY_MANIFEST_FILE)
 

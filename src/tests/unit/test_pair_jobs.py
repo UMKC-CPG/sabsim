@@ -239,8 +239,8 @@ def test_four_separate_jobs_complete_the_chain(project):
 
 
 def test_reruns_never_overwrite_an_earlier_run(project, monkeypatch):
-    """A second run of a stage gets its own run-<id> folder; the first
-    run's bulk folder is left untouched (Paul, 2026-08-30)."""
+    """A second run of a stage gets its own run-<id> folder; the first run's
+    bulk folder is left untouched (DESIGN §10.8)."""
     from sabsim.deploy.scratch import stage_scratch
     folders = stage_folders(project.pair)
     monkeypatch.setenv("SLURM_JOB_ID", "111")

@@ -1,10 +1,10 @@
 """The materials catalog — one folder per crystal phase and face.
 
-DESIGN.md §10.11 (Paul, 2026-09-23). A material the pipeline can use
-needs a crystal file, an entry naming its phase and its bonding face,
-and a force-model recipe for its environment library. The catalog
-keeps those three together in ONE folder under ``share/catalog/``,
-named ``<formula>_<phase>_<face>`` lower-cased:
+DESIGN.md §10.11. A material the pipeline can use needs a crystal file, an
+entry naming its phase and its bonding face, and a force-model recipe for
+its environment library. The catalog keeps those three together in ONE
+folder under ``share/catalog/``, named ``<formula>_<phase>_<face>``
+lower-cased:
 
     share/catalog/si_diamond_100/    material.toml, si_diamond.cif,
                                      recipe.toml

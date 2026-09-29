@@ -205,17 +205,17 @@ def _library_problems(pair: PairSpecification,
     job names its own surface, a whole-chain run names both.
 
     The §3.5 gate judges "crystalline" against a bootstrap-made library
-    found PER SURFACE in the project: ``prep_surf1_<a>/`` for wafer A
-    and ``prep_surf2_<b>/`` for wafer B (DESIGN §1.2/§3.5; Paul,
-    2026-08-30). Every check here needs to READ a library file — exactly
-    the environment-dependence that defines phase three. For each of
-    the two surfaces the file must exist, and if it does the same rules
-    the prep job applies (:func:`~sabsim.driver.environment_library.
+    found PER SURFACE in the project: ``prep_surf1_<a>/`` for wafer A and
+    ``prep_surf2_<b>/`` for wafer B (DESIGN §1.2/§3.5). Every check here
+    needs to READ a library file — exactly the environment-dependence that
+    defines phase three. For each of the two surfaces the file must exist,
+    and if it does the same rules the prep job applies
+    (:func:`~sabsim.driver.environment_library.
     check_library_against_project`: model, engine, that wafer's face, the
-    temperature warn/refuse band) run now, so a mismatch costs no
-    node-hour. A same-material pair has two prep folders and both are
-    checked — the second is usually a copy of the first, and a copy
-    that was never made is exactly what this catches.
+    temperature warn/refuse band) run now, so a mismatch costs no node-hour.
+    A same-material pair has two prep folders and both are checked — the
+    second is usually a copy of the first, and a copy that was never made is
+    exactly what this catches.
     """
     from sabsim.driver.environment_library import (
         check_library_against_project,

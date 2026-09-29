@@ -10,9 +10,9 @@ the bond, the analysis) plus a submission guide. It **submits nothing**
 node, so the human submits the scripts and inspects each gate before
 the next.
 
-The scripts are named after the STAGE FOLDERS they fill (ARCHITECTURE
-§1, revised 2026-08-30 (Paul)): ``prep_surf1_si.slurm`` runs the job
-whose deliverables land in ``prep_surf1_si/`` and whose bulk lands in
+The scripts are named after the STAGE FOLDERS they fill (ARCHITECTURE §1,
+revised 2026-08-30): ``prep_surf1_si.slurm`` runs the job whose deliverables
+land in ``prep_surf1_si/`` and whose bulk lands in
 ``intermediate/prep_surf1_si/``, so a reader of the project folder sees
 ONE name per stage. `prepare` also makes the four stage folders if they
 do not exist yet, never touching one that does — a prep folder may
@@ -101,10 +101,10 @@ def prepare(project_spec_path, deployment_rc_path,
     (unset root, walltime over ceiling) before writing anything.
 
     ``dump_visuals`` (the default) puts ``--dump-visuals`` on every
-    generated run line, so each dynamic stage (cascade, press, settle,
-    pull) records a trajectory for viewing — the standing rule (Paul,
-    2026-08-26) that a dynamic run leaves a movie behind as its evidence;
-    ``False`` writes ``--no-dump-visuals`` instead.
+    generated run line, so each dynamic stage (cascade, press, settle, pull)
+    records a trajectory for viewing — the standing rule that a dynamic run
+    leaves a movie behind as its evidence; ``False`` writes
+    ``--no-dump-visuals`` instead.
     """
     # The roots gate FIRST (§10.5): resolve the three location roots, or
     # stop on the login node naming the missing one — before any file is

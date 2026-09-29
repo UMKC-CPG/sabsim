@@ -150,8 +150,8 @@ def test_supported_models_table_holds_the_pinned_model():
 def test_unknown_universal_model_name_is_a_loud_stop():
     """A name outside the table stops and lists what IS supported.
 
-    There is no fall-back (Paul, 2026-08-28): an unknown model must never
-    silently become the default one.
+    There is no fall-back: an unknown model must never silently become the
+    default one.
     """
     with pytest.raises(ValueError) as caught:
         supported_universal_model("DPA-4-hypothetical")

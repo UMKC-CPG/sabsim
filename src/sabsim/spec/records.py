@@ -70,11 +70,10 @@ class MaterialKnobs:
     # Where this wafer's PREPARATORY work lives: the PREP FOLDER of
     # the project, ``<project>/prep_surf1_<label>/`` for wafer A and
     # ``prep_surf2_<label>/`` for wafer B, the label lower-cased
-    # (ARCHITECTURE §1; Paul, 2026-08-30). It holds the force-model
-    # recipe, the single-material calculations, the environment
-    # library the §3.5 gate judges against, and this surface's own
-    # amorphization. Set by the loader from the project file's own
-    # location, never typed by hand.
+    # (ARCHITECTURE §1). It holds the force-model recipe, the
+    # single-material calculations, the environment library the §3.5 gate
+    # judges against, and this surface's own amorphization. Set by the
+    # loader from the project file's own location, never typed by hand.
     preparation_directory: str
 
 
@@ -269,14 +268,13 @@ class PotentialSpec:
 class PairSpecification:
     """The wafer pair a project runs: two surfaces under one protocol.
 
-    This is the unit that runs and produces a result (PSEUDOCODE.md
-    §2). Since 2026-08-30 (Paul) a project holds exactly ONE pair, so
-    the pair carries no name of its own: everything derived from it
-    (folder names, script names, dump names) uses :attr:`pair_label`,
-    which is built from the two wafers' material labels. A reference
-    pair — the Si/Si that a Si/SiO2 question is compared against — is a
-    separate project folder the person makes and runs themselves
-    (DESIGN.md §1.1).
+    This is the unit that runs and produces a result (PSEUDOCODE.md §2).
+    Since 2026-08-30 a project holds exactly ONE pair, so the pair carries
+    no name of its own: everything derived from it (folder names, script
+    names, dump names) uses :attr:`pair_label`, which is built from the two
+    wafers' material labels. A reference pair — the Si/Si that a Si/SiO2
+    question is compared against — is a separate project folder the person
+    makes and runs themselves (DESIGN.md §1.1).
 
     ``potential_ref`` names WHICH potential generation this pair runs
     under: not a knob but a pointer to an upstream artifact (DESIGN.md
@@ -305,8 +303,8 @@ class PairSpecification:
         """``<a>_<b>``: both material labels lower-cased and joined.
 
         The one identity every derived name is built from. Lower-cased
-        because it becomes part of folder and file names, and a name
-        that differs only by case is a trap on a shell (Paul).
+        because it becomes part of folder and file names, and a name that
+        differs only by case is a trap on a shell.
         """
         return (f"{folder_label(self.material.wafer_a.identity)}_"
                 f"{folder_label(self.material.wafer_b.identity)}")

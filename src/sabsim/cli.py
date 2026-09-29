@@ -90,10 +90,10 @@ def _build_parser() -> argparse.ArgumentParser:
         default=True,
         help="record a trajectory for every dynamic stage — the "
              "bombardment of each half, the press and settle, and each "
-             "pull rung — for viewing in Ovito. ON by default (Paul, "
-             "2026-08-26: the movie is how a run is verified); pass "
-             "--no-dump-visuals to skip it when the frames' wall clock "
-             "and size (a pull rung can reach 1.3 GB) are not wanted")
+             "pull rung — for viewing in Ovito. ON by default (the "
+             "movie is how a run is verified); pass --no-dump-visuals "
+             "to skip it when the frames' wall clock and size (a pull "
+             "rung can reach 1.3 GB) are not wanted")
     run.add_argument(
         "--dump-stride", type=int, metavar="STEPS",
         help="record one frame per STEPS of MD, overriding the spec's "
@@ -604,12 +604,12 @@ COMMAND_RECORD_FILE = "command"
 def record_command(arguments=None) -> None:
     """Append the issued command line to ``command`` in this directory.
 
-    Imago's standing convention, adopted unchanged (ARCHITECTURE §4.2,
-    Paul 2026-09-23): one dated block per run — a ``Date:`` line and a
-    ``Cmnd:`` line carrying the exact argument vector — so the file
-    grows into the history of what was done in this folder and the
-    exact invocation can be recovered later. ``arguments`` defaults to
-    ``sys.argv``; a caller may hand in the vector it actually ran.
+    Imago's standing convention, adopted unchanged (ARCHITECTURE §4.2): one
+    dated block per run — a ``Date:`` line and a ``Cmnd:`` line carrying the
+    exact argument vector — so the file grows into the history of what was
+    done in this folder and the exact invocation can be recovered later.
+    ``arguments`` defaults to ``sys.argv``; a caller may hand in the vector
+    it actually ran.
     """
     arguments = sys.argv if arguments is None else list(arguments)
     stamp = datetime.now().strftime("%b. %d, %Y: %H:%M:%S")
@@ -637,8 +637,8 @@ def main(argv=None) -> int:
     suite leaves no stray ``command`` files (CLAUDE.md). A help
     request is not recorded either: it changes nothing.
     """
-    # A help request does something only to the screen, so it is not
-    # part of the folder's history (Paul, 2026-09-23).
+    # A help request does something only to the screen, so it is not part of
+    # the folder's history (ARCHITECTURE §4.2).
     if argv is None and not _is_help_request(sys.argv[1:]):
         record_command()
     parser = _build_parser()

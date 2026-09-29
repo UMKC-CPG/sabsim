@@ -137,15 +137,15 @@ def activate_surface(
         comm=None) -> ActivatedHalf:
     """Amorphize and gate ONE half — a prep job's stage (§10.1, §14.3).
 
-    Revised 2026-08-30 (Paul): each surface is prepared by its own prep
-    job, so this is the per-surface form the sequencer and the prep job
-    both call. W0 writes nothing and opens no engine: it returns a
-    placeholder slab with a PASSING placeholder verdict, carrying the
-    handle's wafer tag and the shared cell it was (notionally) cut on,
-    so the ACTIVATED_HALF_CONTRACT is met and the pipeline flows. The
-    REAL body is :func:`sabsim.pipeline.live_stages.activate_one_surface_
-    live`, which runs the cascade + heal out-of-process and gates the
-    healed half (§3.5).
+    Revised 2026-08-30: each surface is prepared by its own prep job, so
+    this is the per-surface form the sequencer and the prep job both call.
+    W0 writes nothing and opens no engine: it returns a placeholder slab
+    with a PASSING placeholder verdict, carrying the handle's wafer tag and
+    the shared cell it was (notionally) cut on, so the
+    ACTIVATED_HALF_CONTRACT is met and the pipeline flows. The REAL body
+    is :func:`sabsim.pipeline.live_stages.activate_one_surface_live`,
+    which runs the cascade + heal out-of-process and gates the healed
+    half (§3.5).
     """
     slab = Slab(identity=handle.identity, note="placeholder (wave 0)")
     return ActivatedHalf(
