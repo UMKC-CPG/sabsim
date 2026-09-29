@@ -396,3 +396,160 @@ def test_dump_frames_carry_their_step_and_key_by_the_ledger(tmp_path):
     assert frame_at(frames, 2500)[0].info["step"] == 3000
     assert frame_at(frames, None) == []
     assert frame_at(frames, 9000) == []
+
+
+# ---------------------------------------------------------------------
+# generate never writes over an environment library (DESIGN §10.8).
+# ---------------------------------------------------------------------
+
+_OLD_LIBRARY = "# the library a surface was gated against\n"
+
+
+class _NamedRecipe:
+    """The little of a recipe `generate` itself touches: its name."""
+
+    name = "fixture-recipe"
+
+
+def _stub_the_expensive_parts(monkeypatch, tmp_path, built):
+    """Replace the recipe loader, the dynamics and the harvest.
+
+    ``built`` collects the word "collection1" or "collection2" each
+    time the stand-in for that part is called, so a test can tell
+    whether any work was started. The Collection 1 stand-in writes a
+    new library pair where the real one does, under scratch.
+    """
+    from sabsim.bootstrap import collection1, command, harvest
+    from sabsim.driver.environment_library import (
+        LIBRARY_ARRAYS_FILE,
+        LIBRARY_MANIFEST_FILE,
+    )
+    monkeypatch.setenv("SABSIM_SCRATCH", str(tmp_path / "scratch"))
+    monkeypatch.setattr(command, "load_recipe",
+                        lambda recipe_path: _NamedRecipe())
+    monkeypatch.setattr(command, "check_recipe_references",
+                        lambda recipe: None)
+
+    def build_collection1(recipe, work_dir):
+        built.append("collection1")
+        work_dir = Path(work_dir)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        (work_dir / LIBRARY_MANIFEST_FILE).write_text("# a NEW library\n")
+        (work_dir / LIBRARY_ARRAYS_FILE).write_bytes(b"new arrays")
+        return [], str(work_dir / LIBRARY_MANIFEST_FILE)
+
+    def harvest_collection2(recipe):
+        built.append("collection2")
+        return []
+
+    monkeypatch.setattr(collection1, "build_collection1", build_collection1)
+    monkeypatch.setattr(harvest, "harvest_collection2", harvest_collection2)
+
+
+def _prep_folder_with_a_library(tmp_path) -> Path:
+    from sabsim.driver.environment_library import LIBRARY_MANIFEST_FILE
+    prep_folder = tmp_path / "project" / "prep_surf1_si_diamond_100"
+    prep_folder.mkdir(parents=True)
+    (prep_folder / LIBRARY_MANIFEST_FILE).write_text(_OLD_LIBRARY)
+    return prep_folder
+
+
+def test_generate_refuses_to_write_over_a_library(tmp_path, monkeypatch):
+    """A library already there stops generate before any work starts."""
+    from sabsim.bootstrap.command import LibraryExistsError, generate
+    from sabsim.driver.environment_library import LIBRARY_MANIFEST_FILE
+    built = []
+    _stub_the_expensive_parts(monkeypatch, tmp_path, built)
+    prep_folder = _prep_folder_with_a_library(tmp_path)
+
+    with pytest.raises(LibraryExistsError, match="--overwrite-library"):
+        generate("recipe.toml", str(prep_folder))
+
+    assert built == []
+    assert (prep_folder / LIBRARY_MANIFEST_FILE).read_text() == _OLD_LIBRARY
+
+
+def test_generate_refuses_when_only_the_arrays_file_is_left(
+        tmp_path, monkeypatch):
+    """Half a library pair is still something not to write over."""
+    from sabsim.bootstrap.command import LibraryExistsError, generate
+    from sabsim.driver.environment_library import LIBRARY_ARRAYS_FILE
+    built = []
+    _stub_the_expensive_parts(monkeypatch, tmp_path, built)
+    prep_folder = tmp_path / "prep_surf1_si_diamond_100"
+    prep_folder.mkdir()
+    (prep_folder / LIBRARY_ARRAYS_FILE).write_bytes(b"old arrays")
+
+    with pytest.raises(LibraryExistsError, match=LIBRARY_ARRAYS_FILE):
+        generate("recipe.toml", str(prep_folder))
+    assert built == []
+
+
+def test_generate_replaces_a_library_when_told_to(tmp_path, monkeypatch):
+    """The explicit flag is the person saying the old one may go."""
+    from sabsim.bootstrap.command import generate
+    from sabsim.driver.environment_library import LIBRARY_MANIFEST_FILE
+    built = []
+    _stub_the_expensive_parts(monkeypatch, tmp_path, built)
+    prep_folder = _prep_folder_with_a_library(tmp_path)
+
+    generate("recipe.toml", str(prep_folder), collection2=False,
+             overwrite_library=True)
+
+    assert built == ["collection1"]
+    assert (prep_folder / LIBRARY_MANIFEST_FILE).read_text() == (
+        "# a NEW library\n")
+
+
+def test_generate_builds_a_library_where_there_is_none(
+        tmp_path, monkeypatch):
+    """The ordinary first build needs no flag."""
+    from sabsim.bootstrap.command import generate
+    from sabsim.driver.environment_library import LIBRARY_MANIFEST_FILE
+    built = []
+    _stub_the_expensive_parts(monkeypatch, tmp_path, built)
+    prep_folder = tmp_path / "prep_surf1_si_diamond_100"
+    prep_folder.mkdir()
+
+    generate("recipe.toml", str(prep_folder), collection2=False)
+
+    assert built == ["collection1"]
+    assert (prep_folder / LIBRARY_MANIFEST_FILE).is_file()
+
+
+def test_harvesting_collection2_alone_is_never_refused(
+        tmp_path, monkeypatch):
+    """It writes no library, so an existing one is not in its way."""
+    from sabsim.bootstrap.command import generate
+    from sabsim.driver.environment_library import LIBRARY_MANIFEST_FILE
+    built = []
+    _stub_the_expensive_parts(monkeypatch, tmp_path, built)
+    prep_folder = _prep_folder_with_a_library(tmp_path)
+
+    generate("recipe.toml", str(prep_folder), collection1=False)
+
+    assert built == ["collection2"]
+    assert (prep_folder / LIBRARY_MANIFEST_FILE).read_text() == _OLD_LIBRARY
+
+
+def test_cli_generate_reports_the_refusal_and_the_flag(
+        tmp_path, monkeypatch, capsys):
+    """From the command line: exit 1, and the message names the way on."""
+    from sabsim.cli import main
+    from sabsim.driver.environment_library import LIBRARY_MANIFEST_FILE
+    built = []
+    _stub_the_expensive_parts(monkeypatch, tmp_path, built)
+    prep_folder = _prep_folder_with_a_library(tmp_path)
+    monkeypatch.chdir(prep_folder)
+
+    assert main(["bootstrap", "generate", "recipe.toml",
+                 "--skip-collection2"]) == 1
+    message = capsys.readouterr().err
+    assert "already holds" in message and "--overwrite-library" in message
+    assert built == []
+
+    assert main(["bootstrap", "generate", "recipe.toml",
+                 "--skip-collection2", "--overwrite-library"]) == 0
+    assert built == ["collection1"]
+    assert (prep_folder / LIBRARY_MANIFEST_FILE).read_text() == (
+        "# a NEW library\n")

@@ -42,6 +42,10 @@ from sabsim.deploy.scratch import job_scratch
 STRUCTURES_FILE = "structures.extxyz"
 
 
+class LibraryExistsError(RuntimeError):
+    """The folder already holds an environment library; none was built."""
+
+
 def bootstrap_directory(job_directory, recipe: ForceModelRecipe) -> Path:
     """Where this recipe's phases hand files to each other."""
     directory = Path(job_scratch(job_directory)) / "bootstrap" / recipe.name
@@ -75,16 +79,67 @@ def _place_library_in_prep_folder(manifest: Path, home: Path) -> Path:
     return home / LIBRARY_MANIFEST_FILE
 
 
+def existing_library_files(job_directory) -> list:
+    """The environment-library files this folder already holds.
+
+    A library is a PAIR of files, the readable manifest and the arrays
+    beside it; either one alone still counts, because a half-written or
+    half-deleted pair is something a person must look at, not something
+    to write over.
+    """
+    from sabsim.driver.environment_library import (
+        LIBRARY_ARRAYS_FILE, LIBRARY_MANIFEST_FILE)
+    home = Path(job_directory)
+    return [home / name
+            for name in (LIBRARY_MANIFEST_FILE, LIBRARY_ARRAYS_FILE)
+            if (home / name).exists()]
+
+
+def refuse_to_replace_library(job_directory) -> None:
+    """Stop if the folder holds a library already (DESIGN §10.8).
+
+    A surface that has been prepared was GATED against the library in
+    its prep folder: that library is the evidence for what "undamaged"
+    meant when the surface passed. Building a new one over it would
+    leave a gate verdict that no file on disk can explain, so it is
+    refused here — before any dynamics is run, since those are the
+    expensive part — and the message says both ways forward.
+    """
+    found = existing_library_files(job_directory)
+    if not found:
+        return
+    names = " and ".join(path.name for path in found)
+    raise LibraryExistsError(
+        f"{Path(job_directory)} already holds {names}; nothing was "
+        f"built and nothing was changed. A surface prepared in this "
+        f"folder was gated against that library, so it is not written "
+        f"over (DESIGN §10.8). To rebuild it, move the file(s) aside "
+        f"and run this again, or pass --overwrite-library to replace "
+        f"them where they are")
+
+
 def generate(recipe_path: str, job_directory: str,
-             collection1: bool = True, collection2: bool = True) -> dict:
+             collection1: bool = True, collection2: bool = True,
+             overwrite_library: bool = False) -> dict:
     """Build Collection 1 and/or harvest Collection 2; write structures.
 
     Returns a small summary (family -> count) for the caller to print.
     Either collection may be skipped — Collection 1 needs a compute node
     for its two dynamic families, Collection 2 only needs the dumps.
+
+    Building Collection 1 also writes the environment library into
+    ``job_directory``. If one is already there this raises
+    :class:`LibraryExistsError` before doing any work, unless
+    ``overwrite_library`` is true — the caller's explicit statement that
+    the old library is to be replaced. Harvesting Collection 2 alone
+    writes no library, so it is never refused on this account.
     """
     from sabsim.bootstrap.collection1 import build_collection1
     from sabsim.bootstrap.harvest import harvest_collection2
+    # First of all, before the recipe is even read: whether to replace
+    # a library does not depend on what the new one would contain.
+    if collection1 and not overwrite_library:
+        refuse_to_replace_library(job_directory)
     recipe = load_recipe(recipe_path)
     check_recipe_references(recipe)
     out_dir = bootstrap_directory(job_directory, recipe)

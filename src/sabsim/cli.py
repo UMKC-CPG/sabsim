@@ -221,6 +221,11 @@ def _build_parser() -> argparse.ArgumentParser:
     generate.add_argument(
         "--skip-collection2", action="store_true",
         help="build Collection 1 only (no pair dumps needed)")
+    generate.add_argument(
+        "--overwrite-library", action="store_true",
+        help="replace an environment library this folder already "
+             "holds. Without it generate REFUSES and changes nothing: "
+             "a surface prepared here was gated against that library")
     label_parser = phases.add_parser(
         "label",
         help="write one VASP directory per selected structure and ONE "
@@ -246,7 +251,8 @@ def _bootstrap(args: argparse.Namespace) -> int:
             summary = command.generate(
                 args.recipe, job_directory,
                 collection1=not args.skip_collection1,
-                collection2=not args.skip_collection2)
+                collection2=not args.skip_collection2,
+                overwrite_library=args.overwrite_library)
             print("sabsim bootstrap generate: structures per family")
             for family, count in sorted(summary.items()):
                 print(f"  {family:20s} {count}")

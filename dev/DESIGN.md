@@ -4660,6 +4660,23 @@ failed pull beside the corrected one for comparison, and it is the
 general case: a rerun is evidence about the earlier run, which is
 destroyed if the rerun writes over it.
 
+**An environment library is never written over either (2026-09-29).**
+A surface that has been prepared was GATED against the library in its
+prep folder (§3.5), so that library is the evidence for what
+"undamaged" meant when the surface passed; replace it and the verdict
+is one no file on disk can explain. The generated library job has
+always exited at once when a library is there (§10.2), but that guard
+lived in the job script, and `sabsim bootstrap generate` typed by hand
+in a prep folder wrote straight over the old pair. The rule now lives
+in the command: finding either file of the pair
+(`environment_library.toml`, `environment_library.npz`), `generate`
+stops before it reads the recipe or runs any dynamics, changes
+nothing, and says the two ways forward — move the files aside, which
+keeps the old library for comparison, or pass `--overwrite-library`,
+which is the person saying on the record that it may go. The job
+script's own guard stays, because it lets a chain be resubmitted
+without failing: there an existing library is success, not an error.
+
 ### 10.9 `init` — the generator §1.4 promised (2026-09-07)
 
 §1.4 forbids a hidden default and pays for that with a promise: the

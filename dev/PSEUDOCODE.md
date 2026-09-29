@@ -3862,6 +3862,13 @@ function build_environment_library(structures, force_model_recipe):
 > nothing is copied anywhere. A homo pair's second prep folder may
 > simply receive a copy of the first's library pair, since the library
 > is a fact about the material, not the surface.
+>
+> **It never writes over a library (2026-09-29).** If the folder it is
+> run from already holds either file of the pair, `generate` stops
+> BEFORE the recipe is read or any dynamics is run and changes
+> nothing, unless it is given `--overwrite-library` (DESIGN §10.8).
+> Harvesting Collection 2 alone (`--skip-collection1`) writes no
+> library and is never refused on this account.
 
 
 The one genuinely OURS step, and the one worth stating carefully: the
@@ -4882,7 +4889,8 @@ function prepare(project_spec_path, deployment_rc_path):
     # prep usage block; runs `sabsim bootstrap generate recipe.toml
     # --skip-collection2` with the prep folder as CWD; exits at once,
     # successfully, if that folder already holds a library (never
-    # overwrite -- move it aside to rebuild).
+    # overwrite -- move it aside to rebuild). The command itself
+    # refuses too (§11.3), so the rule holds when it is typed by hand.
     for each (surface, prep_folder) in ((1, folders.prep_surf1),
                                         (2, folders.prep_surf2)):
         script = render_library_script(validated, surface, usage[prep],
