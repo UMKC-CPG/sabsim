@@ -34,6 +34,8 @@ from sabsim.bootstrap.recipe import (
 )
 from sabsim.catalog_recipe import (
     TEMPLATE_FILENAME,
+    describe_terminations,
+    surface_plane_species,
     estimate_descriptor_cutoff,
     in_plane_widths,
     repeats_to_clear,
@@ -130,7 +132,9 @@ def test_add_makes_a_sibling_entry_from_a_crystal_file(catalog_copy):
     assert "face              = [1, 0, 0]" in recipe
     assert 'phase             = "sio2-tridymite"' in recipe
     assert 'species_union = ["Si", "O"]' in recipe    # chemistry kept
-    assert len(report.notices) == 1 and "verify_melt" in report.notices[0]
+    assert len(report.notices) == 2 and "verify_melt" in report.notices[0]
+    assert "termination 0 is used" in report.notices[1]
+    assert "# The (100) face has" in recipe
     # A second FACE of the same phase is cloned from that phase, and
     # what is flagged is the surface block, not the melt.
     second_face = add_entry(str(quartz_cif), "tridymite", (0, 0, 1),
@@ -271,6 +275,29 @@ def test_an_unreachable_library_leaves_the_pseudopotentials_to_decide(
         "[recipe] -> domain",
         "[production_settings] -> paw -> Si",
         "[audit_settings] -> paw -> Si"]
+
+
+def test_the_terminations_of_a_face_are_described():
+    """Reported, not chosen: one line per termination, saying which
+    species the bonding (top) side and the far side end on."""
+    assert surface_plane_species(
+        [8.8, 10.7, 16.6, 18.5, 18.6], ["Ga", "N", "Ga", "N", "N"],
+        top=True) == ["N"]
+    assert surface_plane_species(
+        [8.8, 10.7, 16.6, 18.5], ["Ga", "N", "Ga", "N"],
+        top=False) == ["Ga"]
+    silicon = load_crystal(
+        CATALOG_ROOT / "si_diamond_100" / "si_diamond.cif")
+    lines = describe_terminations(silicon, (1, 0, 0))
+    assert lines[0].startswith("the (100) face has 1 termination(s)")
+    assert lines[1:] == [
+        "  termination 0: bonding side ends on Si, far side on Si"]
+    quartz = load_crystal(
+        CATALOG_ROOT / "sio2_quartz_001" / "sio2_alpha_quartz.cif")
+    lines = describe_terminations(quartz, (0, 0, 1))
+    assert len(lines) == 3
+    assert "bonding side ends on Si, far side on O" in lines[1]
+    assert "bonding side ends on O, far side on O" in lines[2]
 
 
 def test_the_cutoff_rule_on_a_compound_and_a_skewed_surface_cell():

@@ -64,6 +64,12 @@ SHELL_GAP_ANGSTROM = 0.15
 # sparse for the rule, and the cutoff is left to the person.
 SHELL_SEARCH_RADII_ANGSTROM = (8.0, 12.0, 16.0)
 
+# Atoms within this height of a slab's outermost atom are counted as
+# its surface PLANE. Planes of a crystal lie further apart than this
+# (GaN's alternate 0.6 and 2.0 A apart along c), and atoms of one
+# plane that a file's rounding separates lie much closer.
+SURFACE_PLANE_DEPTH_ANGSTROM = 0.3
+
 # The surface block's own template values, needed to cut the trial slab
 # whose in-plane width sets the lateral repeat.
 _TEMPLATE_SLAB_THICKNESS = 10.0
@@ -275,6 +281,51 @@ def estimate_lateral_repeat(crystal, face, cutoff: float) -> int:
     return repeats_to_clear(narrowest, cutoff)
 
 
+def surface_plane_species(heights, symbols, top: bool) -> list[str]:
+    """The species on a slab's outermost atomic plane, top or bottom.
+
+    The plane is every atom within :data:`SURFACE_PLANE_DEPTH_ANGSTROM`
+    of the outermost one; the symbols are returned sorted, each once.
+    """
+    heights = np.array(heights, dtype=float)
+    if top:
+        on_plane = heights >= heights.max() - SURFACE_PLANE_DEPTH_ANGSTROM
+    else:
+        on_plane = heights <= heights.min() + SURFACE_PLANE_DEPTH_ANGSTROM
+    return sorted({symbol for symbol, chosen in zip(symbols, on_plane)
+                   if chosen})
+
+
+def describe_terminations(crystal, face) -> list[str]:
+    """One line per termination of the face: what each side ends on.
+
+    REPORTED, never chosen (DESIGN §10.11). The recipe and the project
+    use termination 0 until §2.5 selects one by surface energy, and on
+    a compound face the terminations can end on different species, so
+    the person is shown which is which. The BONDING side is the slab's
+    top — the side that is bombarded and then pressed (§2.6).
+    """
+    from sabsim.structure.slab_builder import slab_terminations
+
+    slabs = slab_terminations(
+        crystal, tuple(face), _TEMPLATE_SLAB_THICKNESS,
+        _TEMPLATE_SLAB_VACUUM)
+    face_text = "".join(f"m{-index}" if index < 0 else str(index)
+                        for index in face)
+    lines = [f"the ({face_text}) face has {len(slabs)} termination(s); "
+             f"termination 0 is used, a stand-in until one is "
+             f"selected by surface energy (DESIGN §2.5):"]
+    for index, slab in enumerate(slabs):
+        heights = [site.coords[2] for site in slab]
+        symbols = [site.specie.symbol for site in slab]
+        bonding = surface_plane_species(heights, symbols, top=True)
+        far = surface_plane_species(heights, symbols, top=False)
+        lines.append(
+            f"  termination {index}: bonding side ends on "
+            f"{'+'.join(bonding)}, far side on {'+'.join(far)}")
+    return lines
+
+
 def choose_pseudopotentials(species: list[str],
                             paw_library: Path | None) -> tuple:
     """Element -> PAW directory name, and what to tell the person.
@@ -359,7 +410,34 @@ def _today() -> str:
     return datetime.date.today().isoformat()
 
 
+def _capitalised(lines: list[str]) -> list[str]:
+    """The same lines with the first one starting a sentence."""
+    if not lines:
+        return []
+    return [lines[0][0].upper() + lines[0][1:], *lines[1:]]
+
+
+def _wrapped(lines: list[str], width: int = 69) -> list[str]:
+    """Break lines at spaces so a comment block keeps to the width.
+
+    A continuation is indented to the first line's own indent plus
+    four, so a list item stays readable as one item.
+    """
+    wrapped = []
+    for line in lines:
+        indent = len(line) - len(line.lstrip())
+        while len(line) > width:
+            cut = line.rfind(" ", 0, width + 1)
+            if cut <= indent:
+                break
+            wrapped.append(line[:cut])
+            line = " " * (indent + 4) + line[cut + 1:]
+        wrapped.append(line)
+    return wrapped
+
+
 def _comment_block(lines: list[str]) -> str:
+    lines = _wrapped(lines)
     return "\n".join(f"# {line}".rstrip() for line in lines)
 
 
@@ -381,7 +459,8 @@ def resolve_pseudopotential_library(template_text: str) -> Path | None:
 
 
 def _template_header(label, formula, phase, face, cif_name,
-                     undecided: list[str]) -> str:
+                     undecided: list[str],
+                     terminations: list[str]) -> str:
     """The opening comment block of a recipe written from the template."""
     face_text = "".join(f"m{-index}" if index < 0 else str(index)
                         for index in face)
@@ -423,6 +502,8 @@ def _template_header(label, formula, phase, face, cif_name,
             "Every other value is the same in every lean recipe.",
             "",
             *still_open,
+            "",
+            *_capitalised(terminations),
         ]),
         _THIN_RULE,
     ])
@@ -505,9 +586,11 @@ def recipe_from_template(crystal, label: str, formula: str, phase: str,
         raise RecipeWriteError(
             f"the filled recipe template is not readable TOML: "
             f"{broken}") from None
+    terminations = describe_terminations(crystal, face)
+    notices.extend(_as_one_notice(terminations))
     text = body.replace("@HEADER@", _template_header(
         label, formula, phase, face, Path(cif_repository_path).name,
-        undecided))
+        undecided, terminations))
     unfilled = _UNFILLED_TOKEN.findall(text)
     if unfilled:
         raise RecipeWriteError(
@@ -556,7 +639,12 @@ def set_in_table(text: str, table_header: str, key: str,
     return text[:header.end()] + block + text[end:]
 
 
-def recipe_from_sibling(source_text: str, source_label: str,
+def _as_one_notice(terminations: list[str]) -> list[str]:
+    """The termination lines as ONE notice, the list kept as lines."""
+    return ["\n         ".join(terminations)] if terminations else []
+
+
+def recipe_from_sibling(crystal, source_text: str, source_label: str,
                         source_phase: str, label: str, formula: str,
                         phase: str, face,
                         cif_repository_path: str) -> tuple:
@@ -568,6 +656,7 @@ def recipe_from_sibling(source_text: str, source_label: str,
     says so. Returns ``(text, notices)``.
     """
     new_phase_name = phase_name(formula, phase)
+    terminations = describe_terminations(crystal, face)
     text = set_in_table(source_text, "[recipe]", "name",
                         _quoted(recipe_name(label)))
     text = set_in_table(text, "[[phases]]", "name",
@@ -593,6 +682,8 @@ def recipe_from_sibling(source_text: str, source_label: str,
             "included, is the sibling's: where a comment speaks of "
             "that",
             "crystal or that face, it is not speaking of this one.",
+            "",
+            *_capitalised(terminations),
         ]),
         _RULE,
     ])
@@ -608,4 +699,5 @@ def recipe_from_sibling(source_text: str, source_label: str,
             f"{source_label}'s; a new phase melts differently (LEDGER "
             f"T-43) and `verify_melt` will refuse one that does not "
             f"melt"]
+    notices.extend(_as_one_notice(terminations))
     return note + "\n" + text, notices

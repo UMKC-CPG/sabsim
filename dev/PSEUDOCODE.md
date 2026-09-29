@@ -5094,6 +5094,9 @@ function catalog_add(cif, phase, face, formula=None, label=None,
                                             phase, face, cif)
     write CATALOG_ROOT/label/recipe.toml
     report what was derived: the label, and the formula as read
+    report describe_terminations(crystal, face)   # also written in
+                                                  # the recipe's
+                                                  # opening comment
 
 # Where the recipe comes from. A sibling is an entry of the SAME
 # formula; another chemistry is never cloned.
@@ -5155,6 +5158,20 @@ function estimate_descriptor_cutoff(crystal) -> length or UNDECIDED:
         if fewer than three shells: return UNDECIDED
         candidate = (outer edge of shell 2 + inner edge of shell 3) / 2
     return the largest candidate, rounded to 0.1 angstrom
+
+constant SURFACE_PLANE_DEPTH = 0.3 angstrom   # atoms within this of
+                                              # the outermost atom
+                                              # are the same plane
+
+function describe_terminations(crystal, face) -> list of lines:
+    # Reported, never chosen (DESIGN §10.11): termination 0 is a
+    # stand-in until §2.5 selects by surface energy.
+    slabs = every termination the slab builder offers for the face,
+            at the template's thickness and vacuum
+    for index, slab in slabs:
+        bonding = species within SURFACE_PLANE_DEPTH of the top atom
+        far     = species within SURFACE_PLANE_DEPTH of the bottom one
+        line(index, bonding, far, "the one used" if index == 0)
 
 function repeats_to_clear(width, cutoff) -> integer:
     # smallest n with n * width > 2 * cutoff: no atom sees its image

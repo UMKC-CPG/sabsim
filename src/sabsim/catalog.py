@@ -314,7 +314,7 @@ def add_entry(cif_source: str, phase: str, face,
         else:
             undecided = []
             recipe_text, notices = recipe_from_sibling(
-                source.recipe.read_text(), source.label, source.phase,
+                crystal, source.recipe.read_text(), source.label, source.phase,
                 expected, formula, phase, face, cif_repository_path)
     except RecipeWriteError as failure:
         raise CatalogError(str(failure)) from None

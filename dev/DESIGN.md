@@ -4852,6 +4852,22 @@ show three shells, a pseudopotential library that is not reachable
 from where the command runs — the line is written `"DECIDE"` rather
 than estimated from less.
 
+**The terminations of the face are REPORTED, not chosen and not
+named (Paul, 2026-09-28).** A face can usually be cut on more than
+one atomic plane, and until §2.5's selection by surface energy is
+built the recipe and the project use the first the builder offers.
+That stand-in is easy to overlook, so `catalog add` cuts the trial
+slab every way the builder can and says, for each termination, which
+species the BONDING side ends on — the slab's top, the side that is
+bombarded and pressed (§2.6) — and which the far side ends on: for
+GaN (001), termination 0 ends on N and termination 1 on Ga. The
+lines go to the command's output and into the recipe's opening
+comment, on both routes. The termination is deliberately NOT part of
+the label or of `material.toml`: the library is matched to a project
+by face and species and not by termination (§4.8 part 2), the value
+is an ordinal in a list the builder may reorder, and it is to become
+a computed result rather than a choice.
+
 **A sibling of the same formula is still cloned**, because there the
 chemistry lines are decisions already made and a difference between
 siblings should read as a diff: by default the first entry of the

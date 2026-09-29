@@ -229,6 +229,25 @@ def load_crystal(cif_path) -> Structure:
     return crystal
 
 
+def slab_terminations(
+        crystal: Structure,
+        miller_face: tuple[int, int, int],
+        min_slab_thickness: float = 8.0,
+        min_vacuum: float = 10.0) -> list:
+    """Every termination of a face, as pymatgen slabs, in builder order.
+
+    A face can usually be cut on more than one atomic plane; each cut
+    is a TERMINATION. :func:`build_slab` takes one of these by its
+    position in this list, and ``sabsim catalog add`` describes all of
+    them (DESIGN.md §10.11), so both read the one list made here.
+    """
+    generator = SlabGenerator(
+        crystal, miller_index=tuple(miller_face),
+        min_slab_size=min_slab_thickness, min_vacuum_size=min_vacuum,
+        center_slab=True)
+    return generator.get_slabs()
+
+
 def build_slab(
         crystal: Structure,
         miller_face: tuple[int, int, int],
@@ -244,11 +263,8 @@ def build_slab(
     ``termination_index``-th candidate (the first by default) is used: a
     documented stand-in, not a silent "first candidate is sufficient".
     """
-    generator = SlabGenerator(
-        crystal, miller_index=tuple(miller_face),
-        min_slab_size=min_slab_thickness, min_vacuum_size=min_vacuum,
-        center_slab=True)
-    candidates = generator.get_slabs()
+    candidates = slab_terminations(
+        crystal, miller_face, min_slab_thickness, min_vacuum)
     if termination_index >= len(candidates):
         raise IndexError(
             f"termination {termination_index} out of range: the "
