@@ -17,3 +17,9 @@ cif       = "sio2_alpha_quartz.cif"
 source       = "Crystallography Open Database"
 cod_id       = 1011097
 cod_revision = 303120
+# The article the structure was published in, as the crystal file
+# states it; the bracketed part is the database's own note on the
+# years the journal carried that name.
+reference    = """\
+    Zeitschrift fuer Kristallographie, Kristallgeometrie, \
+    Kristallphysik, Kristallchemie (-144,1977) 92, 355 (1935)"""
