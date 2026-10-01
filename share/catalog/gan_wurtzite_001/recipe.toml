@@ -1,8 +1,8 @@
 # =====================================================================
-# SABSIM force-model RECIPE — v0, GaN hexagonal (001), LEAN
-# (DESIGN.md §4.8). Written by `sabsim catalog add` on 2026-09-28.
-#   catalog entry  gan_hexagonal_001
-#   crystal file   gan_p63mc_186_2015.cif
+# SABSIM force-model RECIPE — v0, GaN wurtzite (001), LEAN
+# (DESIGN.md §4.8). Written by `sabsim catalog add` on 2026-09-29.
+#   catalog entry  gan_wurtzite_001
+#   crystal file   gan_p63mc_186_1938.cif
 #   written from   recipe.template.toml
 # NOTHING in it has been run yet.
 # ---------------------------------------------------------------------
@@ -18,6 +18,12 @@
 #
 # Still to decide in this file, each marked "DECIDE":
 #   - [recipe] -> domain
+#   - [collection1] -> surfaces[0] -> termination_index
+#
+# The (001) face has 2 terminations; `termination_index` is yours to
+#     decide among them (DESIGN §10.11):
+#   termination 0: bonding side ends on Ga, far side on N
+#   termination 1: bonding side ends on N, far side on Ga
 # ---------------------------------------------------------------------
 # The third input file, on its own clock: a potential is manufactured
 # ONCE from this recipe, costing days of machine time, then consumed
@@ -40,7 +46,7 @@
 
 [recipe]
 # DERIVED: the catalog label, with the recipe's generation after it.
-name          = "gan-hexagonal-001-lean-v0"
+name          = "gan-wurtzite-001-lean-v0"
 # Part 1 — the key. The elements the ONE shared model must handle (this
 # fixes the global type-map order, §4.3) and the structural/chemical
 # regime it claims. A pair's material_domain must lie inside this.
@@ -83,7 +89,7 @@ reference_data_ref = "share/activation/Ga_N.toml"
 # measured best (LEDGER T-44): treat it as a start. CHECK: the
 # library self-check in `sabsim bootstrap generate` refuses a ruler
 # that cannot tell warm crystal from glass.
-descriptor_cutoff    = { value = 4.9, unit = "angstrom" }
+descriptor_cutoff    = { value = 4.8, unit = "angstrom" }
 expansion_order       = 6
 # ESTIMATE: 1, 1/2, 1/4 ... in species_union order. Any distinct
 # values are accepted; the same self-check judges how well they work.
@@ -110,8 +116,8 @@ md_timestep       = { value = 1.0, unit = "fs" }
 # ---------------------------------------------------------------------
 [[phases]]
 # DERIVED: the formula and the phase word, and this entry's crystal.
-name = "gan-hexagonal"
-cif  = "share/catalog/gan_hexagonal_001/gan_p63mc_186_2015.cif"
+name = "gan-wurtzite"
+cif  = "share/catalog/gan_wurtzite_001/gan_p63mc_186_1938.cif"
 
 [collection1.bulk]
 # Family 1 — the perfect crystal at the lattice the GENERATOR model
@@ -139,7 +145,7 @@ modes      = ["volumetric", "uniaxial_z", "shear_xy"]
 # atoms that also clears twice the descriptor cutoff. An easier
 # material melts cooler and smaller, and is cheaper to label. CHECK:
 # `verify_melt` refuses a hold in which the atoms did not diffuse.
-phase             = "gan-hexagonal"
+phase             = "gan-wurtzite"
 cells_per_axis    = 4
 melt_temperature  = { value = 5000.0, unit = "K" }
 melt_duration     = { value = 5.0,    unit = "ps" }
@@ -152,13 +158,16 @@ seed              = 11
 [[collection1.surfaces]]
 # Family 4 — the clean, unbombarded free surface: same face the studies
 # bond, no damage. Cut by the §7 slab builder at the derived lattice.
-# `termination_index` 0 is the FIRST termination the builder offers, a
-# stand-in until §2.5 selects one by surface energy; on a polar face
-# the terminations differ in species, so look at which one this is.
-phase             = "gan-hexagonal"
-# DERIVED: the bonding face this catalog entry is for.
+phase             = "gan-wurtzite"
+# DERIVED: the bonding face this catalog entry is for. Its sign
+# counts: the face names the slab's top, the side that bonds (§2.5).
 face              = [0, 0, 1]
-termination_index = 0
+# Which atomic plane the cut ends on, as a position in the builder's
+# list of terminations; this file's opening comment says what each
+# one ends on. DERIVED as 0 when the face has a single termination.
+# DECIDE when it has more: nothing checks the choice, and it stands
+# in for §2.5's selection by surface energy, which is not built yet.
+termination_index = 2
 slab_thickness    = { value = 10.0, unit = "angstrom" }
 vacuum            = { value = 12.0, unit = "angstrom" }
 # In-plane tiling of the slab's own surface cell. A 1x1 column is often
@@ -180,7 +189,7 @@ seed      = 20260826
 # harvested after the equilibration interval, spaced by the stride.
 # 300 K, not hotter: warmer runs spread wide enough to swallow the
 # glass the ruler must tell them from (LEDGER T-37).
-phase           = "gan-hexagonal"
+phase           = "gan-wurtzite"
 ensemble        = "NVT"
 temperature     = { value = 300.0, unit = "K" }
 duration        = { value = 4.0,   unit = "ps" }
@@ -190,7 +199,7 @@ replicas        = 1
 seed            = 21
 
 [[collection1.warm_runs]]
-phase           = "gan-hexagonal"
+phase           = "gan-wurtzite"
 ensemble        = "NPT"
 temperature     = { value = 300.0, unit = "K" }
 duration        = { value = 4.0,   unit = "ps" }

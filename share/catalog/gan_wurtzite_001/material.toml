@@ -4,9 +4,9 @@
 # <formula>_<phase>_<face>, lower-cased — and `sabsim catalog`
 # refuses a mismatch.
 formula   = "GaN"
-phase     = "hexagonal"
+phase     = "wurtzite"
 face      = [0, 0, 1]
-cif       = "gan_p63mc_186_2015.cif"
+cif       = "gan_p63mc_186_1938.cif"
 
 [provenance]
 source = "unrecorded — say where this crystal came from"
