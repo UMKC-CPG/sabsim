@@ -4913,6 +4913,27 @@ because everything else follows from them (2026-09-28):
   still written with the old key is refused, with the one-word repair
   named. The project file is NOT renamed: `init` copies the phase
   word into the wafer table's `structure` line, as it always has.
+- **Where the crystal came from is read from the crystal file
+  (2026-10-01).** A file fetched from the Crystallography Open
+  Database states its own origin, so nobody has to type it: the
+  database id is its `_cod_database_code` item, the revision fetched
+  is the version stamp in its opening comment (`#$Revision: 303120
+  $`), and the article the structure was published in is in its
+  `_journal_` items. `catalog add` writes those into `material.toml`
+  as `[provenance] source`, `cod_id`, `cod_revision` and `reference`
+  — the last because a COD file is used on the condition that the
+  article is credited, and a project file that repeats the table
+  (§10.9) keeps the credit beside every result. `--cod-id` and
+  `--cod-revision` are optional and, like `--formula`, only a CHECK:
+  a value that contradicts the file is refused before anything is
+  written, since one of the two is wrong; a value the file does not
+  state at all is recorded as given, which is how a file with no
+  origin of its own gets one. A file pymatgen generated is recorded
+  as exactly that. For any other file nothing is inferred: the entry
+  says `unrecorded`, and the command says so as a notice. Until this
+  date the two options were the ONLY source, so an entry added
+  without them — both of the first two made from the template —
+  recorded no origin although its crystal file stated one.
 
 The command then refuses a label that already exists, refuses a
 crystal with partial occupancy (the builder needs an ordered cell),

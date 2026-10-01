@@ -9,4 +9,9 @@ face      = [0, 0, 1]
 cif       = "gan_p63mc_186_1938.cif"
 
 [provenance]
-source = "unrecorded — say where this crystal came from"
+source = "Crystallography Open Database"
+cod_id = 1010168
+cod_revision = 130149
+reference = """\
+    Zeitschrift fuer Anorganische und Allgemeine Chemie 239, 282 \
+    (1938)"""

@@ -172,10 +172,14 @@ def _build_parser() -> argparse.ArgumentParser:
                         metavar=("H", "K", "L"),
                         help="the bonding face's Miller indices")
     adding.add_argument("--cod-id", type=int, metavar="ID",
-                        help="Crystallography Open Database id, if that "
-                             "is where the file came from")
+                        help="optional CHECK: a file from the "
+                             "Crystallography Open Database states its "
+                             "own id and revision, which are read and "
+                             "recorded; an id given here is refused if "
+                             "the file states another")
     adding.add_argument("--cod-revision", type=int, metavar="REV",
-                        help="the COD revision fetched")
+                        help="optional CHECK of the COD revision the "
+                             "file states, in the same way")
     adding.add_argument("--from", dest="source", metavar="LABEL",
                         help="the sibling to clone the recipe from; "
                              "it must be of the same formula (default: "

@@ -9,4 +9,7 @@ face      = [0, 0, 1]
 cif       = "linbo3_r3c_161_1997.cif"
 
 [provenance]
-source = "unrecorded — say where this crystal came from"
+source = "Crystallography Open Database"
+cod_id = 2101845
+cod_revision = 202022
+reference = "Acta Crystallographica Section B 53, 420 (1997)"

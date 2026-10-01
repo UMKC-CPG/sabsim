@@ -36,7 +36,7 @@ import textwrap
 import tomllib
 from pathlib import Path
 
-from sabsim.catalog import MaterialEntry
+from sabsim.catalog import MaterialEntry, toml_string_literal
 from sabsim.spec.records import stage_folder_names
 
 # The marker a recipe or a project file carries where a judgement is
@@ -335,14 +335,8 @@ def description_literal(description: str) -> str:
     indentation that follows, so the loader reads ONE line of text
     while the file stays narrow enough to read.
     """
-    quoted = f'"{_toml_string(description)}"'
-    if len("description = ") + len(quoted) <= COMMENT_WIDTH:
-        return quoted
-    pieces = textwrap.wrap(
-        _toml_string(description), width=COMMENT_WIDTH - 6,
-        break_long_words=False, break_on_hyphens=False)
-    body = " \\\n".join(f"    {piece}" for piece in pieces)
-    return f'"""\\\n{body}"""'
+    return toml_string_literal("description = ", description,
+                               width=COMMENT_WIDTH)
 
 
 def _face_literal(entry: MaterialEntry) -> str:

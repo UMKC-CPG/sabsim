@@ -5153,7 +5153,9 @@ record MaterialEntry:
     face:       (h, k, l)
     cif:        path          # repository-relative, inside the folder
     recipe:     path          # the folder's recipe.toml
-    provenance: map           # e.g. cod_id, cod_revision, note
+    provenance: map           # source, cod_id, cod_revision,
+                              # reference -- read from the crystal
+                              # file by catalog_add (below)
 
 function entry_label(formula, phase, face) -> string:
     # lower(formula) + "_" + slug(phase) + "_" + face digits, a
@@ -5168,11 +5170,28 @@ function read_catalog() -> list of MaterialEntry:
         require entry_label(...) == folder name
     return entries in name order
 
+function read_cif_provenance(cif) -> map:
+    # What the file STATES about its origin; nothing is inferred.
+    if the first data block has _cod_database_code:
+        source       = "Crystallography Open Database"
+        cod_id       = that code
+        cod_revision = N of the opening comment "#$Revision: N $"
+    else if the file opens "# generated using pymatgen":
+        source       = "generated using pymatgen; ..."
+    if a source was found and _journal_name_full, _journal_year stated:
+        reference    = "<journal> <volume>, <first page> (<year>)"
+    return the keys found            # empty: the file says nothing
+
 function catalog_add(cif, phase, face, formula=None, label=None,
                      provenance, source=None):
     # The person says three things: the crystal, the phase word, the
-    # face. `formula` and `label` are optional CHECKS of what the
-    # command derives, never inputs it needs (DESIGN §10.11).
+    # face. `formula`, `label` and `provenance` (--cod-id,
+    # --cod-revision) are optional CHECKS of what the command derives,
+    # never inputs it needs (DESIGN §10.11).
+    stated = read_cif_provenance(cif)
+    for each (key, value) the person gave:
+        refuse if stated has key with a different value
+    provenance = the person's values, then stated's over them
     crystal = load_crystal(cif); require crystal.is_ordered
     found = reduced formula of crystal, cased      # "GaN", "SiO2"
     if formula given: require slug(formula) == slug(found)
@@ -5184,7 +5203,9 @@ function catalog_add(cif, phase, face, formula=None, label=None,
     source = the recipe's source, chosen as written below
     # Every refusal above happens BEFORE anything is written.
     make CATALOG_ROOT/label; copy cif in
-    write material.toml          # formula, phase, face, cif
+    write material.toml          # formula, phase, face, cif, and
+                                 # [provenance]; "unrecorded" plus a
+                                 # notice when it is empty
     if source is None:
         text, undecided, notices = recipe_from_template(
             crystal, label, formula, phase, face, cif)
@@ -5192,7 +5213,8 @@ function catalog_add(cif, phase, face, formula=None, label=None,
         text, notices = recipe_from_sibling(source, label, formula,
                                             phase, face, cif)
     write CATALOG_ROOT/label/recipe.toml
-    report what was derived: the label, and the formula as read
+    report what was derived: the label, the formula as read, and
+        the provenance the file stated
     report describe_terminations(crystal, face)   # also written in
                                                   # the recipe's
                                                   # opening comment

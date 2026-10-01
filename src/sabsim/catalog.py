@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import textwrap
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,6 +45,19 @@ CATALOG_ROOT = REPOSITORY_ROOT / "share" / "catalog"
 
 ENTRY_FILENAME = "material.toml"
 RECIPE_FILENAME = "recipe.toml"
+
+# What `[provenance] source` says when a crystal file came from the
+# Crystallography Open Database, and when nothing could be learned.
+COD_SOURCE = "Crystallography Open Database"
+UNRECORDED_SOURCE = "unrecorded — say where this crystal came from"
+
+# A COD crystal file opens with the database's own version stamp, as a
+# comment: "#$Revision: 303120 $". It is the only place the revision is
+# written; the id is a proper data item further down.
+_COD_REVISION_STAMP = re.compile(r"^#\$Revision:\s*(\d+)\s*\$",
+                                 re.MULTILINE)
+# The first line pymatgen writes into a crystal file it generated.
+_PYMATGEN_STAMP = "# generated using pymatgen"
 
 
 class CatalogError(RuntimeError):
@@ -147,6 +161,135 @@ def read_entry(folder: Path) -> MaterialEntry:
         provenance=dict(raw.get("provenance", {})))
 
 
+# The widest a written line of TOML may be before a long string value
+# is folded over several lines (the files are read by people).
+TOML_LINE_WIDTH = 72
+
+
+def toml_string_literal(key_text: str, value: str,
+                        width: int = TOML_LINE_WIDTH) -> str:
+    """A string as a TOML value that keeps to the line width.
+
+    ``key_text`` is what stands before the value on its line
+    (``"reference = "``), so the fit is judged on the whole line. A
+    value that fits is an ordinary quoted string. A longer one is
+    written as a multi-line string whose lines end in a backslash:
+    TOML joins such lines and drops the indentation that follows, so a
+    loader reads ONE line of text while the file stays narrow.
+    """
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    quoted = f'"{escaped}"'
+    if len(key_text) + len(quoted) <= width:
+        return quoted
+    pieces = textwrap.wrap(escaped, width=width - 6,
+                           break_long_words=False, break_on_hyphens=False)
+    body = " \\\n".join(f"    {piece}" for piece in pieces)
+    return f'"""\\\n{body}"""'
+
+
+def _whole_number(text) -> int | None:
+    """The text as a whole number, or None when it is not one."""
+    try:
+        return int(str(text).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _journal_reference(items: dict) -> str | None:
+    """The article a crystal was published in, as one readable line.
+
+    ``Acta Crystallographica Section B 53, 420 (1997)``: journal,
+    volume, first page, year, from the crystal file's ``_journal_``
+    items. The journal's name and the year are the least that makes a
+    reference worth writing; volume and page are added when stated.
+    """
+    def stated(tag):
+        value = items.get(tag)
+        value = " ".join(str(value).split()) if value is not None else ""
+        return value if value not in ("", "?", ".") else None
+
+    journal, year = stated("_journal_name_full"), stated("_journal_year")
+    if journal is None or year is None:
+        return None
+    volume = stated("_journal_volume")
+    page = stated("_journal_page_first")
+    reference = journal
+    if volume is not None:
+        reference += f" {volume}"
+    if page is not None:
+        reference += f", {page}"
+    return f"{reference} ({year})"
+
+
+def read_cif_provenance(cif_path: Path) -> dict:
+    """What a crystal file says about where it came from.
+
+    A file fetched from the Crystallography Open Database states its
+    own origin, so nobody has to type it: the database id is the data
+    item ``_cod_database_code``, the revision fetched is the version
+    stamp in the file's opening comment, and the article the structure
+    was published in is in its ``_journal_`` items. Those become
+    ``source``, ``cod_id``, ``cod_revision`` and ``reference`` — the
+    last because a COD file is used on the condition that the article
+    is credited, and a project file that carries it (DESIGN §10.9)
+    keeps that credit attached to every result.
+
+    A file pymatgen generated says only that, and it is recorded as
+    such. Anything else yields an empty table: this reads what the
+    file STATES and never infers a database from the look of a file.
+    """
+    from pymatgen.io.cif import CifFile
+
+    text = Path(cif_path).read_text(errors="replace")
+    items: dict = {}
+    try:
+        for block in CifFile.from_str(text).data.values():
+            items = dict(block.data)
+            break                   # the first data block is the crystal
+    except Exception:               # noqa: BLE001 — an odd header is not
+        items = {}                  # a reason to refuse the crystal
+
+    provenance: dict = {}
+    cod_id = _whole_number(items.get("_cod_database_code"))
+    if cod_id is not None:
+        provenance["source"] = COD_SOURCE
+        provenance["cod_id"] = cod_id
+        stamp = _COD_REVISION_STAMP.search(text)
+        if stamp is not None:
+            provenance["cod_revision"] = int(stamp.group(1))
+    elif text.lstrip().startswith(_PYMATGEN_STAMP):
+        provenance["source"] = (
+            "generated using pymatgen; the file names no database of "
+            "origin")
+    reference = _journal_reference(items)
+    if reference is not None and provenance:
+        provenance["reference"] = reference
+    return provenance
+
+
+def reconcile_provenance(stated: dict, given: dict,
+                         cif_source: str) -> dict:
+    """The entry's provenance: what the file states, checked and added to.
+
+    ``stated`` is what :func:`read_cif_provenance` found and ``given``
+    what the person supplied (``--cod-id``, ``--cod-revision``). Like
+    the formula and the label, a value the person gives is a CHECK of
+    what the file says, not a replacement for it: where both name the
+    same thing and disagree, the entry is refused, because one of the
+    two is wrong and a catalog entry is cited for as long as it lives.
+    What only the person supplied is added — that is how a file with
+    no origin of its own gets one.
+    """
+    for key, value in given.items():
+        if key in stated and stated[key] != value:
+            raise CatalogError(
+                f"{cif_source} states {key} = {stated[key]!r}, not the "
+                f"{value!r} given; the crystal file is the authority on "
+                f"where it came from — leave the option out, or use the "
+                f"file you meant (DESIGN §10.11)")
+    return {**given, **stated}
+
+
 def read_catalog(root: Path = CATALOG_ROOT) -> list[MaterialEntry]:
     """Every entry under the catalog root, in name order."""
     if not root.is_dir():
@@ -173,17 +316,22 @@ def lookup_entry(label: str, root: Path = CATALOG_ROOT) -> MaterialEntry:
         f"add` makes one (DESIGN §10.11)")
 
 
+def describe_provenance(provenance: dict) -> str:
+    """A provenance table in a few words, for a listing or a report."""
+    cod = provenance.get("cod_id")
+    if cod is not None:
+        revision = provenance.get("cod_revision", "?")
+        return f"COD {cod} rev {revision}"
+    return str(provenance.get("source", ""))
+
+
 def describe_entries(entries, formula: str | None = None) -> list[str]:
     """One printable line per entry, optionally one formula's only."""
     lines = []
     for entry in entries:
         if formula and slug(entry.formula) != slug(formula):
             continue
-        source = entry.provenance.get("source", "")
-        cod = entry.provenance.get("cod_id")
-        if cod is not None:
-            revision = entry.provenance.get("cod_revision", "?")
-            source = f"COD {cod} rev {revision}"
+        source = describe_provenance(entry.provenance)
         lines.append(f"{entry.label:24s} {entry.formula:6s} "
                      f"{entry.phase:18s} ({entry.face_digits})  "
                      f"{source}")
@@ -253,6 +401,11 @@ def add_entry(cif_source: str, phase: str, face,
     cif_path = Path(cif_source)
     if not cif_path.is_file():
         raise CatalogError(f"no crystal file at {cif_source}")
+    # Where the crystal came from is read from the file itself; what
+    # the person gave is checked against it (refused on a mismatch).
+    stated_provenance = read_cif_provenance(cif_path)
+    provenance = reconcile_provenance(
+        stated_provenance, dict(provenance or {}), cif_source)
     crystal = load_crystal(str(cif_path))
     if not crystal.is_ordered:
         raise CatalogError(
@@ -326,10 +479,19 @@ def add_entry(cif_source: str, phase: str, face,
         undecided=undecided)
     report.derived.append(f"label {expected} (from formula, phase, face)")
     report.derived.append(f"formula {formula} (read from the crystal file)")
+    if stated_provenance:
+        report.derived.append(
+            f"provenance {describe_provenance(stated_provenance)} (read "
+            f"from the crystal file)")
+    if not provenance:
+        report.notices.append(
+            f"{cif_path.name} does not say where it came from, and no "
+            f"--cod-id was given: {expected}/{ENTRY_FILENAME} records "
+            f"its [provenance] source as unrecorded — write it in")
     shutil.copy2(cif_path, folder / cif_path.name)
     report.written.append(f"{expected}/{cif_path.name}")
     (folder / ENTRY_FILENAME).write_text(_render_entry(
-        formula, phase, face, cif_path.name, provenance or {}))
+        formula, phase, face, cif_path.name, provenance))
     report.written.append(f"{expected}/{ENTRY_FILENAME}")
 
     (folder / RECIPE_FILENAME).write_text(recipe_text)
@@ -355,11 +517,14 @@ def _render_entry(formula, phase, face, cif_name, provenance) -> str:
         "[provenance]",
     ]
     if not provenance:
-        lines.append('source = "unrecorded — say where this crystal came '
-                     'from"')
-    for key, value in provenance.items():
+        lines.append(f'source = "{UNRECORDED_SOURCE}"')
+    # `source` first, whatever order the values arrived in: it is the
+    # line a reader looks for.
+    ordered = sorted(provenance.items(), key=lambda item: item[0] != "source")
+    for key, value in ordered:
         if isinstance(value, (int, float)):
             lines.append(f"{key} = {value}")
         else:
-            lines.append(f'{key} = "{value}"')
+            key_text = f"{key} = "
+            lines.append(key_text + toml_string_literal(key_text, value))
     return "\n".join(lines) + "\n"

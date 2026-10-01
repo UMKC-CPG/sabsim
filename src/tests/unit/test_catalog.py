@@ -112,14 +112,12 @@ def test_add_makes_a_sibling_entry_from_a_crystal_file(catalog_copy):
     quartz_cif = catalog_copy / "sio2_quartz_001" / "sio2_alpha_quartz.cif"
     report = add_entry(
         str(quartz_cif), "tridymite", (1, 0, 0), formula="SiO2",
-        label="sio2_tridymite_100",
-        provenance={"source": "Crystallography Open Database",
-                    "cod_id": 1, "cod_revision": 2},
-        root=catalog_copy)
+        label="sio2_tridymite_100", root=catalog_copy)
     entry = report.entry
     assert entry.label == "sio2_tridymite_100"
     assert entry.face == (1, 0, 0)
-    assert entry.provenance["cod_id"] == 1
+    # Nobody typed where the crystal came from: the file says so.
+    assert entry.provenance["cod_id"] == 1011097
     assert report.cloned_from == "sio2_quartz_001"
     recipe = entry.recipe.read_text()
     # The recipe's OWN name and the phase's name are different lines
@@ -351,3 +349,112 @@ def test_cli_catalog_add_needs_only_crystal_phase_and_face(capsys):
     with pytest.raises(SystemExit):
         main(["catalog", "add", "--cif", "/no/such/crystal.cif",
               "--structure", "wurtzite", "--face", "0", "0", "1"])
+
+
+# ---------------------------------------------------------------------
+# Provenance is read from the crystal file (DESIGN §10.11).
+# ---------------------------------------------------------------------
+
+def _quartz_cif(catalog_copy):
+    return catalog_copy / "sio2_quartz_001" / "sio2_alpha_quartz.cif"
+
+
+def test_a_cod_file_states_its_own_provenance(catalog_copy):
+    """The id, the revision fetched and the article, with nothing typed."""
+    from sabsim.catalog import COD_SOURCE, read_cif_provenance
+    stated = read_cif_provenance(_quartz_cif(catalog_copy))
+    assert stated["source"] == COD_SOURCE
+    assert stated["cod_id"] == 1011097
+    assert stated["cod_revision"] == 303120
+    assert stated["reference"].endswith("92, 355 (1935)")
+
+
+def test_a_generated_file_says_only_that_it_was_generated(catalog_copy):
+    from sabsim.catalog import read_cif_provenance
+    silicon = catalog_copy / "si_diamond_100" / "si_diamond.cif"
+    stated = read_cif_provenance(silicon)
+    assert "pymatgen" in stated["source"]
+    assert "cod_id" not in stated and "reference" not in stated
+
+
+def test_add_records_the_provenance_the_file_states(catalog_copy):
+    """`catalog add` writes it into material.toml and says it did."""
+    report = add_entry(str(_quartz_cif(catalog_copy)), "tridymite",
+                       (1, 0, 0), root=catalog_copy)
+    assert report.entry.provenance["cod_id"] == 1011097
+    assert report.entry.provenance["cod_revision"] == 303120
+    assert any("COD 1011097 rev 303120" in line and
+               "read from the crystal file" in line
+               for line in report.derived)
+    written = (report.entry.folder / "material.toml").read_text()
+    assert "unrecorded" not in written
+    # A long article reference is folded, and the file keeps its width.
+    assert all(len(line) <= 80 for line in written.splitlines())
+    with (report.entry.folder / "material.toml").open("rb") as handle:
+        assert tomllib.load(handle)["provenance"]["reference"].endswith(
+            "92, 355 (1935)")
+
+
+def test_a_cod_id_that_agrees_with_the_file_is_accepted(catalog_copy):
+    """The option is a check; a matching value changes nothing."""
+    report = add_entry(
+        str(_quartz_cif(catalog_copy)), "tridymite", (1, 0, 0),
+        provenance={"cod_id": 1011097, "cod_revision": 303120},
+        root=catalog_copy)
+    assert report.entry.provenance["cod_id"] == 1011097
+
+
+def test_a_cod_id_the_file_contradicts_is_refused(catalog_copy):
+    """One of the two is wrong, and nothing is written."""
+    with pytest.raises(CatalogError, match="states cod_id = 1011097"):
+        add_entry(str(_quartz_cif(catalog_copy)), "tridymite", (1, 0, 0),
+                  provenance={"cod_id": 42}, root=catalog_copy)
+    assert not (catalog_copy / "sio2_tridymite_100").exists()
+
+
+def _cif_with_no_origin(catalog_copy, tmp_path):
+    """The quartz crystal with every statement of its origin removed."""
+    kept = [line for line in _quartz_cif(catalog_copy).read_text()
+            .splitlines()
+            if not line.startswith("#")
+            and not line.startswith("_cod_database_code")]
+    bare = tmp_path / "bare_quartz.cif"
+    bare.write_text("\n".join(kept) + "\n")
+    return bare
+
+
+def test_a_file_that_names_no_origin_is_said_to_be_unrecorded(
+        catalog_copy, tmp_path):
+    """Nothing is inferred: the entry says unrecorded, and so does add."""
+    from sabsim.catalog import UNRECORDED_SOURCE
+    bare = _cif_with_no_origin(catalog_copy, tmp_path)
+    report = add_entry(str(bare), "tridymite", (1, 0, 0),
+                       root=catalog_copy)
+    assert report.entry.provenance == {"source": UNRECORDED_SOURCE}
+    assert any("does not say where it came from" in notice
+               for notice in report.notices)
+    assert not any("provenance" in line for line in report.derived)
+
+
+def test_a_given_cod_id_supplies_what_the_file_does_not_state(
+        catalog_copy, tmp_path):
+    """The option still works for a file with no origin of its own."""
+    bare = _cif_with_no_origin(catalog_copy, tmp_path)
+    report = add_entry(
+        str(bare), "tridymite", (1, 0, 0),
+        provenance={"source": "Crystallography Open Database",
+                    "cod_id": 7, "cod_revision": 8},
+        root=catalog_copy)
+    assert report.entry.provenance["cod_id"] == 7
+    assert not any("unrecorded" in notice for notice in report.notices)
+
+
+def test_every_shipped_cod_entry_records_what_its_file_states():
+    """No catalog entry disagrees with its own crystal file."""
+    from sabsim.catalog import read_cif_provenance
+    for entry in read_catalog():
+        stated = read_cif_provenance(entry.cif)
+        for key in ("cod_id", "cod_revision"):
+            if key in stated:
+                assert entry.provenance.get(key) == stated[key], (
+                    entry.label, key)
