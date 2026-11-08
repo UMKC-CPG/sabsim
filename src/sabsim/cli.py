@@ -46,59 +46,20 @@ from sabsim.pipeline.skeleton_stages import W0_STAGES
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Assemble the ``sabsim`` argument parser (one verb so far: run)."""
+    """Assemble the ``sabsim`` argument parser.
+
+    The verbs are registered — and so listed by ``--help`` — in the
+    order a person meets them: ``setup`` once per install, ``catalog``
+    to see what can be bonded, ``init`` to make the project folder,
+    ``prepare`` to write its job scripts, then the two the scripts
+    themselves run on the node, ``bootstrap`` (the library builds)
+    and ``run`` (the four jobs).
+    """
     parser = argparse.ArgumentParser(
         prog="sabsim",
         description="Run a surface-activated-bonding project — one wafer "
                     "pair — end to end, or one of its four jobs.")
     subcommands = parser.add_subparsers(dest="command")
-
-    run = subcommands.add_parser(
-        "run",
-        help="run a project: prepare each surface -> assemble -> press "
-             "-> pull -> measure")
-    run.add_argument(
-        "spec", nargs="?", default="sabsim.toml",
-        help="the project file (default: sabsim.toml here); its folder "
-             "is the project folder the stage folders live in")
-    run.add_argument(
-        "--dry-run", action="store_true",
-        help="run the placeholder stages on the login node — validate the "
-             "spec and exercise the whole control flow with no "
-             "supercomputer and no real physics")
-
-    # The four pair jobs (DESIGN.md §10.2, §14.3), mutually exclusive: a
-    # run does ONE job's stage of the chain, or — no flag — the whole
-    # chain. store_const on one shared dest gives both the exclusivity
-    # and a single job_flag value. The flags are spelled from the job
-    # registry (ONE source of the job set, §10.3): --prep-surf1,
-    # --prep-surf2, --bond, --analysis. These are the lines a generated
-    # deployment script carries; the human submits both preps, then
-    # bond, then analysis, checking each before the next (§10.5).
-    from sabsim.deploy.registry import JOB_REGISTRY
-    jobs = run.add_mutually_exclusive_group()
-    for job in JOB_REGISTRY:
-        jobs.add_argument(
-            job.flag, dest="job_flag", action="store_const",
-            const=job.name,
-            help=f"run only the {job.name} job ({job.resource_class}): "
-                 f"{', '.join(job.stages)}; writes {job.writes} into "
-                 f"the {job.folder_key} stage folder")
-    run.set_defaults(job_flag=None)
-    run.add_argument(
-        "--dump-visuals", action=argparse.BooleanOptionalAction,
-        default=True,
-        help="record a trajectory for every dynamic stage — the "
-             "bombardment of each half, the press and settle, and each "
-             "pull rung — for viewing in Ovito. ON by default (the "
-             "movie is how a run is verified); pass --no-dump-visuals "
-             "to skip it when the frames' wall clock and size (a pull "
-             "rung can reach 1.3 GB) are not wanted")
-    run.add_argument(
-        "--dump-stride", type=int, metavar="STEPS",
-        help="record one frame per STEPS of MD, overriding the spec's "
-             "frame_stride. Only meaningful with --dump-visuals; raise it "
-             "for smaller files, lower it for smoother playback")
 
     # `setup` — the install CHECKED and the shell rc WRITTEN (DESIGN.md
     # §10.10, PSEUDOCODE §14.8). Builds nothing; never overwrites.
@@ -119,24 +80,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--venv", metavar="PATH",
         help="the venv the rc activates; default: the one running this "
              "command")
-
-    # `init` — the GENERATOR (DESIGN.md §10.9, PSEUDOCODE §14.7): writes
-    # a project folder from the tracked templates and never overwrites,
-    # so it can be re-run after an edit to add what is still missing.
-    init = subcommands.add_parser(
-        "init",
-        help="write a project folder (sabsim.toml, deployment.toml, the "
-             "four stage folders, a recipe per surface) from the "
-             "templates; never overwrites")
-    init.add_argument(
-        "project",
-        help="the project folder to fill; made if missing")
-    init.add_argument(
-        "materials", nargs=2, metavar="LABEL",
-        help="the pair to bond: two materials-catalog labels (wafer A "
-             "is the bottom surface, wafer B the top), e.g. "
-             "si_diamond_100 sio2_quartz_001; `sabsim catalog list` "
-             "shows them")
 
     # `catalog` — the materials catalog (DESIGN.md §10.11, PSEUDOCODE
     # §14.9): one folder per crystal phase and face under share/catalog.
@@ -186,6 +129,24 @@ def _build_parser() -> argparse.ArgumentParser:
                              "the first of the same phase, else of the "
                              "same formula; a new chemistry is written "
                              "from the template)")
+
+    # `init` — the GENERATOR (DESIGN.md §10.9, PSEUDOCODE §14.7): writes
+    # a project folder from the tracked templates and never overwrites,
+    # so it can be re-run after an edit to add what is still missing.
+    init = subcommands.add_parser(
+        "init",
+        help="write a project folder (sabsim.toml, deployment.toml, the "
+             "four stage folders, a recipe per surface) from the "
+             "templates; never overwrites")
+    init.add_argument(
+        "project",
+        help="the project folder to fill; made if missing")
+    init.add_argument(
+        "materials", nargs=2, metavar="LABEL",
+        help="the pair to bond: two materials-catalog labels (wafer A "
+             "is the bottom surface, wafer B the top), e.g. "
+             "si_diamond_100 sio2_quartz_001; `sabsim catalog list` "
+             "shows them")
 
     # `prepare` — the WRITER (DESIGN.md §10.1, PSEUDOCODE §14.4): reads
     # the project file AND the machine-local deployment rc, and writes
@@ -243,6 +204,56 @@ def _build_parser() -> argparse.ArgumentParser:
         help="read the finished VASP runs, drop the unconverged, write "
              "labels.extxyz")
     harvest_parser.add_argument("recipe", help="the force-model recipe TOML")
+    # `run` — the WORKER (ARCHITECTURE §4): what the generated
+    # Slurm scripts execute on the compute node, so it comes last
+    # in the order a person meets these verbs.
+    run = subcommands.add_parser(
+        "run",
+        help="run a project: prepare each surface -> assemble -> press "
+             "-> pull -> measure")
+    run.add_argument(
+        "spec", nargs="?", default="sabsim.toml",
+        help="the project file (default: sabsim.toml here); its folder "
+             "is the project folder the stage folders live in")
+    run.add_argument(
+        "--dry-run", action="store_true",
+        help="run the placeholder stages on the login node — validate the "
+             "spec and exercise the whole control flow with no "
+             "supercomputer and no real physics")
+
+    # The four pair jobs (DESIGN.md §10.2, §14.3), mutually exclusive: a
+    # run does ONE job's stage of the chain, or — no flag — the whole
+    # chain. store_const on one shared dest gives both the exclusivity
+    # and a single job_flag value. The flags are spelled from the job
+    # registry (ONE source of the job set, §10.3): --prep-surf1,
+    # --prep-surf2, --bond, --analysis. These are the lines a generated
+    # deployment script carries; the human submits both preps, then
+    # bond, then analysis, checking each before the next (§10.5).
+    from sabsim.deploy.registry import JOB_REGISTRY
+    jobs = run.add_mutually_exclusive_group()
+    for job in JOB_REGISTRY:
+        jobs.add_argument(
+            job.flag, dest="job_flag", action="store_const",
+            const=job.name,
+            help=f"run only the {job.name} job ({job.resource_class}): "
+                 f"{', '.join(job.stages)}; writes {job.writes} into "
+                 f"the {job.folder_key} stage folder")
+    run.set_defaults(job_flag=None)
+    run.add_argument(
+        "--dump-visuals", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="record a trajectory for every dynamic stage — the "
+             "bombardment of each half, the press and settle, and each "
+             "pull rung — for viewing in Ovito. ON by default (the "
+             "movie is how a run is verified); pass --no-dump-visuals "
+             "to skip it when the frames' wall clock and size (a pull "
+             "rung can reach 1.3 GB) are not wanted")
+    run.add_argument(
+        "--dump-stride", type=int, metavar="STEPS",
+        help="record one frame per STEPS of MD, overriding the spec's "
+             "frame_stride. Only meaningful with --dump-visuals; raise it "
+             "for smaller files, lower it for smoother playback")
+
     return parser
 
 
@@ -629,6 +640,30 @@ def record_command(arguments=None) -> None:
         record.write("\n\n")
 
 
+# Environment variables the launchers set to a process's rank in a
+# parallel job: Slurm's srun, the PMI standard, and Open MPI's mpirun.
+LAUNCHER_RANK_VARIABLES = ("SLURM_PROCID", "PMI_RANK",
+                           "OMPI_COMM_WORLD_RANK")
+
+
+def _is_primary_rank() -> bool:
+    """True unless a launcher says this process is a non-zero rank.
+
+    The job scripts start ``sabsim run`` under ``srun -n N``, so N
+    copies of this module start at once, each in the project folder;
+    only one of them may write the ``command`` block or the file gets
+    N identical entries per run. The rank is read from the launcher's
+    environment rather than from MPI itself, which is imported much
+    later and only for a live run. A plain shell invocation sets none
+    of these variables and so is always primary.
+    """
+    for variable in LAUNCHER_RANK_VARIABLES:
+        rank = os.environ.get(variable)
+        if rank is not None and rank.strip() not in ("", "0"):
+            return False
+    return True
+
+
 def _is_help_request(arguments) -> bool:
     """True when the vector asks for help (``-h``/``--help``) anywhere.
 
@@ -645,11 +680,14 @@ def main(argv=None) -> int:
     is the real entry — ``argv`` is None, so the vector is the process's
     own — never when a test or another module hands one in, so the
     suite leaves no stray ``command`` files (CLAUDE.md). A help
-    request is not recorded either: it changes nothing.
+    request is not recorded either: it changes nothing. Under a
+    parallel launcher only rank 0 records, so an N-rank job leaves
+    one block, not N.
     """
     # A help request does something only to the screen, so it is not part of
     # the folder's history (ARCHITECTURE §4.2).
-    if argv is None and not _is_help_request(sys.argv[1:]):
+    if (argv is None and not _is_help_request(sys.argv[1:])
+            and _is_primary_rank()):
         record_command()
     parser = _build_parser()
     args = parser.parse_args(argv)

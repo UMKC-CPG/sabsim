@@ -8,6 +8,7 @@ which is checked here without ever reaching the engine.
 
 from __future__ import annotations
 
+import argparse
 import os
 
 import pytest
@@ -187,3 +188,35 @@ def test_a_help_request_is_not_recorded(run_home, monkeypatch, capsys):
         with pytest.raises(SystemExit):
             main()
     assert not (run_home / COMMAND_RECORD_FILE).exists()
+
+
+def test_only_rank_zero_of_a_parallel_job_records(run_home, monkeypatch,
+                                                  capsys):
+    """Under `srun -n N` one block is written, by rank 0, not N of them.
+
+    Each launcher names the rank in its own variable; a non-zero value
+    in any of them silences the recorder, a zero (or no variable at
+    all, the plain-shell case) lets it write.
+    """
+    from sabsim.cli import COMMAND_RECORD_FILE, LAUNCHER_RANK_VARIABLES
+    vector = ["sabsim", "init", ".", "si_diamond_100", "sio2_quartz_001"]
+    monkeypatch.setattr("sys.argv", vector)
+    for variable in LAUNCHER_RANK_VARIABLES:
+        monkeypatch.setenv(variable, "3")
+        main()
+        monkeypatch.delenv(variable)
+    assert not (run_home / COMMAND_RECORD_FILE).exists()
+    monkeypatch.setenv("SLURM_PROCID", "0")
+    main()
+    text = (run_home / COMMAND_RECORD_FILE).read_text()
+    assert text.count("Cmnd:") == 1
+
+
+def test_help_lists_the_verbs_in_workflow_order(capsys):
+    """`sabsim -h` presents the verbs in the order a person runs them."""
+    from sabsim.cli import _build_parser
+    subparsers = [action for action in _build_parser()._actions
+                  if isinstance(action, argparse._SubParsersAction)]
+    verbs = list(subparsers[0].choices)
+    assert verbs == ["setup", "catalog", "init", "prepare", "bootstrap",
+                     "run"]

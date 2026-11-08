@@ -1284,9 +1284,14 @@ shell histories. The record is written only from the real console
 entry point (the installed `sabsim` script, with no argument vector
 handed in), never when a test or another module calls `main(argv)`
 directly, so the test suite leaves no stray `command` files, and
-not for a help request (`-h`/`--help`), which changes nothing. A
-setting that lands in this permanent record should therefore be
-named, not numbered — the same argument Imago makes.
+not for a help request (`-h`/`--help`), which changes nothing. Under
+a parallel launcher only rank 0 writes (2026-11-08): the job scripts
+start `sabsim` under `srun -n N`, so N copies begin at once in the
+same folder, and the rank is read from the launcher's environment
+(`SLURM_PROCID`, `PMI_RANK`, `OMPI_COMM_WORLD_RANK`) before MPI is
+ever imported — one block per run, not N. A setting that lands in
+this permanent record should therefore be named, not numbered — the
+same argument Imago makes.
 
 **Per-run subdirectories, never a silent overwrite.** Re-running a
 stage (a new seed, a tweaked energy) must never clobber the previous
