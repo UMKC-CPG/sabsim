@@ -664,13 +664,21 @@ def _is_primary_rank() -> bool:
     return True
 
 
-def _is_help_request(arguments) -> bool:
-    """True when the vector asks for help (``-h``/``--help``) anywhere.
+def _names_an_action(args: argparse.Namespace) -> bool:
+    """True when the parsed vector asks for something that will run.
 
-    argparse honours the flag at any position, including after a
-    subcommand (``sabsim init -h``), and exits before anything runs.
+    A bare ``sabsim``, or a ``catalog``/``bootstrap`` with no verb or
+    phase, only prints help and exits — nothing happened in the
+    folder, so nothing belongs in its history. (Help requests and
+    parse errors never reach this point: argparse exits first.)
     """
-    return any(arg in ("-h", "--help") for arg in arguments)
+    if args.command is None:
+        return False
+    if args.command == "catalog" and args.verb is None:
+        return False
+    if args.command == "bootstrap" and args.phase is None:
+        return False
+    return True
 
 
 def main(argv=None) -> int:
@@ -679,18 +687,18 @@ def main(argv=None) -> int:
     The invocation is recorded in the ``command`` file ONLY when this
     is the real entry — ``argv`` is None, so the vector is the process's
     own — never when a test or another module hands one in, so the
-    suite leaves no stray ``command`` files (CLAUDE.md). A help
-    request is not recorded either: it changes nothing. Under a
-    parallel launcher only rank 0 records, so an N-rank job leaves
-    one block, not N.
+    suite leaves no stray ``command`` files (CLAUDE.md). The record
+    is written AFTER the vector has parsed and names an action: a
+    help request, a bare ``sabsim``, a verb with nothing after it, or
+    a mistyped line (``sabsim help``) prints to the screen and changes
+    nothing, so none of them enters the folder's history
+    (ARCHITECTURE §4.2). Under a parallel launcher only rank 0
+    records, so an N-rank job leaves one block, not N.
     """
-    # A help request does something only to the screen, so it is not part of
-    # the folder's history (ARCHITECTURE §4.2).
-    if (argv is None and not _is_help_request(sys.argv[1:])
-            and _is_primary_rank()):
-        record_command()
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv)   # exits on -h/--help or a bad line
+    if argv is None and _names_an_action(args) and _is_primary_rank():
+        record_command()
     if args.command == "run":
         return _run(args)
     if args.command == "setup":

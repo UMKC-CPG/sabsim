@@ -1283,8 +1283,11 @@ its `bootstrap` phases. Recall is a `cat command`, not a search of
 shell histories. The record is written only from the real console
 entry point (the installed `sabsim` script, with no argument vector
 handed in), never when a test or another module calls `main(argv)`
-directly, so the test suite leaves no stray `command` files, and
-not for a help request (`-h`/`--help`), which changes nothing. Under
+directly, so the test suite leaves no stray `command` files. It is
+written only after the line has parsed and names an action: a help
+request, a bare `sabsim`, a verb with no action after it (`sabsim
+catalog`), or a line argparse rejects (`sabsim help`) prints to the
+screen and changes nothing, so none enters the history. Under
 a parallel launcher only rank 0 writes (2026-11-08): the job scripts
 start `sabsim` under `srun -n N`, so N copies begin at once in the
 same folder, and the rank is read from the launcher's environment

@@ -180,13 +180,25 @@ def test_main_with_an_argument_vector_records_nothing(run_home, capsys):
     assert not (run_home / COMMAND_RECORD_FILE).exists()
 
 
-def test_a_help_request_is_not_recorded(run_home, monkeypatch, capsys):
-    """`sabsim -h` and `sabsim init --help` leave no `command` entry."""
+def test_a_line_that_runs_nothing_is_not_recorded(run_home, monkeypatch,
+                                                  capsys):
+    """Help, a bare `sabsim`, a mistyped verb, a verb with no action.
+
+    Each prints to the screen and changes nothing, so none leaves a
+    `command` entry — whether argparse exits (help, a parse error) or
+    main itself returns 2 (no subcommand, `catalog` without a verb,
+    `bootstrap` without a phase).
+    """
     from sabsim.cli import COMMAND_RECORD_FILE
-    for vector in (["sabsim", "-h"], ["sabsim", "init", "--help"]):
+    for vector in (["sabsim", "-h"], ["sabsim", "init", "--help"],
+                   ["sabsim", "help"], ["sabsim", "init", "only_one"]):
         monkeypatch.setattr("sys.argv", vector)
         with pytest.raises(SystemExit):
             main()
+    for vector in (["sabsim"], ["sabsim", "catalog"],
+                   ["sabsim", "bootstrap"]):
+        monkeypatch.setattr("sys.argv", vector)
+        assert main() == 2
     assert not (run_home / COMMAND_RECORD_FILE).exists()
 
 
