@@ -42,7 +42,9 @@ from sabsim.deploy.prepare import (
     SubmissionEntry,
     prepare,
     render_job_script,
+    submission_entries,
 )
+from sabsim.deploy.submit import Submission, SubmitError, submit
 
 __all__ = [
     "DeploymentConfig",
@@ -69,4 +71,8 @@ __all__ = [
     "SubmissionEntry",
     "prepare",
     "render_job_script",
+    "submission_entries",
+    "Submission",
+    "SubmitError",
+    "submit",
 ]

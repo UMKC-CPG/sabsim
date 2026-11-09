@@ -230,5 +230,5 @@ def test_help_lists_the_verbs_in_workflow_order(capsys):
     subparsers = [action for action in _build_parser()._actions
                   if isinstance(action, argparse._SubParsersAction)]
     verbs = list(subparsers[0].choices)
-    assert verbs == ["setup", "catalog", "init", "prepare", "bootstrap",
-                     "run"]
+    assert verbs == ["setup", "catalog", "init", "prepare", "submit",
+                     "bootstrap", "run"]

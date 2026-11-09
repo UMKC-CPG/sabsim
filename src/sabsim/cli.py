@@ -169,6 +169,35 @@ def _build_parser() -> argparse.ArgumentParser:
         help="record a trajectory for every dynamic stage of every "
              "generated job (ON by default — a dynamic run leaves its "
              "movie behind); --no-dump-visuals writes scripts that skip it")
+    # `submit` — the HAND (DESIGN.md §10.12, PSEUDOCODE §14.10): gives
+    # the scripts `prepare` wrote to the scheduler in the guide's order,
+    # holds each on the named jobs it depends on, and exits at once.
+    submit = subcommands.add_parser(
+        "submit",
+        help="hand the prepared scripts to the scheduler in the guide's "
+             "order (a prep job's library build first when its library "
+             "is missing); watches nothing")
+    submit.add_argument(
+        "jobs", nargs="+", metavar="JOB",
+        help="which jobs to submit: prep-surf1, prep-surf2, bond, "
+             "analysis, or all; a job is held only on the jobs named "
+             "here that it depends on")
+    submit.add_argument(
+        "spec", nargs="?", default="sabsim.toml",
+        help="the project file (default: sabsim.toml here)")
+    submit.add_argument(
+        "--gpu", metavar="TYPE",
+        help="the card model to ask for instead of the scripts' own, "
+             "e.g. V100 or A100 — on every GPU job, keeping each "
+             "script's card count; CPU jobs are untouched")
+    submit.add_argument(
+        "--node", metavar="NAME",
+        help="pin every submitted job to this node (sbatch --nodelist)")
+    submit.add_argument(
+        "--dry-run", action="store_true",
+        help="print the sbatch lines that would be issued and submit "
+             "nothing")
+
     bootstrap = subcommands.add_parser(
         "bootstrap",
         help="manufacture the production potential from a force-model "
@@ -209,8 +238,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # in the order a person meets these verbs.
     run = subcommands.add_parser(
         "run",
-        help="run a project: prepare each surface -> assemble -> press "
-             "-> pull -> measure")
+        help="run one job of a project inside an allocation: prepare a "
+             "surface -> assemble -> press -> pull -> measure. This is "
+             "the line INSIDE the scripts `prepare` writes, issued by "
+             "the scheduler, not a command a person types; use "
+             "`submit` to start a job")
     run.add_argument(
         "spec", nargs="?", default="sabsim.toml",
         help="the project file (default: sabsim.toml here); its folder "
@@ -619,6 +651,59 @@ def _prepare(args: argparse.Namespace) -> int:
     return 0
 
 
+def _submit(args: argparse.Namespace) -> int:
+    """Execute ``sabsim submit``: hand the named jobs to the scheduler.
+
+    Runs on the login node for a second and exits (DESIGN.md §10.12):
+    the scripts must exist (else it names `sabsim prepare`), each job
+    is held on the named jobs it depends on, and a prep job's library
+    build is added only when its library is missing. The spec is
+    positional-optional like `prepare`'s; the job words come first.
+    """
+    from sabsim.deploy.submit import (
+        SubmitError,
+        describe_submission,
+        submit,
+    )
+
+    # `jobs` is greedy (nargs="+"), so a project file given after the
+    # job words lands in it; a word ending in .toml is the spec.
+    job_words = list(args.jobs)
+    spec = args.spec
+    if job_words and job_words[-1].endswith(".toml"):
+        spec = job_words.pop()
+    if not os.path.isfile(spec):
+        print(f"sabsim: no project file at '{spec}' — give a path, or "
+              f"put a sabsim.toml in this directory", file=sys.stderr)
+        return 2
+    project_directory = os.path.dirname(os.path.abspath(spec))
+    try:
+        submissions, notices = submit(
+            spec, job_words, project_directory, gpu_type=args.gpu,
+            node=args.node, dry_run=args.dry_run)
+    except SubmitError as failure:
+        print(f"sabsim: submit halted — {failure}", file=sys.stderr)
+        return 1
+    except Exception as failure:                       # noqa: BLE001
+        # A bad project file or a scheduler failure reports WHY, not a
+        # traceback (DESIGN.md §5.7).
+        print(f"sabsim: submit halted — {failure}", file=sys.stderr)
+        return 1
+
+    for notice in notices:
+        print(f"sabsim submit: {notice}")
+    verb = "would issue" if args.dry_run else "issued"
+    print(f"sabsim submit: {verb} {len(submissions)} sbatch line(s) "
+          f"from {project_directory}")
+    for submission in submissions:
+        print(f"  {describe_submission(submission)}")
+        if not args.dry_run:
+            print(f"    -> {submission.job_name} is job {submission.job_id}")
+    if not args.dry_run:
+        print("  watch them with: squeue -u $USER")
+    return 0
+
+
 COMMAND_RECORD_FILE = "command"
 
 
@@ -709,6 +794,8 @@ def main(argv=None) -> int:
         return _catalog(args)
     if args.command == "prepare":
         return _prepare(args)
+    if args.command == "submit":
+        return _submit(args)
     if args.command == "bootstrap":
         return _bootstrap(args)
     parser.print_help()

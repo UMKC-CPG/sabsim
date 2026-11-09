@@ -1238,6 +1238,9 @@ which `sabsim bootstrap label` reads to write its job array
 4. **The persistent control process** — a long-lived controller cannot
    sit on a login node (it is killed). Fine for v1 (hand-run); automation
    later must run it inside a job or use a submit-and-monitor manager.
+   A `sbatch` that returns at once is NOT such a process: `sabsim
+   submit` (DESIGN §10.12, 2026-11-08) hands the written scripts to the
+   scheduler with their `afterok` chain and exits, watching nothing.
 5. **ALF's Parsl config for the target machine** — a bounded setup task
    (a CPU-QM executor + a GPU-train executor), not a fork. The bootstrap
    loop (STRUCTURAL 1b) is the most execution-intensive part: ALF's Parsl
@@ -1276,7 +1279,8 @@ command appends one dated block — a `Date:` line and a `Cmnd:` line
 carrying the exact argument vector — to a file named `command` in the
 directory it was issued from, before it does anything else. So a
 project folder's `command` file grows into the history of what was
-done there: the `init`, each `prepare`, and, because the generated
+done there: the `init`, each `prepare`, each `submit` (with the card
+or node it asked for), and, because the generated
 Slurm scripts `cd` into the project folder before their `sabsim run`
 line, every compute-node run with its date; a prep folder's records
 its `bootstrap` phases. Recall is a `cat command`, not a search of

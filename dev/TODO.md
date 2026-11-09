@@ -45,6 +45,23 @@
 
 <!-- Tasks related to layout, modules, build. -->
 
+- [x] **`sabsim submit` — the guide's chain handed to the scheduler**
+      (2026-11-08; DESIGN §10.1 revised + §10.12, PSEUDOCODE §14.10,
+      ARCHITECTURE §4.1 wall 4 + §4.2). The §10.1 wall forbids a process
+      that LIVES on the login node, not a `sbatch` that returns at once,
+      so a third consumer command hands the written scripts over:
+      `sabsim submit prep-surf1|...|all [--gpu TYPE] [--node NAME]
+      [--dry-run]`. Only what is named is submitted, held with `afterok`
+      only on named upstream jobs; a prep job's library build is added
+      exactly when its library manifest is missing; a missing script
+      stops before anything is issued; the overrides ride the sbatch
+      line so the scripts on disk stay the rc's record. The order and
+      dependency graph now live in ONE function, `submission_entries`,
+      read by both `prepare` and `submit`. Prompted by the 2026-11-08
+      MS5 session: every H100 busy, V100s idle, and the hand-typed
+      `--parsable`/`afterok` sequence being the only way to use them.
+      `deploy/submit.py` + 9 tests. Follow-on: none planned; a
+      `--walltime` override is the obvious next knob if it is wanted.
 - [x] **The project file carries the termination** (2026-09-28;
       DESIGN §2.5/§10.11). `termination_index` is a required key of
       each wafer table, the wafer is cut on it, `init` copies it from

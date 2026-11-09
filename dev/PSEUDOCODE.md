@@ -4642,13 +4642,14 @@ kill against time spent writing state.
 ## 14. Deployment — preparing and running (`DESIGN.md` §10)
 
 The CONSUMER of the machine-local deployment file (`ARCHITECTURE.md`
-§4.1, §4.4; `DESIGN.md` §10). It is two commands that share one registry:
-a WRITER, `prepare`, that reads the project spec AND the deployment rc
-and emits ready-to-submit scripts; and an EXECUTOR, `run`, that lives
-INSIDE each script and does one job's worth of the pipeline. `sabsim`
-submits NOTHING and watches nothing (the login-node wall, §4.1); the
-human submits the scripts and inspects each gate before sending the
-next.
+§4.1, §4.4; `DESIGN.md` §10). It is three commands that share one
+registry: a WRITER, `prepare`, that reads the project spec AND the
+deployment rc and emits ready-to-submit scripts; a HAND, `submit`,
+that gives those scripts to the scheduler in the guide's order and
+exits (§14.10, 2026-11-08); and an EXECUTOR, `run`, that lives INSIDE
+each script and does one job's worth of the pipeline. `sabsim` watches
+NOTHING (the login-node wall, §4.1); the human inspects each gate
+before sending the next, by hand or through `submit`.
 
 Nothing here trains a potential or layers in a physics default. The force
 model a pair uses is a LOOKUP behind the §1 `resolve_potential` seam —
@@ -5367,3 +5368,40 @@ process (ALF's own Parsl loop plus direct VASP seed jobs, `DESIGN.md`
 inside a prep folder (`sabsim bootstrap generate`, §11.3). `prepare`
 writes the four STAGE jobs that CONSUME it; deploying the bootstrap
 itself is ALF's concern, not this consumer's (§4.1, "no Parsl-in-Parsl").
+
+### 14.10 submit -- the chain handed to the scheduler (`DESIGN.md` §10.12)
+
+```
+submit(spec_path, job_names, gpu_type=None, node=None, dry_run=False,
+       scheduler=sbatch):
+    project   = load_and_validate_project(spec_path)
+    folders   = stage_folders(project.pair)
+    entries   = submission_entries(folders)      # §14.4's order + graph
+    wanted    = every entry whose job_name is in job_names, in order
+    for each prep entry in wanted:
+        if its prep folder holds no LIBRARY_MANIFEST_FILE:
+            insert its library entry in front of it      # DESIGN §10.2
+        else: say "library present, build skipped"
+    for each entry in wanted:
+        require <project>/<entry.script_name> exists
+                                   # else: stop, "run sabsim prepare"
+    ids = {}
+    for each entry in wanted:                      # registry order
+        held_on = [ids[name] for name in entry.depends_on if name in ids]
+                                   # an upstream job NOT on the line is
+                                   # one already run and checked
+        options = ["--parsable"]
+        if held_on: options += ["--dependency=afterok:" + ":".join(held_on)]
+        if gpu_type and the script asks for a GPU:
+            count = the count on its "#SBATCH --gres=gpu:<model>:<count>"
+            options += [f"--gres=gpu:{gpu_type}:{count}"]
+        if node: options += [f"--nodelist={node}"]
+        if dry_run: print "sbatch", options, script; ids[name] = <name_id>
+        else:       ids[name] = scheduler(options, script)   # returns id
+    print each (name, id); print the squeue line
+    return ids                                # exits at once; watches nothing
+```
+
+`[CODE level]` the `sbatch` call itself (a subprocess, its id parsed
+from `--parsable`), the exact wording, and the test double for the
+scheduler.

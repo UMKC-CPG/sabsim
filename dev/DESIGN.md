@@ -4330,20 +4330,26 @@ nothing in deployment leaks back into it. And convenience lives in
 (§1.4), so the deployment consumer is a **generator**, exactly as the
 specification loader is.
 
-### 10.1 The consumer is a writer, not a submitter
+### 10.1 The consumer is a writer, not a watcher (revised 2026-11-08)
 
 It is tempting to imagine `sabsim` itself submitting jobs and watching
-them to completion. It must not, for a concrete reason recorded in
-`ARCHITECTURE.md` §4.1: a long-lived submit-and-watch process cannot sit
-on a login node — that is one of the six execution walls. So the consumer
-**writes ready-to-submit scripts and hands them back**; the human submits
-them and watches them. This is the §1.4 generator pattern lifted from the
-pair specification to deployment — the same tool that emits a complete,
-editable specification now also emits complete, editable submission
-scripts with the site-specifics already filled in. Nothing is submitted
-for you, and nothing runs on the login node except the writing itself.
+them to completion. It must not WATCH, for a concrete reason recorded
+in `ARCHITECTURE.md` §4.1: a long-lived submit-and-watch process cannot
+sit on a login node — that is one of the six execution walls. So the
+consumer **writes ready-to-submit scripts and hands them back**, and
+the human watches them. This is the §1.4 generator pattern lifted from
+the pair specification to deployment — the same tool that emits a
+complete, editable specification now also emits complete, editable
+submission scripts with the site-specifics already filled in. Nothing
+is watched for you, and nothing runs on the login node except the
+writing itself and, since 2026-11-08, the one-second act of handing
+the scripts to the scheduler (§10.12): the wall forbids a process that
+LIVES on the login node, not a `sbatch` that returns at once. Until
+then the person typed the `sbatch` lines from the guide; the hand
+typing is what §10.12 removes, and the scripts stay the editable
+record of what each job asks for.
 
-The consumer is two commands:
+The consumer is three commands:
 
 - **`sabsim prepare`** — the writer, run inside the project folder. It
   reads *both* `sabsim.toml` (which pair, and what each surface needs)
@@ -4351,6 +4357,10 @@ The consumer is two commands:
   writes the scripts. It is the single place the two inputs meet: the
   pair specification still never names the cluster, and `prepare` joins
   the two only at the moment of writing.
+- **`sabsim submit prep-surf1|prep-surf2|bond|analysis|all`** — the
+  hand that gives the written scripts to the scheduler, in the guide's
+  order and with the guide's dependencies, then exits (§10.12). It
+  watches nothing.
 - **`sabsim run --prep-surf1|--prep-surf2|--bond|--analysis`** — the
   executor. It runs one job's worth of the pipeline, and this is the
   line that lives *inside* each generated script. It runs within an
@@ -5060,6 +5070,57 @@ crystal file is the handoff from whatever found it — Imago's
 own. Removing an entry is deleting its folder. Materials live in the
 person's own clone; a second catalog under `SABSIM_LOCAL` is the
 growth path when one is needed.
+
+### 10.12 `submit` — the guide's chain, submitted for you (2026-11-08)
+
+The guide (§10.5) ends with a chained form: six `sbatch --parsable`
+lines, each holding its job on the ones before it with `afterok`. A
+person who wants one prep surface on a card that happens to be free
+had to type that sequence by hand, with a `--gres` override on each
+line, and to remember that a prep job needs its library build first
+only when the library is not there yet. That is the step `submit`
+takes over:
+
+```
+sabsim submit prep-surf1 [prep-surf2 ...] | all
+              [--gpu TYPE] [--node NAME] [--dry-run]
+```
+
+It runs in the project folder, like `prepare`, and reads the project
+file to learn the stage-folder names — and so the script names, which
+`prepare` wrote and `submit` never rewrites. **It submits only what it
+is asked for.** The jobs named on the line are submitted in the
+registry's order (§10.3); a named job is held with `afterok` on
+another named job it depends on, and NOT on one that is absent from
+the line, because an absent upstream job is one the person has
+already run and checked — that is what submitting `bond` alone means.
+`all` names every job. A prep job's library build (§10.2 step 0) is
+added in front of it, and the prep job held on it, EXACTLY WHEN its
+prep folder holds no `environment_library.toml`; when the library is
+there the build is skipped and the command says so, instead of
+spending an allocation on a script that would exit at once. A missing
+script is a clear stop naming `sabsim prepare`, not a scheduler error.
+
+Two overrides give the person the control they had typing by hand.
+`--gpu TYPE` replaces the card model in each GPU job's request — the
+script's own `#SBATCH --gres=gpu:<model>:<count>` line gives the count,
+so a two-card bond job stays a two-card job on the new model — and
+leaves a CPU job untouched. `--node NAME` pins every submitted job to
+that node. Both are passed on the `sbatch` line, where they outrank
+the script's directives, so the scripts on disk keep saying what the
+rc said and a later `prepare` loses nothing. Neither override is
+remembered: a card chosen because it was free this evening is not a
+property of the project, and the `command` file (`ARCHITECTURE.md`
+§4.2) records which card each submission actually asked for.
+
+`--dry-run` prints the `sbatch` lines it would issue, with
+`<library_surf1_id>`-style placeholders where a job id would go, and
+submits nothing: the login-node check, and what the test suite
+exercises. A real submission prints each job's name and id, then the
+`squeue` line that shows them. The command exits as soon as the last
+id is back; it never waits, polls, or holds a terminal, so the §10.1
+wall is untouched. Submitting is the one thing `prepare` deliberately
+left to the person; `submit` does that one thing and nothing after it.
 
 ## 11. Resuming an interrupted run
 

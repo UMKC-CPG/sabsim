@@ -85,6 +85,62 @@ class SubmissionEntry:
     depends_on: tuple[str, ...]
 
 
+# A surface's library build is named `library_surf<n>` in the guide and
+# in `submit`'s job list (§10.2 step 0); the prefix is spelled once.
+LIBRARY_JOB_PREFIX = "library_surf"
+
+
+def library_job_name(surface_number: int) -> str:
+    """The guide's name for surface ``surface_number``'s library build."""
+    return f"{LIBRARY_JOB_PREFIX}{surface_number}"
+
+
+def library_surface_number(job_name: str) -> int | None:
+    """Which surface a library-build job name belongs to, else None.
+
+    ``library_surf1`` -> 1, ``library_surf2`` -> 2; a pair job's name
+    (``bond``) is not a library build and yields None.
+    """
+    if not job_name.startswith(LIBRARY_JOB_PREFIX):
+        return None
+    return int(job_name[len(LIBRARY_JOB_PREFIX):])
+
+
+def submission_entries(folders) -> tuple[SubmissionEntry, ...]:
+    """The guide's job list: every script, in submission order (§10.5).
+
+    This is the ONE statement of what a project submits and what each
+    submission waits on, read by both `prepare` (which renders a script
+    per entry and prints the guide from them) and `submit` (which hands
+    the scripts to the scheduler, §10.12). First the two library builds
+    — step 0 of §10.2, one per surface, independent of everything —
+    then the registry's jobs in its order, each prep job holding on its
+    own surface's library build as well as on whatever the registry
+    says. ``folders`` is the pair's ``StageFolders`` record, which names
+    the stage folders and so the scripts.
+    """
+    entries = []
+    library_names = {}
+    for surface_number, prep_folder in ((1, folders.prep_surf1),
+                                        (2, folders.prep_surf2)):
+        name = library_job_name(surface_number)
+        library_names[f"prep_surf{surface_number}"] = name
+        entries.append(SubmissionEntry(
+            job_name=name, stage_folder=prep_folder,
+            script_name=_semantic_name(_library_stem(prep_folder)),
+            depends_on=()))
+    for job in JOB_REGISTRY:
+        stage_folder = job.folder(folders)
+        depends_on = job.depends_on
+        if job.name in library_names:
+            depends_on = (library_names[job.name], *job.depends_on)
+        entries.append(SubmissionEntry(
+            job_name=job.name, stage_folder=stage_folder,
+            script_name=_semantic_name(stage_folder),
+            depends_on=depends_on))
+    return tuple(entries)
+
+
 def prepare(project_spec_path, deployment_rc_path,
             project_directory=None,
             dump_visuals: bool = True) -> tuple[SubmissionEntry, ...]:
@@ -127,45 +183,33 @@ def prepare(project_spec_path, deployment_rc_path,
         _check_walltime_ceiling(job, usage, partition)
         _check_gpu_ceiling(job, usage, partition)
 
-    # Step 0 (§10.2, 2026-09-10): one environment-library build per
-    # surface, from the prep usage block, NOT a registry job — it runs
-    # on the bootstrap's clock. Written first so the guide lists it
-    # first; each prep job is then held on its own surface's build.
-    entries = []
-    library_names = {}
+    # The submission order and dependency graph come from ONE place
+    # (`submission_entries`), shared with `sabsim submit` (§10.12), so
+    # the guide and the submitter can never disagree about what is
+    # held on what. Here each entry is rendered into its script.
+    entries = submission_entries(folders)
     prep_usage, prep_partition = _resolve_usage_and_partition(
         deployment, registry_lookup("prep_surf1"))
-    for surface_number, prep_folder in ((1, folders.prep_surf1),
-                                        (2, folders.prep_surf2)):
-        (project_directory / prep_folder).mkdir(parents=True, exist_ok=True)
-        library_name = f"library_surf{surface_number}"
-        library_names[f"prep_surf{surface_number}"] = library_name
-        script = render_library_script(
-            validated, surface_number, prep_usage, prep_partition,
-            deployment, roots, project_directory)
-        script_name = _semantic_name(_library_stem(prep_folder))
-        _write_script(project_directory / script_name, script)
-        entries.append(SubmissionEntry(
-            job_name=library_name, stage_folder=prep_folder,
-            script_name=script_name, depends_on=()))
-
-    for job in JOB_REGISTRY:
-        usage, partition = _resolve_usage_and_partition(deployment, job)
-        stage_folder = job.folder(folders)
+    for entry in entries:
         # The stage folder itself: made if absent, left alone if present
         # (a prep folder may already hold its recipe and library).
-        (project_directory / stage_folder).mkdir(parents=True, exist_ok=True)
-        script = render_job_script(
-            validated, job, usage, partition, deployment, roots,
-            spec_path, project_directory, dump_visuals=dump_visuals)
-        script_name = _semantic_name(stage_folder)
-        _write_script(project_directory / script_name, script)
-        depends_on = job.depends_on
-        if job.name in library_names:
-            depends_on = (library_names[job.name], *job.depends_on)
-        entries.append(SubmissionEntry(
-            job_name=job.name, stage_folder=stage_folder,
-            script_name=script_name, depends_on=depends_on))
+        (project_directory / entry.stage_folder).mkdir(
+            parents=True, exist_ok=True)
+        surface_number = library_surface_number(entry.job_name)
+        if surface_number is not None:
+            # Step 0 (§10.2, 2026-09-10): a surface's environment-library
+            # build, from the prep usage block, NOT a registry job — it
+            # runs on the bootstrap's clock.
+            script = render_library_script(
+                validated, surface_number, prep_usage, prep_partition,
+                deployment, roots, project_directory)
+        else:
+            job = registry_lookup(entry.job_name)
+            usage, partition = _resolve_usage_and_partition(deployment, job)
+            script = render_job_script(
+                validated, job, usage, partition, deployment, roots,
+                spec_path, project_directory, dump_visuals=dump_visuals)
+        _write_script(project_directory / entry.script_name, script)
 
     _write_guide(project_directory, validated, tuple(entries))
     return tuple(entries)
@@ -612,7 +656,10 @@ def _write_guide(
         "## Chained form, for a person who trusts the gates",
         "",
         "Submit everything at once and let the scheduler hold each job",
-        "until the ones it depends on succeed (`afterok`):",
+        "until the ones it depends on succeed (`afterok`). `sabsim submit",
+        "all` types these lines for you, skipping a library build whose",
+        "library is already there; `sabsim submit prep-surf1 --gpu V100`",
+        "submits one job on a card that is free (DESIGN.md §10.12):",
         "",
         "```bash",
     ]
