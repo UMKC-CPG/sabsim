@@ -6,10 +6,13 @@ three selection rules (only what is named; a library build only when
 the library is missing; a missing script is a stop before anything is
 submitted), the `afterok` chain among the named jobs, the `--gpu`
 override that keeps each script's card count and leaves a CPU job
-alone, the `--node` pin, the GPU partition both overrides request, and
-the dry run that calls no scheduler. The scheduler is a double that
-records every sbatch line it is handed, and the cluster is a fixed
-node table in `sinfo`'s own layout, so no test asks a real scheduler.
+alone, the `--node` pin, the GPU partition both overrides request, the
+interpreter guard, and the dry run that calls no scheduler. The
+scheduler is a double that records every sbatch line it is handed, and
+the cluster is a fixed node table in `sinfo`'s own layout, so no test
+asks a real scheduler. The interpreter guard is switched off for every
+test but its own, so the suite passes however the shell that runs it
+spells `python`.
 """
 
 import os
@@ -22,6 +25,7 @@ from sabsim.deploy import prepare
 from sabsim.deploy.submit import (
     SubmitError,
     gpu_count_in_script,
+    interpreter_mismatch,
     parse_node_table,
     requested_job_names,
     submit,
@@ -66,6 +70,86 @@ gpu-1-2  gpu_requeue  (null)              drain
 def _cluster():
     """The fixed cluster above, as `submit`'s survey would return it."""
     return parse_node_table(_NODE_TABLE)
+
+
+@pytest.fixture(autouse=True)
+def shell_fit_to_submit_from(monkeypatch):
+    """Switch the interpreter guard off: the test shell is not on trial.
+
+    The guard compares the first `python` on PATH with the interpreter
+    running the suite, which differ on a machine that only has
+    `python3`. The guard's own tests call the real function, imported
+    by name above before this replaces the module's copy.
+    """
+    # The package exports the `submit` FUNCTION under the module's own
+    # name, so the module is fetched from the import table by its path.
+    submit_module = sys.modules["sabsim.deploy.submit"]
+    monkeypatch.setattr(submit_module, "interpreter_mismatch", lambda: None)
+
+
+def _two_installs(tmp_path, monkeypatch, python_on_path):
+    """Stand up an install and a site Python; choose what PATH finds.
+
+    Makes `<tmp>/install/bin/{python,python3.11}` and
+    `<tmp>/site/bin/python`, declares the install's `python3.11` to be
+    the interpreter running sabsim, and makes the PATH lookup answer
+    `python_on_path` ("install", "site" or None for "not found").
+    Returns the two `bin` directories.
+    """
+    install_bin = tmp_path / "install" / "bin"
+    site_bin = tmp_path / "site" / "bin"
+    for folder in (install_bin, site_bin):
+        folder.mkdir(parents=True)
+        (folder / "python").write_text("")
+    (install_bin / "python3.11").write_text("")
+    found = {"install": str(install_bin / "python"),
+             "site": str(site_bin / "python"), None: None}[python_on_path]
+    submit_module = sys.modules["sabsim.deploy.submit"]
+    monkeypatch.setattr(sys, "executable", str(install_bin / "python3.11"))
+    monkeypatch.setattr(submit_module.shutil, "which", lambda word: found)
+    return install_bin, site_bin
+
+
+def test_the_guard_accepts_the_installs_own_python(tmp_path, monkeypatch):
+    """PATH's `python` beside the running interpreter: nothing to say."""
+    _two_installs(tmp_path, monkeypatch, "install")
+    assert interpreter_mismatch() is None
+
+
+def test_the_guard_names_a_foreign_python(tmp_path, monkeypatch):
+    """The 2026-11-08 failure: the site's Python ahead of the install's."""
+    install_bin, site_bin = _two_installs(tmp_path, monkeypatch, "site")
+    reason = interpreter_mismatch()
+    assert str(site_bin / "python") in reason
+    assert str(install_bin / "python3.11") in reason
+    assert "No module named sabsim" in reason and "which python" in reason
+
+
+def test_the_guard_names_a_path_with_no_python(tmp_path, monkeypatch):
+    """No `python` on PATH at all is its own readable stop."""
+    _two_installs(tmp_path, monkeypatch, None)
+    assert "holds no `python`" in interpreter_mismatch()
+
+
+def test_a_foreign_python_stops_before_any_submission(prepared_project):
+    """The guard's reason halts a real submission with nothing issued."""
+    scheduler = RecordingScheduler()
+    with pytest.raises(SubmitError, match="not the one running sabsim"):
+        submit("sabsim.toml", ["all"], prepared_project,
+               scheduler=scheduler,
+               interpreter_check=lambda: "not the one running sabsim")
+    assert scheduler.lines == []
+
+
+def test_a_dry_run_reports_a_foreign_python_and_carries_on(
+        prepared_project):
+    """A dry run submits nothing, so it says so and still plans."""
+    submissions, notices = submit(
+        "sabsim.toml", ["bond"], prepared_project, dry_run=True,
+        interpreter_check=lambda: "the wrong python")
+    assert len(submissions) == 1
+    assert any("would stop here" in notice and "the wrong python" in notice
+               for notice in notices)
 
 
 @pytest.fixture

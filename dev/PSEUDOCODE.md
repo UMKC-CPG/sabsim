@@ -5385,6 +5385,10 @@ submit(spec_path, job_names, gpu_type=None, node=None, dry_run=False,
     for each entry in wanted:
         require <project>/<entry.script_name> exists
                                    # else: stop, "run sabsim prepare"
+    if folder of the first "python" on PATH is not the folder of the
+       interpreter running this command:        # the job inherits PATH
+        dry_run: say "a real submission would stop here", carry on
+        else:    stop, naming both and "re-activate; check which python"
     partitions = none
     if node or gpu_type:           # an override decides card AND partition
         table = the scheduler's node table      # one sinfo call:

@@ -25,6 +25,16 @@ Three rules decide what is submitted (§10.12):
 * **A missing script is a clear stop** naming ``sabsim prepare``, before
   anything is submitted.
 
+One more stop guards the hand-off itself (§10.12, 2026-11-08). The
+scheduler copies the submitting shell's environment into the job, and
+a script's run line is the bare word ``python`` (§10.5), so the job
+runs whichever ``python`` comes first on THIS shell's PATH. When that
+is not the interpreter running `submit` — a shell start-up file read
+again had put the site's own Python in front of the install's — the
+job dies in its first second with "No module named sabsim" and the
+jobs held on it wait for ever. `submit` compares the two before the
+first ``sbatch`` and stops, saying how to put the shell right.
+
 The two overrides, ``--gpu`` and ``--node``, also choose the PARTITION
 (§10.12, 2026-11-08): a script names the rc's partitions, and a card
 or node chosen because it was free may sit in another one — on
@@ -42,8 +52,11 @@ been issued; ``--dry-run`` prints those lines and calls nothing.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -293,6 +306,63 @@ def plan_placement(cluster: ClusterMap, gpu_type: str | None,
     return gpu_type, (), notices
 
 
+# The word a generated script's run line uses for the interpreter
+# (`srun ... python -m sabsim ...`, PSEUDOCODE.md §14.5): resolved by
+# the job through the PATH it inherits from the submitting shell.
+JOB_INTERPRETER_WORD = "python"
+
+# Answers None when the shell is fit to submit from, else the reason.
+InterpreterCheck = Callable[[], "str | None"]
+
+
+def interpreter_mismatch() -> str | None:
+    """Say why a job submitted from this shell would not find sabsim.
+
+    A job's run line says ``python``, and the scheduler hands the job
+    this shell's PATH, so the job runs the FIRST ``python`` on it. That
+    must be the interpreter running this command — the one whose
+    install holds sabsim. Returns None when it is, else one readable
+    sentence naming both interpreters and the repair (§10.12).
+
+    The two are compared by the DIRECTORY they sit in, not as files: an
+    install's ``python`` is commonly a link to a base interpreter that
+    does NOT hold sabsim (a venv's link into the conda environment it
+    was made from), so following the links would call two different
+    installs the same. Sitting in one ``bin`` directory is what makes
+    ``python`` and ``python3.11`` the same install.
+    """
+    running = sys.executable
+    if not running:
+        return None                    # an embedded run: nothing to say
+    on_path = shutil.which(JOB_INTERPRETER_WORD)
+    # How to put the shell right: re-activate a virtual environment
+    # when that is what this install is, else just say what is needed.
+    if sys.prefix != sys.base_prefix:
+        repair = (f"re-activate the install (`source "
+                  f"{os.path.join(sys.prefix, 'bin', 'activate')}`)")
+    else:
+        repair = (f"put {os.path.dirname(running)} first on PATH")
+    repair += (f", check that `which {JOB_INTERPRETER_WORD}` prints the "
+               f"install's own, and submit again")
+    if on_path is None:
+        return (f"this shell's PATH holds no `{JOB_INTERPRETER_WORD}`, "
+                f"the word each script's run line starts the job with; "
+                f"sabsim itself is running under {running} — {repair}")
+    try:
+        same_install = os.path.samefile(
+            os.path.dirname(on_path), os.path.dirname(running))
+    except OSError:
+        same_install = False
+    if same_install:
+        return None
+    return (f"the first `{JOB_INTERPRETER_WORD}` on this shell's PATH is "
+            f"{on_path}, not the one running sabsim ({running}); the "
+            f"scheduler copies this shell's PATH into each job, whose "
+            f"run line is `{JOB_INTERPRETER_WORD} -m sabsim ...`, so the "
+            f"job would fail at once with \"No module named sabsim\" "
+            f"and the jobs held on it would never start — {repair}")
+
+
 def gpu_count_in_script(script_path: Path) -> int | None:
     """The GPU count a generated script asks for, or None for a CPU job.
 
@@ -358,7 +428,8 @@ def submit(project_spec_path, job_choices: Sequence[str],
            project_directory=None, gpu_type: str | None = None,
            node: str | None = None, dry_run: bool = False,
            scheduler: Scheduler = sbatch_scheduler,
-           cluster_survey: ClusterSurvey | None = None
+           cluster_survey: ClusterSurvey | None = None,
+           interpreter_check: InterpreterCheck | None = None
            ) -> tuple[tuple[Submission, ...], tuple[str, ...]]:
     """Hand the named jobs' scripts to the scheduler (§14.10).
 
@@ -378,8 +449,11 @@ def submit(project_spec_path, job_choices: Sequence[str],
     ``<name_id>`` placeholders and ``scheduler`` is never called.
     Returns the submissions in order and the notices (skipped library
     builds, the placement chosen). Raises :class:`SubmitError` before
-    anything is submitted when a needed script is missing or a job name
-    is unknown.
+    anything is submitted when a needed script is missing, a job name
+    is unknown, or ``interpreter_check`` (default
+    :func:`interpreter_mismatch`) finds that the ``python`` a job would
+    inherit from this shell is not the one running sabsim; a dry run
+    reports that last finding as a notice and still prints its lines.
     """
     validated = load_and_validate_project(project_spec_path)
     if project_directory is None:
@@ -411,6 +485,17 @@ def submit(project_spec_path, job_choices: Sequence[str],
         raise SubmitError(
             f"no script(s) {missing} in {project_directory} — run "
             f"`sabsim prepare` there first")
+
+    # The job inherits THIS shell's PATH and starts with the word
+    # `python`; if that is not the interpreter running sabsim the job
+    # fails in its first second, so stop here instead (§10.12). A dry
+    # run submits nothing, so it reports the finding and carries on.
+    wrong_python = (interpreter_check or interpreter_mismatch)()
+    if wrong_python and dry_run:
+        notices.append(f"a real submission would stop here — "
+                       f"{wrong_python}")
+    elif wrong_python:
+        raise SubmitError(wrong_python)
 
     submissions = []
     job_ids: dict[str, str] = {}
@@ -463,6 +548,7 @@ __all__ = [
     "SubmitError",
     "describe_submission",
     "gpu_count_in_script",
+    "interpreter_mismatch",
     "is_library_build",
     "parse_node_table",
     "plan_placement",

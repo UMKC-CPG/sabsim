@@ -5101,6 +5101,27 @@ there the build is skipped and the command says so, instead of
 spending an allocation on a script that would exit at once. A missing
 script is a clear stop naming `sabsim prepare`, not a scheduler error.
 
+One more stop guards the hand-off itself. §10.5 keeps the interpreter
+out of the scripts: a run line starts with the bare word `python`,
+and the scheduler copies the submitting shell's environment into the
+job, so the job runs whichever `python` comes first on that shell's
+PATH. That is the right design while the shell is the activated
+install — and a silent failure when it is not. On 2026-11-08 a shell
+start-up file had been read a second time, which put the site's own
+Python in front of the install's; `sabsim` itself still ran (the site
+directory holds no `sabsim`, so the shell fell through to the
+install's), the job was accepted, and it died in its first second
+with "No module named sabsim", leaving the prep job held on it
+waiting for ever. So `submit` compares the first `python` on its
+PATH with the interpreter it is itself running under, **by the
+directory each sits in** (an install's `python` is often a link to a
+base interpreter that lacks sabsim, so following links would call two
+installs the same), and stops before the first `sbatch` when they
+differ, naming both and the repair: re-activate the install and check
+`which python`. The scripts are not touched and §10.5 stands; the
+check costs nothing and is made at the one moment the shell's state
+matters. A dry run reports the finding and still prints its lines.
+
 Two overrides give the person the control they had typing by hand.
 `--gpu TYPE` replaces the card model in each GPU job's request — the
 script's own `#SBATCH --gres=gpu:<model>:<count>` line gives the count,
