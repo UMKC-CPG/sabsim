@@ -98,13 +98,44 @@ def sbatch_scheduler(options: Sequence[str], script: Path) -> str:
         ["sbatch", *options, str(script)], capture_output=True,
         text=True, check=False)
     if completed.returncode != 0:
-        raise SubmitError(
-            f"sbatch refused {script.name}: "
-            f"{completed.stderr.strip() or completed.stdout.strip()}")
+        reason = completed.stderr.strip() or completed.stdout.strip()
+        hint = ""
+        if "node configuration is not available" in reason:
+            hint = (" — the request (card model, count, memory) does not "
+                    "fit any node it may use; with --node, check the "
+                    "node's card against the script's --gres line, or "
+                    "name the card with --gpu")
+        raise SubmitError(f"sbatch refused {script.name}: {reason}{hint}")
     job_id = completed.stdout.strip().split(";")[0]
     if not job_id:
         raise SubmitError(f"sbatch printed no job id for {script.name}")
     return job_id
+
+
+# A full card's model name as the scheduler's `Gres` column spells it
+# (`gpu:V100:1(S:0-71)` -> V100); a MIG slice such as `1g.10gb` is not
+# a card a generated script can ask for by that name and is passed over.
+_CARD_MODEL = re.compile(r"gpu:(?P<model>[A-Z][A-Za-z0-9]*):\d+")
+
+# Looks up the card model a node carries, or None for a CPU node.
+NodeCardLookup = Callable[[str], "str | None"]
+
+
+def node_card_model(node: str) -> str | None:
+    """Ask the scheduler which card model ``node`` carries (§10.12).
+
+    Reads ``sinfo``'s ``Gres`` column for the one node; a node with no
+    GPU, an unknown node, or a cluster without ``sinfo`` yields None,
+    and the caller leaves the script's own request alone.
+    """
+    try:
+        completed = subprocess.run(
+            ["sinfo", "-h", "-N", "-n", node, "-O", "Gres:120"],
+            capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    match = _CARD_MODEL.search(completed.stdout)
+    return match.group("model") if match else None
 
 
 def gpu_count_in_script(script_path: Path) -> int | None:
@@ -171,7 +202,8 @@ def plan_submissions(
 def submit(project_spec_path, job_choices: Sequence[str],
            project_directory=None, gpu_type: str | None = None,
            node: str | None = None, dry_run: bool = False,
-           scheduler: Scheduler = sbatch_scheduler
+           scheduler: Scheduler = sbatch_scheduler,
+           node_card_lookup: NodeCardLookup = node_card_model
            ) -> tuple[tuple[Submission, ...], tuple[str, ...]]:
     """Hand the named jobs' scripts to the scheduler (§14.10).
 
@@ -179,7 +211,11 @@ def submit(project_spec_path, job_choices: Sequence[str],
     ``all``). ``project_directory`` defaults to the folder holding the
     project file, where `prepare` put the scripts. ``gpu_type`` replaces
     the card model on every GPU job's request, keeping each script's
-    count; ``node`` pins every job to that node. With ``dry_run`` the
+    count; ``node`` pins every job to that node AND, when no
+    ``gpu_type`` is given, asks the scheduler (``node_card_lookup``)
+    which card that node carries and requests it, since a script's own
+    card model is the rc's and a pinned node may carry another (the
+    2026-11-08 refusal: H100 asked of a V100 node). With ``dry_run`` the
     ``sbatch`` lines are planned and returned with ``<name_id>``
     placeholders and ``scheduler`` is never called. Returns the
     submissions in order and the notices (skipped library builds).
@@ -194,6 +230,18 @@ def submit(project_spec_path, job_choices: Sequence[str],
     entries = submission_entries(stage_folders(validated.pair))
     selected, notices = plan_submissions(
         project_directory, entries, job_names)
+
+    # A pinned node decides the card: the script asks for the rc's
+    # model, which the node may not carry, and Slurm refuses the pair
+    # outright ("Requested node configuration is not available").
+    if node and not gpu_type:
+        gpu_type = node_card_lookup(node)
+        if gpu_type:
+            notices.append(f"{node} carries {gpu_type} cards; GPU jobs "
+                           f"will ask for that model")
+        else:
+            notices.append(f"{node} reports no GPU; each script's own "
+                           f"request is kept")
 
     # Every needed script must be there BEFORE the first sbatch, so a
     # half-submitted chain is impossible (§10.12).
@@ -251,6 +299,7 @@ __all__ = [
     "describe_submission",
     "gpu_count_in_script",
     "is_library_build",
+    "node_card_model",
     "plan_submissions",
     "requested_job_names",
     "sbatch_scheduler",

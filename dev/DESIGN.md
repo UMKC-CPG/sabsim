@@ -5106,7 +5106,11 @@ Two overrides give the person the control they had typing by hand.
 script's own `#SBATCH --gres=gpu:<model>:<count>` line gives the count,
 so a two-card bond job stays a two-card job on the new model — and
 leaves a CPU job untouched. `--node NAME` pins every submitted job to
-that node. Both are passed on the `sbatch` line, where they outrank
+that node — and, unless `--gpu` says otherwise, asks the scheduler
+which card that node carries and requests it, because the script asks
+for the rc's model and a pinned node may carry another; Slurm refuses
+that pair outright (the first live use, 2026-11-08: an H100 request
+pinned to a V100 node). Both are passed on the `sbatch` line, where they outrank
 the script's directives, so the scripts on disk keep saying what the
 rc said and a later `prepare` loses nothing. Neither override is
 remembered: a card chosen because it was free this evening is not a

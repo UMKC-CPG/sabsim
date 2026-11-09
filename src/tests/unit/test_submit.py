@@ -128,6 +128,28 @@ def test_gpu_override_keeps_count_and_spares_cpu_jobs(prepared_project):
     assert analysis_options[-1] == "--nodelist=g026"
 
 
+def test_a_pinned_node_decides_the_card(prepared_project):
+    """--node without --gpu asks the node's card and requests THAT."""
+    scheduler = RecordingScheduler()
+    _, notices = submit(
+        "sabsim.toml", ["prep-surf1"], prepared_project, node="g022",
+        scheduler=scheduler, node_card_lookup=lambda node: "V100")
+    assert _options_for(scheduler, _PREP_1)[-2:] == [
+        "--gres=gpu:V100:1", "--nodelist=g022"]
+    assert any("carries V100" in notice for notice in notices)
+
+
+def test_a_pinned_cpu_node_keeps_the_scripts_request(prepared_project):
+    """A node reporting no GPU leaves the --gres line as the rc wrote it."""
+    scheduler = RecordingScheduler()
+    _, notices = submit(
+        "sabsim.toml", ["analysis"], prepared_project, node="c018",
+        scheduler=scheduler, node_card_lookup=lambda node: None)
+    assert _options_for(scheduler, _ANALYSIS) == ["--parsable",
+                                                  "--nodelist=c018"]
+    assert any("reports no GPU" in notice for notice in notices)
+
+
 def test_a_missing_script_stops_before_any_submission(prepared_project):
     """Delete bond's script: `all` halts naming prepare, nothing issued."""
     (prepared_project / _BOND).unlink()

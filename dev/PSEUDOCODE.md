@@ -5385,6 +5385,9 @@ submit(spec_path, job_names, gpu_type=None, node=None, dry_run=False,
     for each entry in wanted:
         require <project>/<entry.script_name> exists
                                    # else: stop, "run sabsim prepare"
+    if node and not gpu_type:
+        gpu_type = card model the scheduler reports for node, or None
+                                   # a pinned node decides the card
     ids = {}
     for each entry in wanted:                      # registry order
         held_on = [ids[name] for name in entry.depends_on if name in ids]
