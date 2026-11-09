@@ -241,7 +241,8 @@ def test_both_preps_share_the_prep_usage_block(roots_set, project):
     assert "#SBATCH --time=12:00:00" in text
     assert "export SABSIM_CASCADE_ENGINE_PREFIX=" in text
     assert "--prep-surf2" in text
-    assert "prep_surf1 has also finished" in text
+    assert ("once prep_surf1 has also finished, sabsim submit bond "
+            f"(by hand: sbatch {_BOND}.slurm)") in text
 
 
 def test_bond_script_is_gpu(roots_set, project):
@@ -261,7 +262,10 @@ def test_bond_script_is_gpu(roots_set, project):
         '/bin/activate"' in text
     assert text.index("module load") < text.index("source \"")
     assert "--bond --dump-visuals" in text
-    assert f"then submit: sbatch {_ANALYSIS}.slurm" in text
+    # The next job is named as its `sabsim submit` line first, then the
+    # bare sbatch line it stands for (DESIGN §10.12).
+    assert (f"Next, unless already queued: sabsim submit analysis "
+            f"(by hand: sbatch {_ANALYSIS}.slurm)") in text
 
 
 def test_analysis_is_terminal_and_loads_no_science_module(
@@ -290,28 +294,29 @@ def test_scripts_are_lean_no_transitional_env(roots_set, project):
 
 
 def test_guide_reads_as_the_dependency_graph(roots_set, project):
-    """The guide says preps first (together), bond after both, analysis.
+    """The guide lists library builds, preps, bond after both, analysis.
 
-    It also prints the chained `sbatch --dependency=afterok:...` form,
-    naming both prep ids for bond and the bond id for analysis (§14.4).
+    It ends with the bare `sbatch --dependency=afterok:...` chain,
+    naming both prep ids for bond and the bond id for analysis (§14.4):
+    the by-hand route `sabsim submit` stands for.
     """
     prepare(project["spec"], _RC)
     guide = (project["folder"] / GUIDE_FILENAME).read_text()
 
     assert "si_sio2" in guide                          # the pair label
     assert "a test project" in guide                   # the description
-    assert f"1. `sbatch {_PREP_1}.library.slurm`" in guide
-    assert f"2. `sbatch {_PREP_2}.library.slurm`" in guide
+    assert f"1. `{_PREP_1}.library.slurm` (library_surf1;" in guide
+    assert f"2. `{_PREP_2}.library.slurm` (library_surf2;" in guide
     assert "in either order, or together" in guide
-    assert f"3. `sbatch {_PREP_1}.slurm`" in guide
+    assert f"3. `{_PREP_1}.slurm` (prep_surf1;" in guide
     assert f"after `{_PREP_1}.library.slurm` has finished" in guide
-    assert f"4. `sbatch {_PREP_2}.slurm`" in guide
-    assert f"5. `sbatch {_BOND}.slurm`" in guide
+    assert f"4. `{_PREP_2}.slurm` (prep_surf2;" in guide
+    assert f"5. `{_BOND}.slurm` (bond;" in guide
     assert (f"after `{_PREP_1}.slurm` and `{_PREP_2}.slurm` have "
             f"finished") in guide
-    assert f"6. `sbatch {_ANALYSIS}.slurm`" in guide
+    assert f"6. `{_ANALYSIS}.slurm` (analysis;" in guide
     assert f"after `{_BOND}.slurm` has finished" in guide
-    # The chained form, with the scheduler holding each job for the
+    # The by-hand chain, with the scheduler holding each job for the
     # ones it depends on — the library builds first.
     assert (f"library_surf1_id=$(sbatch --parsable "
             f"{_PREP_1}.library.slurm)") in guide
@@ -321,6 +326,58 @@ def test_guide_reads_as_the_dependency_graph(roots_set, project):
             f"$prep_surf1_id:$prep_surf2_id {_BOND}.slurm)") in guide
     assert ("analysis_id=$(sbatch --parsable --dependency=afterok:"
             f"$bond_id {_ANALYSIS}.slurm)") in guide
+
+
+def test_guide_leads_with_sabsim_submit(roots_set, project):
+    """The guide's commands are `sabsim submit` lines (DESIGN §10.12).
+
+    Step by step it is one line per wave — both preps, bond, analysis —
+    with the folders to check in between; all at once it is `sabsim
+    submit all`; and the dry run and the two overrides are named. Each
+    of these comes BEFORE the bare sbatch chain, which is kept last.
+    """
+    prepare(project["spec"], _RC)
+    guide = (project["folder"] / GUIDE_FILENAME).read_text()
+    lines = guide.splitlines()
+
+    # One `sabsim submit` line per wave, in order, each followed by
+    # the folders whose results are to be read before the next.
+    first_wave = lines.index("sabsim submit prep-surf1 prep-surf2")
+    assert lines[first_wave + 1] == (
+        f"# when finished, check {_PREP_1}/ and {_PREP_2}/ — then:")
+    assert lines[first_wave + 2] == "sabsim submit bond"
+    assert lines[first_wave + 3] == (
+        f"# when finished, check {_BOND}/ — then:")
+    assert lines[first_wave + 4] == "sabsim submit analysis"
+    assert lines[first_wave + 5] == "```"      # nothing to check after
+
+    assert "sabsim submit all" in lines
+    assert "`sabsim submit all --dry-run`" in guide
+    assert "`sabsim submit prep-surf1 --gpu V100`" in guide
+    assert "`sabsim submit prep-surf1 --node <name>`" in guide
+    assert "which python" in guide             # the shell to submit from
+
+    # The by-hand chain is the LAST thing in the guide.
+    by_hand = guide.index("## The same chain by hand")
+    assert guide.index("sabsim submit all") < by_hand
+    assert by_hand < guide.index("library_surf1_id=$(sbatch")
+
+
+def test_submission_waves_follow_the_dependency_lists(project):
+    """Waves: the two preps together, then bond, then analysis.
+
+    The library builds belong to no wave — `sabsim submit` adds one in
+    front of its prep job by itself, when the library is missing.
+    """
+    from sabsim.deploy.prepare import submission_entries, submission_waves
+    from sabsim.spec.loader import load_and_validate_project
+    from sabsim.spec.records import stage_folders
+
+    validated = load_and_validate_project(project["spec"])
+    entries = submission_entries(stage_folders(validated.pair))
+    waves = submission_waves(entries)
+    assert [[entry.job_name for entry in wave] for wave in waves] == [
+        ["prep_surf1", "prep_surf2"], ["bond"], ["analysis"]]
 
 
 def test_per_kind_environment_is_exported_in_sorted_order(
@@ -420,4 +477,10 @@ def test_library_build_runs_the_bootstrap_in_the_prep_folder(
     assert "python -m sabsim bootstrap generate" in text
     assert "recipe.toml --skip-collection2" in text
     assert "sabsim run" not in text
-    assert f"then submit: sbatch {_PREP_2}.slurm" in text
+    assert (f"Next, unless already queued: sabsim submit prep-surf2 "
+            f"(by hand: sbatch {_PREP_2}.slurm)") in text
+    # No backtick may sit inside the script's double-quoted echo: the
+    # shell would run the words between two of them as a command.
+    echo_lines = [line for line in text.splitlines()
+                  if line.startswith("echo ")]
+    assert echo_lines and all("`" not in line for line in echo_lines)

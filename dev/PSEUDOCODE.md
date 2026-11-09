@@ -4902,13 +4902,43 @@ function prepare(project_spec_path, deployment_rc_path):
     return guide
 ```
 
-The guide (§10.5) reads as the dependency graph, in plain words: submit
-`prep_surf1_<a>.slurm` and `prep_surf2_<b>.slurm` (in either order, or
-together); when BOTH have finished and their gate reports are to your
-liking, submit `bond_<a>_<b>.slurm`; then `analysis_<a>_<b>.slurm`. It
-also prints the one-line chained form for a person who trusts the
-gates: the two preps, then bond with `--dependency=afterok:<id1>:<id2>`,
-then analysis with `afterok:<bond id>`.
+The guide (§10.5, rebuilt around `submit` 2026-11-09) has five parts:
+
+```
+function write_guide(project, entries):
+    # (1) The jobs as the dependency graph, in plain words, no command.
+    for each (step, entry) in numbered entries:
+        write step, entry.script_name, entry.job_name, and either
+              "independent" or "after <the scripts it depends on>"
+    # (2) Step by step: one `sabsim submit` line per wave.
+    waves = submission_waves(entries)   # [preps], [bond], [analysis]
+    for each wave:
+        write "sabsim submit " + the submit word of each job in the wave
+        if a later wave exists:
+            write "# when finished, check <the wave's stage folders>"
+    # (3) All at once.
+    write "sabsim submit all"
+    # (4) --dry-run, --gpu <model>, --node <name>, and the shell to
+    #     submit from (the install active; §14.10's interpreter check).
+    # (5) The same chain by hand, LAST: the sbatch --parsable lines.
+    for each entry:
+        write "<name>_id=$(sbatch --parsable"
+              + (" --dependency=afterok:" + the ids it depends on)
+              + " <script>)"
+
+function submission_waves(entries):
+    # The pair jobs only: a library build is `submit`'s to add (§14.10).
+    wave_of = {}
+    for each pair entry, in submission order:
+        wave_of[entry] = 1 + max(wave_of of each pair job it depends on,
+                                 default -1)
+    return the entries grouped by wave_of, lowest first
+```
+
+A job's **submit word** is its registry name with dashes
+(`prep-surf1`) — the `run` flag without its leading dashes — spelled
+once on the registry entry and read by the `submit` parser, the guide
+and every "what to submit next" line.
 
 ### 14.5 What a generated script contains (§10.5, §10.7)
 
@@ -4949,8 +4979,10 @@ function render_job_script(project, job, usage, partition, deployment,
         scheduler's own $SLURM_NTASKS drives the launcher. Every dynamic
         run passes `--dump-visuals`, so a trajectory is always there to
         look at.
-      - on success, a printed line naming what to check and which script
-        to submit next (§10.5), reinforcing the guide: a prep job names
+      - on success, a printed line naming what to check and which job
+        to submit next, "unless already queued", as its `sabsim submit
+        <word>` line followed by the bare `sbatch <script>` it stands
+        for (§10.5, §10.12), reinforcing the guide: a prep job names
         its gate report and says "when the OTHER prep has also passed,
         submit bond"; bond names its stage ledger and says "submit
         analysis"; analysis says the measure vector is written.

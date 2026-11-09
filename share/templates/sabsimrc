@@ -21,7 +21,10 @@
 # of any SABSIM code (ARCHITECTURE.md §4.1). After it is sourced, an
 # sbatch job INHERITS this environment (SLURM's default is --export=ALL),
 # so the generated compute-node scripts find `python`, `mpirun`, and the
-# `sabsim` command already on PATH without restating any of it.
+# `sabsim` command already on PATH without restating any of it. That is
+# also why `sabsim submit` looks at this shell before it hands a job
+# over: the first `python` on PATH must be the install's own, or it
+# stops and says how to put the shell right (DESIGN.md §10.12).
 #
 # Source it from your login shell (the `ssabsim` alias does exactly this)
 # before running `sabsim prepare`.

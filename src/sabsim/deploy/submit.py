@@ -67,7 +67,7 @@ from sabsim.deploy.prepare import (
     library_surface_number,
     submission_entries,
 )
-from sabsim.deploy.registry import JOB_NAMES
+from sabsim.deploy.registry import JOB_NAMES, JOB_REGISTRY
 from sabsim.driver.environment_library import LIBRARY_MANIFEST_FILE
 from sabsim.spec.loader import load_and_validate_project
 from sabsim.spec.records import stage_folders
@@ -75,10 +75,11 @@ from sabsim.spec.records import stage_folders
 # The word that names every job at once on the command line.
 ALL_JOBS = "all"
 
-# The job choices the verb offers: the registry's names with dashes,
-# matching the `run` flags without their leading dashes, plus `all`.
+# The job choices the verb offers: each registry job's own submit word
+# (its `run` flag without the leading dashes, spelled by the registry
+# so the guide and the scripts' "submit next" lines agree), plus `all`.
 JOB_CHOICES: tuple[str, ...] = tuple(
-    name.replace("_", "-") for name in JOB_NAMES) + (ALL_JOBS,)
+    job.submit_word for job in JOB_REGISTRY) + (ALL_JOBS,)
 
 # The script directive that states a job's GPU request, as `prepare`
 # writes it: `#SBATCH --gres=gpu:<model>:<count>` (model optional).

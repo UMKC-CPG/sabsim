@@ -4538,6 +4538,41 @@ checkpoint-by-checkpoint model directly. (The command verb `run` is kept
 — a common, understood word, like `git commit` — since the naming rule
 governs files, not verbs.)
 
+**The guide is written around `sabsim submit`** (2026-11-09; §10.12).
+While the person typed every `sbatch` line, the guide was a numbered
+list of them. Now that one command hands the scripts over, a guide
+that led with `sbatch` would teach the route nobody is meant to take
+first, so its parts are, in order:
+
+1. **The jobs, in order** — the six scripts as the dependency graph in
+   plain words (what each waits for), with no command in front of them.
+2. **Step by step, checking each result** — one `sabsim submit` line
+   per *wave* of jobs that may go together (both preps; bond;
+   analysis), and between two waves a remark naming the stage folders
+   to read first. This is §10.2's inspect-each-gate model, typed in
+   three lines. The waves are read off the same dependency lists as
+   everything else (§10.3), so an inserted job finds its place.
+3. **All at once** — `sabsim submit all`, for a person who trusts the
+   gates.
+4. **Looking first, and choosing a card or a node** — `--dry-run`,
+   `--gpu`, `--node`, and the one condition `submit` checks before it
+   issues anything: that the shell it is run from has the install
+   active (§10.12).
+5. **The same chain by hand** — the six `sbatch --parsable` lines with
+   their `afterok` holds, kept LAST. They are what `submit all` issues
+   when neither library exists yet; they stay because the scripts are
+   the editable record (§10.1) and a person must always be able to see,
+   and type, what the tool does for them.
+
+The same rule reaches every other place that tells a person what to do
+next: a script's success line, the summary a finished `sabsim run`
+prints, and the closing lines of `init` and `prepare` all name the
+`sabsim submit` line (a script's line adds the bare `sbatch` it stands
+for). A success line also says "unless already queued", because after
+`submit all` the next job is waiting in the queue and must not be sent
+a second time. The word a job is submitted by — `prep-surf1` — is its
+`run` flag without the dashes, spelled once in the registry (§10.3).
+
 ### 10.6 Walltime — a number the person provides, and one cheap check
 
 Every job must declare a wall-clock limit up front, and for most jobs any
@@ -4627,12 +4662,16 @@ scripts (→ values `prepare` fills from the deployment file); one coarse
 job per pair (→ four per-kind jobs, two of them independent, revising
 `ARCHITECTURE.md` §4.3);
 a machine-wide tool list (→ per-kind `[usage.*]` tool lists); any notion
-of the tool submitting or babysitting jobs (→ a writer plus a human); and
+of the tool babysitting jobs (→ a writer plus a human; since 2026-11-08
+the tool does issue the `sbatch` lines when asked, §10.12, and still
+watches nothing); and
 a tool that budgets walltime (→ a human-provided walltime with a cheap
 ceiling check).
 
 **Frozen for v1:** four jobs named prep_surf1 / prep_surf2 / bond / analysis
-(revised 2026-08-30); `prepare` writes and the human submits; the ordered
+(revised 2026-08-30); `prepare` writes and the human submits (by
+`sabsim submit` since 2026-11-08, §10.12 — the human still decides
+when, and still reads each gate); the ordered
 registry as the single source of job identity and order; baked-in frozen roots
 guarded by a resolve-or-refuse gate; per-kind tool lists; user-provided
 walltime with the partition-ceiling check; and overrun handled by human
@@ -5073,8 +5112,9 @@ growth path when one is needed.
 
 ### 10.12 `submit` — the guide's chain, submitted for you (2026-11-08)
 
-The guide (§10.5) ends with a chained form: six `sbatch --parsable`
-lines, each holding its job on the ones before it with `afterok`. A
+The guide (§10.5) ends with the chain by hand: six `sbatch --parsable`
+lines, each holding its job on the ones before it with `afterok`.
+Until 2026-11-08 that was the only route, and a
 person who wants one prep surface on a card that happens to be free
 had to type that sequence by hand, with a `--gres` override on each
 line, and to remember that a prep job needs its library build first
@@ -5169,6 +5209,19 @@ exercises. A real submission prints each job's name and id, then the
 id is back; it never waits, polls, or holds a terminal, so the §10.1
 wall is untouched. Submitting is the one thing `prepare` deliberately
 left to the person; `submit` does that one thing and nothing after it.
+
+**What follows from it for everything a student reads** (2026-11-09).
+A command that exists but is named only in passing is a command
+students do not find. So wherever SABSIM tells a person what to do
+next, `sabsim submit` is the instruction and `sbatch` is the
+explanation of it: the guide is rebuilt around it (§10.5), each
+script's success line and each finished run's summary name the
+`sabsim submit` line for the next job, `init` and `prepare` close by
+naming it, and the install introduction's first-project walk ends
+with it. The bootstrap's VASP labelling array (§4.8) is NOT covered:
+it is a different chain with a different script, written by `sabsim
+bootstrap label`, and that command still prints the one `sbatch` line
+to type.
 
 ## 11. Resuming an interrupted run
 

@@ -134,7 +134,20 @@ class JobKind:
         Spelled from the name in ONE place so the CLI parser and the
         writer's run line agree by construction (§10.3).
         """
-        return "--" + self.name.replace("_", "-")
+        return "--" + self.submit_word
+
+    @property
+    def submit_word(self) -> str:
+        """The word that names this job to ``sabsim submit``.
+
+        The job's name with underscores turned into dashes
+        (``prep-surf1``): the ``run`` flag without its leading dashes,
+        so a person types the same word to submit a job that the
+        script uses to run it (DESIGN.md §10.12). Spelled here, in ONE
+        place, for the `submit` parser, the guide, and every "what to
+        submit next" line a script or a finished run prints.
+        """
+        return self.name.replace("_", "-")
 
     def folder(self, folders) -> str:
         """The NAME of the stage folder this job fills, for one pair.

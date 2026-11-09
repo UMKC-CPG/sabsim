@@ -62,6 +62,25 @@
       `--parsable`/`afterok` sequence being the only way to use them.
       `deploy/submit.py` + 9 tests. Follow-on: none planned; a
       `--walltime` override is the obvious next knob if it is wanted.
+- [x] **`submit` carried into everything a student reads** (2026-11-09;
+      DESIGN §10.5 + §10.12 closing paragraph, §10.7 two overtaken
+      statements, PSEUDOCODE §14.4/§14.5, ARCHITECTURE §4.4). The guide
+      `prepare` writes is rebuilt around the command: the jobs as the
+      dependency graph, then one `sabsim submit` line per wave with the
+      folders to check in between, `submit all`, the dry run and the
+      card/node overrides, and LAST the bare `sbatch` chain. The same
+      wording reaches each script's success line ("unless already
+      queued"), the summary a finished `run` prints (it named the `run`
+      flag, which nobody types), the closing lines of `init` and
+      `prepare`, `install/INSTALL-INTRO.md`, and one remark each in the
+      `sabsimrc` and `deployment_rc.toml` templates. A job's submit
+      word is spelled once, `JobKind.submit_word`. NOT touched: `sabsim
+      bootstrap label` (a different chain; still prints its one
+      `sbatch` line), the `install/tests/` harnesses (their own
+      scripts), and `dev/notes/workflow-current.md` (dated 2026-08-25
+      and stale well beyond this: it still describes two verbs).
+      Project folders prepared before this keep their old guide until
+      `sabsim prepare` is run in them again.
 - [x] **The project file carries the termination** (2026-09-28;
       DESIGN §2.5/§10.11). `termination_index` is a required key of
       each wafer table, the wafer is cut on it, `init` copies it from

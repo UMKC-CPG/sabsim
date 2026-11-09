@@ -44,7 +44,11 @@ module_paths    = ["/cluster/VAST/rulisp-lab/cpg/modulefiles"]
   name          = "gpu,requeue"
   # The card MODEL to request (SLURM gres type), so a job sized for an
   # H100 does not land on a slower card in this mixed pool; leave empty
-  # for "any card".
+  # for "any card". This is the STANDING choice. To use another card for
+  # one submission because it happens to be free, do not edit it here:
+  # `sabsim submit <jobs> --gpu <model>` (or `--node <name>`) asks for
+  # it on the sbatch line and leaves the scripts as written (DESIGN.md
+  # §10.12).
   gpu_type      = "H100"
   gpus_per_node = 4
   max_walltime  = { value = 24.0, unit = "h" }

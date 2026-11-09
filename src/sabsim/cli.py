@@ -23,6 +23,13 @@ the first checks the install and writes the shell rc (DESIGN.md §10.10),
 the second writes a project folder from the tracked templates (§10.9).
 Neither overwrites anything.
 
+``sabsim prepare`` and ``sabsim submit`` are how a person normally
+reaches ``run``: the first writes one Slurm script per job, with the
+``run`` line inside it, plus a submission guide; the second hands
+those scripts to the scheduler in the guide's order and exits, watching
+nothing (DESIGN.md §10.1, §10.12). So the ``srun`` lines above are what
+a generated script issues, not what a student types.
+
 The run/restart/refresh/test operations are FLAGS on ``run``, not separate
 verbs. v1 ships ``--dry-run`` (the login-node stub run) and the four
 job flags; ``--dump-visuals`` (record every dynamic stage for viewing) and
@@ -151,7 +158,8 @@ def _build_parser() -> argparse.ArgumentParser:
     # `prepare` — the WRITER (DESIGN.md §10.1, PSEUDOCODE §14.4): reads
     # the project file AND the machine-local deployment rc, and writes
     # one ready-to-submit script per job plus a submission guide. It
-    # submits nothing; the human submits the scripts in order.
+    # submits nothing; `submit`, below, hands the scripts over when the
+    # person asks, a stage at a time or all at once (§10.12).
     prepare = subcommands.add_parser(
         "prepare",
         help="write ready-to-submit scripts for a project (submits "
@@ -262,8 +270,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # and a single job_flag value. The flags are spelled from the job
     # registry (ONE source of the job set, §10.3): --prep-surf1,
     # --prep-surf2, --bond, --analysis. These are the lines a generated
-    # deployment script carries; the human submits both preps, then
-    # bond, then analysis, checking each before the next (§10.5).
+    # deployment script carries; the person sends both preps, then
+    # bond, then analysis with `sabsim submit`, checking each before
+    # the next (§10.5, §10.12).
     from sabsim.deploy.registry import JOB_REGISTRY
     jobs = run.add_mutually_exclusive_group()
     for job in JOB_REGISTRY:
@@ -466,7 +475,9 @@ def _print_job_summary(result) -> None:
     sequence (DESIGN.md §10.2, §10.5), so the summary names the
     deliverable the job wrote and — reinforcing the guide — which jobs
     wait on it in the registry's dependency graph, or that the chain is
-    complete.
+    complete. A waiting job is named by the `sabsim submit` line that
+    sends it (§10.12), never by its `run` flag: `run` is the line
+    inside a script, not one a person types.
     """
     from sabsim.deploy.registry import jobs_depending_on
 
@@ -475,10 +486,10 @@ def _print_job_summary(result) -> None:
           f"{result.artifact_written} in {result.deliverable_directory}")
     followers = jobs_depending_on(result.job_name)
     if followers:
-        names = ", ".join(f"'{job.name}' (sabsim run {job.flag})"
+        names = ", ".join(f"'{job.name}' (sabsim submit {job.submit_word})"
                           for job in followers)
         print(f"  check the result; once every job it waits on has "
-              f"finished, submit: {names}.")
+              f"finished, submit (unless already queued): {names}.")
     else:
         print("  this was the last job in the chain; the measure vector "
               "is written.")
@@ -555,8 +566,11 @@ def _init(args: argparse.Namespace) -> int:
           "scripts and a\n     SUBMISSION_GUIDE.md: two environment-"
           "library builds (step 0, once per\n     recipe), the two "
           "surface preps, bond, and analysis.")
-    print("  3. submit them in the guide's order, or as its chained form; "
-          "nothing runs\n     on the login node.")
+    print("  3. `sabsim submit all` hands them to the scheduler in the "
+          "guide's order —\n     or name the jobs a stage at a time "
+          "(`sabsim submit prep-surf1\n     prep-surf2`, then `bond`, "
+          "then `analysis`), checking each result;\n     `--dry-run` "
+          "prints the lines first. Nothing runs on the login node.")
     print("  Running `sabsim init` again with the same pair is safe: it "
           "adds only\n  what is missing.")
     return 0
@@ -650,7 +664,9 @@ def _prepare(args: argparse.Namespace) -> int:
           f"{project_directory}")
     for entry in entries:
         print(f"  {entry.script_name}")
-    print(f"  submit in the order in {GUIDE_FILENAME}.")
+    print(f"  next: `sabsim submit all`, or a stage at a time as "
+          f"{GUIDE_FILENAME} shows\n  (`sabsim submit all --dry-run` "
+          f"prints the sbatch lines and submits nothing).")
     return 0
 
 

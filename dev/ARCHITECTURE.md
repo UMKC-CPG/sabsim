@@ -1214,7 +1214,8 @@ key per kind of job keeps those resource shapes from lumping together.
 section covers the **Tier-C** pair jobs (`prep` / `bond` /
 `analysis`) — the LAMMPS cascade per surface, the assembly and press /
 pull, and the measure. It carries no `sequence` footprint: `sabsim`
-writes scripts and the human submits them (`DESIGN.md` §10.1), so the
+writes scripts and hands them to the scheduler only when the human
+asks (`sabsim submit`, `DESIGN.md` §10.1, §10.12), so the
 **Tier-A** sequencer never claims an allocation of its own — its control
 flow runs INSIDE each pair job. **Tier B is excluded by design:** ALF
 (DeePMD training and

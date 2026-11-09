@@ -1,13 +1,16 @@
 """The `sabsim prepare` writer (PSEUDOCODE.md §14.4, §14.5; DESIGN §10).
 
-`prepare` is the WRITER half of the deployment consumer (`run` is the
-executor, :mod:`sabsim.deploy`/`sabsim.pipeline.pair_jobs`). It reads
-BOTH inputs — the project file (one wafer pair) and the machine-local
-deployment rc — and emits one ready-to-submit script per job of the
-registry (:mod:`sabsim.deploy.registry`: the two surface preparations,
-the bond, the analysis) plus a submission guide. It **submits nothing**
+`prepare` is the WRITER of the deployment consumer (`submit` is the
+hand, :mod:`sabsim.deploy.submit`; `run` is the executor,
+:mod:`sabsim.pipeline.pair_jobs`). It reads BOTH inputs — the project
+file (one wafer pair) and the machine-local deployment rc — and emits
+one ready-to-submit script per job of the registry
+(:mod:`sabsim.deploy.registry`: the two surface preparations, the
+bond, the analysis) plus a submission guide. It **submits nothing**
 (§10.1): a long-lived submit-and-watch process cannot sit on a login
-node, so the human submits the scripts and inspects each gate before
+node, so the person hands the scripts over — with `sabsim submit`
+(§10.12), which the guide and every "what next" line name first, or
+by typing the guide's `sbatch` lines — and inspects each gate before
 the next.
 
 The scripts are named after the STAGE FOLDERS they fill (ARCHITECTURE §1,
@@ -291,6 +294,9 @@ def render_library_script(
                    else folders.prep_surf2)
     stem = _library_stem(prep_folder)
     prep_directory = project_directory / prep_folder
+    # The prep job this build feeds: what its success line says to
+    # submit next.
+    prep_job = registry_lookup(f"prep_surf{surface_number}")
     lines = _script_header(
         stem, [f"# {stem} — build surface {surface_number}'s ENVIRONMENT "
                f"LIBRARY (DESIGN §3.5),",
@@ -320,10 +326,24 @@ def render_library_script(
         f"    {RECIPE_FILENAME} --skip-collection2",
         "",
         f'echo "{stem} done. Check the self-check numbers in '
-        f'{prep_folder}/{LIBRARY_MANIFEST_FILE}, then submit: sbatch '
-        f'{_semantic_name(prep_folder)}"',
+        f'{prep_folder}/{LIBRARY_MANIFEST_FILE}. Next, unless already '
+        f'queued: {_next_submission(prep_job, folders)}"',
     ]
     return "\n".join(lines) + "\n"
+
+
+def _next_submission(job: JobKind, folders) -> str:
+    """How a printed hint names the next job to hand to the scheduler.
+
+    The `sabsim submit` line first (§10.12) — it is what a person
+    types — then the bare ``sbatch`` line it stands for, so the hint
+    still names the script and still works by hand. No backticks: the
+    text sits inside a script's double-quoted ``echo``, where a
+    backtick would run the words between as a command.
+    """
+    script = _semantic_name(job.folder(folders))
+    return (f"sabsim submit {job.submit_word} "
+            f"(by hand: sbatch {script})")
 
 
 def _library_stem(prep_folder: str) -> str:
@@ -438,6 +458,10 @@ def _success_line(job: JobKind, folders) -> str:
     A prep job's successor (bond) also needs the OTHER prep to have
     finished, so the line says so rather than inviting a premature
     submit; the last job in the chain announces the measure vector.
+    The next job is named as its `sabsim submit` line (§10.12), and
+    the line says "unless already queued" because a person who
+    submitted several jobs at once has the successor waiting in the
+    queue already and must not send it a second time.
     """
     stem = job.folder(folders)
     successors = jobs_depending_on(job.name)
@@ -446,17 +470,17 @@ def _success_line(job: JobKind, folders) -> str:
                 f'written in {stem}/; the pair chain is complete."')
     parts = []
     for successor in successors:
-        script = _semantic_name(successor.folder(folders))
+        command = _next_submission(successor, folders)
         others = [name for name in successor.depends_on
                   if name != job.name]
         if others:
             parts.append(
-                f"once {' and '.join(others)} has also finished, submit: "
-                f"sbatch {script}")
+                f"once {' and '.join(others)} has also finished, "
+                f"{command}")
         else:
-            parts.append(f"then submit: sbatch {script}")
+            parts.append(command)
     return (f'echo "{job.name} done ({stem}). Check its deliverables in '
-            f'{stem}/, {"; ".join(parts)}"')
+            f'{stem}/. Next, unless already queued: {"; ".join(parts)}"')
 
 
 # ---------------------------------------------------------------------
@@ -606,19 +630,52 @@ def _write_script(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
+def submission_waves(
+        entries: tuple[SubmissionEntry, ...]
+        ) -> tuple[tuple[SubmissionEntry, ...], ...]:
+    """The pair jobs grouped into waves a person submits together.
+
+    A wave is every pair job whose upstream pair jobs all sit in
+    earlier waves: the two preps, then bond, then analysis. The library
+    builds are left out — `sabsim submit` puts one in front of its prep
+    job by itself, when that library is missing (§10.12) — so each wave
+    is exactly the job words of ONE `sabsim submit` line in the guide's
+    step-by-step form. Read off the entries' own dependency lists, so
+    an inserted job finds its wave for free.
+    """
+    pair_entries = [entry for entry in entries
+                    if library_surface_number(entry.job_name) is None]
+    pair_names = {entry.job_name for entry in pair_entries}
+    # The entries arrive in submission order, so every job a pair job
+    # waits on already has its wave number when that job is reached.
+    wave_of: dict[str, int] = {}
+    for entry in pair_entries:
+        upstream_waves = [wave_of[name] for name in entry.depends_on
+                          if name in pair_names]
+        wave_of[entry.job_name] = 1 + max(upstream_waves, default=-1)
+    wave_count = 1 + max(wave_of.values(), default=-1)
+    return tuple(
+        tuple(entry for entry in pair_entries
+              if wave_of[entry.job_name] == wave_number)
+        for wave_number in range(wave_count))
+
+
 def _write_guide(
         project_directory: Path, project,
         entries: tuple[SubmissionEntry, ...]) -> None:
     """Drop the submission guide beside the scripts (§10.5, §14.4).
 
-    The guide is where ORDER lives (semantic filenames carry no ordinal).
-    It reads as the DEPENDENCY GRAPH in plain words: the two surface
-    preparations first, in either order or together; the bond once both
-    have finished and their gate reports are to the person's liking;
-    then the analysis. It also prints the one-line chained form for a
-    person who trusts the gates — ``sbatch --dependency=afterok:...`` —
-    reinforced by every script printing its own "submit next" line on
-    success.
+    The guide is where ORDER lives (semantic filenames carry no ordinal)
+    and it is written around `sabsim submit` (§10.12), the command a
+    person actually types. In order it gives: the jobs as the DEPENDENCY
+    GRAPH in plain words (library builds, the two surface preparations,
+    the bond once both have finished, the analysis); the step-by-step
+    form, one `sabsim submit` line per wave with the folders to check
+    in between; the all-at-once form for a person who trusts the gates;
+    the dry run and the card and node overrides; and last the bare
+    ``sbatch --dependency=afterok:...`` chain those commands stand for,
+    so the by-hand route is never lost. Every script reinforces it by
+    printing its own "what to submit next" line on success.
     """
     by_name = {entry.job_name: entry for entry in entries}
     lines = [
@@ -628,38 +685,95 @@ def _write_guide(
         "",
         "Generated by `sabsim prepare` (DESIGN.md §10). Each script fills",
         "the stage folder of the same name: deliverables beside this guide,",
-        "bulk output under `intermediate/` (§10.8). Submit the jobs in the",
-        "order below, checking each result before submitting the next",
-        "(§10.2). Each script also prints, on success, what to check and",
-        "the next job to submit. The two `.library` builds come first:",
-        "each makes its surface's environment library ONCE per recipe",
-        "(§3.5) and exits at once, successfully, when the library is",
-        "already there — so they may always be included in the chain.",
+        "bulk output under `intermediate/` (§10.8).",
         "",
-        "## Step by step",
+        "You do not need to type `sbatch` yourself. `sabsim submit`, run in",
+        "this folder, hands the scripts to the scheduler in the order below,",
+        "holds each job until the jobs it waits for have succeeded, prints",
+        "the job ids, and exits (§10.12). It watches nothing: checking each",
+        "result is still yours to do (§10.2), and each script prints, on",
+        "success, what to check and what to submit next.",
+        "",
+        "## The jobs, in order",
         "",
     ]
     step = 0
     for entry in entries:
         step += 1
         if not entry.depends_on:
-            when = "independent — submit in either order, or together"
+            when = "independent — runs in either order, or together"
         else:
             waits = " and ".join(
                 f"`{by_name[name].script_name}`" for name in entry.depends_on)
             verb = "has" if len(entry.depends_on) == 1 else "have"
-            when = f"after {waits} {verb} finished and been checked"
-        lines.append(f"{step}. `sbatch {entry.script_name}` "
+            when = f"after {waits} {verb} finished"
+        lines.append(f"{step}. `{entry.script_name}` "
                      f"({entry.job_name}; {when})")
     lines += [
         "",
-        "## Chained form, for a person who trusts the gates",
+        "The two `.library` builds each make their surface's environment",
+        "library ONCE per recipe (§3.5). `sabsim submit` puts a build in",
+        "front of its prep job only when that prep folder holds no library",
+        "yet, and says so when it skips one.",
         "",
-        "Submit everything at once and let the scheduler hold each job",
-        "until the ones it depends on succeed (`afterok`). `sabsim submit",
-        "all` types these lines for you, skipping a library build whose",
-        "library is already there; `sabsim submit prep-surf1 --gpu V100`",
-        "submits one job on a card that is free (DESIGN.md §10.12):",
+        "## Step by step, checking each result",
+        "",
+        "```bash",
+    ]
+    # One `sabsim submit` line per wave of jobs that may go together,
+    # with the folders to look in before the next wave is sent (§10.2).
+    waves = submission_waves(entries)
+    for wave_number, wave in enumerate(waves):
+        job_words = " ".join(
+            registry_lookup(entry.job_name).submit_word for entry in wave)
+        lines.append(f"sabsim submit {job_words}")
+        if wave_number + 1 < len(waves):
+            folders_to_check = " and ".join(
+                f"{entry.stage_folder}/" for entry in wave)
+            lines.append(
+                f"# when finished, check {folders_to_check} — then:")
+    # The first job's word, for the two override examples below.
+    example_word = registry_lookup(waves[0][0].job_name).submit_word
+    lines += [
+        "```",
+        "",
+        "A job named on the line is held only on the other jobs named with",
+        "it. A job it depends on that is NOT named is taken as already run",
+        "and checked — that is what submitting one job alone means.",
+        "",
+        "## All at once, for a person who trusts the gates",
+        "",
+        "```bash",
+        "sabsim submit all",
+        "```",
+        "",
+        "Every job is queued now and held (`afterok`) on the jobs it depends",
+        "on, so a job that fails holds back every job waiting on it.",
+        "",
+        "## Looking first, and choosing a card or a node",
+        "",
+        "- `sabsim submit all --dry-run` prints the `sbatch` lines it would",
+        "  issue and submits nothing.",
+        f"- `sabsim submit {example_word} --gpu V100` asks for that card",
+        "  model (V100 is only an example) on every GPU job named, keeping",
+        "  each script's card count, in the GPU partitions that hold it.",
+        f"- `sabsim submit {example_word} --node <name>` pins the named jobs",
+        "  to one node and asks for the card that node carries.",
+        "",
+        "Neither choice is remembered or written into a script: the scripts",
+        "keep saying what `deployment.toml` said. Submit from the shell in",
+        "which the install is active (`which python` prints the install's",
+        "own): every job inherits that shell's environment, and `sabsim",
+        "submit` stops before the first job when the `python` a job would",
+        "inherit is not the install's.",
+        "",
+        "## The same chain by hand",
+        "",
+        "`sabsim submit all` issues these lines when neither library exists",
+        "yet. They are here to show what it does, and for a scheduler option",
+        "it does not offer. A `.library` script exits at once, successfully,",
+        "when its library is already there, so it may always stay in a",
+        "hand-typed chain:",
         "",
         "```bash",
     ]

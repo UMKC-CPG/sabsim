@@ -132,9 +132,21 @@ sabsim init ~/sabsim/jobs/si_sio2 si_diamond_100 sio2_quartz_001
 cd ~/sabsim/jobs/si_sio2
 # 1. read and edit sabsim.toml, deployment.toml, prep_surf*/recipe.toml
 sabsim prepare          # 2. writes six .slurm + SUBMISSION_GUIDE.md
-# 3. submit in the guide's order: the two .library builds (once per
-#    recipe), the two preps, bond, analysis — or its chained form
+sabsim submit all --dry-run   # 3. prints the sbatch lines, sends none
+sabsim submit prep-surf1 prep-surf2    # 4. each surface's library
+#    build (once per recipe) goes first by itself when it is missing
+# 5. read each prep folder's gate report, then `sabsim submit bond`;
+#    check the bond, then `sabsim submit analysis`. (A person who
+#    trusts the gates types `sabsim submit all` instead of 4 and 5.)
 ```
+
+`sabsim submit` hands the scripts to the scheduler and exits; it
+watches nothing, and `SUBMISSION_GUIDE.md` in the project folder shows
+the same steps for your pair, how to ask for a different card or node,
+and the bare `sbatch` lines the command stands for. Run it from the
+shell in which the venv is active: each job inherits that shell's
+environment, and `submit` stops before the first job if the `python`
+it would inherit is not the install's.
 
 ## The four things that trip people up
 
