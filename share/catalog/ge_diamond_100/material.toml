@@ -1,0 +1,14 @@
+# SABSIM materials catalog entry (DESIGN.md §10.11). This folder
+# IS the material: this file, its crystal file, and its recipe.
+# The folder's name derives from the three values below —
+# <formula>_<phase>_<face>, lower-cased — and `sabsim catalog`
+# refuses a mismatch.
+formula   = "Ge"
+phase     = "diamond"
+face      = [1, 0, 0]
+cif       = "Ge_diamond.cif"
+
+[provenance]
+source = "Crystallography Open Database"
+cod_id = 9011050
+cod_revision = 291792

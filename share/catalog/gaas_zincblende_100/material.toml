@@ -1,0 +1,14 @@
+# SABSIM materials catalog entry (DESIGN.md §10.11). This folder
+# IS the material: this file, its crystal file, and its recipe.
+# The folder's name derives from the three values below —
+# <formula>_<phase>_<face>, lower-cased — and `sabsim catalog`
+# refuses a mismatch.
+formula   = "GaAs"
+phase     = "zincblende"
+face      = [1, 0, 0]
+cif       = "GaAs_zincblende.cif"
+
+[provenance]
+source = "Crystallography Open Database"
+cod_id = 9008845
+cod_revision = 291735
