@@ -25,6 +25,16 @@ Three rules decide what is submitted (§10.12):
 * **A missing script is a clear stop** naming ``sabsim prepare``, before
   anything is submitted.
 
+The two overrides, ``--gpu`` and ``--node``, also choose the PARTITION
+(§10.12, 2026-11-08): a script names the rc's partitions, and a card
+or node chosen because it was free may sit in another one — on
+Hellbender most V100 nodes are reachable only through ``gpu_requeue``,
+and a pinned V100 job fell into the mixed ``requeue`` pool, which the
+site keeps for CPU work. So the overrides read the node table once
+(``sinfo``) and ask, on every GPU job, for the GPU partitions the
+chosen card or node belongs to: a partition counts as a GPU partition
+when every node in it that is in service carries a card.
+
 The scheduler call is a plain function argument so the test suite can
 stand in a double for ``sbatch`` and read back exactly what would have
 been issued; ``--dry-run`` prints those lines and calls nothing.
@@ -101,10 +111,10 @@ def sbatch_scheduler(options: Sequence[str], script: Path) -> str:
         reason = completed.stderr.strip() or completed.stdout.strip()
         hint = ""
         if "node configuration is not available" in reason:
-            hint = (" — the request (card model, count, memory) does not "
-                    "fit any node it may use; with --node, check the "
-                    "node's card against the script's --gres line, or "
-                    "name the card with --gpu")
+            hint = (" — the request (card model, count, memory, "
+                    "partition) does not fit any node it may use; "
+                    "check the sbatch line above against what "
+                    "`sinfo -N -n <node> -O Partition,Gres` reports")
         raise SubmitError(f"sbatch refused {script.name}: {reason}{hint}")
     job_id = completed.stdout.strip().split(";")[0]
     if not job_id:
@@ -117,25 +127,170 @@ def sbatch_scheduler(options: Sequence[str], script: Path) -> str:
 # a card a generated script can ask for by that name and is passed over.
 _CARD_MODEL = re.compile(r"gpu:(?P<model>[A-Z][A-Za-z0-9]*):\d+")
 
-# Looks up the card model a node carries, or None for a CPU node.
-NodeCardLookup = Callable[[str], "str | None"]
+# The scheduler's node table, one row per (node, partition) pair: the
+# node's name, one partition it belongs to, its generic resources
+# (`gpu:V100:1(S:0-71)`, or `(null)` for none) and its compact state.
+_NODE_TABLE_COLUMNS = "NodeList:40,Partition:40,Gres:120,StateCompact:16"
+
+# Compact states of a node that is OUT OF SERVICE. Such a node says
+# nothing about what its partitions are for, so the GPU-partition rule
+# passes over it (a drained, card-less placeholder node sat in the
+# gpu_requeue partition on 2026-11-08 and must not disqualify it).
+_OUT_OF_SERVICE_STATES = ("drain", "drng", "down", "fail", "maint",
+                          "inval", "unk")
 
 
-def node_card_model(node: str) -> str | None:
-    """Ask the scheduler which card model ``node`` carries (§10.12).
+@dataclass(frozen=True)
+class NodeRow:
+    """One row of the scheduler's node table (one node, one partition)."""
 
-    Reads ``sinfo``'s ``Gres`` column for the one node; a node with no
-    GPU, an unknown node, or a cluster without ``sinfo`` yields None,
-    and the caller leaves the script's own request alone.
+    node: str
+    partition: str
+    gres: str
+    state: str
+
+    @property
+    def carries_gpu(self) -> bool:
+        """True when the node has any GPU resource, a MIG slice included."""
+        return self.gres.startswith("gpu:")
+
+    @property
+    def in_service(self) -> bool:
+        """False for a drained, down or otherwise withdrawn node."""
+        return not any(word in self.state for word in _OUT_OF_SERVICE_STATES)
+
+
+class ClusterMap:
+    """What the scheduler's node table says about cards and partitions.
+
+    Built once per `submit` from ``sinfo`` (or from a fixed text in the
+    tests) and asked three questions: which card model a node carries,
+    which partitions are GPU partitions, and which of those a card
+    model or a node is reachable through (§10.12). A **GPU partition**
+    is one whose every in-service node carries a GPU and that holds at
+    least one such node; a partition that mixes CPU and GPU nodes (the
+    site-wide ``requeue`` pool) is not one, whatever its name.
+    """
+
+    def __init__(self, rows: Sequence[NodeRow]):
+        self.rows = tuple(rows)
+
+    def card_model(self, node: str) -> str | None:
+        """The full card model ``node`` carries, or None (CPU or MIG)."""
+        for row in self.rows:
+            if row.node == node:
+                match = _CARD_MODEL.search(row.gres)
+                if match:
+                    return match.group("model")
+        return None
+
+    def partitions_of(self, node: str) -> tuple[str, ...]:
+        """Every partition ``node`` belongs to, sorted."""
+        return tuple(sorted({row.partition for row in self.rows
+                             if row.node == node}))
+
+    def gpu_partitions(self) -> tuple[str, ...]:
+        """The partitions made only of GPU nodes, sorted."""
+        gpu_only: dict[str, bool] = {}
+        for row in self.rows:
+            if not row.in_service:
+                continue
+            gpu_only[row.partition] = (
+                gpu_only.get(row.partition, True) and row.carries_gpu)
+        return tuple(sorted(name for name, is_gpu in gpu_only.items()
+                            if is_gpu))
+
+    def gpu_partitions_of(self, node: str) -> tuple[str, ...]:
+        """The GPU partitions ``node`` is reachable through, sorted."""
+        gpu_partitions = set(self.gpu_partitions())
+        return tuple(name for name in self.partitions_of(node)
+                     if name in gpu_partitions)
+
+    def gpu_partitions_for_model(self, model: str) -> tuple[str, ...]:
+        """The GPU partitions holding at least one ``model`` card."""
+        gpu_partitions = set(self.gpu_partitions())
+        wanted = f"gpu:{model}:"
+        return tuple(sorted({row.partition for row in self.rows
+                             if row.partition in gpu_partitions
+                             and row.gres.startswith(wanted)}))
+
+
+def parse_node_table(text: str) -> ClusterMap:
+    """Read ``sinfo -h -N -O <_NODE_TABLE_COLUMNS>`` output into a map.
+
+    Each line is four whitespace-separated columns; the scheduler marks
+    its default partition with a trailing ``*``, which is not part of
+    the name and is dropped. Short or empty lines are skipped.
+    """
+    rows = []
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) < 4:
+            continue
+        node, partition, gres, state = fields[:4]
+        rows.append(NodeRow(node, partition.rstrip("*"), gres, state))
+    return ClusterMap(rows)
+
+
+def survey_cluster() -> ClusterMap:
+    """Ask the scheduler for its node table (§10.12).
+
+    One ``sinfo`` call for the whole cluster. A machine without
+    ``sinfo`` yields an empty map, so every lookup answers None or
+    nothing and the scripts' own requests are kept.
     """
     try:
         completed = subprocess.run(
-            ["sinfo", "-h", "-N", "-n", node, "-O", "Gres:120"],
+            ["sinfo", "-h", "-N", "-O", _NODE_TABLE_COLUMNS],
             capture_output=True, text=True, check=False)
     except OSError:
-        return None
-    match = _CARD_MODEL.search(completed.stdout)
-    return match.group("model") if match else None
+        return ClusterMap(())
+    return parse_node_table(completed.stdout)
+
+
+# Produces the cluster map; a test hands in a fixed table instead.
+ClusterSurvey = Callable[[], ClusterMap]
+
+
+def plan_placement(cluster: ClusterMap, gpu_type: str | None,
+                   node: str | None
+                   ) -> tuple[str | None, tuple[str, ...], list[str]]:
+    """Turn the two overrides into a card model, partitions and notices.
+
+    A pinned ``node`` decides the card (unless ``gpu_type`` names one)
+    AND the partitions: the GPU partitions that node belongs to. A bare
+    ``gpu_type`` asks for the GPU partitions that hold that card. A
+    node reporting no full card, or a model the table does not list,
+    leaves the scripts' own partition alone and says so. Returns the
+    card model to request (or None), the partitions to request (empty
+    for none) and the notices to print.
+    """
+    notices: list[str] = []
+    if node:
+        model = cluster.card_model(node)
+        if model is None:
+            notices.append(f"{node} reports no GPU card; each script's "
+                           f"own request is kept")
+            return gpu_type, (), notices
+        gpu_type = gpu_type or model
+        partitions = cluster.gpu_partitions_of(node)
+        reach = (f" in the GPU partition(s) {','.join(partitions)}"
+                 if partitions else "")
+        notices.append(f"{node} carries {model} cards{reach}; GPU jobs "
+                       f"will ask for {gpu_type} there")
+        return gpu_type, partitions, notices
+    if gpu_type:
+        partitions = cluster.gpu_partitions_for_model(gpu_type)
+        if partitions:
+            notices.append(f"{gpu_type} cards sit in the GPU partition(s) "
+                           f"{','.join(partitions)}; GPU jobs will ask "
+                           f"for them")
+        else:
+            notices.append(f"the scheduler lists no GPU partition holding "
+                           f"{gpu_type} cards; each script's own "
+                           f"partition is kept")
+        return gpu_type, partitions, notices
+    return gpu_type, (), notices
 
 
 def gpu_count_in_script(script_path: Path) -> int | None:
@@ -203,7 +358,7 @@ def submit(project_spec_path, job_choices: Sequence[str],
            project_directory=None, gpu_type: str | None = None,
            node: str | None = None, dry_run: bool = False,
            scheduler: Scheduler = sbatch_scheduler,
-           node_card_lookup: NodeCardLookup = node_card_model
+           cluster_survey: ClusterSurvey | None = None
            ) -> tuple[tuple[Submission, ...], tuple[str, ...]]:
     """Hand the named jobs' scripts to the scheduler (§14.10).
 
@@ -212,15 +367,19 @@ def submit(project_spec_path, job_choices: Sequence[str],
     project file, where `prepare` put the scripts. ``gpu_type`` replaces
     the card model on every GPU job's request, keeping each script's
     count; ``node`` pins every job to that node AND, when no
-    ``gpu_type`` is given, asks the scheduler (``node_card_lookup``)
-    which card that node carries and requests it, since a script's own
-    card model is the rc's and a pinned node may carry another (the
-    2026-11-08 refusal: H100 asked of a V100 node). With ``dry_run`` the
-    ``sbatch`` lines are planned and returned with ``<name_id>``
-    placeholders and ``scheduler`` is never called. Returns the
-    submissions in order and the notices (skipped library builds).
-    Raises :class:`SubmitError` before anything is submitted when a
-    needed script is missing or a job name is unknown.
+    ``gpu_type`` is given, requests the card that node carries, since a
+    script's own card model is the rc's and a pinned node may carry
+    another (the 2026-11-08 refusal: H100 asked of a V100 node). Either
+    override also requests, on every GPU job, the GPU partitions the
+    chosen node or card is reachable through (:func:`plan_placement`),
+    read from the scheduler's node table by ``cluster_survey`` (default
+    :func:`survey_cluster`; a test hands in a fixed table). With
+    ``dry_run`` the ``sbatch`` lines are planned and returned with
+    ``<name_id>`` placeholders and ``scheduler`` is never called.
+    Returns the submissions in order and the notices (skipped library
+    builds, the placement chosen). Raises :class:`SubmitError` before
+    anything is submitted when a needed script is missing or a job name
+    is unknown.
     """
     validated = load_and_validate_project(project_spec_path)
     if project_directory is None:
@@ -231,17 +390,18 @@ def submit(project_spec_path, job_choices: Sequence[str],
     selected, notices = plan_submissions(
         project_directory, entries, job_names)
 
-    # A pinned node decides the card: the script asks for the rc's
-    # model, which the node may not carry, and Slurm refuses the pair
-    # outright ("Requested node configuration is not available").
-    if node and not gpu_type:
-        gpu_type = node_card_lookup(node)
-        if gpu_type:
-            notices.append(f"{node} carries {gpu_type} cards; GPU jobs "
-                           f"will ask for that model")
-        else:
-            notices.append(f"{node} reports no GPU; each script's own "
-                           f"request is kept")
+    # An override decides the card AND the partition. The script asks
+    # for the rc's model in the rc's partitions; a pinned node may
+    # carry another card (Slurm then refuses the pair outright) and
+    # may sit in another partition (the job then falls into whichever
+    # listed partition does hold the node, meant for GPU work or not).
+    # The node table is read only when an override needs it.
+    gpu_partitions: tuple[str, ...] = ()
+    if node or gpu_type:
+        cluster = (cluster_survey or survey_cluster)()
+        gpu_type, gpu_partitions, placement_notices = plan_placement(
+            cluster, gpu_type, node)
+        notices.extend(placement_notices)
 
     # Every needed script must be there BEFORE the first sbatch, so a
     # half-submitted chain is impossible (§10.12).
@@ -263,10 +423,13 @@ def submit(project_spec_path, job_choices: Sequence[str],
                    if name in job_ids]
         if held_on:
             options.append("--dependency=afterok:" + ":".join(held_on))
-        if gpu_type:
-            count = gpu_count_in_script(script)
-            if count is not None:
-                options.append(f"--gres=gpu:{gpu_type}:{count}")
+        # The card and partition overrides touch GPU jobs only: a CPU
+        # job (no --gres directive in its script) keeps its own lines.
+        count = gpu_count_in_script(script)
+        if gpu_type and count is not None:
+            options.append(f"--gres=gpu:{gpu_type}:{count}")
+            if gpu_partitions:
+                options.append("--partition=" + ",".join(gpu_partitions))
         if node:
             options.append(f"--nodelist={node}")
         if dry_run:
@@ -293,16 +456,20 @@ def is_library_build(submission: Submission) -> bool:
 
 __all__ = [
     "ALL_JOBS",
+    "ClusterMap",
     "JOB_CHOICES",
+    "NodeRow",
     "Submission",
     "SubmitError",
     "describe_submission",
     "gpu_count_in_script",
     "is_library_build",
-    "node_card_model",
+    "parse_node_table",
+    "plan_placement",
     "plan_submissions",
     "requested_job_names",
     "sbatch_scheduler",
     "submit",
+    "survey_cluster",
 ]
 

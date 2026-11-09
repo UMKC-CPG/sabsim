@@ -5385,9 +5385,21 @@ submit(spec_path, job_names, gpu_type=None, node=None, dry_run=False,
     for each entry in wanted:
         require <project>/<entry.script_name> exists
                                    # else: stop, "run sabsim prepare"
-    if node and not gpu_type:
-        gpu_type = card model the scheduler reports for node, or None
-                                   # a pinned node decides the card
+    partitions = none
+    if node or gpu_type:           # an override decides card AND partition
+        table = the scheduler's node table      # one sinfo call:
+                                   # (node, partition, gres, state) rows
+        gpu_partitions = partitions of table in which every in-service
+                         node carries a GPU     # drained nodes skipped
+        if node:
+            card = card model table reports for node, or None
+            if card is None: say "no GPU card; requests kept"
+            else:
+                gpu_type   = gpu_type or card   # a pinned node decides
+                partitions = gpu_partitions that node belongs to
+        else:
+            partitions = gpu_partitions holding a gpu_type card
+            if none: say "no GPU partition holds it; partition kept"
     ids = {}
     for each entry in wanted:                      # registry order
         held_on = [ids[name] for name in entry.depends_on if name in ids]
@@ -5398,6 +5410,8 @@ submit(spec_path, job_names, gpu_type=None, node=None, dry_run=False,
         if gpu_type and the script asks for a GPU:
             count = the count on its "#SBATCH --gres=gpu:<model>:<count>"
             options += [f"--gres=gpu:{gpu_type}:{count}"]
+            if partitions:
+                options += ["--partition=" + ",".join(partitions)]
         if node: options += [f"--nodelist={node}"]
         if dry_run: print "sbatch", options, script; ids[name] = <name_id>
         else:       ids[name] = scheduler(options, script)   # returns id

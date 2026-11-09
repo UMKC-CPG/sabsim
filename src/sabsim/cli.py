@@ -189,10 +189,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--gpu", metavar="TYPE",
         help="the card model to ask for instead of the scripts' own, "
              "e.g. V100 or A100 — on every GPU job, keeping each "
-             "script's card count; CPU jobs are untouched")
+             "script's card count and asking for the GPU partitions "
+             "that hold that card; CPU jobs are untouched")
     submit.add_argument(
         "--node", metavar="NAME",
-        help="pin every submitted job to this node (sbatch --nodelist)")
+        help="pin every submitted job to this node (sbatch --nodelist); "
+             "GPU jobs then ask for the card that node carries and the "
+             "GPU partition it sits in")
     submit.add_argument(
         "--dry-run", action="store_true",
         help="print the sbatch lines that would be issued and submit "

@@ -5110,12 +5110,35 @@ that node — and, unless `--gpu` says otherwise, asks the scheduler
 which card that node carries and requests it, because the script asks
 for the rc's model and a pinned node may carry another; Slurm refuses
 that pair outright (the first live use, 2026-11-08: an H100 request
-pinned to a V100 node). Both are passed on the `sbatch` line, where they outrank
+pinned to a V100 node).
+
+Both overrides also choose the **partition**, for the same reason
+they choose the card: the script names the rc's partitions, and a
+card or node picked because it is free may sit in another one. The
+second live use showed it the same day. The script listed
+`gpu,requeue`; the V100 node `g022` belongs to `requeue` and
+`gpu_requeue` only; Slurm therefore placed the pinned job in
+`requeue`, the site-wide mixed pool that the site reserves for CPU
+work and tells GPU jobs to leave for `gpu_requeue`. So `submit` reads
+the scheduler's node table once (`sinfo`: node, partition, generic
+resources, state) and applies one rule, stated without reference to
+any partition's name: **a GPU partition is one in which every node
+that is in service carries a GPU.** A drained or down node is passed
+over, because a withdrawn node says nothing about what a partition is
+for. With `--node`, each GPU job asks for the GPU partitions that
+node belongs to; with `--gpu` alone, for the GPU partitions holding at
+least one card of that model. A CPU job keeps its own partition, and
+so does every job when the table offers no answer (a model the
+cluster does not list, a node with no full card, a machine with no
+`sinfo`); the command says which of these happened.
+
+The overrides are passed on the `sbatch` line, where they outrank
 the script's directives, so the scripts on disk keep saying what the
 rc said and a later `prepare` loses nothing. Neither override is
 remembered: a card chosen because it was free this evening is not a
 property of the project, and the `command` file (`ARCHITECTURE.md`
-§4.2) records which card each submission actually asked for.
+§4.2) records the `submit` line, while the lines it prints show the
+card and partition each job asked for.
 
 `--dry-run` prints the `sbatch` lines it would issue, with
 `<library_surf1_id>`-style placeholders where a job id would go, and
