@@ -12,3 +12,4 @@ cif       = "Ge_diamond.cif"
 source = "Crystallography Open Database"
 cod_id = 9011050
 cod_revision = 291792
+reference = "Acta Crystallographica 15, 578 (1962)"

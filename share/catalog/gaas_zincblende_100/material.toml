@@ -12,3 +12,4 @@ cif       = "GaAs_zincblende.cif"
 source = "Crystallography Open Database"
 cod_id = 9008845
 cod_revision = 291735
+reference = "Crystal Structures 1, 85 (1963)"
